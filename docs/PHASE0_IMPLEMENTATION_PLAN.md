@@ -401,3 +401,12 @@ Phase 0 完成时，应能演示：
 - 明确真实 AI 提供方：DeepSeek、OpenAI 兼容接口或继续 FakeProvider。
 - 明确毕业设计演示日期和可用测试设备。
 
+
+## P0-2A 完成记录
+
+- 已建立 project-side manifest：`resources/models/witch/model-manifest.json`。
+- 已建立本地许可记录：`resources/models/witch/README.local-only.md`。
+- 原始模型文件未修改。
+- 原始模型目录 `魔女/` 仍被 `.gitignore` 排除，不进入仓库。
+- 当前仅记录授权边界、模型文件清单、表情映射、矩形命中区和模型能力。
+- 当前不接入 Live2D/Cubism SDK，不加载 `.moc3`，不接入渲染，不接真实 AI。

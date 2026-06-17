@@ -1,0 +1,75 @@
+{
+  "id": "witch",
+  "displayName": "魔女",
+  "usage": "local-graduation-demo-only",
+  "sourceDir": "../../../魔女",
+  "model3": "魔女.model3.json",
+  "moc3": "魔女.moc3",
+  "physics": "魔女.physics3.json",
+  "displayInfo": "魔女.cdi3.json",
+  "idleMotion": "Scene1.motion3.json",
+  "textures": [
+    "魔女.8192/texture_00.png",
+    "魔女.8192/texture_01.png"
+  ],
+  "expressions": {
+    "dark": "h.exp3.json",
+    "staff": "fz.exp3.json",
+    "ghost": "cw.exp3.json",
+    "angry": "sq.exp3.json",
+    "hat": "mz.exp3.json",
+    "sad": "ku.exp3.json",
+    "bow": "hdj.exp3.json",
+    "glasses": "yj.exp3.json",
+    "excited": "xx.exp3.json",
+    "happy": "x.exp3.json",
+    "gestureGame": "zs1.exp3.json",
+    "gestureMic": "zs2.exp3.json"
+  },
+  "emotionMap": {
+    "neutral": null,
+    "happy": "happy",
+    "sad": "sad",
+    "angry": "angry",
+    "surprised": "excited",
+    "confused": "dark"
+  },
+  "hitAreas": {
+    "head": {
+      "x": 0.25,
+      "y": 0.05,
+      "width": 0.5,
+      "height": 0.28
+    },
+    "body": {
+      "x": 0.22,
+      "y": 0.28,
+      "width": 0.56,
+      "height": 0.55
+    }
+  },
+  "capabilities": {
+    "hasPhysics": true,
+    "hasDisplayInfo": true,
+    "hasIdleMotion": true,
+    "hasExpressions": true,
+    "hasModelHitAreas": false,
+    "usesProjectSideHitAreas": true
+  },
+  "performanceNotes": {
+    "textureCount": 2,
+    "textureSizes": [
+      {
+        "path": "魔女.8192/texture_00.png",
+        "width": 8192,
+        "height": 8192
+      },
+      {
+        "path": "魔女.8192/texture_01.png",
+        "width": 4096,
+        "height": 8192
+      }
+    ],
+    "note": "Textures are large. Phase 0 may use them for local validation, but later phases should consider downsampling or performance comparison."
+  }
+}
