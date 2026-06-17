@@ -20,4 +20,5 @@ vendor/cubism/**/Models/
 vendor/cubism/**/models/
 
 # Local-only Live2D model assets. Do not publish or redistribute without permission.
+model/
 魔女/

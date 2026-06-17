@@ -2,7 +2,7 @@
   "id": "witch",
   "displayName": "魔女",
   "usage": "local-graduation-demo-only",
-  "sourceDir": "../../../魔女",
+  "sourceDir": "../../../model",
   "model3": "魔女.model3.json",
   "moc3": "魔女.moc3",
   "physics": "魔女.physics3.json",
