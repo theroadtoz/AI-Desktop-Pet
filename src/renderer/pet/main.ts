@@ -1,0 +1,180 @@
+import "./styles.css";
+
+const foundCanvas = document.querySelector<HTMLCanvasElement>("#pet-canvas");
+
+if (!foundCanvas) {
+  throw new Error("pet canvas missing");
+}
+
+const canvas: HTMLCanvasElement = foundCanvas;
+const foundGl = canvas.getContext("webgl2", {
+  alpha: true,
+  antialias: true,
+  premultipliedAlpha: false,
+  preserveDrawingBuffer: false
+});
+
+if (!foundGl) {
+  throw new Error("WebGL2 is not available");
+}
+
+const gl: WebGL2RenderingContext = foundGl;
+
+type Rgba = readonly [number, number, number, number];
+
+const vertexShaderSource = `#version 300 es
+in vec2 a_position;
+in vec4 a_color;
+out vec4 v_color;
+
+void main() {
+  gl_Position = vec4(a_position, 0.0, 1.0);
+  v_color = a_color;
+}`;
+
+const fragmentShaderSource = `#version 300 es
+precision mediump float;
+
+in vec4 v_color;
+out vec4 outColor;
+
+void main() {
+  outColor = v_color;
+}`;
+
+function createShader(type: GLenum, source: string): WebGLShader {
+  const shader = gl.createShader(type);
+
+  if (!shader) {
+    throw new Error("failed to create WebGL shader");
+  }
+
+  gl.shaderSource(shader, source);
+  gl.compileShader(shader);
+
+  if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+    const message = gl.getShaderInfoLog(shader) ?? "unknown shader error";
+    gl.deleteShader(shader);
+    throw new Error(message);
+  }
+
+  return shader;
+}
+
+function createProgram(): WebGLProgram {
+  const vertexShader = createShader(gl.VERTEX_SHADER, vertexShaderSource);
+  const fragmentShader = createShader(gl.FRAGMENT_SHADER, fragmentShaderSource);
+  const program = gl.createProgram();
+
+  if (!program) {
+    throw new Error("failed to create WebGL program");
+  }
+
+  gl.attachShader(program, vertexShader);
+  gl.attachShader(program, fragmentShader);
+  gl.linkProgram(program);
+  gl.deleteShader(vertexShader);
+  gl.deleteShader(fragmentShader);
+
+  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+    const message = gl.getProgramInfoLog(program) ?? "unknown program error";
+    gl.deleteProgram(program);
+    throw new Error(message);
+  }
+
+  return program;
+}
+
+function toClipX(x: number, width: number): number {
+  return (x / width) * 2 - 1;
+}
+
+function toClipY(y: number, height: number): number {
+  return 1 - (y / height) * 2;
+}
+
+function ellipseVertices(
+  width: number,
+  height: number,
+  centerX: number,
+  centerY: number,
+  radiusX: number,
+  radiusY: number,
+  color: Rgba
+): Float32Array {
+  const steps = 72;
+  const vertices: number[] = [
+    toClipX(centerX, width),
+    toClipY(centerY, height),
+    ...color
+  ];
+
+  for (let index = 0; index <= steps; index += 1) {
+    const angle = (index / steps) * Math.PI * 2;
+    const x = centerX + Math.cos(angle) * radiusX;
+    const y = centerY + Math.sin(angle) * radiusY;
+    vertices.push(toClipX(x, width), toClipY(y, height), ...color);
+  }
+
+  return new Float32Array(vertices);
+}
+
+function resizeCanvas(): void {
+  const ratio = window.devicePixelRatio || 1;
+  const width = Math.max(1, Math.round(canvas.clientWidth * ratio));
+  const height = Math.max(1, Math.round(canvas.clientHeight * ratio));
+
+  if (canvas.width !== width || canvas.height !== height) {
+    canvas.width = width;
+    canvas.height = height;
+  }
+}
+
+const program = createProgram();
+const buffer = gl.createBuffer();
+
+if (!buffer) {
+  throw new Error("failed to create WebGL buffer");
+}
+
+const positionLocation = gl.getAttribLocation(program, "a_position");
+const colorLocation = gl.getAttribLocation(program, "a_color");
+
+function drawEllipse(vertices: Float32Array): void {
+  gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
+  gl.drawArrays(gl.TRIANGLE_FAN, 0, vertices.length / 6);
+}
+
+function drawPlaceholderPet(): void {
+  resizeCanvas();
+
+  const width = canvas.width;
+  const height = canvas.height;
+  const centerX = width / 2;
+
+  gl.viewport(0, 0, width, height);
+  gl.clearColor(0, 0, 0, 0);
+  gl.clear(gl.COLOR_BUFFER_BIT);
+  gl.useProgram(program);
+  gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+  gl.enable(gl.BLEND);
+  gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+  gl.enableVertexAttribArray(positionLocation);
+  gl.enableVertexAttribArray(colorLocation);
+  gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 24, 0);
+  gl.vertexAttribPointer(colorLocation, 4, gl.FLOAT, false, 24, 8);
+
+  drawEllipse(ellipseVertices(width, height, centerX, height * 0.56, width * 0.26, height * 0.3, [0.42, 0.14, 0.58, 0.62]));
+  drawEllipse(ellipseVertices(width, height, centerX, height * 0.27, width * 0.18, height * 0.13, [0.96, 0.78, 0.92, 0.72]));
+  drawEllipse(ellipseVertices(width, height, centerX, height * 0.2, width * 0.22, height * 0.1, [0.2, 0.09, 0.28, 0.5]));
+  drawEllipse(ellipseVertices(width, height, centerX - width * 0.065, height * 0.26, width * 0.022, height * 0.016, [0.16, 0.06, 0.18, 0.7]));
+  drawEllipse(ellipseVertices(width, height, centerX + width * 0.065, height * 0.26, width * 0.022, height * 0.016, [0.16, 0.06, 0.18, 0.7]));
+}
+
+drawPlaceholderPet();
+window.addEventListener("resize", drawPlaceholderPet);
+window.petApi?.reportFirstFrame();
+
+canvas.addEventListener("click", () => {
+  window.petApi?.openChat();
+});

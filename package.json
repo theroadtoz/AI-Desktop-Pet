@@ -1,0 +1,18 @@
+{
+  "name": "ai-desktop-pet",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Phase 0 prototype for a low-interruption Live2D AI desktop pet.",
+  "main": "dist/main/app.js",
+  "scripts": {
+    "dev": "npm run build && electron .",
+    "build": "tsc -p tsconfig.main.json && tsc -p tsconfig.preload.json && vite build",
+    "typecheck": "tsc --noEmit -p tsconfig.renderer.json",
+    "verify": "npm run build && npm run typecheck"
+  },
+  "devDependencies": {
+    "electron": "42.4.0",
+    "typescript": "^5.9.3",
+    "vite": "^8.0.16"
+  }
+}

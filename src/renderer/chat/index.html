@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Desktop Pet Chat</title>
+  </head>
+  <body>
+    <main class="chat-shell">
+      <section id="messages" class="messages" aria-live="polite"></section>
+      <form id="chat-form" class="composer">
+        <input id="chat-input" type="text" autocomplete="off" placeholder="和她说点什么..." />
+        <button type="submit">发送</button>
+      </form>
+    </main>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>
