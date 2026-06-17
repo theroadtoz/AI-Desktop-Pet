@@ -1,16 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
-
-type RenderHealth = {
-  framesPerSecond: number;
-  isContextLost: boolean;
-  timestamp: number;
-};
-
-type PetApi = {
-  reportFirstFrame(): void;
-  reportRenderHealth(state: RenderHealth): void;
-  openChat(): void;
-};
+import type { PetApi, RenderHealth, PetDragDelta } from "../shared/ipc-contract";
 
 const api: PetApi = {
   reportFirstFrame() {
@@ -19,8 +8,20 @@ const api: PetApi = {
   reportRenderHealth(state: RenderHealth) {
     ipcRenderer.send("pet:health", state);
   },
+  setPointerHit(isHit: boolean) {
+    ipcRenderer.send("pet:pointer-hit-change", { isHit });
+  },
   openChat() {
-    void ipcRenderer.invoke("chat:open");
+    void ipcRenderer.invoke("pet:open-chat");
+  },
+  startDrag() {
+    ipcRenderer.send("pet:drag-start");
+  },
+  moveDrag(delta: PetDragDelta) {
+    ipcRenderer.send("pet:drag-move", delta);
+  },
+  endDrag() {
+    ipcRenderer.send("pet:drag-end");
   }
 };
 

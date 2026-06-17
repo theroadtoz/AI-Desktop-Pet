@@ -1,9 +1,12 @@
-import { app, BrowserWindow, ipcMain } from "electron";
+import { app, BrowserWindow, ipcMain, type IpcMainEvent, type IpcMainInvokeEvent } from "electron";
+import type { PetDragDelta, PetPointerHitState } from "../shared/ipc-contract";
+import { createPointerController, type PointerController } from "./services/pointer-controller";
 import { createChatWindow, focusChatInput, showChatWindow } from "./windows/chat-window";
 import { createPetWindow } from "./windows/pet-window";
 
 let petWindow: BrowserWindow | null = null;
 let chatWindow: BrowserWindow | null = null;
+let pointerController: PointerController | null = null;
 
 const gotLock = app.requestSingleInstanceLock();
 
@@ -20,23 +23,80 @@ app.on("second-instance", () => {
 
 app.whenReady().then(async () => {
   petWindow = createPetWindow();
+  pointerController = createPointerController(petWindow);
   chatWindow = createChatWindow();
 
-  ipcMain.handle("chat:open", () => {
+  function openChatWindow(): void {
     if (!chatWindow) {
       chatWindow = createChatWindow();
     }
 
     showChatWindow(chatWindow);
     focusChatInput(chatWindow);
+  }
+
+  function isPetSender(event: IpcMainEvent | IpcMainInvokeEvent): boolean {
+    return Boolean(petWindow && event.sender === petWindow.webContents);
+  }
+
+  ipcMain.handle("pet:open-chat", (event) => {
+    if (!isPetSender(event)) {
+      return;
+    }
+
+    openChatWindow();
   });
 
-  ipcMain.on("pet:first-frame", () => {
+  ipcMain.on("pet:pointer-hit-change", (event, state: PetPointerHitState) => {
+    if (!isPetSender(event) || typeof state?.isHit !== "boolean") {
+      return;
+    }
+
+    pointerController?.setPointerHit(state.isHit);
+  });
+
+  ipcMain.on("pet:drag-start", (event) => {
+    if (!isPetSender(event)) {
+      return;
+    }
+
+    pointerController?.startDrag();
+  });
+
+  ipcMain.on("pet:drag-move", (event, delta: PetDragDelta) => {
+    if (
+      !isPetSender(event) ||
+      typeof delta?.deltaX !== "number" ||
+      typeof delta.deltaY !== "number"
+    ) {
+      return;
+    }
+
+    pointerController?.moveDrag(delta);
+  });
+
+  ipcMain.on("pet:drag-end", (event) => {
+    if (!isPetSender(event)) {
+      return;
+    }
+
+    pointerController?.endDrag();
+  });
+
+  ipcMain.on("pet:first-frame", (event) => {
+    if (!isPetSender(event)) {
+      return;
+    }
+
     // Phase 0 telemetry hook. P0-6 will replace this with structured logging.
     console.info("[pet] first frame reported");
   });
 
-  ipcMain.on("pet:health", (_event, state) => {
+  ipcMain.on("pet:health", (event, state) => {
+    if (!isPetSender(event)) {
+      return;
+    }
+
     console.info("[pet] health", state);
   });
 });
@@ -49,6 +109,8 @@ app.on("window-all-closed", () => {
 
 app.on("activate", () => {
   if (!petWindow || petWindow.isDestroyed()) {
+    pointerController?.dispose();
     petWindow = createPetWindow();
+    pointerController = createPointerController(petWindow);
   }
 });

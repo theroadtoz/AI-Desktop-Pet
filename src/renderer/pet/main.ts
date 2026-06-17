@@ -175,6 +175,128 @@ drawPlaceholderPet();
 window.addEventListener("resize", drawPlaceholderPet);
 window.petApi?.reportFirstFrame();
 
-canvas.addEventListener("click", () => {
-  window.petApi?.openChat();
+type HitRect = {
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+};
+
+const HIT_RECTS: readonly HitRect[] = [
+  { left: 0.25, right: 0.75, top: 0.05, bottom: 0.33 },
+  { left: 0.22, right: 0.78, top: 0.28, bottom: 0.83 }
+];
+
+const DRAG_THRESHOLD_DIP = 4;
+
+let lastIsHit = false;
+let pointerDown: { pointerId: number; x: number; y: number } | null = null;
+let lastDragPoint: { x: number; y: number } | null = null;
+let isDragging = false;
+
+function isPetHit(clientX: number, clientY: number): boolean {
+  const rect = canvas.getBoundingClientRect();
+  const x = (clientX - rect.left) / rect.width;
+  const y = (clientY - rect.top) / rect.height;
+
+  return HIT_RECTS.some((hitRect) => (
+    x >= hitRect.left &&
+    x <= hitRect.right &&
+    y >= hitRect.top &&
+    y <= hitRect.bottom
+  ));
+}
+
+function updatePointerHit(event: PointerEvent): boolean {
+  const nextIsHit = isPetHit(event.clientX, event.clientY);
+
+  if (nextIsHit !== lastIsHit) {
+    lastIsHit = nextIsHit;
+    window.petApi?.setPointerHit(nextIsHit);
+  }
+
+  return nextIsHit;
+}
+
+function endDrag(): void {
+  if (isDragging) {
+    window.petApi?.endDrag();
+  }
+
+  pointerDown = null;
+  lastDragPoint = null;
+  isDragging = false;
+}
+
+canvas.addEventListener("pointermove", (event) => {
+  updatePointerHit(event);
+
+  if (!pointerDown || pointerDown.pointerId !== event.pointerId) {
+    return;
+  }
+
+  const totalDeltaX = event.clientX - pointerDown.x;
+  const totalDeltaY = event.clientY - pointerDown.y;
+
+  if (!isDragging) {
+    const distance = Math.hypot(totalDeltaX, totalDeltaY);
+
+    if (distance <= DRAG_THRESHOLD_DIP) {
+      return;
+    }
+
+    isDragging = true;
+    lastDragPoint = { x: event.screenX, y: event.screenY };
+    window.petApi?.startDrag();
+    return;
+  }
+
+  if (!lastDragPoint) {
+    lastDragPoint = { x: event.screenX, y: event.screenY };
+    return;
+  }
+
+  const deltaX = event.screenX - lastDragPoint.x;
+  const deltaY = event.screenY - lastDragPoint.y;
+  lastDragPoint = { x: event.screenX, y: event.screenY };
+
+  if (deltaX !== 0 || deltaY !== 0) {
+    window.petApi?.moveDrag({ deltaX, deltaY });
+  }
+});
+
+canvas.addEventListener("pointerdown", (event) => {
+  if (!updatePointerHit(event)) {
+    return;
+  }
+
+  pointerDown = { pointerId: event.pointerId, x: event.clientX, y: event.clientY };
+  lastDragPoint = null;
+  isDragging = false;
+  canvas.setPointerCapture(event.pointerId);
+});
+
+canvas.addEventListener("pointerup", (event) => {
+  const wasDragging = isDragging;
+  const isHit = updatePointerHit(event);
+
+  if (pointerDown?.pointerId === event.pointerId) {
+    endDrag();
+    if (canvas.hasPointerCapture(event.pointerId)) {
+      canvas.releasePointerCapture(event.pointerId);
+    }
+  }
+
+  if (isHit && !wasDragging) {
+    window.petApi?.openChat();
+  }
+});
+
+canvas.addEventListener("pointercancel", (event) => {
+  if (pointerDown?.pointerId === event.pointerId) {
+    endDrag();
+    if (canvas.hasPointerCapture(event.pointerId)) {
+      canvas.releasePointerCapture(event.pointerId);
+    }
+  }
 });
