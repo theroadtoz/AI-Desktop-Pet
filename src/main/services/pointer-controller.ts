@@ -1,7 +1,13 @@
-import type { BrowserWindow } from "electron";
+import { screen, type BrowserWindow } from "electron";
 import type { PetDragDelta } from "../../shared/ipc-contract";
 
 const RESTORE_DELAY_MS = 60;
+const POINTER_POLL_INTERVAL_MS = 50;
+
+const HIT_RECTS = [
+  { left: 0.25, right: 0.75, top: 0.05, bottom: 0.33 },
+  { left: 0.22, right: 0.78, top: 0.28, bottom: 0.83 }
+] as const;
 
 export type PointerController = {
   setPointerHit(isHit: boolean): void;
@@ -15,6 +21,7 @@ export function createPointerController(window: BrowserWindow): PointerControlle
   let isPointerHit = false;
   let isDragging = false;
   let restoreTimer: NodeJS.Timeout | null = null;
+  let pollTimer: NodeJS.Timeout | null = null;
 
   function clearRestoreTimer(): void {
     if (restoreTimer) {
@@ -46,17 +53,45 @@ export function createPointerController(window: BrowserWindow): PointerControlle
     }, RESTORE_DELAY_MS);
   }
 
+  function isCursorInHitRect(): boolean {
+    if (window.isDestroyed()) {
+      return false;
+    }
+
+    const cursor = screen.getCursorScreenPoint();
+    const bounds = window.getBounds();
+    const x = (cursor.x - bounds.x) / bounds.width;
+    const y = (cursor.y - bounds.y) / bounds.height;
+
+    return HIT_RECTS.some((hitRect) => (
+      x >= hitRect.left &&
+      x <= hitRect.right &&
+      y >= hitRect.top &&
+      y <= hitRect.bottom
+    ));
+  }
+
+  function setPointerHit(nextIsHit: boolean): void {
+    isPointerHit = nextIsHit;
+
+    if (isPointerHit || isDragging) {
+      setInteractive();
+      return;
+    }
+
+    schedulePassThrough();
+  }
+
+  pollTimer = setInterval(() => {
+    const nextIsHit = isCursorInHitRect();
+
+    if (nextIsHit !== isPointerHit) {
+      setPointerHit(nextIsHit);
+    }
+  }, POINTER_POLL_INTERVAL_MS);
+
   return {
-    setPointerHit(nextIsHit: boolean) {
-      isPointerHit = nextIsHit;
-
-      if (isPointerHit || isDragging) {
-        setInteractive();
-        return;
-      }
-
-      schedulePassThrough();
-    },
+    setPointerHit,
     startDrag() {
       isDragging = true;
       setInteractive();
@@ -86,6 +121,10 @@ export function createPointerController(window: BrowserWindow): PointerControlle
     },
     dispose() {
       clearRestoreTimer();
+      if (pollTimer) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+      }
     }
   };
 }
