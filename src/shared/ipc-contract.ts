@@ -14,6 +14,12 @@ export type RenderHealth = {
   framesPerSecond: number;
   isContextLost: boolean;
   timestamp: number;
+  renderer?: "live2d" | "placeholder";
+  message?: string;
+  canvasWidth?: number;
+  canvasHeight?: number;
+  nonTransparentPixels?: number;
+  opaqueBlackPixels?: number;
 };
 
 export type PetPointerHitState = {

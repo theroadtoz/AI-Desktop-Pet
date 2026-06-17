@@ -22,6 +22,7 @@ protocol.registerSchemesAsPrivileged([
     privileges: {
       standard: true,
       secure: true,
+      corsEnabled: true,
       supportFetchAPI: true
     }
   }

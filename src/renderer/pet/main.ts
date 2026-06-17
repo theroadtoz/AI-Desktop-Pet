@@ -1,4 +1,9 @@
 import "./styles.css";
+import { initializeCubismRuntime } from "./live2d/cubism-runtime";
+import { loadWitchLive2DModel } from "./live2d/cubism-model";
+import { createLive2DRenderer } from "./live2d/cubism-renderer";
+import { registerWebGLContextRecoveryLogging } from "./live2d/context-recovery";
+import type { Live2DRenderer } from "./live2d/types";
 
 const foundCanvas = document.querySelector<HTMLCanvasElement>("#pet-canvas");
 
@@ -19,6 +24,7 @@ if (!foundGl) {
 }
 
 const gl: WebGL2RenderingContext = foundGl;
+registerWebGLContextRecoveryLogging(canvas);
 
 type Rgba = readonly [number, number, number, number];
 
@@ -171,9 +177,66 @@ function drawPlaceholderPet(): void {
   drawEllipse(ellipseVertices(width, height, centerX + width * 0.065, height * 0.26, width * 0.022, height * 0.016, [0.16, 0.06, 0.18, 0.7]));
 }
 
-drawPlaceholderPet();
-window.addEventListener("resize", drawPlaceholderPet);
-window.petApi?.reportFirstFrame();
+let live2DRenderer: Live2DRenderer | null = null;
+let isUsingLive2D = false;
+
+function drawFallbackPet(): void {
+  isUsingLive2D = false;
+  drawPlaceholderPet();
+}
+
+function reportRenderHealth(renderer: "live2d" | "placeholder", message?: string): void {
+  window.petApi?.reportRenderHealth({
+    framesPerSecond: 0,
+    isContextLost: gl.isContextLost(),
+    timestamp: Date.now(),
+    renderer,
+    ...(message ? { message } : {})
+  });
+}
+
+async function startPetRenderer(): Promise<void> {
+  try {
+    resizeCanvas();
+    await initializeCubismRuntime();
+
+    const model = await loadWitchLive2DModel(gl, canvas.width, canvas.height);
+    live2DRenderer = createLive2DRenderer(canvas, gl, model, (sample) => {
+      window.petApi?.reportRenderHealth({
+        framesPerSecond: 0,
+        isContextLost: gl.isContextLost(),
+        timestamp: Date.now(),
+        renderer: "live2d",
+        ...sample
+      });
+    });
+    isUsingLive2D = true;
+    live2DRenderer.start();
+    reportRenderHealth("live2d");
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn("[live2d] failed to start Live2D renderer; using placeholder", {
+      message
+    });
+    drawFallbackPet();
+    reportRenderHealth("placeholder", message);
+  } finally {
+    window.petApi?.reportFirstFrame();
+  }
+}
+
+window.addEventListener("resize", () => {
+  if (!isUsingLive2D) {
+    drawPlaceholderPet();
+  }
+});
+
+window.addEventListener("beforeunload", () => {
+  live2DRenderer?.release();
+  live2DRenderer = null;
+});
+
+void startPetRenderer();
 
 type Model3Probe = {
   Version?: unknown;

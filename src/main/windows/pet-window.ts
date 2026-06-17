@@ -29,6 +29,14 @@ export function createPetWindow(): BrowserWindow {
     window.showInactive();
   });
 
+  window.webContents.on("console-message", (event) => {
+    console.info("[pet:console]", event.message);
+  });
+
+  window.webContents.on("render-process-gone", (_event, details) => {
+    console.warn("[pet] render process gone", details);
+  });
+
   window.loadFile(join(__dirname, "../../renderer/pet/index.html"));
 
   return window;

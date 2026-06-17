@@ -3,6 +3,7 @@ import { defineConfig } from "vite";
 
 export default defineConfig({
   root: resolve(__dirname, "src/renderer"),
+  publicDir: resolve(__dirname, "public"),
   base: "./",
   build: {
     outDir: "../../dist/renderer",
