@@ -175,6 +175,37 @@ drawPlaceholderPet();
 window.addEventListener("resize", drawPlaceholderPet);
 window.petApi?.reportFirstFrame();
 
+type Model3Probe = {
+  Version?: unknown;
+  FileReferences?: {
+    Moc?: unknown;
+  };
+};
+
+async function verifyModelAssetProtocol(): Promise<void> {
+  const response = await fetch("pet-model://witch/魔女.model3.json");
+
+  if (!response.ok) {
+    console.warn("[pet-model] model3 fetch failed", { status: response.status });
+    return;
+  }
+
+  const model3 = await response.json() as Model3Probe;
+
+  console.info("[pet-model] model3 fetch ok", {
+    hasVersion: Object.hasOwn(model3, "Version"),
+    hasMoc: typeof model3.FileReferences?.Moc === "string"
+  });
+}
+
+if (import.meta.env.DEV) {
+  void verifyModelAssetProtocol().catch((error: unknown) => {
+    console.warn("[pet-model] model3 fetch failed", {
+      message: error instanceof Error ? error.message : String(error)
+    });
+  });
+}
+
 type HitRect = {
   left: number;
   right: number;

@@ -9,5 +9,15 @@ __pycache__/
 *.pyc
 tools/
 
+vendor/cubism/*.zip
+vendor/cubism/CubismSdkForWeb-*/
+vendor/cubism/**/Samples/
+vendor/cubism/**/Demo/
+vendor/cubism/**/Resources/
+vendor/cubism/**/Sample*/
+vendor/cubism/**/sample*/
+vendor/cubism/**/Models/
+vendor/cubism/**/models/
+
 # Local-only Live2D model assets. Do not publish or redistribute without permission.
 魔女/

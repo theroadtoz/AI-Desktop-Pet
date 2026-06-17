@@ -1,5 +1,13 @@
-import { app, BrowserWindow, ipcMain, type IpcMainEvent, type IpcMainInvokeEvent } from "electron";
+import {
+  app,
+  BrowserWindow,
+  ipcMain,
+  protocol,
+  type IpcMainEvent,
+  type IpcMainInvokeEvent
+} from "electron";
 import type { PetDragDelta, PetPointerHitState } from "../shared/ipc-contract";
+import { registerModelAssetProtocol } from "./services/model-asset-protocol";
 import { createPointerController, type PointerController } from "./services/pointer-controller";
 import { createChatWindow, focusChatInput, showChatWindow } from "./windows/chat-window";
 import { createPetWindow } from "./windows/pet-window";
@@ -7,6 +15,17 @@ import { createPetWindow } from "./windows/pet-window";
 let petWindow: BrowserWindow | null = null;
 let chatWindow: BrowserWindow | null = null;
 let pointerController: PointerController | null = null;
+
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: "pet-model",
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true
+    }
+  }
+]);
 
 const gotLock = app.requestSingleInstanceLock();
 
@@ -22,6 +41,8 @@ app.on("second-instance", () => {
 });
 
 app.whenReady().then(async () => {
+  registerModelAssetProtocol();
+
   petWindow = createPetWindow();
   pointerController = createPointerController(petWindow);
   chatWindow = createChatWindow();
