@@ -10,6 +10,11 @@ screenshot_*.png
 __pycache__/
 *.pyc
 tools/
+docs/
+
+# Local research/report generators. Keep out of the app repository.
+scripts/add_toc.py
+scripts/generate_*.py
 
 vendor/cubism/*.zip
 vendor/cubism/CubismSdkForWeb-*/
@@ -20,7 +25,12 @@ vendor/cubism/**/Sample*/
 vendor/cubism/**/sample*/
 vendor/cubism/**/Models/
 vendor/cubism/**/models/
+vendor/cubism/README.md
+
+# Runtime uses public/cubism/shaders; this copied SDK shader folder is redundant.
+src/renderer/pet/live2d/vendor/shaders/
 
 # Local-only Live2D model assets. Do not publish or redistribute without permission.
 model/
+resources/models/witch/README.local-only.md
 魔女/
