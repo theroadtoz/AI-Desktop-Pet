@@ -13,6 +13,11 @@ export type CubismFitLayout = {
   translateY: number;
 };
 
+export type CubismProjectionViewSize = {
+  width: number;
+  height: number;
+};
+
 type DrawableBoundsModel = {
   getCanvasWidth(): number;
   getCanvasHeight(): number;
@@ -73,11 +78,21 @@ export function calculateCubismFitLayout(
   const centerX = (bounds.minX + bounds.maxX) / 2;
   const centerY = (bounds.minY + bounds.maxY) / 2;
 
-  return {
+  const fit = {
     scale,
     translateX: -centerX * scale,
     translateY: -centerY * scale
   };
+
+  if (!isPositiveFinite(viewSize.width) || !isPositiveFinite(viewSize.height) || !isPositiveFinite(fit.scale)) {
+    return {
+      scale: 0.8,
+      translateX: 0,
+      translateY: 0
+    };
+  }
+
+  return fit;
 }
 
 function calculateDrawableBounds(model: DrawableBoundsModel): CubismModelBounds | null {
@@ -123,7 +138,14 @@ function calculateDrawableBounds(model: DrawableBoundsModel): CubismModelBounds 
   };
 }
 
-function getProjectionViewSize(canvasWidth: number, canvasHeight: number): { width: number; height: number } {
+export function getProjectionViewSize(canvasWidth: number, canvasHeight: number): CubismProjectionViewSize {
+  if (!isPositiveFinite(canvasWidth) || !isPositiveFinite(canvasHeight)) {
+    return {
+      width: 2,
+      height: 2
+    };
+  }
+
   if (canvasWidth > canvasHeight) {
     return {
       width: 2 * (canvasWidth / canvasHeight),
@@ -133,7 +155,7 @@ function getProjectionViewSize(canvasWidth: number, canvasHeight: number): { wid
 
   return {
     width: 2,
-    height: 2 * (canvasWidth / canvasHeight)
+    height: 2 * (canvasHeight / canvasWidth)
   };
 }
 

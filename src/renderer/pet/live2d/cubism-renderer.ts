@@ -1,5 +1,5 @@
 import { CUBISM_SHADER_BASE_URL } from "./cubism-assets";
-import { calculateCubismFitLayout, calculateCubismModelBounds } from "./cubism-layout";
+import { calculateCubismFitLayout, calculateCubismModelBounds, getProjectionViewSize } from "./cubism-layout";
 import { CubismMatrix44 } from "./vendor/framework/math/cubismmatrix44";
 import type { LoadedLive2DModel, Live2DFrameSample, Live2DRenderer } from "./types";
 
@@ -21,6 +21,7 @@ function updateModelMatrix(model: LoadedLive2DModel, canvas: HTMLCanvasElement, 
   const modelMatrix = userModel.getModelMatrix();
   const bounds = calculateCubismModelBounds(cubismModel);
   const fit = calculateCubismFitLayout(bounds, canvas.width, canvas.height);
+  const visibleArea = getProjectionViewSize(canvas.width, canvas.height);
 
   modelMatrix.loadIdentity();
   modelMatrix.scale(fit.scale, fit.scale);
@@ -32,7 +33,7 @@ function updateModelMatrix(model: LoadedLive2DModel, canvas: HTMLCanvasElement, 
     const ratio = canvas.width / canvas.height;
     projection.scale(1 / ratio, 1);
   } else {
-    const ratio = canvas.height / canvas.width;
+    const ratio = canvas.width / canvas.height;
     projection.scale(1, ratio);
   }
 
@@ -41,8 +42,20 @@ function updateModelMatrix(model: LoadedLive2DModel, canvas: HTMLCanvasElement, 
   renderer.setRenderTargetSize(canvas.width, canvas.height);
 
   if (shouldLogLayout && import.meta.env.DEV) {
+    const modelAspect = bounds.width / bounds.height;
+    const fittedAspect = (bounds.width * fit.scale) / (bounds.height * fit.scale);
+
+    console.info("[pet-live2d-layout] visibleArea", {
+      width: visibleArea.width,
+      height: visibleArea.height,
+      aspect: visibleArea.width / visibleArea.height
+    });
     console.info("[pet-live2d-layout] bounds", bounds);
     console.info("[pet-live2d-layout] fit", fit);
+    console.info("[pet-live2d-layout] aspectCheck", {
+      modelAspect,
+      fittedAspect
+    });
   }
 }
 
