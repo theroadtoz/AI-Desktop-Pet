@@ -22,6 +22,7 @@ import type {
 import { isChatMessage } from "../shared/ipc-contract";
 import { emotionTags, type EmotionTag } from "../shared/emotion";
 import { ChatEngineBusyError, createChatEngine, type ChatEngine } from "./services/chat/chat-engine";
+import { createChatProviderFromConfig } from "./services/chat/provider-factory";
 import { readEnvProviderConfig, type EnvProviderConfig } from "./services/config/env-config";
 import {
   createProviderConfigStore,
@@ -385,7 +386,7 @@ app.whenReady().then(async () => {
   providerConfigStore = createProviderConfigStore({ logTelemetry });
   secureKeyStore = createSecureKeyStore({ logTelemetry });
   envProviderConfig = readEnvProviderConfig();
-  chatEngine = createChatEngine();
+  chatEngine = createChatEngine(createProviderFromCurrentConfig());
   logStartupInfo();
   registerModelAssetProtocol();
 
@@ -437,7 +438,25 @@ app.whenReady().then(async () => {
     return secureKeyStore?.hasApiKey(apiKeyRef) ?? false;
   }
 
-  getCurrentProviderConfig();
+  function getApiKey(apiKeyRef: string): string | null {
+    if (
+      envProviderConfig?.apiKeyRef === apiKeyRef &&
+      typeof envProviderConfig.apiKey === "string" &&
+      envProviderConfig.apiKey.length > 0
+    ) {
+      return envProviderConfig.apiKey;
+    }
+
+    return secureKeyStore?.getApiKey(apiKeyRef) ?? null;
+  }
+
+  function createProviderFromCurrentConfig() {
+    return createChatProviderFromConfig({
+      config: getCurrentProviderConfig(),
+      getApiKey,
+      logTelemetry
+    });
+  }
 
   function isEmotionTag(value: unknown): value is EmotionTag {
     return typeof value === "string" && emotionTags.includes(value as EmotionTag);
@@ -618,7 +637,9 @@ app.whenReady().then(async () => {
       throw new Error("Unauthorized config request");
     }
 
-    return providerConfigStore.saveConfig(config);
+    const savedConfig = providerConfigStore.saveConfig(config);
+    chatEngine?.setProvider(createProviderFromCurrentConfig());
+    return savedConfig;
   });
 
   ipcMain.handle("config:has-api-key", (event, request: unknown) => {

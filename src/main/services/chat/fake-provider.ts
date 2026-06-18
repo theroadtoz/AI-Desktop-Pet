@@ -1,6 +1,8 @@
 import type { ChatMessage } from "../../../shared/chat";
 import type { ChatProvider, ChatProviderResult } from "../../../shared/chat-provider";
 import type { EmotionTag } from "../../../shared/emotion";
+import { getLatestUserMessage } from "./chat-message-mapper";
+import { classifyEmotion } from "./emotion-classifier";
 
 const REPLIES: Readonly<Record<EmotionTag, string>> = {
   neutral: "我听到了。先陪你把这件事慢慢理清楚。",
@@ -8,23 +10,14 @@ const REPLIES: Readonly<Record<EmotionTag, string>> = {
   sad: "我在这里。难过的时候可以先慢一点说。",
   surprised: "这听起来有点突然，我会认真听你讲。",
   confused: "我有点没完全理解，我们可以一步一步来。",
-  angry: "我明白这让人很窝火，先深呼吸一下。"
+  angry: "我明白这让人很烦，先深呼吸一下。"
 };
-
-const KEYWORD_RULES: readonly {
-  emotion: EmotionTag;
-  keywords: readonly string[];
-}[] = [
-  { emotion: "happy", keywords: ["开心", "好", "喜欢", "棒", "谢谢"] },
-  { emotion: "sad", keywords: ["难过", "哭", "伤心", "累", "不开心"] },
-  { emotion: "angry", keywords: ["生气", "烦", "讨厌", "火", "气死"] }
-];
 
 export function createFakeChatProvider(): ChatProvider {
   return {
     id: "fake",
     async streamReply(request, options) {
-      const reply = createFakeReply(getLatestUserInput(request.messages));
+      const reply = createFakeReply(request.messages);
 
       for (const chunk of chunkText(reply.text)) {
         await delay(randomDelayMs(), options.signal);
@@ -37,34 +30,12 @@ export function createFakeChatProvider(): ChatProvider {
   };
 }
 
-function createFakeReply(input: string): ChatProviderResult {
-  const emotion = detectEmotion(input);
+function createFakeReply(messages: ChatMessage[]): ChatProviderResult {
+  const emotion = classifyEmotion({ latestUserMessage: getLatestUserMessage(messages) });
   return {
     text: REPLIES[emotion],
     emotion
   };
-}
-
-function getLatestUserInput(messages: ChatMessage[]): string {
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index];
-
-    if (message?.role === "user") {
-      return message.content;
-    }
-  }
-
-  return "";
-}
-
-function detectEmotion(input: string): EmotionTag {
-  for (const rule of KEYWORD_RULES) {
-    if (rule.keywords.some((keyword) => input.includes(keyword))) {
-      return rule.emotion;
-    }
-  }
-
-  return "neutral";
 }
 
 function chunkText(text: string): string[] {

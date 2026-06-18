@@ -16,6 +16,7 @@ export class ChatEngineBusyError extends Error {
 
 export type ChatEngine = {
   getProviderId(): ChatProviderId;
+  setProvider(provider: ChatProvider): void;
   hasActiveStream(): boolean;
   abortActiveStream(): boolean;
   startChatStream(
@@ -32,6 +33,9 @@ export function createChatEngine(provider: ChatProvider = createFakeChatProvider
   return {
     getProviderId() {
       return provider.id;
+    },
+    setProvider(nextProvider) {
+      provider = nextProvider;
     },
     hasActiveStream() {
       return activeAbortController !== null;
