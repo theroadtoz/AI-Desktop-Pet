@@ -4,6 +4,8 @@ dist/
 dist-renderer/
 *.log
 *.tmp
+.env.local
+.tmp-electron-user-data/
 screenshot_*.png
 __pycache__/
 *.pyc

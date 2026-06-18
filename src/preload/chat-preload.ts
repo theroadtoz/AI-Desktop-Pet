@@ -4,9 +4,13 @@ import type {
   ChatSendRequest,
   ChatStreamDeltaPayload,
   ChatStreamDonePayload,
-  ChatStreamErrorPayload
+  ChatStreamErrorPayload,
+  ConfigApi,
+  ConfigApiKeyRequest,
+  ConfigSetApiKeyRequest
 } from "../shared/ipc-contract";
 import type { EmotionTag } from "../shared/emotion";
+import type { ProviderConfig } from "../shared/provider-config";
 
 const emotionTags = [
   "neutral",
@@ -66,6 +70,59 @@ function isChatStreamErrorPayload(value: unknown): value is ChatStreamErrorPaylo
     error &&
     typeof error.message === "string" &&
     (error.errorType === "aborted" || error.errorType === "busy" || error.errorType === "failed")
+  );
+}
+
+function isProviderConfig(value: unknown): value is ProviderConfig {
+  const config = value as Partial<ProviderConfig> | null;
+
+  if (!config || typeof config !== "object") {
+    return false;
+  }
+
+  if (config.providerId === "fake") {
+    return typeof config.displayName === "string" && config.displayName.length > 0;
+  }
+
+  if (config.providerId === "openai-compatible") {
+    return (
+      typeof config.displayName === "string" &&
+      config.displayName.length > 0 &&
+      typeof config.baseURL === "string" &&
+      config.baseURL.length > 0 &&
+      typeof config.model === "string" &&
+      config.model.length > 0 &&
+      typeof config.apiKeyRef === "string" &&
+      config.apiKeyRef.length > 0 &&
+      typeof config.temperature === "number" &&
+      Number.isFinite(config.temperature) &&
+      typeof config.maxTokens === "number" &&
+      Number.isInteger(config.maxTokens) &&
+      config.maxTokens > 0 &&
+      typeof config.timeoutMs === "number" &&
+      Number.isInteger(config.timeoutMs) &&
+      config.timeoutMs > 0
+    );
+  }
+
+  return false;
+}
+
+function isConfigApiKeyRequest(value: unknown): value is ConfigApiKeyRequest {
+  const request = value as Partial<ConfigApiKeyRequest> | null;
+
+  return Boolean(request && typeof request.apiKeyRef === "string" && request.apiKeyRef.length > 0);
+}
+
+function isConfigSetApiKeyRequest(value: unknown): value is ConfigSetApiKeyRequest {
+  const request = value as Partial<ConfigSetApiKeyRequest> | null;
+
+  return Boolean(
+    request &&
+    typeof request.apiKeyRef === "string" &&
+    request.apiKeyRef.length > 0 &&
+    typeof request.apiKey === "string" &&
+    request.apiKey.length > 0
   );
 }
 
@@ -130,8 +187,55 @@ const api: ChatApi = {
   }
 };
 
+const configApi: ConfigApi = {
+  async getProvider() {
+    const config = await ipcRenderer.invoke("config:get-provider");
+
+    if (!isProviderConfig(config)) {
+      throw new Error("Invalid provider config response");
+    }
+
+    return config;
+  },
+  async setProvider(config) {
+    if (!isProviderConfig(config)) {
+      throw new Error("Invalid provider config");
+    }
+
+    const savedConfig = await ipcRenderer.invoke("config:set-provider", config);
+
+    if (!isProviderConfig(savedConfig)) {
+      throw new Error("Invalid provider config response");
+    }
+
+    return savedConfig;
+  },
+  async hasApiKey(request) {
+    if (!isConfigApiKeyRequest(request)) {
+      return false;
+    }
+
+    return Boolean(await ipcRenderer.invoke("config:has-api-key", request));
+  },
+  async setApiKey(request) {
+    if (!isConfigSetApiKeyRequest(request)) {
+      return false;
+    }
+
+    return Boolean(await ipcRenderer.invoke("config:set-api-key", request));
+  },
+  async deleteApiKey(request) {
+    if (!isConfigApiKeyRequest(request)) {
+      return false;
+    }
+
+    return Boolean(await ipcRenderer.invoke("config:delete-api-key", request));
+  }
+};
+
 ipcRenderer.on("chat:focus-input", () => {
   window.dispatchEvent(new CustomEvent("chat:focus-input"));
 });
 
 contextBridge.exposeInMainWorld("chatApi", api);
+contextBridge.exposeInMainWorld("configApi", configApi);

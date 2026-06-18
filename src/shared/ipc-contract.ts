@@ -1,6 +1,7 @@
 import type { EmotionTag } from "./emotion";
 import type { ChatMessage } from "./chat";
 import type { ChatProviderResult, ChatRequest, ChatStreamDelta } from "./chat-provider";
+import type { ProviderConfig } from "./provider-config";
 
 export type PetWindowCommand =
   | { type: "pet:first-frame"; payload?: PetFirstFrameInfo }
@@ -26,6 +27,14 @@ export type ChatStreamDonePayload = ChatProviderResult;
 export type ChatStreamErrorPayload = {
   message: string;
   errorType: "aborted" | "busy" | "failed";
+};
+
+export type ConfigApiKeyRequest = {
+  apiKeyRef: string;
+};
+
+export type ConfigSetApiKeyRequest = ConfigApiKeyRequest & {
+  apiKey: string;
 };
 
 export type RenderHealth = {
@@ -85,6 +94,14 @@ export type ChatApi = {
   onReplyDone(handler: (result: ChatStreamDonePayload) => void): () => void;
   onReplyError(handler: (error: ChatStreamErrorPayload) => void): () => void;
   reportReplyEmotion(emotion: EmotionTag): void;
+};
+
+export type ConfigApi = {
+  getProvider(): Promise<ProviderConfig>;
+  setProvider(config: ProviderConfig): Promise<ProviderConfig>;
+  hasApiKey(request: ConfigApiKeyRequest): Promise<boolean>;
+  setApiKey(request: ConfigSetApiKeyRequest): Promise<boolean>;
+  deleteApiKey(request: ConfigApiKeyRequest): Promise<boolean>;
 };
 
 export function isChatMessage(value: unknown): value is ChatMessage {

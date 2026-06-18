@@ -1,7 +1,8 @@
 import type { ChatMessage } from "./chat";
 import type { EmotionTag } from "./emotion";
+import type { ProviderId } from "./provider-config";
 
-export type ChatProviderId = "fake";
+export type ChatProviderId = ProviderId;
 
 export type ChatRequest = {
   conversationId: string;

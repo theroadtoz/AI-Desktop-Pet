@@ -10,6 +10,8 @@ import {
 } from "electron";
 import { release as getOsRelease } from "node:os";
 import type {
+  ConfigApiKeyRequest,
+  ConfigSetApiKeyRequest,
   ChatSendRequest,
   PetDragDelta,
   PetFirstFrameInfo,
@@ -20,6 +22,14 @@ import type {
 import { isChatMessage } from "../shared/ipc-contract";
 import { emotionTags, type EmotionTag } from "../shared/emotion";
 import { ChatEngineBusyError, createChatEngine, type ChatEngine } from "./services/chat/chat-engine";
+import { readEnvProviderConfig, type EnvProviderConfig } from "./services/config/env-config";
+import {
+  createProviderConfigStore,
+  createProviderTelemetryPayload,
+  DEFAULT_PROVIDER_CONFIG,
+  type ProviderConfigStore
+} from "./services/config/provider-config-store";
+import { createSecureKeyStore, type SecureKeyStore } from "./services/config/secure-key-store";
 import { registerModelAssetProtocol } from "./services/model-asset-protocol";
 import { createPointerController, type PointerController } from "./services/pointer-controller";
 import { createTelemetryService, type TelemetryPayload, type TelemetryService } from "./services/telemetry";
@@ -31,6 +41,9 @@ let chatWindow: BrowserWindow | null = null;
 let pointerController: PointerController | null = null;
 let telemetry: TelemetryService | null = null;
 let chatEngine: ChatEngine | null = null;
+let providerConfigStore: ProviderConfigStore | null = null;
+let secureKeyStore: SecureKeyStore | null = null;
+let envProviderConfig: EnvProviderConfig | null = null;
 let performanceHeartbeat: NodeJS.Timeout | null = null;
 
 const PET_RENDERER_RECOVERY_WINDOW_MS = 60_000;
@@ -292,6 +305,24 @@ function isChatSendRequest(value: unknown): value is ChatSendRequest {
   );
 }
 
+function isConfigApiKeyRequest(value: unknown): value is ConfigApiKeyRequest {
+  const request = value as Partial<ConfigApiKeyRequest> | null;
+
+  return Boolean(request && typeof request.apiKeyRef === "string" && request.apiKeyRef.length > 0);
+}
+
+function isConfigSetApiKeyRequest(value: unknown): value is ConfigSetApiKeyRequest {
+  const request = value as Partial<ConfigSetApiKeyRequest> | null;
+
+  return Boolean(
+    request &&
+    typeof request.apiKeyRef === "string" &&
+    request.apiKeyRef.length > 0 &&
+    typeof request.apiKey === "string" &&
+    request.apiKey.length > 0
+  );
+}
+
 function isAbortError(error: unknown): boolean {
   return error instanceof DOMException && error.name === "AbortError";
 }
@@ -351,6 +382,9 @@ function rebuildPetWindow(recoverySource?: string): void {
 
 app.whenReady().then(async () => {
   telemetry = createTelemetryService();
+  providerConfigStore = createProviderConfigStore({ logTelemetry });
+  secureKeyStore = createSecureKeyStore({ logTelemetry });
+  envProviderConfig = readEnvProviderConfig();
   chatEngine = createChatEngine();
   logStartupInfo();
   registerModelAssetProtocol();
@@ -375,9 +409,35 @@ app.whenReady().then(async () => {
     return Boolean(petWindow && event.sender === petWindow.webContents);
   }
 
-  function isChatSender(event: IpcMainEvent): boolean {
+  function isChatSender(event: IpcMainEvent | IpcMainInvokeEvent): boolean {
     return Boolean(chatWindow && event.sender === chatWindow.webContents);
   }
+
+  function getCurrentProviderConfig() {
+    if (envProviderConfig) {
+      logTelemetry(
+        "provider_config_loaded",
+        createProviderTelemetryPayload(envProviderConfig.providerConfig, "env")
+      );
+      return envProviderConfig.providerConfig;
+    }
+
+    return providerConfigStore?.getConfig() ?? DEFAULT_PROVIDER_CONFIG;
+  }
+
+  function hasApiKey(apiKeyRef: string): boolean {
+    if (
+      envProviderConfig?.apiKeyRef === apiKeyRef &&
+      typeof envProviderConfig.apiKey === "string" &&
+      envProviderConfig.apiKey.length > 0
+    ) {
+      return true;
+    }
+
+    return secureKeyStore?.hasApiKey(apiKeyRef) ?? false;
+  }
+
+  getCurrentProviderConfig();
 
   function isEmotionTag(value: unknown): value is EmotionTag {
     return typeof value === "string" && emotionTags.includes(value as EmotionTag);
@@ -543,6 +603,47 @@ app.whenReady().then(async () => {
     }
 
     chatEngine.abortActiveStream();
+  });
+
+  ipcMain.handle("config:get-provider", (event) => {
+    if (!isChatSender(event)) {
+      throw new Error("Unauthorized config request");
+    }
+
+    return getCurrentProviderConfig();
+  });
+
+  ipcMain.handle("config:set-provider", (event, config: unknown) => {
+    if (!isChatSender(event) || !providerConfigStore) {
+      throw new Error("Unauthorized config request");
+    }
+
+    return providerConfigStore.saveConfig(config);
+  });
+
+  ipcMain.handle("config:has-api-key", (event, request: unknown) => {
+    if (!isChatSender(event) || !isConfigApiKeyRequest(request)) {
+      return false;
+    }
+
+    return hasApiKey(request.apiKeyRef);
+  });
+
+  ipcMain.handle("config:set-api-key", (event, request: unknown) => {
+    if (!isChatSender(event) || !isConfigSetApiKeyRequest(request) || !secureKeyStore) {
+      return false;
+    }
+
+    secureKeyStore.setApiKey(request.apiKeyRef, request.apiKey);
+    return true;
+  });
+
+  ipcMain.handle("config:delete-api-key", (event, request: unknown) => {
+    if (!isChatSender(event) || !isConfigApiKeyRequest(request) || !secureKeyStore) {
+      return false;
+    }
+
+    return secureKeyStore.deleteApiKey(request.apiKeyRef);
   });
 });
 
