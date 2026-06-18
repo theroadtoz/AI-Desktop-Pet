@@ -14,12 +14,14 @@ export type PointerController = {
   startDrag(): void;
   moveDrag(delta: PetDragDelta): void;
   endDrag(): void;
+  isIgnoringMouseEvents(): boolean;
   dispose(): void;
 };
 
 export function createPointerController(window: BrowserWindow): PointerController {
   let isPointerHit = false;
   let isDragging = false;
+  let isIgnoringMouseEvents = true;
   let restoreTimer: NodeJS.Timeout | null = null;
   let pollTimer: NodeJS.Timeout | null = null;
 
@@ -34,12 +36,14 @@ export function createPointerController(window: BrowserWindow): PointerControlle
     clearRestoreTimer();
     if (!window.isDestroyed()) {
       window.setIgnoreMouseEvents(false);
+      isIgnoringMouseEvents = false;
     }
   }
 
   function setPassThrough(): void {
     if (!window.isDestroyed()) {
       window.setIgnoreMouseEvents(true, { forward: true });
+      isIgnoringMouseEvents = true;
     }
   }
 
@@ -108,6 +112,9 @@ export function createPointerController(window: BrowserWindow): PointerControlle
         Math.round(x + delta.deltaX),
         Math.round(y + delta.deltaY)
       );
+    },
+    isIgnoringMouseEvents() {
+      return isIgnoringMouseEvents;
     },
     endDrag() {
       isDragging = false;

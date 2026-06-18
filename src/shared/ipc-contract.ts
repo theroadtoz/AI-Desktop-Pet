@@ -1,10 +1,12 @@
 import type { EmotionTag } from "./emotion";
 
 export type PetWindowCommand =
-  | { type: "pet:first-frame" }
+  | { type: "pet:first-frame"; payload?: PetFirstFrameInfo }
   | { type: "pet:health"; payload: RenderHealth }
+  | { type: "pet:telemetry"; payload: PetTelemetryEvent }
   | { type: "pet:pointer-hit-change"; payload: PetPointerHitState }
   | { type: "pet:apply-emotion"; payload: EmotionTag }
+  | { type: "pet:inject-webgl-context-loss" }
   | { type: "pet:open-chat" }
   | { type: "pet:drag-start" }
   | { type: "pet:drag-move"; payload: PetDragDelta }
@@ -23,6 +25,21 @@ export type RenderHealth = {
   canvasHeight?: number;
   nonTransparentPixels?: number;
   opaqueBlackPixels?: number;
+  firstFrameMs?: number;
+  renderStartMs?: number;
+  recoveryCount?: number;
+};
+
+export type PetFirstFrameInfo = {
+  firstFrameMs: number;
+  renderStartMs: number;
+  renderer: "live2d" | "placeholder";
+  recoveryCount: number;
+};
+
+export type PetTelemetryEvent = {
+  type: string;
+  payload?: Record<string, unknown>;
 };
 
 export type PetPointerHitState = {
@@ -35,10 +52,12 @@ export type PetDragDelta = {
 };
 
 export type PetApi = {
-  reportFirstFrame(): void;
+  reportFirstFrame(info: PetFirstFrameInfo): void;
   reportRenderHealth(state: RenderHealth): void;
+  reportTelemetry(type: string, payload?: Record<string, unknown>): void;
   setPointerHit(isHit: boolean): void;
   onApplyEmotion(handler: (emotion: EmotionTag) => void): () => void;
+  onInjectWebGLContextLoss(handler: () => void): () => void;
   openChat(): void;
   startDrag(): void;
   moveDrag(delta: PetDragDelta): void;

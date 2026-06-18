@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { PetApi, RenderHealth, PetDragDelta } from "../shared/ipc-contract";
+import type { PetApi, RenderHealth, PetDragDelta, PetFirstFrameInfo } from "../shared/ipc-contract";
 import type { EmotionTag } from "../shared/emotion";
 
 const emotionTags = [
@@ -16,11 +16,14 @@ function isEmotionTag(value: unknown): value is EmotionTag {
 }
 
 const api: PetApi = {
-  reportFirstFrame() {
-    ipcRenderer.send("pet:first-frame");
+  reportFirstFrame(info: PetFirstFrameInfo) {
+    ipcRenderer.send("pet:first-frame", info);
   },
   reportRenderHealth(state: RenderHealth) {
     ipcRenderer.send("pet:health", state);
+  },
+  reportTelemetry(type: string, payload?: Record<string, unknown>) {
+    ipcRenderer.send("pet:telemetry", { type, payload });
   },
   setPointerHit(isHit: boolean) {
     ipcRenderer.send("pet:pointer-hit-change", { isHit });
@@ -36,6 +39,17 @@ const api: PetApi = {
 
     return () => {
       ipcRenderer.removeListener("pet:apply-emotion", listener);
+    };
+  },
+  onInjectWebGLContextLoss(handler: () => void) {
+    const listener = (): void => {
+      handler();
+    };
+
+    ipcRenderer.on("pet:inject-webgl-context-loss", listener);
+
+    return () => {
+      ipcRenderer.removeListener("pet:inject-webgl-context-loss", listener);
     };
   },
   openChat() {

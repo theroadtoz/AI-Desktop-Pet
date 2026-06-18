@@ -3,7 +3,7 @@ import { initializeCubismRuntime } from "./live2d/cubism-runtime";
 import { loadWitchLive2DModel } from "./live2d/cubism-model";
 import { createLive2DRenderer } from "./live2d/cubism-renderer";
 import { registerWebGLContextRecovery } from "./live2d/context-recovery";
-import type { LoadedLive2DModel, Live2DRenderer } from "./live2d/types";
+import type { LoadedLive2DModel, Live2DFrameSample, Live2DRenderer } from "./live2d/types";
 import type { EmotionTag } from "../../shared/emotion";
 
 const foundCanvas = document.querySelector<HTMLCanvasElement>("#pet-canvas");
@@ -25,6 +25,7 @@ if (!foundGl) {
 }
 
 const gl: WebGL2RenderingContext = foundGl;
+const rendererBootTimeMs = performance.now();
 
 type Rgba = readonly [number, number, number, number];
 
@@ -214,6 +215,10 @@ let pendingEmotion: EmotionTag | null = null;
 let lastEmotion: EmotionTag = "neutral";
 let isStartingPetRenderer = false;
 let isRecoveringContext = false;
+let currentRenderStartMs = 0;
+let firstFrameMs: number | undefined;
+let recoveryCount = 0;
+let pendingLive2DFrameSample: ((sample: Live2DFrameSample) => void) | null = null;
 
 function applyEmotionToModel(emotion: EmotionTag): void {
   if (!live2DModel) {
@@ -261,8 +266,31 @@ function reportRenderHealth(renderer: "live2d" | "placeholder", message?: string
     isContextLost: gl.isContextLost(),
     timestamp: Date.now(),
     renderer,
+    ...(firstFrameMs !== undefined ? { firstFrameMs } : {}),
+    renderStartMs: currentRenderStartMs,
+    recoveryCount,
     ...(message ? { message } : {})
   });
+}
+
+function waitForNextLive2DFrameSample(timeoutMs = 2_000): Promise<Live2DFrameSample | null> {
+  return new Promise((resolve) => {
+    const timeoutId = window.setTimeout(() => {
+      pendingLive2DFrameSample = null;
+      resolve(null);
+    }, timeoutMs);
+
+    pendingLive2DFrameSample = (sample) => {
+      window.clearTimeout(timeoutId);
+      pendingLive2DFrameSample = null;
+      resolve(sample);
+    };
+  });
+}
+
+async function releaseCubismStaticWebGLResources(): Promise<void> {
+  const { CubismRenderer_WebGL } = await import("./live2d/vendor/framework/rendering/cubismrenderer_webgl");
+  CubismRenderer_WebGL.doStaticRelease();
 }
 
 async function startPetRenderer(): Promise<void> {
@@ -271,6 +299,7 @@ async function startPetRenderer(): Promise<void> {
   }
 
   isStartingPetRenderer = true;
+  currentRenderStartMs = Math.round(performance.now() - rendererBootTimeMs);
 
   try {
     if (gl.isContextLost()) {
@@ -284,11 +313,15 @@ async function startPetRenderer(): Promise<void> {
 
     live2DModel = await loadWitchLive2DModel(gl, canvas.width, canvas.height);
     live2DRenderer = createLive2DRenderer(canvas, gl, live2DModel, (sample) => {
+      pendingLive2DFrameSample?.(sample);
       window.petApi?.reportRenderHealth({
         framesPerSecond: 0,
         isContextLost: gl.isContextLost(),
         timestamp: Date.now(),
         renderer: "live2d",
+        ...(firstFrameMs !== undefined ? { firstFrameMs } : {}),
+        renderStartMs: currentRenderStartMs,
+        recoveryCount,
         ...sample
       });
     });
@@ -310,7 +343,13 @@ async function startPetRenderer(): Promise<void> {
     reportRenderHealth("placeholder", message);
   } finally {
     isStartingPetRenderer = false;
-    window.petApi?.reportFirstFrame();
+    firstFrameMs = firstFrameMs ?? Math.round(performance.now() - rendererBootTimeMs);
+    window.petApi?.reportFirstFrame({
+      firstFrameMs,
+      renderStartMs: currentRenderStartMs,
+      renderer: isUsingLive2D ? "live2d" : "placeholder",
+      recoveryCount
+    });
   }
 }
 
@@ -318,6 +357,17 @@ function handleWebGLContextLost(): void {
   const renderer = isUsingLive2D ? "live2d" : "placeholder";
 
   isRecoveringContext = true;
+  recoveryCount += 1;
+  window.petApi?.reportTelemetry("webgl_context_lost", {
+    renderer,
+    recoveryCount,
+    isContextLost: gl.isContextLost()
+  });
+  window.petApi?.reportTelemetry("recovery_started", {
+    source: "webgl_context_lost",
+    renderer,
+    recoveryCount
+  });
   live2DRenderer?.stop();
   live2DRenderer = null;
   live2DModel = null;
@@ -330,9 +380,39 @@ function handleWebGLContextLost(): void {
 
 async function handleWebGLContextRestored(): Promise<void> {
   invalidatePlaceholderResources();
+  window.petApi?.reportTelemetry("webgl_context_restored", {
+    recoveryCount,
+    isContextLost: gl.isContextLost()
+  });
 
   try {
+    await releaseCubismStaticWebGLResources();
+    const frameSample = waitForNextLive2DFrameSample();
     await startPetRenderer();
+    const sample = isUsingLive2D ? await frameSample : null;
+
+    if (isUsingLive2D && (!sample || sample.nonTransparentPixels <= 0)) {
+      throw new Error("Live2D recovery produced an empty frame");
+    }
+
+    window.petApi?.reportTelemetry("recovery_succeeded", {
+      source: "webgl_context_restored",
+      renderer: isUsingLive2D ? "live2d" : "placeholder",
+      recoveryCount
+    });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    window.petApi?.reportTelemetry("recovery_failed", {
+      source: "webgl_context_restored",
+      recoveryCount,
+      message
+    });
+
+    if (!gl.isContextLost()) {
+      disposeLive2DRenderer();
+      drawFallbackPet();
+      reportRenderHealth("placeholder", message);
+    }
   } finally {
     isRecoveringContext = false;
   }
@@ -368,6 +448,10 @@ function injectWebGLContextLoss(): void {
   }, 250);
 }
 
+const removeInjectWebGLContextLossListener = window.petApi?.onInjectWebGLContextLoss(() => {
+  injectWebGLContextLoss();
+}) ?? null;
+
 window.addEventListener("resize", () => {
   resizeCanvas();
 
@@ -383,6 +467,7 @@ window.addEventListener("resize", () => {
 window.addEventListener("beforeunload", () => {
   removeWebGLContextRecovery();
   removeApplyEmotionListener?.();
+  removeInjectWebGLContextLossListener?.();
   live2DRenderer?.release();
   live2DRenderer = null;
   live2DModel = null;

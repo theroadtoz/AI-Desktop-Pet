@@ -8,7 +8,8 @@
     "dev": "npm run build && electron .",
     "build": "tsc -p tsconfig.main.json && tsc -p tsconfig.preload.json && vite build",
     "typecheck": "tsc --noEmit -p tsconfig.renderer.json",
-    "verify": "npm run build && npm run typecheck"
+    "verify": "npm run build && npm run typecheck",
+    "telemetry:summary": "node scripts/summarize-telemetry.js"
   },
   "devDependencies": {
     "electron": "42.4.0",
