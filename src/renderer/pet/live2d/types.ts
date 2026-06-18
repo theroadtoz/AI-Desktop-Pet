@@ -22,6 +22,7 @@ export type LoadedLive2DModel = {
 
 export type Live2DRenderer = {
   start(): void;
+  resize(width: number, height: number): void;
   stop(): void;
   release(): void;
 };

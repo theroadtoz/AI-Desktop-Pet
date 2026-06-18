@@ -228,6 +228,12 @@ async function startPetRenderer(): Promise<void> {
 }
 
 window.addEventListener("resize", () => {
+  resizeCanvas();
+
+  if (isUsingLive2D) {
+    live2DRenderer?.resize(canvas.width, canvas.height);
+  }
+
   if (!isUsingLive2D) {
     drawPlaceholderPet();
   }

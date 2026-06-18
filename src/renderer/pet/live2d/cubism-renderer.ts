@@ -1,4 +1,5 @@
 import { CUBISM_SHADER_BASE_URL } from "./cubism-assets";
+import { calculateCubismFitLayout, calculateCubismModelBounds } from "./cubism-layout";
 import { CubismMatrix44 } from "./vendor/framework/math/cubismmatrix44";
 import type { LoadedLive2DModel, Live2DFrameSample, Live2DRenderer } from "./types";
 
@@ -13,18 +14,17 @@ function resizeCanvas(canvas: HTMLCanvasElement): void {
   }
 }
 
-function updateModelMatrix(model: LoadedLive2DModel, canvas: HTMLCanvasElement): void {
+function updateModelMatrix(model: LoadedLive2DModel, canvas: HTMLCanvasElement, shouldLogLayout: boolean): void {
   const userModel = model.userModel;
   const renderer = userModel.getRenderer();
   const cubismModel = userModel.getModel();
   const modelMatrix = userModel.getModelMatrix();
-  const canvasAspect = canvas.width / canvas.height;
-  const modelAspect = cubismModel.getCanvasWidth() / cubismModel.getCanvasHeight();
-  const width = modelAspect > canvasAspect ? 1.85 : 1.85 * modelAspect / canvasAspect;
+  const bounds = calculateCubismModelBounds(cubismModel);
+  const fit = calculateCubismFitLayout(bounds, canvas.width, canvas.height);
 
   modelMatrix.loadIdentity();
-  modelMatrix.setWidth(width);
-  modelMatrix.setCenterPosition(0, -0.08);
+  modelMatrix.scale(fit.scale, fit.scale);
+  modelMatrix.translate(fit.translateX, fit.translateY);
 
   const projection = new CubismMatrix44();
 
@@ -39,6 +39,11 @@ function updateModelMatrix(model: LoadedLive2DModel, canvas: HTMLCanvasElement):
   projection.multiplyByMatrix(modelMatrix);
   renderer.setMvpMatrix(projection);
   renderer.setRenderTargetSize(canvas.width, canvas.height);
+
+  if (shouldLogLayout && import.meta.env.DEV) {
+    console.info("[pet-live2d-layout] bounds", bounds);
+    console.info("[pet-live2d-layout] fit", fit);
+  }
 }
 
 export function createLive2DRenderer(
@@ -51,14 +56,29 @@ export function createLive2DRenderer(
   let lastFrameTime = performance.now();
   let disposed = false;
   let didSampleFirstFrame = false;
+  let lastCanvasWidth = 0;
+  let lastCanvasHeight = 0;
+  let didLogLayout = false;
+
+  const syncCanvasLayout = (): void => {
+    resizeCanvas(canvas);
+
+    if (canvas.width === lastCanvasWidth && canvas.height === lastCanvasHeight) {
+      return;
+    }
+
+    lastCanvasWidth = canvas.width;
+    lastCanvasHeight = canvas.height;
+    updateModelMatrix(model, canvas, !didLogLayout);
+    didLogLayout = true;
+  };
 
   const renderFrame = (frameTime: number): void => {
     if (disposed) {
       return;
     }
 
-    resizeCanvas(canvas);
-    updateModelMatrix(model, canvas);
+    syncCanvasLayout();
 
     const deltaSeconds = Math.min((frameTime - lastFrameTime) / 1000, 1 / 15);
     lastFrameTime = frameTime;
@@ -83,8 +103,17 @@ export function createLive2DRenderer(
     start(): void {
       if (animationFrameId === 0) {
         lastFrameTime = performance.now();
+        syncCanvasLayout();
         animationFrameId = window.requestAnimationFrame(renderFrame);
       }
+    },
+    resize(width: number, height: number): void {
+      if (canvas.width !== width || canvas.height !== height) {
+        canvas.width = width;
+        canvas.height = height;
+      }
+
+      syncCanvasLayout();
     },
     stop(): void {
       if (animationFrameId !== 0) {
