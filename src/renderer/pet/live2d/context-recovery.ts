@@ -1,10 +1,28 @@
-export function registerWebGLContextRecoveryLogging(canvas: HTMLCanvasElement): void {
-  canvas.addEventListener("webglcontextlost", (event) => {
+export type WebGLContextRecoveryHandlers = {
+  onLost(event: Event): void;
+  onRestored(event: Event): void;
+};
+
+export function registerWebGLContextRecovery(
+  canvas: HTMLCanvasElement,
+  handlers: WebGLContextRecoveryHandlers
+): () => void {
+  const handleLost = (event: Event): void => {
     event.preventDefault();
     console.warn("[live2d] WebGL context lost");
-  });
+    handlers.onLost(event);
+  };
 
-  canvas.addEventListener("webglcontextrestored", () => {
-    console.warn("[live2d] WebGL context restored; full Live2D recovery is deferred");
-  });
+  const handleRestored = (event: Event): void => {
+    console.warn("[live2d] WebGL context restored");
+    handlers.onRestored(event);
+  };
+
+  canvas.addEventListener("webglcontextlost", handleLost);
+  canvas.addEventListener("webglcontextrestored", handleRestored);
+
+  return () => {
+    canvas.removeEventListener("webglcontextlost", handleLost);
+    canvas.removeEventListener("webglcontextrestored", handleRestored);
+  };
 }

@@ -2,7 +2,7 @@ import "./styles.css";
 import { initializeCubismRuntime } from "./live2d/cubism-runtime";
 import { loadWitchLive2DModel } from "./live2d/cubism-model";
 import { createLive2DRenderer } from "./live2d/cubism-renderer";
-import { registerWebGLContextRecoveryLogging } from "./live2d/context-recovery";
+import { registerWebGLContextRecovery } from "./live2d/context-recovery";
 import type { LoadedLive2DModel, Live2DRenderer } from "./live2d/types";
 import type { EmotionTag } from "../../shared/emotion";
 
@@ -25,7 +25,6 @@ if (!foundGl) {
 }
 
 const gl: WebGL2RenderingContext = foundGl;
-registerWebGLContextRecoveryLogging(canvas);
 
 type Rgba = readonly [number, number, number, number];
 
@@ -137,15 +136,40 @@ function resizeCanvas(): void {
   }
 }
 
-const program = createProgram();
-const buffer = gl.createBuffer();
+type PlaceholderResources = {
+  program: WebGLProgram;
+  buffer: WebGLBuffer;
+  positionLocation: number;
+  colorLocation: number;
+};
 
-if (!buffer) {
-  throw new Error("failed to create WebGL buffer");
+let placeholderResources: PlaceholderResources | null = null;
+
+function invalidatePlaceholderResources(): void {
+  placeholderResources = null;
 }
 
-const positionLocation = gl.getAttribLocation(program, "a_position");
-const colorLocation = gl.getAttribLocation(program, "a_color");
+function getPlaceholderResources(): PlaceholderResources {
+  if (placeholderResources) {
+    return placeholderResources;
+  }
+
+  const program = createProgram();
+  const buffer = gl.createBuffer();
+
+  if (!buffer) {
+    throw new Error("failed to create WebGL buffer");
+  }
+
+  placeholderResources = {
+    program,
+    buffer,
+    positionLocation: gl.getAttribLocation(program, "a_position"),
+    colorLocation: gl.getAttribLocation(program, "a_color")
+  };
+
+  return placeholderResources;
+}
 
 function drawEllipse(vertices: Float32Array): void {
   gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
@@ -153,8 +177,13 @@ function drawEllipse(vertices: Float32Array): void {
 }
 
 function drawPlaceholderPet(): void {
+  if (gl.isContextLost()) {
+    return;
+  }
+
   resizeCanvas();
 
+  const { program, buffer, positionLocation, colorLocation } = getPlaceholderResources();
   const width = canvas.width;
   const height = canvas.height;
   const centerX = width / 2;
@@ -182,8 +211,11 @@ let live2DRenderer: Live2DRenderer | null = null;
 let live2DModel: LoadedLive2DModel | null = null;
 let isUsingLive2D = false;
 let pendingEmotion: EmotionTag | null = null;
+let lastEmotion: EmotionTag = "neutral";
+let isStartingPetRenderer = false;
+let isRecoveringContext = false;
 
-function applyEmotion(emotion: EmotionTag): void {
+function applyEmotionToModel(emotion: EmotionTag): void {
   if (!live2DModel) {
     pendingEmotion = emotion;
     return;
@@ -202,6 +234,11 @@ function applyEmotion(emotion: EmotionTag): void {
   });
 }
 
+function applyEmotion(emotion: EmotionTag): void {
+  lastEmotion = emotion;
+  applyEmotionToModel(emotion);
+}
+
 const removeApplyEmotionListener = window.petApi?.onApplyEmotion((emotion) => {
   applyEmotion(emotion);
 }) ?? null;
@@ -209,6 +246,13 @@ const removeApplyEmotionListener = window.petApi?.onApplyEmotion((emotion) => {
 function drawFallbackPet(): void {
   isUsingLive2D = false;
   drawPlaceholderPet();
+}
+
+function disposeLive2DRenderer(): void {
+  live2DRenderer?.release();
+  live2DRenderer = null;
+  live2DModel = null;
+  isUsingLive2D = false;
 }
 
 function reportRenderHealth(renderer: "live2d" | "placeholder", message?: string): void {
@@ -222,7 +266,19 @@ function reportRenderHealth(renderer: "live2d" | "placeholder", message?: string
 }
 
 async function startPetRenderer(): Promise<void> {
+  if (isStartingPetRenderer) {
+    return;
+  }
+
+  isStartingPetRenderer = true;
+
   try {
+    if (gl.isContextLost()) {
+      reportRenderHealth("placeholder", "WebGL context is lost");
+      return;
+    }
+
+    disposeLive2DRenderer();
     resizeCanvas();
     await initializeCubismRuntime();
 
@@ -237,9 +293,12 @@ async function startPetRenderer(): Promise<void> {
       });
     });
     isUsingLive2D = true;
+    live2DModel.setLookTarget(0, 0);
     live2DRenderer.start();
     if (pendingEmotion) {
-      applyEmotion(pendingEmotion);
+      applyEmotionToModel(pendingEmotion);
+    } else if (lastEmotion !== "neutral") {
+      applyEmotionToModel(lastEmotion);
     }
     reportRenderHealth("live2d");
   } catch (error: unknown) {
@@ -250,8 +309,63 @@ async function startPetRenderer(): Promise<void> {
     drawFallbackPet();
     reportRenderHealth("placeholder", message);
   } finally {
+    isStartingPetRenderer = false;
     window.petApi?.reportFirstFrame();
   }
+}
+
+function handleWebGLContextLost(): void {
+  const renderer = isUsingLive2D ? "live2d" : "placeholder";
+
+  isRecoveringContext = true;
+  live2DRenderer?.stop();
+  live2DRenderer = null;
+  live2DModel = null;
+  isUsingLive2D = false;
+  pendingEmotion = lastEmotion;
+  invalidatePlaceholderResources();
+  endDrag();
+  reportRenderHealth(renderer, "WebGL context lost");
+}
+
+async function handleWebGLContextRestored(): Promise<void> {
+  invalidatePlaceholderResources();
+
+  try {
+    await startPetRenderer();
+  } finally {
+    isRecoveringContext = false;
+  }
+}
+
+const removeWebGLContextRecovery = registerWebGLContextRecovery(canvas, {
+  onLost: handleWebGLContextLost,
+  onRestored: () => {
+    void handleWebGLContextRestored();
+  }
+});
+
+function injectWebGLContextLoss(): void {
+  if (gl.isContextLost() || isRecoveringContext) {
+    console.warn("[live2d] WebGL context loss injection skipped during recovery");
+    return;
+  }
+
+  const extension = gl.getExtension("WEBGL_lose_context");
+
+  if (!extension) {
+    console.warn("[live2d] WEBGL_lose_context extension is not available");
+    return;
+  }
+
+  console.warn("[live2d] injecting WebGL context loss");
+  extension.loseContext();
+
+  window.setTimeout(() => {
+    if (gl.isContextLost()) {
+      extension.restoreContext();
+    }
+  }, 250);
 }
 
 window.addEventListener("resize", () => {
@@ -267,6 +381,7 @@ window.addEventListener("resize", () => {
 });
 
 window.addEventListener("beforeunload", () => {
+  removeWebGLContextRecovery();
   removeApplyEmotionListener?.();
   live2DRenderer?.release();
   live2DRenderer = null;
@@ -454,6 +569,11 @@ const EXPRESSION_SHORTCUTS: Readonly<Record<string, EmotionTag>> = {
 
 window.addEventListener("keydown", (event) => {
   if (event.repeat || event.ctrlKey || event.altKey || event.metaKey) {
+    return;
+  }
+
+  if (import.meta.env.DEV && event.key.toLowerCase() === "l") {
+    injectWebGLContextLoss();
     return;
   }
 

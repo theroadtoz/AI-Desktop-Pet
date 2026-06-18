@@ -17,6 +17,10 @@ let petWindow: BrowserWindow | null = null;
 let chatWindow: BrowserWindow | null = null;
 let pointerController: PointerController | null = null;
 
+const PET_RENDERER_RECOVERY_WINDOW_MS = 60_000;
+const PET_RENDERER_MAX_RECOVERIES = 3;
+let petRendererRecoveryTimes: number[] = [];
+
 protocol.registerSchemesAsPrivileged([
   {
     scheme: "pet-model",
@@ -42,11 +46,73 @@ app.on("second-instance", () => {
   }
 });
 
+app.on("child-process-gone", (_event, details) => {
+  const payload = {
+    type: details.type,
+    reason: details.reason
+  };
+
+  if (details.type.toLowerCase().includes("gpu")) {
+    console.warn("[app] GPU child process gone", payload);
+    return;
+  }
+
+  console.info("[app] child process gone", payload);
+});
+
+function canRecoverPetRenderer(): boolean {
+  const now = Date.now();
+  petRendererRecoveryTimes = petRendererRecoveryTimes.filter((time) => (
+    now - time < PET_RENDERER_RECOVERY_WINDOW_MS
+  ));
+
+  if (petRendererRecoveryTimes.length >= PET_RENDERER_MAX_RECOVERIES) {
+    console.warn("[pet] renderer recovery limit reached; automatic rebuild stopped", {
+      limit: PET_RENDERER_MAX_RECOVERIES,
+      windowMs: PET_RENDERER_RECOVERY_WINDOW_MS
+    });
+    return false;
+  }
+
+  petRendererRecoveryTimes.push(now);
+  return true;
+}
+
+function createRecoverablePetWindow(): BrowserWindow {
+  const nextPetWindow = createPetWindow();
+
+  nextPetWindow.webContents.on("render-process-gone", (_event, details) => {
+    console.warn("[pet] render process gone", {
+      reason: details.reason,
+      exitCode: details.exitCode
+    });
+
+    if (petWindow !== nextPetWindow || !canRecoverPetRenderer()) {
+      return;
+    }
+
+    rebuildPetWindow();
+  });
+
+  return nextPetWindow;
+}
+
+function rebuildPetWindow(): void {
+  pointerController?.dispose();
+  pointerController = null;
+
+  if (petWindow && !petWindow.isDestroyed()) {
+    petWindow.destroy();
+  }
+
+  petWindow = createRecoverablePetWindow();
+  pointerController = createPointerController(petWindow);
+}
+
 app.whenReady().then(async () => {
   registerModelAssetProtocol();
 
-  petWindow = createPetWindow();
-  pointerController = createPointerController(petWindow);
+  rebuildPetWindow();
   chatWindow = createChatWindow();
 
   function openChatWindow(): void {
@@ -148,8 +214,6 @@ app.on("window-all-closed", () => {
 
 app.on("activate", () => {
   if (!petWindow || petWindow.isDestroyed()) {
-    pointerController?.dispose();
-    petWindow = createPetWindow();
-    pointerController = createPointerController(petWindow);
+    rebuildPetWindow();
   }
 });
