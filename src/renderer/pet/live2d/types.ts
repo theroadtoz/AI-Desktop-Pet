@@ -1,4 +1,5 @@
 import type { CubismUserModel } from "./vendor/framework/model/cubismusermodel";
+import type { EmotionTag } from "../../../shared/emotion";
 
 export type Model3Json = {
   FileReferences?: {
@@ -11,6 +12,11 @@ export type Model3Json = {
 export type LoadedLive2DModel = {
   userModel: CubismUserModel;
   update(deltaSeconds: number): void;
+  setExpression(emotion: EmotionTag): Promise<void>;
+  clearExpression(): void;
+  getAvailableExpressions(): string[];
+  setLookTarget(x: number, y: number): void;
+  setLookPaused(paused: boolean): void;
   release(): void;
 };
 

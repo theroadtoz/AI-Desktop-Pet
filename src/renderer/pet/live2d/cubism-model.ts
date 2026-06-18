@@ -1,4 +1,6 @@
 import { CUBISM_SHADER_BASE_URL } from "./cubism-assets";
+import { createCubismExpressionController } from "./cubism-expression";
+import { CubismLookController } from "./cubism-look";
 import { WITCH_MODEL3_URL, type LoadedLive2DModel, type Model3Json } from "./types";
 
 async function fetchArrayBuffer(url: string): Promise<ArrayBuffer> {
@@ -68,6 +70,8 @@ export async function loadWitchLive2DModel(
     import("./vendor/framework/model/cubismusermodel"),
     import("./vendor/framework/cubismmodelsettingjson")
   ]);
+  const expressionController = await createCubismExpressionController();
+  let lookController: CubismLookController | null = null;
 
   class PetCubismUserModel extends CubismUserModel {
     public updateFrame(deltaSeconds: number): void {
@@ -79,6 +83,8 @@ export async function loadWitchLive2DModel(
       }
 
       model.saveParameters();
+      expressionController.update(model, deltaSeconds);
+      lookController?.update(model, deltaSeconds);
       model.update();
     }
 
@@ -104,6 +110,8 @@ export async function loadWitchLive2DModel(
   if (!userModel.getModel()) {
     throw new Error("failed to load Live2D moc3");
   }
+
+  lookController = new CubismLookController(userModel.getModel());
 
   const physicsPath = model3.FileReferences?.Physics;
 
@@ -131,7 +139,23 @@ export async function loadWitchLive2DModel(
     update(deltaSeconds: number): void {
       userModel.updateFrame(deltaSeconds);
     },
+    setExpression(emotion): Promise<void> {
+      return expressionController.setExpression(emotion);
+    },
+    clearExpression(): void {
+      expressionController.clearExpression();
+    },
+    getAvailableExpressions(): string[] {
+      return expressionController.getAvailableExpressions();
+    },
+    setLookTarget(x: number, y: number): void {
+      lookController?.setTarget(x, y);
+    },
+    setLookPaused(paused: boolean): void {
+      lookController?.setPaused(paused);
+    },
     release(): void {
+      expressionController.release();
       userModel.release();
     }
   };

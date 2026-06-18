@@ -3,7 +3,8 @@ import { initializeCubismRuntime } from "./live2d/cubism-runtime";
 import { loadWitchLive2DModel } from "./live2d/cubism-model";
 import { createLive2DRenderer } from "./live2d/cubism-renderer";
 import { registerWebGLContextRecoveryLogging } from "./live2d/context-recovery";
-import type { Live2DRenderer } from "./live2d/types";
+import type { LoadedLive2DModel, Live2DRenderer } from "./live2d/types";
+import type { EmotionTag } from "../../shared/emotion";
 
 const foundCanvas = document.querySelector<HTMLCanvasElement>("#pet-canvas");
 
@@ -178,6 +179,7 @@ function drawPlaceholderPet(): void {
 }
 
 let live2DRenderer: Live2DRenderer | null = null;
+let live2DModel: LoadedLive2DModel | null = null;
 let isUsingLive2D = false;
 
 function drawFallbackPet(): void {
@@ -200,8 +202,8 @@ async function startPetRenderer(): Promise<void> {
     resizeCanvas();
     await initializeCubismRuntime();
 
-    const model = await loadWitchLive2DModel(gl, canvas.width, canvas.height);
-    live2DRenderer = createLive2DRenderer(canvas, gl, model, (sample) => {
+    live2DModel = await loadWitchLive2DModel(gl, canvas.width, canvas.height);
+    live2DRenderer = createLive2DRenderer(canvas, gl, live2DModel, (sample) => {
       window.petApi?.reportRenderHealth({
         framesPerSecond: 0,
         isContextLost: gl.isContextLost(),
@@ -234,6 +236,7 @@ window.addEventListener("resize", () => {
 window.addEventListener("beforeunload", () => {
   live2DRenderer?.release();
   live2DRenderer = null;
+  live2DModel = null;
 });
 
 void startPetRenderer();
@@ -312,6 +315,14 @@ function updatePointerHit(event: PointerEvent): boolean {
   return nextIsHit;
 }
 
+function updateLookTarget(event: PointerEvent): void {
+  const rect = canvas.getBoundingClientRect();
+  const x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+  const y = -(((event.clientY - rect.top) / rect.height) * 2 - 1);
+
+  live2DModel?.setLookTarget(x, y);
+}
+
 function endDrag(): void {
   if (isDragging) {
     window.petApi?.endDrag();
@@ -320,9 +331,11 @@ function endDrag(): void {
   pointerDown = null;
   lastDragPoint = null;
   isDragging = false;
+  live2DModel?.setLookPaused(false);
 }
 
 canvas.addEventListener("pointermove", (event) => {
+  updateLookTarget(event);
   updatePointerHit(event);
 
   if (!pointerDown || pointerDown.pointerId !== event.pointerId) {
@@ -340,6 +353,7 @@ canvas.addEventListener("pointermove", (event) => {
     }
 
     isDragging = true;
+    live2DModel?.setLookPaused(true);
     lastDragPoint = { x: event.screenX, y: event.screenY };
     window.petApi?.startDrag();
     return;
@@ -393,4 +407,29 @@ canvas.addEventListener("pointercancel", (event) => {
       canvas.releasePointerCapture(event.pointerId);
     }
   }
+});
+
+const EXPRESSION_SHORTCUTS: Readonly<Record<string, EmotionTag>> = {
+  "1": "neutral",
+  "2": "happy",
+  "3": "sad",
+  "4": "angry",
+  "5": "surprised",
+  "6": "confused"
+};
+
+window.addEventListener("keydown", (event) => {
+  if (event.repeat || event.ctrlKey || event.altKey || event.metaKey) {
+    return;
+  }
+
+  const emotion = EXPRESSION_SHORTCUTS[event.key];
+
+  if (!emotion || !live2DModel) {
+    return;
+  }
+
+  void live2DModel.setExpression(emotion).then(() => {
+    console.info(`[pet-expression] ${emotion}`);
+  });
 });
