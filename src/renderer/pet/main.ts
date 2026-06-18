@@ -181,6 +181,30 @@ function drawPlaceholderPet(): void {
 let live2DRenderer: Live2DRenderer | null = null;
 let live2DModel: LoadedLive2DModel | null = null;
 let isUsingLive2D = false;
+let pendingEmotion: EmotionTag | null = null;
+
+function applyEmotion(emotion: EmotionTag): void {
+  if (!live2DModel) {
+    pendingEmotion = emotion;
+    return;
+  }
+
+  pendingEmotion = null;
+
+  if (emotion === "neutral") {
+    live2DModel.clearExpression();
+    console.info("[pet-expression] neutral");
+    return;
+  }
+
+  void live2DModel.setExpression(emotion).then(() => {
+    console.info(`[pet-expression] ${emotion}`);
+  });
+}
+
+const removeApplyEmotionListener = window.petApi?.onApplyEmotion((emotion) => {
+  applyEmotion(emotion);
+}) ?? null;
 
 function drawFallbackPet(): void {
   isUsingLive2D = false;
@@ -214,6 +238,9 @@ async function startPetRenderer(): Promise<void> {
     });
     isUsingLive2D = true;
     live2DRenderer.start();
+    if (pendingEmotion) {
+      applyEmotion(pendingEmotion);
+    }
     reportRenderHealth("live2d");
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
@@ -240,6 +267,7 @@ window.addEventListener("resize", () => {
 });
 
 window.addEventListener("beforeunload", () => {
+  removeApplyEmotionListener?.();
   live2DRenderer?.release();
   live2DRenderer = null;
   live2DModel = null;
@@ -435,7 +463,5 @@ window.addEventListener("keydown", (event) => {
     return;
   }
 
-  void live2DModel.setExpression(emotion).then(() => {
-    console.info(`[pet-expression] ${emotion}`);
-  });
+  applyEmotion(emotion);
 });

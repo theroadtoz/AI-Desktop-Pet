@@ -1,7 +1,10 @@
+import type { EmotionTag } from "./emotion";
+
 export type PetWindowCommand =
   | { type: "pet:first-frame" }
   | { type: "pet:health"; payload: RenderHealth }
   | { type: "pet:pointer-hit-change"; payload: PetPointerHitState }
+  | { type: "pet:apply-emotion"; payload: EmotionTag }
   | { type: "pet:open-chat" }
   | { type: "pet:drag-start" }
   | { type: "pet:drag-move"; payload: PetDragDelta }
@@ -35,6 +38,7 @@ export type PetApi = {
   reportFirstFrame(): void;
   reportRenderHealth(state: RenderHealth): void;
   setPointerHit(isHit: boolean): void;
+  onApplyEmotion(handler: (emotion: EmotionTag) => void): () => void;
   openChat(): void;
   startDrag(): void;
   moveDrag(delta: PetDragDelta): void;
@@ -43,4 +47,5 @@ export type PetApi = {
 
 export type ChatApi = {
   focusInput(): void;
+  reportReplyEmotion(emotion: EmotionTag): void;
 };

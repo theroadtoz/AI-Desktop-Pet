@@ -1,5 +1,19 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { PetApi, RenderHealth, PetDragDelta } from "../shared/ipc-contract";
+import type { EmotionTag } from "../shared/emotion";
+
+const emotionTags = [
+  "neutral",
+  "happy",
+  "sad",
+  "surprised",
+  "confused",
+  "angry"
+] as const;
+
+function isEmotionTag(value: unknown): value is EmotionTag {
+  return typeof value === "string" && emotionTags.includes(value as EmotionTag);
+}
 
 const api: PetApi = {
   reportFirstFrame() {
@@ -10,6 +24,19 @@ const api: PetApi = {
   },
   setPointerHit(isHit: boolean) {
     ipcRenderer.send("pet:pointer-hit-change", { isHit });
+  },
+  onApplyEmotion(handler: (emotion: EmotionTag) => void) {
+    const listener = (_event: Electron.IpcRendererEvent, emotion: unknown): void => {
+      if (isEmotionTag(emotion)) {
+        handler(emotion);
+      }
+    };
+
+    ipcRenderer.on("pet:apply-emotion", listener);
+
+    return () => {
+      ipcRenderer.removeListener("pet:apply-emotion", listener);
+    };
   },
   openChat() {
     void ipcRenderer.invoke("pet:open-chat");

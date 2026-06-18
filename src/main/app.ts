@@ -7,6 +7,7 @@ import {
   type IpcMainInvokeEvent
 } from "electron";
 import type { PetDragDelta, PetPointerHitState } from "../shared/ipc-contract";
+import { emotionTags, type EmotionTag } from "../shared/emotion";
 import { registerModelAssetProtocol } from "./services/model-asset-protocol";
 import { createPointerController, type PointerController } from "./services/pointer-controller";
 import { createChatWindow, focusChatInput, showChatWindow } from "./windows/chat-window";
@@ -59,6 +60,14 @@ app.whenReady().then(async () => {
 
   function isPetSender(event: IpcMainEvent | IpcMainInvokeEvent): boolean {
     return Boolean(petWindow && event.sender === petWindow.webContents);
+  }
+
+  function isChatSender(event: IpcMainEvent): boolean {
+    return Boolean(chatWindow && event.sender === chatWindow.webContents);
+  }
+
+  function isEmotionTag(value: unknown): value is EmotionTag {
+    return typeof value === "string" && emotionTags.includes(value as EmotionTag);
   }
 
   ipcMain.handle("pet:open-chat", (event) => {
@@ -120,6 +129,14 @@ app.whenReady().then(async () => {
     }
 
     console.info("[pet] health", state);
+  });
+
+  ipcMain.on("chat:reply-emotion", (event, emotion: unknown) => {
+    if (!isChatSender(event) || !isEmotionTag(emotion) || !petWindow || petWindow.isDestroyed()) {
+      return;
+    }
+
+    petWindow.webContents.send("pet:apply-emotion", emotion);
   });
 });
 
