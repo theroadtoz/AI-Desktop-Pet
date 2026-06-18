@@ -1,5 +1,6 @@
-import type { FakeReply } from "../../shared/chat";
-import type { EmotionTag } from "../../shared/emotion";
+import type { ChatMessage } from "../../../shared/chat";
+import type { ChatProvider, ChatProviderResult } from "../../../shared/chat-provider";
+import type { EmotionTag } from "../../../shared/emotion";
 
 const REPLIES: Readonly<Record<EmotionTag, string>> = {
   neutral: "我听到了。先陪你把这件事慢慢理清楚。",
@@ -19,12 +20,24 @@ const KEYWORD_RULES: readonly {
   { emotion: "angry", keywords: ["生气", "烦", "讨厌", "火", "气死"] }
 ];
 
-type StreamFakeReplyOptions = {
-  signal?: AbortSignal;
-  onDelta(chunk: string): void;
-};
+export function createFakeChatProvider(): ChatProvider {
+  return {
+    id: "fake",
+    async streamReply(request, options) {
+      const reply = createFakeReply(getLatestUserInput(request.messages));
 
-export function createFakeReply(input: string): FakeReply {
+      for (const chunk of chunkText(reply.text)) {
+        await delay(randomDelayMs(), options.signal);
+        throwIfAborted(options.signal);
+        options.onDelta({ text: chunk });
+      }
+
+      return reply;
+    }
+  };
+}
+
+function createFakeReply(input: string): ChatProviderResult {
   const emotion = detectEmotion(input);
   return {
     text: REPLIES[emotion],
@@ -32,19 +45,16 @@ export function createFakeReply(input: string): FakeReply {
   };
 }
 
-export async function streamFakeReply(
-  input: string,
-  options: StreamFakeReplyOptions
-): Promise<FakeReply> {
-  const reply = createFakeReply(input);
+function getLatestUserInput(messages: ChatMessage[]): string {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
 
-  for (const chunk of chunkText(reply.text)) {
-    await delay(randomDelayMs(), options.signal);
-    throwIfAborted(options.signal);
-    options.onDelta(chunk);
+    if (message?.role === "user") {
+      return message.content;
+    }
   }
 
-  return reply;
+  return "";
 }
 
 function detectEmotion(input: string): EmotionTag {
@@ -71,29 +81,29 @@ function randomDelayMs(): number {
   return 30 + Math.floor(Math.random() * 21);
 }
 
-function delay(ms: number, signal?: AbortSignal): Promise<void> {
+function delay(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
-    if (signal?.aborted) {
+    if (signal.aborted) {
       reject(createAbortError());
       return;
     }
 
-    const timeoutId = window.setTimeout(() => {
-      signal?.removeEventListener("abort", abort);
+    const timeoutId = setTimeout(() => {
+      signal.removeEventListener("abort", abort);
       resolve();
     }, ms);
 
     function abort(): void {
-      window.clearTimeout(timeoutId);
+      clearTimeout(timeoutId);
       reject(createAbortError());
     }
 
-    signal?.addEventListener("abort", abort, { once: true });
+    signal.addEventListener("abort", abort, { once: true });
   });
 }
 
-function throwIfAborted(signal?: AbortSignal): void {
-  if (signal?.aborted) {
+function throwIfAborted(signal: AbortSignal): void {
+  if (signal.aborted) {
     throw createAbortError();
   }
 }

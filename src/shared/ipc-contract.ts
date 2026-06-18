@@ -1,4 +1,6 @@
 import type { EmotionTag } from "./emotion";
+import type { ChatMessage } from "./chat";
+import type { ChatProviderResult, ChatRequest, ChatStreamDelta } from "./chat-provider";
 
 export type PetWindowCommand =
   | { type: "pet:first-frame"; payload?: PetFirstFrameInfo }
@@ -14,6 +16,17 @@ export type PetWindowCommand =
 
 export type ChatWindowCommand =
   | { type: "chat:focus-input" };
+
+export type ChatSendRequest = ChatRequest;
+
+export type ChatStreamDeltaPayload = ChatStreamDelta;
+
+export type ChatStreamDonePayload = ChatProviderResult;
+
+export type ChatStreamErrorPayload = {
+  message: string;
+  errorType: "aborted" | "busy" | "failed";
+};
 
 export type RenderHealth = {
   framesPerSecond: number;
@@ -66,5 +79,21 @@ export type PetApi = {
 
 export type ChatApi = {
   focusInput(): void;
+  sendMessage(request: ChatSendRequest): void;
+  abortReply(): void;
+  onReplyDelta(handler: (delta: ChatStreamDeltaPayload) => void): () => void;
+  onReplyDone(handler: (result: ChatStreamDonePayload) => void): () => void;
+  onReplyError(handler: (error: ChatStreamErrorPayload) => void): () => void;
   reportReplyEmotion(emotion: EmotionTag): void;
 };
+
+export function isChatMessage(value: unknown): value is ChatMessage {
+  const message = value as Partial<ChatMessage> | null;
+
+  return Boolean(
+    message &&
+    typeof message.id === "string" &&
+    (message.role === "user" || message.role === "assistant") &&
+    typeof message.content === "string"
+  );
+}

@@ -10,13 +10,16 @@ import {
 } from "electron";
 import { release as getOsRelease } from "node:os";
 import type {
+  ChatSendRequest,
   PetDragDelta,
   PetFirstFrameInfo,
   PetPointerHitState,
   PetTelemetryEvent,
   RenderHealth
 } from "../shared/ipc-contract";
+import { isChatMessage } from "../shared/ipc-contract";
 import { emotionTags, type EmotionTag } from "../shared/emotion";
+import { ChatEngineBusyError, createChatEngine, type ChatEngine } from "./services/chat/chat-engine";
 import { registerModelAssetProtocol } from "./services/model-asset-protocol";
 import { createPointerController, type PointerController } from "./services/pointer-controller";
 import { createTelemetryService, type TelemetryPayload, type TelemetryService } from "./services/telemetry";
@@ -27,6 +30,7 @@ let petWindow: BrowserWindow | null = null;
 let chatWindow: BrowserWindow | null = null;
 let pointerController: PointerController | null = null;
 let telemetry: TelemetryService | null = null;
+let chatEngine: ChatEngine | null = null;
 let performanceHeartbeat: NodeJS.Timeout | null = null;
 
 const PET_RENDERER_RECOVERY_WINDOW_MS = 60_000;
@@ -277,6 +281,45 @@ function sanitizeRendererTelemetry(event: PetTelemetryEvent): TelemetryPayload {
   return safePayload;
 }
 
+function isChatSendRequest(value: unknown): value is ChatSendRequest {
+  const request = value as Partial<ChatSendRequest> | null;
+
+  return Boolean(
+    request &&
+    typeof request.conversationId === "string" &&
+    Array.isArray(request.messages) &&
+    request.messages.every(isChatMessage)
+  );
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === "AbortError";
+}
+
+function getChatErrorType(error: unknown): "aborted" | "busy" | "failed" {
+  if (isAbortError(error)) {
+    return "aborted";
+  }
+
+  if (error instanceof ChatEngineBusyError) {
+    return "busy";
+  }
+
+  return "failed";
+}
+
+function getChatErrorMessage(errorType: "aborted" | "busy" | "failed"): string {
+  if (errorType === "aborted") {
+    return "已中断。";
+  }
+
+  if (errorType === "busy") {
+    return "回复仍在生成中。";
+  }
+
+  return "回复失败，请稍后再试。";
+}
+
 function rebuildPetWindow(recoverySource?: string): void {
   if (recoverySource) {
     logTelemetry("recovery_started", {
@@ -308,6 +351,7 @@ function rebuildPetWindow(recoverySource?: string): void {
 
 app.whenReady().then(async () => {
   telemetry = createTelemetryService();
+  chatEngine = createChatEngine();
   logStartupInfo();
   registerModelAssetProtocol();
 
@@ -420,6 +464,85 @@ app.whenReady().then(async () => {
     }
 
     petWindow.webContents.send("pet:apply-emotion", emotion);
+  });
+
+  ipcMain.on("chat:send", (event, request: unknown) => {
+    if (!isChatSender(event) || !isChatSendRequest(request) || !chatEngine) {
+      return;
+    }
+
+    const providerId = chatEngine.getProviderId();
+    const startedAt = Date.now();
+    let replyLength = 0;
+
+    if (chatEngine.hasActiveStream()) {
+      logTelemetry("chat_stream_failed", {
+        providerId,
+        conversationId: request.conversationId,
+        messageCount: request.messages.length,
+        replyLength,
+        durationMs: 0,
+        errorType: "busy"
+      });
+      event.sender.send("chat:stream-error", {
+        message: getChatErrorMessage("busy"),
+        errorType: "busy"
+      });
+      return;
+    }
+
+    logTelemetry("chat_stream_started", {
+      providerId,
+      conversationId: request.conversationId,
+      messageCount: request.messages.length
+    });
+
+    void chatEngine.startChatStream(request, {
+      onDelta(delta) {
+        replyLength += delta.text.length;
+        event.sender.send("chat:stream-delta", delta);
+      }
+    }).then((result) => {
+      logTelemetry("chat_stream_completed", {
+        providerId,
+        conversationId: request.conversationId,
+        messageCount: request.messages.length,
+        replyLength: result.text.length,
+        durationMs: Date.now() - startedAt,
+        emotion: result.emotion
+      });
+      event.sender.send("chat:stream-done", result);
+    }).catch((error: unknown) => {
+      const errorType = getChatErrorType(error);
+      const eventType = errorType === "aborted" ? "chat_stream_aborted" : "chat_stream_failed";
+
+      logTelemetry(eventType, {
+        providerId,
+        conversationId: request.conversationId,
+        messageCount: request.messages.length,
+        replyLength,
+        durationMs: Date.now() - startedAt,
+        errorType
+      });
+      event.sender.send("chat:stream-error", {
+        message: getChatErrorMessage(errorType),
+        errorType
+      });
+
+      if (errorType === "failed") {
+        console.warn("[chat] stream failed", {
+          message: error instanceof Error ? error.message : String(error)
+        });
+      }
+    });
+  });
+
+  ipcMain.on("chat:abort", (event) => {
+    if (!isChatSender(event) || !chatEngine) {
+      return;
+    }
+
+    chatEngine.abortActiveStream();
   });
 });
 

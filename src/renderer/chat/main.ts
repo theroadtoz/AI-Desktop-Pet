@@ -1,6 +1,5 @@
 import "./styles.css";
 import type { ChatMessage, ChatRole } from "../../shared/chat";
-import { streamFakeReply } from "./fake-provider";
 
 const form = document.querySelector<HTMLFormElement>("#chat-form");
 const input = document.querySelector<HTMLInputElement>("#chat-input");
@@ -18,8 +17,11 @@ const messageList = messages;
 const sendAction = sendButton;
 const abortAction = abortButton;
 const chatHistory: ChatMessage[] = [];
+const conversationId = crypto.randomUUID();
 
-let activeAbortController: AbortController | null = null;
+let activeReplyMessage: ChatMessage | null = null;
+let activeReplyElement: HTMLElement | null = null;
+let isReplying = false;
 
 function appendMessage(message: ChatMessage): HTMLElement {
   const item = document.createElement("p");
@@ -45,14 +47,52 @@ function setReplying(isReplying: boolean): void {
   abortAction.disabled = !isReplying;
 }
 
-function isAbortError(error: unknown): boolean {
-  return error instanceof DOMException && error.name === "AbortError";
+function finishReplying(): void {
+  activeReplyMessage = null;
+  activeReplyElement = null;
+  isReplying = false;
+  setReplying(false);
+  chatInput.focus();
 }
+
+window.chatApi?.onReplyDelta((delta) => {
+  if (!activeReplyMessage || !activeReplyElement) {
+    return;
+  }
+
+  activeReplyMessage.content += delta.text;
+  activeReplyElement.textContent = activeReplyMessage.content;
+  messageList.scrollTop = messageList.scrollHeight;
+});
+
+window.chatApi?.onReplyDone((reply) => {
+  window.chatApi?.reportReplyEmotion(reply.emotion);
+  finishReplying();
+});
+
+window.chatApi?.onReplyError((error) => {
+  if (activeReplyMessage && activeReplyElement) {
+    if (error.errorType === "aborted") {
+      if (!activeReplyMessage.content) {
+        activeReplyMessage.content = "已中断。";
+      } else {
+        activeReplyMessage.content += "（已中断）";
+      }
+    } else {
+      activeReplyMessage.content = "回复失败，请稍后再试。";
+      console.warn("[chat] reply failed", error.errorType);
+    }
+
+    activeReplyElement.textContent = activeReplyMessage.content;
+  }
+
+  finishReplying();
+});
 
 chatForm.addEventListener("submit", (event) => {
   event.preventDefault();
 
-  if (activeAbortController) {
+  if (isReplying) {
     return;
   }
 
@@ -64,6 +104,7 @@ chatForm.addEventListener("submit", (event) => {
 
   const userMessage = createMessage("user", text);
   chatHistory.push(userMessage);
+  const requestMessages = [...chatHistory];
   appendMessage(userMessage);
 
   const replyMessage = createMessage("assistant", "");
@@ -71,41 +112,19 @@ chatForm.addEventListener("submit", (event) => {
   const replyElement = appendMessage(replyMessage);
 
   chatInput.value = "";
-  activeAbortController = new AbortController();
+  activeReplyMessage = replyMessage;
+  activeReplyElement = replyElement;
+  isReplying = true;
   setReplying(true);
 
-  void streamFakeReply(text, {
-    signal: activeAbortController.signal,
-    onDelta(chunk) {
-      replyMessage.content += chunk;
-      replyElement.textContent = replyMessage.content;
-      messageList.scrollTop = messageList.scrollHeight;
-    }
-  }).then((reply) => {
-    window.chatApi?.reportReplyEmotion(reply.emotion);
-  }).catch((error: unknown) => {
-    if (!isAbortError(error)) {
-      replyMessage.content = "回复失败，请稍后再试。";
-      replyElement.textContent = replyMessage.content;
-      console.warn("[chat] fake reply failed", error);
-      return;
-    }
-
-    if (!replyMessage.content) {
-      replyMessage.content = "已中断。";
-    } else {
-      replyMessage.content += "（已中断）";
-    }
-    replyElement.textContent = replyMessage.content;
-  }).finally(() => {
-    activeAbortController = null;
-    setReplying(false);
-    chatInput.focus();
+  window.chatApi?.sendMessage({
+    conversationId,
+    messages: requestMessages
   });
 });
 
 abortAction.addEventListener("click", () => {
-  activeAbortController?.abort();
+  window.chatApi?.abortReply();
 });
 
 window.addEventListener("chat:focus-input", () => {
