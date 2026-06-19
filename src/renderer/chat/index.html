@@ -7,7 +7,72 @@
   </head>
   <body>
     <main class="chat-shell">
-      <section id="provider-status" class="status-box" aria-live="polite">正在读取模型状态...</section>
+      <div class="provider-bar">
+        <section id="provider-status" class="status-box" aria-live="polite">正在读取模型状态...</section>
+        <button id="settings-button" class="button-light icon-button" type="button" aria-label="打开 Provider 设置" title="Provider 设置">⚙</button>
+      </div>
+      <section id="settings-panel" class="settings-panel" hidden aria-label="Provider 设置">
+        <div class="settings-header">
+          <h2>Provider 设置</h2>
+          <button id="settings-close-button" class="button-light" type="button">关闭</button>
+        </div>
+        <form id="settings-form" class="content-stack">
+          <label class="field-label">
+            Provider
+            <select id="provider-id" name="providerId">
+              <option value="fake">Fake</option>
+              <option value="openai-compatible">OpenAI-compatible</option>
+            </select>
+          </label>
+          <label class="field-label">
+            显示名称
+            <input id="provider-display-name" name="displayName" type="text" required />
+          </label>
+          <div id="openai-fields" class="content-stack" hidden>
+            <label class="field-label">
+              Base URL
+              <input id="provider-base-url" name="baseURL" type="url" inputmode="url" required />
+            </label>
+            <label class="field-label">
+              模型
+              <input id="provider-model" name="model" type="text" required />
+            </label>
+            <div class="field-grid">
+              <label class="field-label">
+                温度
+                <input id="provider-temperature" name="temperature" type="number" step="any" required />
+              </label>
+              <label class="field-label">
+                最大 Token
+                <input id="provider-max-tokens" name="maxTokens" type="number" min="1" step="1" required />
+              </label>
+              <label class="field-label">
+                超时时间（毫秒）
+                <input id="provider-timeout" name="timeoutMs" type="number" min="1" step="1" required />
+              </label>
+            </div>
+            <div class="api-key-section">
+              <span id="api-key-status" class="status-box" aria-live="polite">API Key：未配置</span>
+              <label class="field-label">
+                更新 API Key
+                <input id="provider-api-key" name="apiKey" type="password" autocomplete="new-password" placeholder="留空则不更新" />
+              </label>
+              <button id="delete-api-key-button" class="button-danger" type="button">删除 API Key</button>
+              <div id="delete-key-confirmation" class="status-box delete-confirmation" hidden>
+                <span>删除后无法恢复，是否继续？</span>
+                <span class="inline-actions">
+                  <button id="cancel-delete-api-key-button" class="button-light" type="button">取消</button>
+                  <button id="confirm-delete-api-key-button" class="button-danger" type="button">确认删除</button>
+                </span>
+              </div>
+            </div>
+          </div>
+          <div class="settings-actions">
+            <button class="button" type="submit">保存设置</button>
+          </div>
+          <p id="settings-feedback" class="status-box" hidden aria-live="polite"></p>
+        </form>
+      </section>
       <section id="messages" class="messages" aria-live="polite"></section>
       <form id="chat-form" class="composer">
         <input id="chat-input" type="text" autocomplete="off" placeholder="和她说点什么..." />

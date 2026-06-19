@@ -17,6 +17,106 @@ body {
   padding: 18px;
 }
 
+.provider-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.provider-bar .status-box {
+  flex: 1;
+}
+
+.icon-button {
+  min-width: 40px;
+  padding: 9px 12px;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.settings-panel {
+  box-sizing: border-box;
+  max-height: 46vh;
+  overflow: auto;
+  padding: 14px;
+  border: 1px solid #e7dccb;
+  border-radius: 8px;
+  background: #fffaf0;
+}
+
+.settings-header,
+.settings-actions,
+.inline-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.settings-header h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.content-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.settings-panel .content-stack {
+  margin-top: 18px;
+}
+
+.field-label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: #4b3928;
+  font-size: 13px;
+}
+
+.field-label input,
+.field-label select {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 9px 10px;
+  border: 1px solid #d7c8b6;
+  border-radius: 8px;
+  background: #fff;
+  color: #2a2118;
+  font: inherit;
+}
+
+.field-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.api-key-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.delete-confirmation {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  white-space: normal;
+}
+
+.button-danger {
+  padding: 10px 16px;
+  border: 1px solid #b45442;
+  border-radius: 8px;
+  background: #fff4f1;
+  color: #8e3021;
+  cursor: pointer;
+}
+
 .messages {
   flex: 1;
   overflow: auto;
@@ -101,8 +201,20 @@ body {
   color: #2a2118;
 }
 
-.composer button:disabled,
-.composer input:disabled {
+button:disabled,
+input:disabled,
+select:disabled {
   cursor: not-allowed;
   opacity: 0.62;
+}
+
+@media (max-width: 480px) {
+  .field-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .delete-confirmation {
+    align-items: flex-start;
+    flex-direction: column;
+  }
 }
