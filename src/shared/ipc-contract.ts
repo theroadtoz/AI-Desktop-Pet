@@ -1,7 +1,7 @@
 import type { EmotionTag } from "./emotion";
 import type { ChatMessage } from "./chat";
 import type { ChatProviderResult, ChatRequest, ChatStreamDelta } from "./chat-provider";
-import type { ProviderConfig } from "./provider-config";
+import type { ProviderConfig, ProviderStatus } from "./provider-config";
 
 export type PetWindowCommand =
   | { type: "pet:first-frame"; payload?: PetFirstFrameInfo }
@@ -24,9 +24,18 @@ export type ChatStreamDeltaPayload = ChatStreamDelta;
 
 export type ChatStreamDonePayload = ChatProviderResult;
 
+export type ChatStreamErrorType =
+  | "aborted"
+  | "busy"
+  | "auth_failed"
+  | "rate_limited"
+  | "server_error"
+  | "network_error"
+  | "failed";
+
 export type ChatStreamErrorPayload = {
   message: string;
-  errorType: "aborted" | "busy" | "failed";
+  errorType: ChatStreamErrorType;
 };
 
 export type ConfigApiKeyRequest = {
@@ -98,6 +107,7 @@ export type ChatApi = {
 
 export type ConfigApi = {
   getProvider(): Promise<ProviderConfig>;
+  getProviderStatus(): Promise<ProviderStatus>;
   setProvider(config: ProviderConfig): Promise<ProviderConfig>;
   hasApiKey(request: ConfigApiKeyRequest): Promise<boolean>;
   setApiKey(request: ConfigSetApiKeyRequest): Promise<boolean>;

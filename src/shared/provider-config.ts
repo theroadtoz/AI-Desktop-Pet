@@ -18,3 +18,12 @@ export type FakeProviderConfig = {
 
 export type ProviderConfig = FakeProviderConfig | OpenAICompatibleConfig;
 
+export type ProviderStatus = {
+  providerId: ProviderId;
+  displayName: string;
+  model?: string;
+  baseURLHost?: string;
+  hasApiKey?: boolean;
+  isFallback: boolean;
+  reason?: "missing_api_key" | "invalid_config";
+};

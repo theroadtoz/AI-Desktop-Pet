@@ -10,7 +10,7 @@ import type {
   ConfigSetApiKeyRequest
 } from "../shared/ipc-contract";
 import type { EmotionTag } from "../shared/emotion";
-import type { ProviderConfig } from "../shared/provider-config";
+import type { ProviderConfig, ProviderStatus } from "../shared/provider-config";
 
 const emotionTags = [
   "neutral",
@@ -19,6 +19,16 @@ const emotionTags = [
   "surprised",
   "confused",
   "angry"
+] as const;
+
+const chatStreamErrorTypes = [
+  "aborted",
+  "busy",
+  "auth_failed",
+  "rate_limited",
+  "server_error",
+  "network_error",
+  "failed"
 ] as const;
 
 function isEmotionTag(value: unknown): value is EmotionTag {
@@ -69,7 +79,8 @@ function isChatStreamErrorPayload(value: unknown): value is ChatStreamErrorPaylo
   return Boolean(
     error &&
     typeof error.message === "string" &&
-    (error.errorType === "aborted" || error.errorType === "busy" || error.errorType === "failed")
+    typeof error.errorType === "string" &&
+    chatStreamErrorTypes.includes(error.errorType as (typeof chatStreamErrorTypes)[number])
   );
 }
 
@@ -106,6 +117,26 @@ function isProviderConfig(value: unknown): value is ProviderConfig {
   }
 
   return false;
+}
+
+function isProviderStatus(value: unknown): value is ProviderStatus {
+  const status = value as Partial<ProviderStatus> | null;
+
+  return Boolean(
+    status &&
+    typeof status.displayName === "string" &&
+    status.displayName.length > 0 &&
+    (status.providerId === "fake" || status.providerId === "openai-compatible") &&
+    typeof status.isFallback === "boolean" &&
+    (status.model === undefined || typeof status.model === "string") &&
+    (status.baseURLHost === undefined || typeof status.baseURLHost === "string") &&
+    (status.hasApiKey === undefined || typeof status.hasApiKey === "boolean") &&
+    (
+      status.reason === undefined ||
+      status.reason === "missing_api_key" ||
+      status.reason === "invalid_config"
+    )
+  );
 }
 
 function isConfigApiKeyRequest(value: unknown): value is ConfigApiKeyRequest {
@@ -196,6 +227,15 @@ const configApi: ConfigApi = {
     }
 
     return config;
+  },
+  async getProviderStatus() {
+    const status = await ipcRenderer.invoke("config:get-provider-status");
+
+    if (!isProviderStatus(status)) {
+      throw new Error("Invalid provider status response");
+    }
+
+    return status;
   },
   async setProvider(config) {
     if (!isProviderConfig(config)) {

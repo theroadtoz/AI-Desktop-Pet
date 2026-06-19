@@ -1,13 +1,15 @@
 import "./styles.css";
 import type { ChatMessage, ChatRole } from "../../shared/chat";
+import type { ProviderStatus } from "../../shared/provider-config";
 
 const form = document.querySelector<HTMLFormElement>("#chat-form");
 const input = document.querySelector<HTMLInputElement>("#chat-input");
 const messages = document.querySelector<HTMLElement>("#messages");
 const sendButton = document.querySelector<HTMLButtonElement>("#send-button");
 const abortButton = document.querySelector<HTMLButtonElement>("#abort-button");
+const providerStatus = document.querySelector<HTMLElement>("#provider-status");
 
-if (!form || !input || !messages || !sendButton || !abortButton) {
+if (!form || !input || !messages || !sendButton || !abortButton || !providerStatus) {
   throw new Error("chat elements missing");
 }
 
@@ -16,12 +18,44 @@ const chatInput = input;
 const messageList = messages;
 const sendAction = sendButton;
 const abortAction = abortButton;
+const providerStatusBox = providerStatus;
 const chatHistory: ChatMessage[] = [];
 const conversationId = crypto.randomUUID();
 
 let activeReplyMessage: ChatMessage | null = null;
 let activeReplyElement: HTMLElement | null = null;
 let isReplying = false;
+
+function formatProviderStatus(status: ProviderStatus): string {
+  if (status.isFallback) {
+    if (status.reason === "missing_api_key") {
+      return `本地回退：未配置 API Key${status.model ? ` · ${status.model}` : ""}`;
+    }
+
+    if (status.reason === "invalid_config") {
+      return "本地回退：provider 配置无效";
+    }
+
+    return "本地回退：Fake Provider";
+  }
+
+  if (status.providerId === "openai-compatible") {
+    const parts = [`真实模型：${status.model ?? status.displayName}`];
+
+    if (status.baseURLHost) {
+      parts.push(status.baseURLHost);
+    }
+
+    return parts.join(" · ");
+  }
+
+  return "本地模式：Fake Provider";
+}
+
+function setProviderStatus(status: ProviderStatus): void {
+  providerStatusBox.textContent = formatProviderStatus(status);
+  providerStatusBox.dataset.state = status.isFallback ? "fallback" : "ready";
+}
 
 function appendMessage(message: ChatMessage): HTMLElement {
   const item = document.createElement("p");
@@ -55,6 +89,21 @@ function finishReplying(): void {
   chatInput.focus();
 }
 
+async function refreshProviderStatus(): Promise<void> {
+  try {
+    const status = await window.configApi?.getProviderStatus();
+
+    if (status) {
+      setProviderStatus(status);
+      return;
+    }
+  } catch {
+  }
+
+  providerStatusBox.dataset.state = "fallback";
+  providerStatusBox.textContent = "模型状态不可用";
+}
+
 window.chatApi?.onReplyDelta((delta) => {
   if (!activeReplyMessage || !activeReplyElement) {
     return;
@@ -79,7 +128,7 @@ window.chatApi?.onReplyError((error) => {
         activeReplyMessage.content += "（已中断）";
       }
     } else {
-      activeReplyMessage.content = "回复失败，请稍后再试。";
+      activeReplyMessage.content = error.message;
       console.warn("[chat] reply failed", error.errorType);
     }
 
@@ -132,3 +181,4 @@ window.addEventListener("chat:focus-input", () => {
 });
 
 window.chatApi?.focusInput();
+void refreshProviderStatus();

@@ -25,6 +25,31 @@ body {
   gap: 12px;
 }
 
+.status-box {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 9px 12px;
+  border: 1px solid #e7dccb;
+  border-radius: 8px;
+  background: #fffaf0;
+  color: #4b3928;
+  font-size: 13px;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status-box[data-state="ready"] {
+  border-color: #c8d9bd;
+  background: #f4f8ef;
+}
+
+.status-box[data-state="fallback"] {
+  border-color: #ead7ad;
+  background: #fff8e8;
+}
+
 .message {
   max-width: 80%;
   margin: 0;

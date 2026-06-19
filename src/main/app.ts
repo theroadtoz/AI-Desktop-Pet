@@ -12,6 +12,7 @@ import { release as getOsRelease } from "node:os";
 import type {
   ConfigApiKeyRequest,
   ConfigSetApiKeyRequest,
+  ChatStreamErrorType,
   ChatSendRequest,
   PetDragDelta,
   PetFirstFrameInfo,
@@ -21,6 +22,7 @@ import type {
 } from "../shared/ipc-contract";
 import { isChatMessage } from "../shared/ipc-contract";
 import { emotionTags, type EmotionTag } from "../shared/emotion";
+import type { ProviderConfig, ProviderStatus } from "../shared/provider-config";
 import { ChatEngineBusyError, createChatEngine, type ChatEngine } from "./services/chat/chat-engine";
 import { createChatProviderFromConfig } from "./services/chat/provider-factory";
 import { readEnvProviderConfig, type EnvProviderConfig } from "./services/config/env-config";
@@ -328,7 +330,7 @@ function isAbortError(error: unknown): boolean {
   return error instanceof DOMException && error.name === "AbortError";
 }
 
-function getChatErrorType(error: unknown): "aborted" | "busy" | "failed" {
+function getChatErrorType(error: unknown): ChatStreamErrorType {
   if (isAbortError(error)) {
     return "aborted";
   }
@@ -337,16 +339,50 @@ function getChatErrorType(error: unknown): "aborted" | "busy" | "failed" {
     return "busy";
   }
 
+  if (error instanceof Error) {
+    if (error.name === "provider_auth_failed") {
+      return "auth_failed";
+    }
+
+    if (error.name === "provider_rate_limited") {
+      return "rate_limited";
+    }
+
+    if (error.name === "provider_server_error") {
+      return "server_error";
+    }
+
+    if (error.name === "provider_network_error") {
+      return "network_error";
+    }
+  }
+
   return "failed";
 }
 
-function getChatErrorMessage(errorType: "aborted" | "busy" | "failed"): string {
+function getChatErrorMessage(errorType: ChatStreamErrorType): string {
   if (errorType === "aborted") {
     return "已中断。";
   }
 
   if (errorType === "busy") {
     return "回复仍在生成中。";
+  }
+
+  if (errorType === "auth_failed") {
+    return "密钥无效，请检查本地配置。";
+  }
+
+  if (errorType === "rate_limited") {
+    return "请求过于频繁，请稍后再试。";
+  }
+
+  if (errorType === "server_error") {
+    return "模型服务暂时不可用，请稍后再试。";
+  }
+
+  if (errorType === "network_error") {
+    return "网络连接失败，请检查网络或 baseURL。";
   }
 
   return "回复失败，请稍后再试。";
@@ -414,7 +450,7 @@ app.whenReady().then(async () => {
     return Boolean(chatWindow && event.sender === chatWindow.webContents);
   }
 
-  function getCurrentProviderConfig() {
+  function getCurrentProviderConfig(): ProviderConfig {
     if (envProviderConfig) {
       logTelemetry(
         "provider_config_loaded",
@@ -424,6 +460,61 @@ app.whenReady().then(async () => {
     }
 
     return providerConfigStore?.getConfig() ?? DEFAULT_PROVIDER_CONFIG;
+  }
+
+  function getCurrentProviderStatus(): ProviderStatus {
+    const config = getCurrentProviderConfig();
+
+    if (config.providerId === "fake") {
+      return {
+        providerId: "fake",
+        displayName: config.displayName,
+        isFallback: false
+      };
+    }
+
+    const baseURLHost = readBaseURLHost(config.baseURL);
+    const keyConfigured = hasApiKey(config.apiKeyRef);
+
+    if (!baseURLHost) {
+      return {
+        providerId: "fake",
+        displayName: DEFAULT_PROVIDER_CONFIG.displayName,
+        model: config.model,
+        hasApiKey: keyConfigured,
+        isFallback: true,
+        reason: "invalid_config"
+      };
+    }
+
+    if (!keyConfigured) {
+      return {
+        providerId: "fake",
+        displayName: DEFAULT_PROVIDER_CONFIG.displayName,
+        model: config.model,
+        baseURLHost,
+        hasApiKey: false,
+        isFallback: true,
+        reason: "missing_api_key"
+      };
+    }
+
+    return {
+      providerId: "openai-compatible",
+      displayName: config.displayName,
+      model: config.model,
+      baseURLHost,
+      hasApiKey: true,
+      isFallback: false
+    };
+  }
+
+  function readBaseURLHost(baseURL: string): string | undefined {
+    try {
+      return new URL(baseURL).host;
+    } catch {
+      return undefined;
+    }
   }
 
   function hasApiKey(apiKeyRef: string): boolean {
@@ -608,10 +699,8 @@ app.whenReady().then(async () => {
         errorType
       });
 
-      if (errorType === "failed") {
-        console.warn("[chat] stream failed", {
-          message: error instanceof Error ? error.message : String(error)
-        });
+      if (errorType !== "aborted" && errorType !== "busy") {
+        console.warn("[chat] stream failed", { errorType });
       }
     });
   });
@@ -630,6 +719,14 @@ app.whenReady().then(async () => {
     }
 
     return getCurrentProviderConfig();
+  });
+
+  ipcMain.handle("config:get-provider-status", (event) => {
+    if (!isChatSender(event)) {
+      throw new Error("Unauthorized config request");
+    }
+
+    return getCurrentProviderStatus();
   });
 
   ipcMain.handle("config:set-provider", (event, config: unknown) => {
