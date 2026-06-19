@@ -451,6 +451,10 @@ app.whenReady().then(async () => {
   }
 
   function getCurrentProviderConfig(): ProviderConfig {
+    if (providerConfigStore?.hasConfig()) {
+      return providerConfigStore.getConfig();
+    }
+
     if (envProviderConfig) {
       logTelemetry(
         "provider_config_loaded",
@@ -518,6 +522,10 @@ app.whenReady().then(async () => {
   }
 
   function hasApiKey(apiKeyRef: string): boolean {
+    if (providerConfigStore?.hasConfig()) {
+      return secureKeyStore?.hasApiKey(apiKeyRef) ?? false;
+    }
+
     if (
       envProviderConfig?.apiKeyRef === apiKeyRef &&
       typeof envProviderConfig.apiKey === "string" &&
@@ -530,6 +538,10 @@ app.whenReady().then(async () => {
   }
 
   function getApiKey(apiKeyRef: string): string | null {
+    if (providerConfigStore?.hasConfig()) {
+      return secureKeyStore?.getApiKey(apiKeyRef) ?? null;
+    }
+
     if (
       envProviderConfig?.apiKeyRef === apiKeyRef &&
       typeof envProviderConfig.apiKey === "string" &&

@@ -15,6 +15,7 @@ type TelemetryLogger = (type: string, payload?: TelemetryPayload) => void;
 
 export type ProviderConfigStore = {
   getConfig(): ProviderConfig;
+  hasConfig(): boolean;
   saveConfig(config: unknown): ProviderConfig;
   getConfigPath(): string;
 };
@@ -61,6 +62,9 @@ export function createProviderConfigStore(options: {
         logLoaded(DEFAULT_PROVIDER_CONFIG, "default");
         return DEFAULT_PROVIDER_CONFIG;
       }
+    },
+    hasConfig() {
+      return existsSync(configPath);
     },
     saveConfig(config) {
       const parsed = parseProviderConfig(config);
@@ -149,4 +153,3 @@ function isFiniteNumber(value: unknown): value is number {
 function isPositiveInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value > 0;
 }
-
