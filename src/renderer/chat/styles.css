@@ -64,6 +64,11 @@ body {
   gap: 18px;
 }
 
+.content-stack[hidden],
+.delete-confirmation[hidden] {
+  display: none;
+}
+
 .settings-panel .content-stack {
   margin-top: 18px;
 }

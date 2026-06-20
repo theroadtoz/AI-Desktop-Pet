@@ -31,7 +31,9 @@ export function showChatWindow(window: BrowserWindow): void {
     window.restore();
   }
 
+  window.setAlwaysOnTop(true, "floating");
   window.show();
+  window.moveTop();
   window.focus();
 }
 
