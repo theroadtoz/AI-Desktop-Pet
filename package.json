@@ -8,7 +8,8 @@
     "dev": "npm run build && electron .",
     "build": "tsc -p tsconfig.main.json && tsc -p tsconfig.preload.json && vite build",
     "typecheck": "tsc --noEmit -p tsconfig.renderer.json",
-    "verify": "npm run build && npm run typecheck",
+    "test:idle-breathing": "node --test --experimental-strip-types scripts/cubism-breath.test.mts",
+    "verify": "npm run build && npm run typecheck && npm run test:idle-breathing",
     "telemetry:summary": "node scripts/summarize-telemetry.js"
   },
   "devDependencies": {
