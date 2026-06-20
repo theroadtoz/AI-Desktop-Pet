@@ -3,11 +3,17 @@ import type { CubismBreath } from "./vendor/framework/effect/cubismbreath";
 import type { CubismIdHandle } from "./vendor/framework/id/cubismid";
 
 const BREATH_PARAMETER_ID = "ParamBreath";
-const BREATH_PEAK = 0.25;
+const BREATH_AMPLITUDE_RATIO = 0.08;
 const BREATH_CYCLE_SECONDS = 3.5;
 
 type ParameterId = CubismIdHandle & {
   isEqual(id: string): boolean;
+};
+
+type BreathParameterConfig = {
+  parameterId: CubismIdHandle;
+  offset: number;
+  peak: number;
 };
 
 export function findBreathParameterId(model: Pick<CubismModel, "getParameterCount" | "getParameterId">): CubismIdHandle | null {
@@ -17,6 +23,41 @@ export function findBreathParameterId(model: Pick<CubismModel, "getParameterCoun
     if (parameterId.isEqual(BREATH_PARAMETER_ID)) {
       return parameterId;
     }
+  }
+
+  return null;
+}
+
+export function createBreathParameterConfig(
+  model: Pick<
+    CubismModel,
+    | "getParameterCount"
+    | "getParameterId"
+    | "getParameterMinimumValue"
+    | "getParameterMaximumValue"
+    | "getParameterDefaultValue"
+  >
+): BreathParameterConfig | null {
+  for (let index = 0; index < model.getParameterCount(); index += 1) {
+    const parameterId = model.getParameterId(index) as ParameterId;
+
+    if (!parameterId.isEqual(BREATH_PARAMETER_ID)) {
+      continue;
+    }
+
+    const minimum = model.getParameterMinimumValue(index);
+    const maximum = model.getParameterMaximumValue(index);
+    const range = maximum - minimum;
+
+    if (!Number.isFinite(range) || range <= 0) {
+      return null;
+    }
+
+    return {
+      parameterId,
+      offset: (minimum + maximum) / 2 - model.getParameterDefaultValue(index),
+      peak: range * BREATH_AMPLITUDE_RATIO
+    };
   }
 
   return null;
@@ -39,9 +80,9 @@ export class CubismBreathController {
 }
 
 export async function createCubismBreathController(model: CubismModel): Promise<CubismBreathController | null> {
-  const parameterId = findBreathParameterId(model);
+  const config = createBreathParameterConfig(model);
 
-  if (!parameterId) {
+  if (!config) {
     return null;
   }
 
@@ -49,7 +90,13 @@ export async function createCubismBreathController(model: CubismModel): Promise<
   const breath = CubismBreath.create();
 
   breath.setParameters([
-    new BreathParameterData(parameterId, 0, BREATH_PEAK, BREATH_CYCLE_SECONDS, 1)
+    new BreathParameterData(
+      config.parameterId,
+      config.offset,
+      config.peak,
+      BREATH_CYCLE_SECONDS,
+      1
+    )
   ]);
 
   return new CubismBreathController(breath);
