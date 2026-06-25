@@ -27,6 +27,28 @@ body {
   flex: 1;
 }
 
+.subpage-nav {
+  display: flex;
+  gap: 8px;
+  border-bottom: 1px solid #e7dccb;
+}
+
+.subpage-tab {
+  padding: 8px 12px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: #6b5745;
+  cursor: pointer;
+  font: inherit;
+}
+
+.subpage-tab.is-active {
+  border-bottom-color: #654321;
+  color: #2a2118;
+  font-weight: 700;
+}
+
 .icon-button {
   min-width: 40px;
   padding: 9px 12px;
@@ -58,6 +80,12 @@ body {
   font-size: 16px;
 }
 
+.settings-section-title {
+  margin: 0;
+  color: #2a2118;
+  font-size: 14px;
+}
+
 .content-stack {
   display: flex;
   flex-direction: column;
@@ -67,6 +95,125 @@ body {
 .content-stack[hidden],
 .delete-confirmation[hidden] {
   display: none;
+}
+
+.chat-page {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.history-page {
+  flex: 1;
+  min-height: 0;
+}
+
+.memory-page {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.selection-note {
+  margin: 0;
+  color: #6b5745;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.history-actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.memory-actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.history-layout {
+  display: grid;
+  grid-template-columns: minmax(130px, 0.75fr) minmax(0, 1.25fr);
+  min-height: 0;
+  flex: 1;
+  gap: 18px;
+}
+
+.conversation-list {
+  display: flex;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  flex-direction: column;
+  list-style: none;
+  border-top: 1px solid #e7dccb;
+}
+
+.conversation-item {
+  border-bottom: 1px solid #e7dccb;
+}
+
+.conversation-select {
+  box-sizing: border-box;
+  display: flex;
+  width: 100%;
+  padding: 10px 0;
+  border: 0;
+  background: transparent;
+  color: #2a2118;
+  cursor: pointer;
+  flex-direction: column;
+  gap: 4px;
+  text-align: left;
+}
+
+.conversation-select.is-selected {
+  color: #654321;
+  font-weight: 700;
+}
+
+.conversation-meta {
+  color: #806b56;
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.history-detail {
+  min-width: 0;
+  overflow: auto;
+}
+
+.history-message-list {
+  display: flex;
+  margin: 0;
+  padding: 0;
+  flex-direction: column;
+  gap: 8px;
+  list-style: none;
+}
+
+.history-message {
+  padding: 8px 0;
+  border-bottom: 1px solid #f0e7dc;
+  line-height: 1.5;
+}
+
+.history-message-role {
+  display: block;
+  margin-bottom: 3px;
+  color: #806b56;
+  font-size: 12px;
+}
+
+.history-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
 }
 
 .settings-panel .content-stack {
@@ -82,7 +229,10 @@ body {
 }
 
 .field-label input,
-.field-label select {
+.field-label select,
+.field-label textarea,
+.memory-card input,
+.memory-card textarea {
   box-sizing: border-box;
   width: 100%;
   padding: 9px 10px;
@@ -91,6 +241,17 @@ body {
   background: #fff;
   color: #2a2118;
   font: inherit;
+}
+
+.field-label textarea,
+.memory-card textarea {
+  min-height: 84px;
+  resize: vertical;
+}
+
+.field-label input[type="range"] {
+  padding: 0;
+  accent-color: #654321;
 }
 
 .field-grid {
@@ -130,6 +291,60 @@ body {
   gap: 12px;
 }
 
+.memory-draft-panel,
+.memory-card {
+  padding: 12px;
+  border: 1px solid #e7dccb;
+  border-radius: 8px;
+  background: #fffaf0;
+}
+
+.memory-list {
+  min-height: 0;
+}
+
+.fold-body {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.shortcut-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 0;
+  border-top: 1px solid #e7dccb;
+}
+
+.shortcut-title {
+  margin: 0;
+  color: #2a2118;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.shortcut-description {
+  margin: 4px 0 0;
+  color: #806b56;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.shortcut-accelerator {
+  min-width: 96px;
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  text-align: center;
+}
+
+.shortcut-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .status-box {
   box-sizing: border-box;
   width: 100%;
@@ -161,6 +376,21 @@ body {
   padding: 10px 12px;
   border-radius: 12px;
   line-height: 1.5;
+}
+
+.message-content {
+  display: block;
+}
+
+.message-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+
+.message-action {
+  padding: 6px 10px;
+  font-size: 12px;
 }
 
 .message-user {
@@ -221,5 +451,21 @@ select:disabled {
   .delete-confirmation {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .history-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .conversation-list {
+    max-height: 160px;
+  }
+
+  .shortcut-row {
+    grid-template-columns: 1fr;
+  }
+
+  .shortcut-actions {
+    justify-content: flex-start;
   }
 }

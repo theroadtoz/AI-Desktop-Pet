@@ -59,12 +59,13 @@ export function createOpenAICompatibleProvider(
           }
         });
 
+        const classification = classifyEmotion({
+          latestUserMessage: getLatestUserMessage(request.messages),
+          assistantReply: replyText
+        });
         const result: ChatProviderResult = {
           text: replyText,
-          emotion: classifyEmotion({
-            latestUserMessage: getLatestUserMessage(request.messages),
-            assistantReply: replyText
-          })
+          ...classification
         };
 
         log(options, "provider_request_completed", {
@@ -122,7 +123,7 @@ async function streamChatCompletions(input: {
       },
       body: JSON.stringify({
         model: input.options.model,
-        messages: mapChatMessagesToOpenAICompatible(input.request.messages),
+        messages: mapChatMessagesToOpenAICompatible(input.request.messages, input.request.memoryContext),
         temperature: input.options.temperature,
         max_tokens: input.options.maxTokens,
         stream: true

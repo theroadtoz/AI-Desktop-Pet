@@ -1,4 +1,4 @@
-import type { EmotionTag } from "./emotion";
+import type { EmotionClassification } from "./emotion";
 
 export type ChatRole = "user" | "assistant";
 
@@ -8,7 +8,6 @@ export type ChatMessage = {
   content: string;
 };
 
-export type FakeReply = {
+export type FakeReply = EmotionClassification & {
   text: string;
-  emotion: EmotionTag;
 };

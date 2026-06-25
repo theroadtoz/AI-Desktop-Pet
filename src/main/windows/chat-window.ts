@@ -1,5 +1,6 @@
 import { BrowserWindow } from "electron";
 import { join } from "node:path";
+import { showChatWindowAbovePet } from "./topmost-policy";
 
 export function createChatWindow(): BrowserWindow {
   const preload = join(__dirname, "../../preload/chat-preload.js");
@@ -27,14 +28,7 @@ export function createChatWindow(): BrowserWindow {
 }
 
 export function showChatWindow(window: BrowserWindow): void {
-  if (window.isMinimized()) {
-    window.restore();
-  }
-
-  window.setAlwaysOnTop(true, "floating");
-  window.show();
-  window.moveTop();
-  window.focus();
+  showChatWindowAbovePet(window);
 }
 
 export function focusChatInput(window: BrowserWindow): void {

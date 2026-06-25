@@ -1,5 +1,6 @@
 import { BrowserWindow } from "electron";
 import { join } from "node:path";
+import { restorePetWindowOnTop } from "./topmost-policy";
 
 export function createPetWindow(): BrowserWindow {
   const preload = join(__dirname, "../../preload/pet-preload.js");
@@ -22,11 +23,10 @@ export function createPetWindow(): BrowserWindow {
     }
   });
 
-  window.setAlwaysOnTop(true, "floating");
   window.setIgnoreMouseEvents(true, { forward: true });
 
   window.once("ready-to-show", () => {
-    window.showInactive();
+    restorePetWindowOnTop(window);
   });
 
   window.webContents.on("console-message", (event) => {

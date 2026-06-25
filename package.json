@@ -8,8 +8,11 @@
     "dev": "npm run build && electron .",
     "build": "tsc -p tsconfig.main.json && tsc -p tsconfig.preload.json && vite build",
     "typecheck": "tsc --noEmit -p tsconfig.renderer.json",
-    "test:idle-breathing": "node --test --experimental-strip-types scripts/cubism-breath.test.mts",
-    "verify": "npm run build && npm run typecheck && npm run test:idle-breathing",
+    "audit:accessories": "node --experimental-strip-types -e \"import('./scripts/live2d-accessory-capability-audit.mts').then(async ({ auditWitchAccessoryCapabilities }) => process.stdout.write(JSON.stringify(await auditWitchAccessoryCapabilities(), null, 2) + '\\n'))\"",
+    "audit:actions": "node --experimental-strip-types scripts/live2d-action-capability-audit.mts",
+    "test:live2d-parameters": "node --test --experimental-strip-types scripts/cubism-breath.test.mts scripts/cubism-frame-pipeline.test.mts scripts/cubism-drag-physics.test.mts scripts/cubism-expression-state.test.mts scripts/cubism-micro-expression.test.mts scripts/cubism-render-budget.test.mts scripts/emotion-presentation.test.mts scripts/live2d-expression-asset-audit.test.mts scripts/live2d-accessory-capability-audit.test.mts scripts/live2d-action-capability-audit.test.mts scripts/pet-accessory.test.mts scripts/pet-presentation.test.mts scripts/pet-presentation-persistence.test.mts scripts/pet-scale-wheel.test.mts scripts/pet-role-state.test.mts scripts/pet-interaction-actions.test.mts scripts/sandboxed-preload.test.mts scripts/pet-drag-pointer.test.mts scripts/diagnostic-shortcut.test.mts scripts/pet-lock-shortcut.test.mts scripts/shortcut-preferences.test.mts scripts/topmost-policy.test.mts",
+    "test:history": "node --test --experimental-strip-types scripts/history-store.test.mts scripts/history-ipc-policy.test.mts scripts/memory-store.test.mts",
+    "verify": "npm run build && npm run typecheck && npm run test:live2d-parameters && npm run test:history",
     "telemetry:summary": "node scripts/summarize-telemetry.js"
   },
   "devDependencies": {

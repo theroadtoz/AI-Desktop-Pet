@@ -2,7 +2,10 @@ import type { CubismModel } from "./vendor/framework/model/cubismmodel";
 import type { CubismBreath } from "./vendor/framework/effect/cubismbreath";
 import type { CubismIdHandle } from "./vendor/framework/id/cubismid";
 
-const BREATH_PARAMETER_ID = "ParamBreath";
+export const BREATH_PARAMETER_IDS = ["ParamBreath"] as const;
+
+const [BREATH_PARAMETER_ID] = BREATH_PARAMETER_IDS;
+const BREATH_CENTER_RATIO = 0.5;
 const BREATH_AMPLITUDE_RATIO = 0.08;
 const BREATH_CYCLE_SECONDS = 3.5;
 
@@ -55,7 +58,7 @@ export function createBreathParameterConfig(
 
     return {
       parameterId,
-      offset: (minimum + maximum) / 2 - model.getParameterDefaultValue(index),
+      offset: minimum + range * BREATH_CENTER_RATIO - model.getParameterDefaultValue(index),
       peak: range * BREATH_AMPLITUDE_RATIO
     };
   }

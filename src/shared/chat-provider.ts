@@ -1,21 +1,23 @@
 import type { ChatMessage } from "./chat";
-import type { EmotionTag } from "./emotion";
+import type { MemoryInjection } from "./chat-memory";
+import type { EmotionClassification } from "./emotion";
 import type { ProviderId } from "./provider-config";
 
 export type ChatProviderId = ProviderId;
 
 export type ChatRequest = {
+  requestVersion: number;
   conversationId: string;
   messages: ChatMessage[];
+  memoryContext?: MemoryInjection;
 };
 
 export type ChatStreamDelta = {
   text: string;
 };
 
-export type ChatProviderResult = {
+export type ChatProviderResult = EmotionClassification & {
   text: string;
-  emotion: EmotionTag;
 };
 
 export type ChatProvider = {

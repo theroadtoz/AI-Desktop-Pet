@@ -92,6 +92,49 @@ function countEvents(events, type) {
   return events.filter((event) => event.type === type).length;
 }
 
+function collectRendererPerformance(events) {
+  const samples = events
+    .filter((event) => event.type === "pet_performance_sample")
+    .map((event) => event.payload ?? {});
+  const byMode = {};
+
+  for (const sample of samples) {
+    const mode = typeof sample.mode === "string" ? sample.mode : "unknown";
+    const bucket = byMode[mode] ?? {
+      count: 0,
+      latestTargetFramesPerSecond: null,
+      maxRafFramesPerSecond: 0,
+      maxRenderedFramesPerSecond: 0,
+      maxLive2DUpdatesPerSecond: 0
+    };
+
+    bucket.count += 1;
+
+    if (typeof sample.targetFramesPerSecond === "number") {
+      bucket.latestTargetFramesPerSecond = sample.targetFramesPerSecond;
+    }
+
+    if (typeof sample.rafFramesPerSecond === "number") {
+      bucket.maxRafFramesPerSecond = Math.max(bucket.maxRafFramesPerSecond, sample.rafFramesPerSecond);
+    }
+
+    if (typeof sample.renderedFramesPerSecond === "number") {
+      bucket.maxRenderedFramesPerSecond = Math.max(bucket.maxRenderedFramesPerSecond, sample.renderedFramesPerSecond);
+    }
+
+    if (typeof sample.live2DUpdatesPerSecond === "number") {
+      bucket.maxLive2DUpdatesPerSecond = Math.max(bucket.maxLive2DUpdatesPerSecond, sample.live2DUpdatesPerSecond);
+    }
+
+    byMode[mode] = bucket;
+  }
+
+  return {
+    count: samples.length,
+    byMode
+  };
+}
+
 function main() {
   const logDirectory = process.argv[2] || defaultLogDirectory();
   const files = readLogFiles(logDirectory);
@@ -113,7 +156,8 @@ function main() {
     rendererGoneCount: countEvents(events, "renderer_process_gone"),
     recoverySucceededCount: countEvents(events, "recovery_succeeded"),
     recoveryFailedCount: countEvents(events, "recovery_failed"),
-    maxWorkingSetMb: collectMaxWorkingSetMb(events)
+    maxWorkingSetMb: collectMaxWorkingSetMb(events),
+    rendererPerformance: collectRendererPerformance(events)
   };
 
   console.log(JSON.stringify(summary, null, 2));

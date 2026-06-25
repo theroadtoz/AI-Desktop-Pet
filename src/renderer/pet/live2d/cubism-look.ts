@@ -5,14 +5,21 @@ type LookParameter = {
   targetValue(x: number, y: number): number;
 };
 
+export const LOOK_INPUT_PARAMETER_IDS = [
+  "ParamAngleX",
+  "ParamAngleY",
+  "ParamEyeBallX",
+  "ParamEyeBallY"
+] as const;
+
 const LOOK_PARAMETER_DEFS: readonly {
   id: string;
   targetValue(x: number, y: number): number;
 }[] = [
-  { id: "ParamAngleX", targetValue: (x) => x * 20 },
-  { id: "ParamAngleY", targetValue: (_x, y) => y * 10 },
-  { id: "ParamEyeBallX", targetValue: (x) => x },
-  { id: "ParamEyeBallY", targetValue: (_x, y) => y }
+  { id: LOOK_INPUT_PARAMETER_IDS[0], targetValue: (x) => x * 20 },
+  { id: LOOK_INPUT_PARAMETER_IDS[1], targetValue: (_x, y) => y * 10 },
+  { id: LOOK_INPUT_PARAMETER_IDS[2], targetValue: (x) => x },
+  { id: LOOK_INPUT_PARAMETER_IDS[3], targetValue: (_x, y) => y }
 ];
 
 function clamp(value: number, min: number, max: number): number {

@@ -9,6 +9,7 @@ import {
   type IpcMainInvokeEvent
 } from "electron";
 import { release as getOsRelease } from "node:os";
+import { isAbsolute } from "node:path";
 import type {
   ConfigApiKeyRequest,
   ConfigSetApiKeyRequest,
@@ -21,9 +22,32 @@ import type {
   RenderHealth
 } from "../shared/ipc-contract";
 import { isChatMessage } from "../shared/ipc-contract";
-import { emotionTags, type EmotionTag } from "../shared/emotion";
+import { isHistoryId, type HistoryMessage } from "../shared/chat-history";
+import { isMemoryId, parseMemoryCardDraft, parseMemoryCardUpdate, type MemoryCardUpdate } from "../shared/chat-memory";
+import { selectEmotionPresentation } from "../shared/emotion-presentation";
+import { isPetAccessoryPresetId } from "../shared/pet-accessory";
+import {
+  createPetPresentationIntent,
+  INITIAL_PET_ROLE_SNAPSHOT,
+  reducePetRoleState,
+  type PetPresentationIntent,
+  type PetRoleEvent,
+  type PetRoleSnapshot
+} from "../shared/pet-role-state";
 import type { ProviderConfig, ProviderStatus } from "../shared/provider-config";
+import {
+  calculateScaledPetBounds,
+  canApplyPetScaleAdjustment,
+  clampPetBounds,
+  DEFAULT_PET_PRESENTATION_PREFERENCES,
+  getAdjustedPetScale,
+  normalizePetScale,
+  parsePetScaleAdjustmentIntent,
+  type PetPresentationPreferences
+} from "../shared/pet-presentation";
 import { ChatEngineBusyError, createChatEngine, type ChatEngine } from "./services/chat/chat-engine";
+import { createHistoryStore, type HistoryStore } from "./services/chat/history-store";
+import { createMemoryStore, type MemoryStore } from "./services/chat/memory-store";
 import { createChatProviderFromConfig } from "./services/chat/provider-factory";
 import { readEnvProviderConfig, type EnvProviderConfig } from "./services/config/env-config";
 import {
@@ -33,11 +57,23 @@ import {
   type ProviderConfigStore
 } from "./services/config/provider-config-store";
 import { createSecureKeyStore, type SecureKeyStore } from "./services/config/secure-key-store";
+import {
+  registerWebGLDiagnosticShortcut,
+  sendWebGLDiagnosticTrigger
+} from "./services/diagnostic-shortcut";
+import { createPetPresentationStore, type PetPresentationStore } from "./services/config/pet-presentation-store";
+import {
+  createPetPresentationPersistence,
+  type PetPresentationPersistence
+} from "./services/config/pet-presentation-persistence";
+import { createShortcutPreferencesStore, type ShortcutPreferencesStore } from "./services/config/shortcut-preferences-store";
 import { registerModelAssetProtocol } from "./services/model-asset-protocol";
 import { createPointerController, type PointerController } from "./services/pointer-controller";
+import { createShortcutRegistry, type ShortcutRegistry } from "./services/shortcut-registry";
 import { createTelemetryService, type TelemetryPayload, type TelemetryService } from "./services/telemetry";
 import { createChatWindow, focusChatInput, showChatWindow } from "./windows/chat-window";
 import { createPetWindow } from "./windows/pet-window";
+import { restorePetWindowOnTop } from "./windows/topmost-policy";
 
 let petWindow: BrowserWindow | null = null;
 let chatWindow: BrowserWindow | null = null;
@@ -47,13 +83,34 @@ let chatEngine: ChatEngine | null = null;
 let providerConfigStore: ProviderConfigStore | null = null;
 let secureKeyStore: SecureKeyStore | null = null;
 let envProviderConfig: EnvProviderConfig | null = null;
+let petPresentationStore: PetPresentationStore | null = null;
+let petPresentationPersistence: PetPresentationPersistence | null = null;
+let historyStore: HistoryStore | null = null;
+let memoryStore: MemoryStore | null = null;
+let shortcutPreferencesStore: ShortcutPreferencesStore | null = null;
+let shortcutRegistry: ShortcutRegistry | null = null;
+let currentPetPresentationPreferences: PetPresentationPreferences = DEFAULT_PET_PRESENTATION_PREFERENCES;
+let isChatInteractionActive = false;
+let petRoleSnapshot: PetRoleSnapshot = INITIAL_PET_ROLE_SNAPSHOT;
+let currentPetPresentationIntent: PetPresentationIntent = createPetPresentationIntent(petRoleSnapshot);
+let activeChatRequestVersion: number | null = null;
 let performanceHeartbeat: NodeJS.Timeout | null = null;
+let isPetLocked = false;
 
 const PET_RENDERER_RECOVERY_WINDOW_MS = 60_000;
 const PET_RENDERER_MAX_RECOVERIES = 3;
+const PET_WINDOW_TITLE = "Desktop Pet";
+const isAcceptanceTelemetryEnabled = process.env.AI_DESKTOP_PET_ACCEPTANCE_TELEMETRY === "1";
 let petRendererRecoveryTimes: number[] = [];
 
+const userDataPathOverride = process.env.AI_DESKTOP_PET_USER_DATA_PATH;
+
+if (!app.isPackaged && userDataPathOverride && isAbsolute(userDataPathOverride)) {
+  app.setPath("userData", userDataPathOverride);
+}
+
 const RENDERER_TELEMETRY_TYPES = new Set([
+  "pet_performance_sample",
   "webgl_context_lost",
   "webgl_context_restored",
   "recovery_started",
@@ -80,6 +137,8 @@ if (!gotLock) {
 }
 
 app.on("second-instance", () => {
+  logTelemetry("second_instance_received");
+  ensurePetWindow("second_instance");
   if (chatWindow) {
     showChatWindow(chatWindow);
     focusChatInput(chatWindow);
@@ -126,6 +185,7 @@ function canRecoverPetRenderer(): boolean {
 
 function createRecoverablePetWindow(): BrowserWindow {
   const nextPetWindow = createPetWindow();
+  applyPetPresentationPreferences(nextPetWindow, getCurrentPetPresentationPreferences());
 
   nextPetWindow.webContents.on("render-process-gone", (_event, details) => {
     console.warn("[pet] render process gone", {
@@ -148,8 +208,92 @@ function createRecoverablePetWindow(): BrowserWindow {
   return nextPetWindow;
 }
 
+function getDesktopPetWindowCount(): number {
+  return BrowserWindow.getAllWindows().filter((window) => (
+    !window.isDestroyed() &&
+    window.getTitle() === PET_WINDOW_TITLE
+  )).length;
+}
+
+function showExistingPetWindow(reason: string): BrowserWindow | null {
+  if (!petWindow || petWindow.isDestroyed()) {
+    return null;
+  }
+
+  restorePetWindowOnTop(petWindow);
+  logTelemetry("pet_window_duplicate_prevented", {
+    reason,
+    desktopPetWindowCount: getDesktopPetWindowCount()
+  });
+  logTelemetry("pet_window_reuse", {
+    reason,
+    desktopPetWindowCount: getDesktopPetWindowCount()
+  });
+  logWindowSnapshot(`pet_reuse_${reason}`);
+  return petWindow;
+}
+
+function ensurePetWindow(reason: string): BrowserWindow {
+  const existingPetWindow = showExistingPetWindow(reason);
+
+  if (existingPetWindow) {
+    return existingPetWindow;
+  }
+
+  pointerController?.dispose();
+  pointerController = null;
+  petWindow = createRecoverablePetWindow();
+  pointerController = createPointerController(petWindow);
+  pointerController.setLocked(isPetLocked);
+  logTelemetry("pet_window_created", {
+    reason,
+    desktopPetWindowCount: getDesktopPetWindowCount()
+  });
+  logWindowSnapshot(`pet_created_${reason}`);
+  return petWindow;
+}
+
 function logTelemetry(type: string, payload: TelemetryPayload = {}): void {
   telemetry?.logEvent(type, payload);
+}
+
+function publishPetPresentation(intent: PetPresentationIntent): void {
+  if (!petWindow || petWindow.isDestroyed()) {
+    return;
+  }
+
+  petWindow.webContents.send("pet:apply-presentation", intent);
+}
+
+function withCurrentAccessoryPreset(intent: PetPresentationIntent): PetPresentationIntent {
+  return {
+    ...intent,
+    accessoryPresetId: currentPetPresentationPreferences.accessoryPresetId
+  };
+}
+
+function transitionPetRole(event: PetRoleEvent): boolean {
+  const transition = reducePetRoleState(petRoleSnapshot, event);
+
+  if (!transition.accepted) {
+    return false;
+  }
+
+  petRoleSnapshot = transition.snapshot;
+  currentPetPresentationIntent = withCurrentAccessoryPreset(transition.intent);
+  publishPetPresentation(currentPetPresentationIntent);
+  logTelemetry("pet_role_transition", {
+    state: petRoleSnapshot.state,
+    requestVersion: petRoleSnapshot.activeRequestVersion,
+    event: event.type
+  });
+  return true;
+}
+
+function settleInterruptedRole(): void {
+  queueMicrotask(() => {
+    transitionPetRole({ type: "interruption:settled" });
+  });
 }
 
 function logStartupInfo(): void {
@@ -193,12 +337,40 @@ function logWindowSnapshot(reason: string): void {
     reason,
     displays: getDisplaySnapshot(),
     petWindow: getWindowSnapshot(petWindow, {
-      ignoreMouseEvents: pointerController?.isIgnoringMouseEvents() ?? true
+      ignoreMouseEvents: pointerController?.isIgnoringMouseEvents() ?? true,
+      isLocked: pointerController?.isLocked() ?? isPetLocked
     }),
     chatWindow: getWindowSnapshot(chatWindow, {
       ignoreMouseEvents: false
     })
   });
+}
+
+function logAcceptanceWindowSnapshot(reason: string): void {
+  if (isAcceptanceTelemetryEnabled) {
+    logWindowSnapshot(reason);
+  }
+}
+
+function setPetLocked(nextIsLocked: boolean, reason: string): { isLocked: boolean } {
+  isPetLocked = nextIsLocked;
+  pointerController?.setLocked(isPetLocked);
+  logTelemetry("pet_lock_changed", {
+    isLocked: isPetLocked,
+    reason
+  });
+  logWindowSnapshot(reason);
+  notifyChatPetLockChanged({ isLocked: isPetLocked });
+  return { isLocked: isPetLocked };
+}
+
+function notifyChatPetLockChanged(state: { isLocked: boolean }): boolean {
+  if (!chatWindow || chatWindow.isDestroyed()) {
+    return false;
+  }
+
+  chatWindow.webContents.send("pet-lock:changed", state);
+  return true;
 }
 
 function startPerformanceHeartbeat(): void {
@@ -215,34 +387,68 @@ function startPerformanceHeartbeat(): void {
         memory: metric.memory
       })),
       petWindowVisible: Boolean(petWindow && !petWindow.isDestroyed() && petWindow.isVisible()),
-      chatWindowVisible: Boolean(chatWindow && !chatWindow.isDestroyed() && chatWindow.isVisible())
+      chatWindowVisible: Boolean(chatWindow && !chatWindow.isDestroyed() && chatWindow.isVisible()),
+      windowSnapshot: isAcceptanceTelemetryEnabled ? {
+        petWindow: getWindowSnapshot(petWindow, {
+          ignoreMouseEvents: pointerController?.isIgnoringMouseEvents() ?? true,
+          isLocked: pointerController?.isLocked() ?? isPetLocked
+        }),
+        chatWindow: getWindowSnapshot(chatWindow, {
+          ignoreMouseEvents: false
+        })
+      } : undefined
     });
   }, 5_000);
   performanceHeartbeat.unref();
 }
 
 function registerDiagnosticShortcuts(): void {
-  if (app.isPackaged) {
-    return;
-  }
+  const result = registerWebGLDiagnosticShortcut({
+    isPackaged: app.isPackaged,
+    register: (accelerator, callback) => globalShortcut.register(accelerator, callback),
+    onTriggered: () => {
+      const delivered = sendWebGLDiagnosticTrigger(petWindow);
 
-  const registered = globalShortcut.register("L", () => {
-    logTelemetry("diagnostic_shortcut", {
-      key: "L",
-      action: "inject_webgl_context_loss"
-    });
-
-    if (petWindow && !petWindow.isDestroyed()) {
-      petWindow.webContents.send("pet:inject-webgl-context-loss");
+      logTelemetry("diagnostic_shortcut_triggered", {
+        accelerator: result.accelerator,
+        action: "inject_webgl_context_loss",
+        delivered
+      });
     }
   });
 
-  if (!registered) {
-    logTelemetry("diagnostic_shortcut_failed", {
-      key: "L",
-      action: "inject_webgl_context_loss"
-    });
+  logTelemetry("diagnostic_shortcut_registration", result);
+}
+
+function createUserShortcutRegistry(): ShortcutRegistry | null {
+  if (!shortcutPreferencesStore) {
+    return null;
   }
+
+  return createShortcutRegistry({
+    initialPreferences: shortcutPreferencesStore.getPreferences(),
+    register: (accelerator, callback) => globalShortcut.register(accelerator, callback),
+    unregister: (accelerator) => globalShortcut.unregister(accelerator),
+    isRegistered: (accelerator) => globalShortcut.isRegistered(accelerator),
+    savePreferences: (preferences) => shortcutPreferencesStore?.savePreferences(preferences) ?? preferences,
+    handlers: {
+      togglePetLock: () => {
+        const nextState = setPetLocked(!isPetLocked, "global_lock_shortcut_toggle");
+
+        logTelemetry("pet_lock_shortcut_triggered", {
+          accelerator: shortcutRegistry
+            ?.getShortcutViews()
+            .find((shortcut) => shortcut.id === "togglePetLock")
+            ?.accelerator,
+          isLocked: nextState.isLocked,
+          chatWindowNotified: Boolean(chatWindow && !chatWindow.isDestroyed())
+        });
+      }
+    },
+    onRegistrationResult: (result) => {
+      logTelemetry("pet_lock_shortcut_registration", result);
+    }
+  });
 }
 
 function readNumber(value: unknown): number | undefined {
@@ -302,9 +508,15 @@ function isChatSendRequest(value: unknown): value is ChatSendRequest {
 
   return Boolean(
     request &&
+    typeof request.requestVersion === "number" &&
+    Number.isSafeInteger(request.requestVersion) &&
+    request.requestVersion > 0 &&
     typeof request.conversationId === "string" &&
+    isHistoryId(request.conversationId) &&
     Array.isArray(request.messages) &&
-    request.messages.every(isChatMessage)
+    request.messages.length > 0 &&
+    request.messages.every((message) => isChatMessage(message) && isHistoryId(message.id) && message.content.trim().length > 0) &&
+    request.messages.at(-1)?.role === "user"
   );
 }
 
@@ -360,6 +572,24 @@ function getChatErrorType(error: unknown): ChatStreamErrorType {
   return "failed";
 }
 
+function getCurrentPetPresentationPreferences(): PetPresentationPreferences {
+  return currentPetPresentationPreferences;
+}
+
+function applyPetPresentationPreferences(window: BrowserWindow, preferences: PetPresentationPreferences): void {
+  if (window.isDestroyed()) {
+    return;
+  }
+
+  const currentBounds = window.getBounds();
+  const currentWorkArea = screen.getDisplayMatching(currentBounds).workArea;
+  const clampedCurrentBounds = clampPetBounds(currentBounds, currentWorkArea);
+  const targetWorkArea = screen.getDisplayMatching(clampedCurrentBounds).workArea;
+  const scaledBounds = calculateScaledPetBounds(clampedCurrentBounds, preferences.petScale, targetWorkArea);
+
+  window.setBounds(scaledBounds);
+}
+
 function getChatErrorMessage(errorType: ChatStreamErrorType): string {
   if (errorType === "aborted") {
     return "已中断。";
@@ -406,7 +636,12 @@ function rebuildPetWindow(recoverySource?: string): void {
 
   petWindow = createRecoverablePetWindow();
   pointerController = createPointerController(petWindow);
+  pointerController.setLocked(isPetLocked);
   logWindowSnapshot(recoverySource ? "pet_rebuild" : "pet_created");
+  logTelemetry(recoverySource ? "pet_window_rebuilt" : "pet_window_created", {
+    reason: recoverySource ?? "rebuild_pet_window",
+    desktopPetWindowCount: getDesktopPetWindowCount()
+  });
 
   if (recoverySource) {
     logTelemetry("recovery_succeeded", {
@@ -420,17 +655,58 @@ function rebuildPetWindow(recoverySource?: string): void {
 app.whenReady().then(async () => {
   telemetry = createTelemetryService();
   providerConfigStore = createProviderConfigStore({ logTelemetry });
+  petPresentationStore = createPetPresentationStore();
+  currentPetPresentationPreferences = petPresentationStore.getPreferences();
+  currentPetPresentationIntent = withCurrentAccessoryPreset(currentPetPresentationIntent);
+  petPresentationPersistence = createPetPresentationPersistence(petPresentationStore);
+  historyStore = createHistoryStore();
+  memoryStore = createMemoryStore();
+  shortcutPreferencesStore = createShortcutPreferencesStore();
+  shortcutRegistry = createUserShortcutRegistry();
   secureKeyStore = createSecureKeyStore({ logTelemetry });
   envProviderConfig = readEnvProviderConfig();
   chatEngine = createChatEngine(createProviderFromCurrentConfig());
   logStartupInfo();
   registerModelAssetProtocol();
 
-  rebuildPetWindow();
+  ensurePetWindow("startup");
   chatWindow = createChatWindow();
+  chatWindow.on("hide", () => {
+    isChatInteractionActive = false;
+    if (activeChatRequestVersion !== null) {
+      chatEngine?.abortActiveStream();
+      transitionPetRole({ type: "request:cancelled", requestVersion: activeChatRequestVersion });
+      activeChatRequestVersion = null;
+      settleInterruptedRole();
+    }
+    transitionPetRole({ type: "chat:closed" });
+    if (petWindow) {
+      restorePetWindowOnTop(petWindow);
+      logWindowSnapshot("chat_hidden_pet_restored");
+    }
+  });
   logWindowSnapshot("startup");
   startPerformanceHeartbeat();
   registerDiagnosticShortcuts();
+  shortcutRegistry?.registerAll();
+
+  screen.on("display-metrics-changed", () => {
+    if (petWindow && !petWindow.isDestroyed()) {
+      applyPetPresentationPreferences(petWindow, getCurrentPetPresentationPreferences());
+    }
+  });
+
+  screen.on("display-added", () => {
+    if (petWindow && !petWindow.isDestroyed()) {
+      applyPetPresentationPreferences(petWindow, getCurrentPetPresentationPreferences());
+    }
+  });
+
+  screen.on("display-removed", () => {
+    if (petWindow && !petWindow.isDestroyed()) {
+      applyPetPresentationPreferences(petWindow, getCurrentPetPresentationPreferences());
+    }
+  });
 
   function openChatWindow(): void {
     if (!chatWindow) {
@@ -439,6 +715,7 @@ app.whenReady().then(async () => {
 
     showChatWindow(chatWindow);
     focusChatInput(chatWindow);
+    transitionPetRole({ type: "chat:opened" });
     logWindowSnapshot("chat_opened");
   }
 
@@ -561,10 +838,6 @@ app.whenReady().then(async () => {
     });
   }
 
-  function isEmotionTag(value: unknown): value is EmotionTag {
-    return typeof value === "string" && emotionTags.includes(value as EmotionTag);
-  }
-
   ipcMain.handle("pet:open-chat", (event) => {
     if (!isPetSender(event)) {
       return;
@@ -587,6 +860,7 @@ app.whenReady().then(async () => {
     }
 
     pointerController?.startDrag();
+    logAcceptanceWindowSnapshot("pet_drag_start");
   });
 
   ipcMain.on("pet:drag-move", (event, delta: PetDragDelta) => {
@@ -607,6 +881,7 @@ app.whenReady().then(async () => {
     }
 
     pointerController?.endDrag();
+    logAcceptanceWindowSnapshot("pet_drag_end");
   });
 
   ipcMain.on("pet:first-frame", (event, info: PetFirstFrameInfo) => {
@@ -638,21 +913,79 @@ app.whenReady().then(async () => {
     }
 
     logTelemetry(rendererEvent.type, sanitizeRendererTelemetry(rendererEvent));
+    if (rendererEvent.type === "webgl_context_lost" || rendererEvent.type === "recovery_failed") {
+      const requestVersion = activeChatRequestVersion;
+      transitionPetRole({ type: "renderer:failed" });
+      if (requestVersion !== null) {
+        chatEngine?.abortActiveStream();
+        activeChatRequestVersion = null;
+      }
+    } else if (rendererEvent.type === "recovery_succeeded") {
+      transitionPetRole({ type: "renderer:recovered" });
+    }
   });
 
-  ipcMain.on("chat:reply-emotion", (event, emotion: unknown) => {
-    if (!isChatSender(event) || !isEmotionTag(emotion) || !petWindow || petWindow.isDestroyed()) {
+  ipcMain.on("pet:presentation-ready", (event) => {
+    if (isPetSender(event)) {
+      publishPetPresentation(currentPetPresentationIntent);
+    }
+  });
+
+  ipcMain.on("chat:interaction-active", (event, isActive: unknown) => {
+    if (!isChatSender(event) || typeof isActive !== "boolean") {
       return;
     }
 
-    petWindow.webContents.send("pet:apply-emotion", emotion);
+    isChatInteractionActive = isActive;
+    transitionPetRole({ type: "chat:interaction", active: isActive });
+  });
+
+  ipcMain.on("pet:adjust-scale", (event, value: unknown) => {
+    const intent = parsePetScaleAdjustmentIntent(value);
+
+    if (
+      !isPetSender(event) ||
+      !intent ||
+      !canApplyPetScaleAdjustment({
+        hasPresentationStore: Boolean(petPresentationStore),
+        isChatInteractionActive,
+        isDragging: pointerController?.isDragging() ?? false,
+        intent
+      })
+    ) {
+      return;
+    }
+
+    const targetScale = getAdjustedPetScale(currentPetPresentationPreferences.petScale, intent);
+
+    if (targetScale === null || normalizePetScale(targetScale) === null || targetScale === currentPetPresentationPreferences.petScale) {
+      return;
+    }
+
+    currentPetPresentationPreferences = {
+      ...currentPetPresentationPreferences,
+      petScale: targetScale
+    };
+    if (isAcceptanceTelemetryEnabled) {
+      logTelemetry("pet_scale_adjusted", {
+        petScale: targetScale,
+        source: "wheel"
+      });
+    }
+    petPresentationPersistence?.schedule(currentPetPresentationPreferences);
+
+    if (petWindow && !petWindow.isDestroyed()) {
+      applyPetPresentationPreferences(petWindow, currentPetPresentationPreferences);
+    }
   });
 
   ipcMain.on("chat:send", (event, request: unknown) => {
-    if (!isChatSender(event) || !isChatSendRequest(request) || !chatEngine) {
+    if (!isChatSender(event) || !isChatSendRequest(request) || !chatEngine || !historyStore || !memoryStore) {
       return;
     }
 
+    const historyStoreForRequest = historyStore;
+    const memoryStoreForRequest = memoryStore;
     const providerId = chatEngine.getProviderId();
     const startedAt = Date.now();
     let replyLength = 0;
@@ -667,11 +1000,59 @@ app.whenReady().then(async () => {
         errorType: "busy"
       });
       event.sender.send("chat:stream-error", {
+        requestVersion: request.requestVersion,
         message: getChatErrorMessage("busy"),
         errorType: "busy"
       });
       return;
     }
+
+    if (!transitionPetRole({ type: "request:started", requestVersion: request.requestVersion })) {
+      return;
+    }
+
+    activeChatRequestVersion = request.requestVersion;
+    const submittedMessage = request.messages.at(-1);
+
+    if (!submittedMessage) {
+      return;
+    }
+
+    try {
+      const historyMessage: HistoryMessage = {
+        id: submittedMessage.id,
+        role: "user",
+        content: submittedMessage.content,
+        createdAt: Date.now()
+      };
+      const inserted = historyStoreForRequest.appendMessage(request.conversationId, historyMessage);
+
+      if (!inserted) {
+        transitionPetRole({ type: "request:failed", requestVersion: request.requestVersion });
+        activeChatRequestVersion = null;
+        event.sender.send("chat:stream-error", {
+          requestVersion: request.requestVersion,
+          message: "重复的消息请求已忽略。",
+          errorType: "failed"
+        });
+        return;
+      }
+    } catch {
+      transitionPetRole({ type: "request:failed", requestVersion: request.requestVersion });
+      activeChatRequestVersion = null;
+      event.sender.send("chat:stream-error", {
+        requestVersion: request.requestVersion,
+        message: "无法保存本地消息，请稍后重试。",
+        errorType: "failed"
+      });
+      return;
+    }
+
+    const memoryContext = memoryStoreForRequest.createInjection();
+    event.sender.send("chat:memory-injection", {
+      requestVersion: request.requestVersion,
+      count: memoryContext.count
+    });
 
     logTelemetry("chat_stream_started", {
       providerId,
@@ -679,12 +1060,49 @@ app.whenReady().then(async () => {
       messageCount: request.messages.length
     });
 
-    void chatEngine.startChatStream(request, {
+    void chatEngine.startChatStream({ ...request, memoryContext }, {
       onDelta(delta) {
+        if (!transitionPetRole({ type: "reply:delta", requestVersion: request.requestVersion })) {
+          return;
+        }
+
         replyLength += delta.text.length;
-        event.sender.send("chat:stream-delta", delta);
+        event.sender.send("chat:stream-delta", { ...delta, requestVersion: request.requestVersion });
       }
     }).then((result) => {
+      try {
+        const historyMessage: HistoryMessage = {
+          id: crypto.randomUUID(),
+          role: "assistant",
+          content: result.text,
+          createdAt: Date.now()
+        };
+        historyStoreForRequest.appendMessage(request.conversationId, historyMessage);
+      } catch {
+        transitionPetRole({ type: "request:failed", requestVersion: request.requestVersion });
+        if (activeChatRequestVersion === request.requestVersion) {
+          activeChatRequestVersion = null;
+        }
+        event.sender.send("chat:stream-error", {
+          requestVersion: request.requestVersion,
+          message: "无法保存本地回复，请稍后重试。",
+          errorType: "failed"
+        });
+        return;
+      }
+
+      const accepted = transitionPetRole({
+        type: "reply:completed",
+        requestVersion: request.requestVersion,
+        expression: selectEmotionPresentation(result)
+      });
+      if (activeChatRequestVersion === request.requestVersion) {
+        activeChatRequestVersion = null;
+      }
+      if (!accepted) {
+        return;
+      }
+
       logTelemetry("chat_stream_completed", {
         providerId,
         conversationId: request.conversationId,
@@ -693,10 +1111,17 @@ app.whenReady().then(async () => {
         durationMs: Date.now() - startedAt,
         emotion: result.emotion
       });
-      event.sender.send("chat:stream-done", result);
+      event.sender.send("chat:stream-done", { ...result, requestVersion: request.requestVersion });
     }).catch((error: unknown) => {
       const errorType = getChatErrorType(error);
       const eventType = errorType === "aborted" ? "chat_stream_aborted" : "chat_stream_failed";
+      const accepted = transitionPetRole({
+        type: errorType === "aborted" ? "request:cancelled" : "request:failed",
+        requestVersion: request.requestVersion
+      });
+      if (activeChatRequestVersion === request.requestVersion) {
+        activeChatRequestVersion = null;
+      }
 
       logTelemetry(eventType, {
         providerId,
@@ -707,12 +1132,17 @@ app.whenReady().then(async () => {
         errorType
       });
       event.sender.send("chat:stream-error", {
+        requestVersion: request.requestVersion,
         message: getChatErrorMessage(errorType),
         errorType
       });
 
       if (errorType !== "aborted" && errorType !== "busy") {
         console.warn("[chat] stream failed", { errorType });
+      }
+
+      if (accepted && errorType === "aborted") {
+        settleInterruptedRole();
       }
     });
   });
@@ -722,7 +1152,11 @@ app.whenReady().then(async () => {
       return;
     }
 
-    chatEngine.abortActiveStream();
+    if (chatEngine.abortActiveStream() && activeChatRequestVersion !== null) {
+      transitionPetRole({ type: "request:cancelled", requestVersion: activeChatRequestVersion });
+      activeChatRequestVersion = null;
+      settleInterruptedRole();
+    }
   });
 
   ipcMain.handle("config:get-provider", (event) => {
@@ -731,6 +1165,106 @@ app.whenReady().then(async () => {
     }
 
     return getCurrentProviderConfig();
+  });
+
+  ipcMain.handle("history:list", (event) => {
+    if (!isChatSender(event) || !historyStore) {
+      throw new Error("Unauthorized history request");
+    }
+
+    return historyStore.listConversations();
+  });
+
+  ipcMain.handle("history:get", (event, id: unknown) => {
+    if (!isChatSender(event) || !historyStore || !isHistoryId(id)) {
+      throw new Error("Invalid history request");
+    }
+
+    return historyStore.getConversation(id);
+  });
+
+  ipcMain.handle("history:delete", (event, id: unknown) => {
+    if (!isChatSender(event) || !historyStore || !isHistoryId(id)) {
+      return false;
+    }
+
+    return historyStore.deleteConversation(id);
+  });
+
+  ipcMain.handle("history:clear", (event) => {
+    if (!isChatSender(event) || !historyStore) {
+      throw new Error("Unauthorized history request");
+    }
+
+    historyStore.clearConversations();
+  });
+
+  ipcMain.handle("memory:get-settings", (event) => {
+    if (!isChatSender(event) || !memoryStore) {
+      throw new Error("Unauthorized memory request");
+    }
+
+    return memoryStore.getSettings();
+  });
+
+  ipcMain.handle("memory:set-enabled", (event, enabled: unknown) => {
+    if (!isChatSender(event) || !memoryStore || typeof enabled !== "boolean") {
+      throw new Error("Invalid memory request");
+    }
+
+    return memoryStore.setEnabled(enabled);
+  });
+
+  ipcMain.handle("memory:list", (event) => {
+    if (!isChatSender(event) || !memoryStore) {
+      throw new Error("Unauthorized memory request");
+    }
+
+    return memoryStore.listCards();
+  });
+
+  ipcMain.handle("memory:get", (event, id: unknown) => {
+    if (!isChatSender(event) || !memoryStore || !isMemoryId(id)) {
+      throw new Error("Invalid memory request");
+    }
+
+    return memoryStore.getCard(id);
+  });
+
+  ipcMain.handle("memory:create", (event, draft: unknown) => {
+    const parsedDraft = parseMemoryCardDraft(draft);
+
+    if (!isChatSender(event) || !memoryStore || !parsedDraft) {
+      throw new Error("Invalid memory request");
+    }
+
+    return memoryStore.createCard(parsedDraft);
+  });
+
+  ipcMain.handle("memory:update", (event, id: unknown, update: unknown) => {
+    const parsedUpdate: MemoryCardUpdate | null = parseMemoryCardUpdate(update);
+
+    if (!isChatSender(event) || !memoryStore || !isMemoryId(id) || !parsedUpdate) {
+      throw new Error("Invalid memory request");
+    }
+
+    return memoryStore.updateCard(id, parsedUpdate);
+  });
+
+  ipcMain.handle("memory:delete", (event, id: unknown) => {
+    if (!isChatSender(event) || !memoryStore || !isMemoryId(id)) {
+      return false;
+    }
+
+    return memoryStore.deleteCard(id);
+  });
+
+  ipcMain.handle("memory:clear", (event) => {
+    if (!isChatSender(event) || !memoryStore) {
+      throw new Error("Unauthorized memory request");
+    }
+
+    memoryStore.clearCards();
   });
 
   ipcMain.handle("config:get-provider-status", (event) => {
@@ -775,6 +1309,92 @@ app.whenReady().then(async () => {
 
     return secureKeyStore.deleteApiKey(request.apiKeyRef);
   });
+
+  ipcMain.handle("pet-presentation:get", (event) => {
+    if (!isChatSender(event)) {
+      throw new Error("Unauthorized pet presentation request");
+    }
+
+    return getCurrentPetPresentationPreferences();
+  });
+
+  ipcMain.handle("pet-presentation:set-scale", (event, petScale: unknown) => {
+    const normalizedScale = normalizePetScale(petScale);
+
+    if (!isChatSender(event) || normalizedScale === null || !petPresentationStore) {
+      throw new Error("Invalid pet presentation request");
+    }
+
+    currentPetPresentationPreferences = {
+      ...currentPetPresentationPreferences,
+      petScale: normalizedScale
+    };
+    const preferences = petPresentationPersistence?.saveNow(currentPetPresentationPreferences)
+      ?? petPresentationStore.savePreferences(currentPetPresentationPreferences);
+
+    if (petWindow && !petWindow.isDestroyed()) {
+      applyPetPresentationPreferences(petWindow, preferences);
+    }
+
+    return preferences;
+  });
+
+  ipcMain.handle("pet-presentation:set-accessory", (event, presetId: unknown) => {
+    if (!isChatSender(event) || !isPetAccessoryPresetId(presetId) || !petPresentationStore) {
+      throw new Error("Invalid pet accessory preset request");
+    }
+
+    currentPetPresentationPreferences = {
+      ...currentPetPresentationPreferences,
+      accessoryPresetId: presetId
+    };
+    const preferences = petPresentationPersistence?.saveNow(currentPetPresentationPreferences)
+      ?? petPresentationStore.savePreferences(currentPetPresentationPreferences);
+    currentPetPresentationIntent = withCurrentAccessoryPreset(currentPetPresentationIntent);
+    publishPetPresentation(currentPetPresentationIntent);
+
+    return preferences;
+  });
+
+  ipcMain.handle("pet-lock:get", (event) => {
+    if (!isChatSender(event)) {
+      return { isLocked: isPetLocked };
+    }
+
+    return { isLocked: isPetLocked };
+  });
+
+  ipcMain.handle("pet-lock:set", (event, value: unknown) => {
+    if (!isChatSender(event) || typeof value !== "boolean") {
+      return { isLocked: isPetLocked };
+    }
+
+    return setPetLocked(value, "chat_pet_lock_toggle");
+  });
+
+  ipcMain.handle("shortcuts:get", (event) => {
+    if (!isChatSender(event)) {
+      throw new Error("Unauthorized shortcut request");
+    }
+
+    return shortcutRegistry?.getShortcutViews() ?? [];
+  });
+
+  ipcMain.handle("shortcuts:update", (event, actionId: unknown, accelerator: unknown) => {
+    if (!isChatSender(event) || !shortcutRegistry) {
+      throw new Error("Invalid shortcut update request");
+    }
+
+    return shortcutRegistry.updateShortcut(actionId, accelerator);
+  });
+
+  ipcMain.handle("shortcuts:reset", (event, actionId: unknown) => {
+    if (!isChatSender(event) || !shortcutRegistry) {
+      throw new Error("Invalid shortcut reset request");
+    }
+
+    return shortcutRegistry.resetShortcut(actionId);
+  });
 });
 
 app.on("window-all-closed", () => {
@@ -784,11 +1404,12 @@ app.on("window-all-closed", () => {
 });
 
 app.on("will-quit", () => {
+  petPresentationPersistence?.flush();
+  shortcutRegistry?.unregisterAll();
+  shortcutRegistry = null;
   globalShortcut.unregisterAll();
 });
 
 app.on("activate", () => {
-  if (!petWindow || petWindow.isDestroyed()) {
-    rebuildPetWindow();
-  }
+  ensurePetWindow("activate");
 });

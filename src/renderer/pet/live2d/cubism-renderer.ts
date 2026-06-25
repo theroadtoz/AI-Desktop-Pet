@@ -1,7 +1,8 @@
 import { CUBISM_SHADER_BASE_URL } from "./cubism-assets";
 import { calculateCubismFitLayout, calculateCubismModelBounds, getProjectionViewSize } from "./cubism-layout";
+import { getCubismRenderBudget, type CubismRenderMode } from "./cubism-render-budget";
 import { CubismMatrix44 } from "./vendor/framework/math/cubismmatrix44";
-import type { LoadedLive2DModel, Live2DFrameSample, Live2DRenderer } from "./types";
+import type { Live2DUpdateSample, LoadedLive2DModel, Live2DFrameSample, Live2DRenderer } from "./types";
 
 function resizeCanvas(canvas: HTMLCanvasElement): void {
   const ratio = window.devicePixelRatio || 1;
@@ -59,19 +60,78 @@ function updateModelMatrix(model: LoadedLive2DModel, canvas: HTMLCanvasElement, 
   }
 }
 
+export type Live2DPerformanceSample = {
+  mode: CubismRenderMode;
+  targetFramesPerSecond: number;
+  rafCallbacks: number;
+  renderedFrames: number;
+  skippedFrames: number;
+  live2DUpdates: number;
+  physicsUpdates: number;
+  breathUpdates: number;
+  rafFramesPerSecond: number;
+  renderedFramesPerSecond: number;
+  live2DUpdatesPerSecond: number;
+};
+
 export function createLive2DRenderer(
   canvas: HTMLCanvasElement,
   gl: WebGL2RenderingContext,
   model: LoadedLive2DModel,
-  onFirstFrameSample?: (sample: Live2DFrameSample) => void
+  onFirstFrameSample?: (sample: Live2DFrameSample) => void,
+  onPerformanceSample?: (sample: Live2DPerformanceSample) => void
 ): Live2DRenderer {
   let animationFrameId = 0;
   let lastFrameTime = performance.now();
+  let lastRenderTime = 0;
+  let interactionBoostUntilMs = performance.now() + 2_000;
+  let isVisible = true;
   let disposed = false;
   let didSampleFirstFrame = false;
   let lastCanvasWidth = 0;
   let lastCanvasHeight = 0;
   let didLogLayout = false;
+  let currentMode: CubismRenderMode = "active";
+  let sampleWindowStartMs = performance.now();
+  let rafCallbacks = 0;
+  let renderedFrames = 0;
+  let skippedFrames = 0;
+  let live2DUpdates = 0;
+  let physicsUpdates = 0;
+  let breathUpdates = 0;
+
+  const resetPerformanceCounters = (nowMs: number): void => {
+    sampleWindowStartMs = nowMs;
+    rafCallbacks = 0;
+    renderedFrames = 0;
+    skippedFrames = 0;
+    live2DUpdates = 0;
+    physicsUpdates = 0;
+    breathUpdates = 0;
+  };
+
+  const maybeReportPerformanceSample = (nowMs: number, targetFramesPerSecond: number): void => {
+    if (!onPerformanceSample || nowMs - sampleWindowStartMs < 5_000) {
+      return;
+    }
+
+    const durationSeconds = (nowMs - sampleWindowStartMs) / 1000;
+
+    onPerformanceSample({
+      mode: currentMode,
+      targetFramesPerSecond,
+      rafCallbacks,
+      renderedFrames,
+      skippedFrames,
+      live2DUpdates,
+      physicsUpdates,
+      breathUpdates,
+      rafFramesPerSecond: Math.round((rafCallbacks / durationSeconds) * 10) / 10,
+      renderedFramesPerSecond: Math.round((renderedFrames / durationSeconds) * 10) / 10,
+      live2DUpdatesPerSecond: Math.round((live2DUpdates / durationSeconds) * 10) / 10
+    });
+    resetPerformanceCounters(nowMs);
+  };
 
   const syncCanvasLayout = (): void => {
     resizeCanvas(canvas);
@@ -91,16 +151,38 @@ export function createLive2DRenderer(
       return;
     }
 
+    rafCallbacks += 1;
+
+    const budget = getCubismRenderBudget({
+      nowMs: frameTime,
+      lastRenderMs: lastRenderTime,
+      isVisible,
+      interactionBoostUntilMs
+    });
+    currentMode = budget.mode;
+
+    if (!budget.shouldRender) {
+      skippedFrames += 1;
+      maybeReportPerformanceSample(frameTime, budget.targetFramesPerSecond);
+      animationFrameId = window.requestAnimationFrame(renderFrame);
+      return;
+    }
+
     syncCanvasLayout();
 
     const deltaSeconds = Math.min((frameTime - lastFrameTime) / 1000, 1 / 15);
     lastFrameTime = frameTime;
+    lastRenderTime = frameTime;
 
     gl.viewport(0, 0, canvas.width, canvas.height);
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
 
-    model.update(deltaSeconds);
+    const updateSample: Live2DUpdateSample = model.update(deltaSeconds);
+    live2DUpdates += updateSample.live2DUpdates;
+    physicsUpdates += updateSample.physicsUpdates;
+    breathUpdates += updateSample.breathUpdates;
+    renderedFrames += 1;
     model.userModel.getRenderer().setRenderState(null as unknown as WebGLFramebuffer, [0, 0, canvas.width, canvas.height]);
     model.userModel.getRenderer().drawModel(CUBISM_SHADER_BASE_URL);
 
@@ -109,6 +191,7 @@ export function createLive2DRenderer(
       onFirstFrameSample(sampleFramePixels(gl, canvas.width, canvas.height));
     }
 
+    maybeReportPerformanceSample(frameTime, budget.targetFramesPerSecond);
     animationFrameId = window.requestAnimationFrame(renderFrame);
   };
 
@@ -116,6 +199,8 @@ export function createLive2DRenderer(
     start(): void {
       if (animationFrameId === 0) {
         lastFrameTime = performance.now();
+        lastRenderTime = 0;
+        resetPerformanceCounters(lastFrameTime);
         syncCanvasLayout();
         animationFrameId = window.requestAnimationFrame(renderFrame);
       }
@@ -127,6 +212,16 @@ export function createLive2DRenderer(
       }
 
       syncCanvasLayout();
+      this.boostInteraction();
+    },
+    boostInteraction(durationMs = 2_000): void {
+      interactionBoostUntilMs = Math.max(interactionBoostUntilMs, performance.now() + durationMs);
+    },
+    setVisible(nextIsVisible: boolean): void {
+      isVisible = nextIsVisible;
+      if (nextIsVisible) {
+        this.boostInteraction();
+      }
     },
     stop(): void {
       if (animationFrameId !== 0) {

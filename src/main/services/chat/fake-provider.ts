@@ -31,10 +31,10 @@ export function createFakeChatProvider(): ChatProvider {
 }
 
 function createFakeReply(messages: ChatMessage[]): ChatProviderResult {
-  const emotion = classifyEmotion({ latestUserMessage: getLatestUserMessage(messages) });
+  const classification = classifyEmotion({ latestUserMessage: getLatestUserMessage(messages) });
   return {
-    text: REPLIES[emotion],
-    emotion
+    text: REPLIES[classification.emotion],
+    ...classification
   };
 }
 

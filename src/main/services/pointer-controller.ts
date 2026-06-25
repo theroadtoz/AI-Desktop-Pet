@@ -11,9 +11,12 @@ const HIT_RECTS = [
 
 export type PointerController = {
   setPointerHit(isHit: boolean): void;
+  setLocked(isLocked: boolean): void;
+  isLocked(): boolean;
   startDrag(): void;
   moveDrag(delta: PetDragDelta): void;
   endDrag(): void;
+  isDragging(): boolean;
   isIgnoringMouseEvents(): boolean;
   dispose(): void;
 };
@@ -21,7 +24,9 @@ export type PointerController = {
 export function createPointerController(window: BrowserWindow): PointerController {
   let isPointerHit = false;
   let isDragging = false;
+  let isLocked = false;
   let isIgnoringMouseEvents = true;
+  let dragBounds: Electron.Rectangle | null = null;
   let restoreTimer: NodeJS.Timeout | null = null;
   let pollTimer: NodeJS.Timeout | null = null;
 
@@ -75,7 +80,29 @@ export function createPointerController(window: BrowserWindow): PointerControlle
     ));
   }
 
+  function clampBoundsToWorkArea(bounds: Electron.Rectangle): Electron.Rectangle {
+    const workArea = screen.getDisplayMatching(bounds).workArea;
+    const maximumX = Math.max(workArea.x, workArea.x + workArea.width - bounds.width);
+    const maximumY = Math.max(workArea.y, workArea.y + workArea.height - bounds.height);
+
+    return {
+      ...bounds,
+      x: Math.min(Math.max(bounds.x, workArea.x), maximumX),
+      y: Math.min(Math.max(bounds.y, workArea.y), maximumY)
+    };
+  }
+
   function setPointerHit(nextIsHit: boolean): void {
+    if (isLocked) {
+      setPassThrough();
+      return;
+    }
+
+    if (isDragging) {
+      setInteractive();
+      return;
+    }
+
     isPointerHit = nextIsHit;
 
     if (isPointerHit || isDragging) {
@@ -87,6 +114,10 @@ export function createPointerController(window: BrowserWindow): PointerControlle
   }
 
   pollTimer = setInterval(() => {
+    if (isDragging) {
+      return;
+    }
+
     const nextIsHit = isCursorInHitRect();
 
     if (nextIsHit !== isPointerHit) {
@@ -96,28 +127,68 @@ export function createPointerController(window: BrowserWindow): PointerControlle
 
   return {
     setPointerHit,
-    startDrag() {
-      isDragging = true;
-      setInteractive();
-    },
-    moveDrag(delta: PetDragDelta) {
-      if (!isDragging || window.isDestroyed()) {
+    setLocked(nextIsLocked: boolean) {
+      isLocked = nextIsLocked;
+
+      if (isLocked) {
+        isDragging = false;
+        clearRestoreTimer();
+        setPassThrough();
         return;
       }
 
-      const position = window.getPosition();
-      const x = position[0] ?? 0;
-      const y = position[1] ?? 0;
-      window.setPosition(
-        Math.round(x + delta.deltaX),
-        Math.round(y + delta.deltaY)
-      );
+      if (isPointerHit) {
+        setInteractive();
+        return;
+      }
+
+      setPassThrough();
+    },
+    isLocked() {
+      return isLocked;
+    },
+    startDrag() {
+      if (isLocked) {
+        setPassThrough();
+        return;
+      }
+
+      isDragging = true;
+      dragBounds = window.getBounds();
+      setInteractive();
+    },
+    moveDrag(delta: PetDragDelta) {
+      if (isLocked || !isDragging || window.isDestroyed()) {
+        return;
+      }
+
+      if (!Number.isFinite(delta.deltaX) || !Number.isFinite(delta.deltaY)) {
+        return;
+      }
+
+      const currentBounds = dragBounds ?? window.getBounds();
+      const nextBounds = clampBoundsToWorkArea({
+        ...currentBounds,
+        x: Math.round(currentBounds.x + delta.deltaX),
+        y: Math.round(currentBounds.y + delta.deltaY)
+      });
+      dragBounds = nextBounds;
+      window.setBounds(nextBounds);
     },
     isIgnoringMouseEvents() {
       return isIgnoringMouseEvents;
     },
+    isDragging() {
+      return isDragging;
+    },
     endDrag() {
       isDragging = false;
+      dragBounds = null;
+
+      if (isLocked) {
+        setPassThrough();
+        return;
+      }
 
       if (isPointerHit) {
         setInteractive();

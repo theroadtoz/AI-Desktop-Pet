@@ -5,6 +5,19 @@ import { createLive2DRenderer } from "./live2d/cubism-renderer";
 import { registerWebGLContextRecovery } from "./live2d/context-recovery";
 import type { LoadedLive2DModel, Live2DFrameSample, Live2DRenderer } from "./live2d/types";
 import type { EmotionTag } from "../../shared/emotion";
+import { getScreenDragDelta, shouldSuppressScaleWheelDuringDrag, type ScreenPoint } from "./drag-pointer";
+import { createScaleWheelNormalizer, hasScaleWheelModifiers } from "./scale-wheel";
+import {
+  createClickActionScheduler,
+  selectRandomPetInteractionAction,
+  type PetInteractionAction
+} from "./interaction-actions";
+import {
+  selectEmotionPresentation,
+  type EmotionPresentation
+} from "../../shared/emotion-presentation";
+import type { PetPresentationIntent } from "../../shared/pet-role-state";
+import { getPetAccessoryPreset, type PetAccessoryPresetId } from "../../shared/pet-accessory";
 
 const foundCanvas = document.querySelector<HTMLCanvasElement>("#pet-canvas");
 
@@ -211,42 +224,79 @@ function drawPlaceholderPet(): void {
 let live2DRenderer: Live2DRenderer | null = null;
 let live2DModel: LoadedLive2DModel | null = null;
 let isUsingLive2D = false;
-let pendingEmotion: EmotionTag | null = null;
-let lastEmotion: EmotionTag = "neutral";
+let pendingPresentation: EmotionPresentation | null = null;
+let lastPresentation: EmotionPresentation = { emotion: "neutral", intensity: "low", mode: "neutral" };
+let pendingAccessoryPresetId: PetAccessoryPresetId | null = null;
+let lastAccessoryPresetId: PetAccessoryPresetId = "none";
 let isStartingPetRenderer = false;
 let isRecoveringContext = false;
 let currentRenderStartMs = 0;
 let firstFrameMs: number | undefined;
 let recoveryCount = 0;
 let pendingLive2DFrameSample: ((sample: Live2DFrameSample) => void) | null = null;
+let activeInteractionAction: { action: PetInteractionAction; timeoutId: number } | null = null;
 
-function applyEmotionToModel(emotion: EmotionTag): void {
+async function applyBasePresentationToLoadedModel(
+  presentation: EmotionPresentation,
+  accessoryPresetId: PetAccessoryPresetId
+): Promise<void> {
   if (!live2DModel) {
-    pendingEmotion = emotion;
     return;
   }
 
-  pendingEmotion = null;
+  await live2DModel.setEmotionPresentation(presentation);
 
-  if (emotion === "neutral") {
-    live2DModel.clearExpression();
-    console.info("[pet-expression] neutral");
+  const accessoryPreset = getPetAccessoryPreset(accessoryPresetId);
+  if (accessoryPreset.expressionName) {
+    await live2DModel.setExpression(accessoryPreset.expressionName);
+  }
+}
+
+function applyBasePresentationToModel(presentation: EmotionPresentation, accessoryPresetId: PetAccessoryPresetId): void {
+  if (!live2DModel) {
+    pendingPresentation = presentation;
+    pendingAccessoryPresetId = accessoryPresetId;
     return;
   }
 
-  void live2DModel.setExpression(emotion).then(() => {
-    console.info(`[pet-expression] ${emotion}`);
-  });
+  pendingPresentation = null;
+  pendingAccessoryPresetId = null;
+
+  void applyBasePresentationToLoadedModel(presentation, accessoryPresetId);
 }
 
-function applyEmotion(emotion: EmotionTag): void {
-  lastEmotion = emotion;
-  applyEmotionToModel(emotion);
+function applyBasePresentation(presentation: EmotionPresentation, accessoryPresetId: PetAccessoryPresetId): void {
+  lastPresentation = presentation;
+  lastAccessoryPresetId = accessoryPresetId;
+  applyBasePresentationToModel(presentation, accessoryPresetId);
 }
 
-const removeApplyEmotionListener = window.petApi?.onApplyEmotion((emotion) => {
-  applyEmotion(emotion);
+function applyPresentationIntent(intent: PetPresentationIntent): void {
+  const expressionAllowed = intent.expression.mode === "emphasis"
+    ? intent.allowEmphasisExpression
+    : intent.expression.mode === "micro"
+      ? intent.allowMicroExpression
+      : true;
+
+  canvas.dataset.roleState = intent.state;
+  canvas.dataset.workStatus = intent.workStatus;
+  lastAccessoryPresetId = intent.accessoryPresetId;
+
+  if (expressionAllowed) {
+    lastPresentation = intent.expression;
+  }
+
+  if (!activeInteractionAction) {
+    applyBasePresentationToModel(lastPresentation, lastAccessoryPresetId);
+  }
+
+  live2DRenderer?.boostInteraction();
+}
+
+const removePresentationIntentListener = window.petApi?.onPresentationIntent((intent) => {
+  applyPresentationIntent(intent);
 }) ?? null;
+window.petApi?.presentationReady();
 
 function drawFallbackPet(): void {
   isUsingLive2D = false;
@@ -324,14 +374,30 @@ async function startPetRenderer(): Promise<void> {
         recoveryCount,
         ...sample
       });
+    }, (sample) => {
+      window.petApi?.reportTelemetry("pet_performance_sample", {
+        mode: sample.mode,
+        targetFramesPerSecond: sample.targetFramesPerSecond,
+        rafCallbacks: sample.rafCallbacks,
+        renderedFrames: sample.renderedFrames,
+        skippedFrames: sample.skippedFrames,
+        live2DUpdates: sample.live2DUpdates,
+        physicsUpdates: sample.physicsUpdates,
+        breathUpdates: sample.breathUpdates,
+        rafFramesPerSecond: sample.rafFramesPerSecond,
+        renderedFramesPerSecond: sample.renderedFramesPerSecond,
+        live2DUpdatesPerSecond: sample.live2DUpdatesPerSecond
+      });
     });
     isUsingLive2D = true;
     live2DModel.setLookTarget(0, 0);
     live2DRenderer.start();
-    if (pendingEmotion) {
-      applyEmotionToModel(pendingEmotion);
-    } else if (lastEmotion !== "neutral") {
-      applyEmotionToModel(lastEmotion);
+    if (pendingPresentation) {
+      applyBasePresentationToModel(pendingPresentation, pendingAccessoryPresetId ?? lastAccessoryPresetId);
+    } else if (lastPresentation.mode !== "neutral") {
+      applyBasePresentationToModel(lastPresentation, lastAccessoryPresetId);
+    } else if (lastAccessoryPresetId !== "none") {
+      applyBasePresentationToModel(lastPresentation, lastAccessoryPresetId);
     }
     reportRenderHealth("live2d");
   } catch (error: unknown) {
@@ -372,7 +438,8 @@ function handleWebGLContextLost(): void {
   live2DRenderer = null;
   live2DModel = null;
   isUsingLive2D = false;
-  pendingEmotion = lastEmotion;
+  pendingPresentation = lastPresentation;
+  pendingAccessoryPresetId = lastAccessoryPresetId;
   invalidatePlaceholderResources();
   endDrag();
   reportRenderHealth(renderer, "WebGL context lost");
@@ -456,6 +523,7 @@ window.addEventListener("resize", () => {
   resizeCanvas();
 
   if (isUsingLive2D) {
+    live2DRenderer?.boostInteraction();
     live2DRenderer?.resize(canvas.width, canvas.height);
   }
 
@@ -464,10 +532,15 @@ window.addEventListener("resize", () => {
   }
 });
 
+document.addEventListener("visibilitychange", () => {
+  live2DRenderer?.setVisible(!document.hidden);
+});
+
 window.addEventListener("beforeunload", () => {
   removeWebGLContextRecovery();
-  removeApplyEmotionListener?.();
+  removePresentationIntentListener?.();
   removeInjectWebGLContextLossListener?.();
+  petClickActionScheduler.cancel();
   live2DRenderer?.release();
   live2DRenderer = null;
   live2DModel = null;
@@ -519,10 +592,11 @@ const HIT_RECTS: readonly HitRect[] = [
 ];
 
 const DRAG_THRESHOLD_DIP = 4;
+const scaleWheelNormalizer = createScaleWheelNormalizer();
 
 let lastIsHit = false;
-let pointerDown: { pointerId: number; x: number; y: number } | null = null;
-let lastDragPoint: { x: number; y: number } | null = null;
+let pointerDown: { pointerId: number; x: number; y: number } & ScreenPoint | null = null;
+let lastDragPoint: ScreenPoint | null = null;
 let isDragging = false;
 
 function isPetHit(clientX: number, clientY: number): boolean {
@@ -538,6 +612,32 @@ function isPetHit(clientX: number, clientY: number): boolean {
   ));
 }
 
+canvas.addEventListener("wheel", (event) => {
+  if (shouldSuppressScaleWheelDuringDrag({ pointerDown: pointerDown !== null, isDragging })) {
+    scaleWheelNormalizer.reset();
+    return;
+  }
+
+  if (!hasScaleWheelModifiers(event) || !isPetHit(event.clientX, event.clientY)) {
+    scaleWheelNormalizer.reset();
+    return;
+  }
+
+  event.preventDefault();
+  event.stopPropagation();
+
+  const step = scaleWheelNormalizer.push({
+    deltaY: event.deltaY,
+    deltaMode: event.deltaMode,
+    viewportHeight: canvas.clientHeight,
+    timestamp: event.timeStamp
+  });
+
+  if (step !== 0) {
+    window.petApi?.adjustScale({ steps: step });
+  }
+}, { passive: false });
+
 function updatePointerHit(event: PointerEvent): boolean {
   const nextIsHit = isPetHit(event.clientX, event.clientY);
 
@@ -549,17 +649,74 @@ function updatePointerHit(event: PointerEvent): boolean {
   return nextIsHit;
 }
 
-function updateLookTarget(event: PointerEvent): void {
-  const rect = canvas.getBoundingClientRect();
-  const x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-  const y = -(((event.clientY - rect.top) / rect.height) * 2 - 1);
-
-  live2DModel?.setLookTarget(x, y);
+function trySetPointerCapture(pointerId: number): void {
+  try {
+    canvas.setPointerCapture(pointerId);
+  } catch {
+    // Synthetic pointer events used by UI acceptance do not always create an active pointer.
+  }
 }
+
+function tryReleasePointerCapture(pointerId: number): void {
+  try {
+    if (canvas.hasPointerCapture(pointerId)) {
+      canvas.releasePointerCapture(pointerId);
+    }
+  } catch {
+    // The pointer may already be gone after cancellation or synthetic input.
+  }
+}
+
+function finishInteractionAction(action: PetInteractionAction): void {
+  if (activeInteractionAction?.action !== action) {
+    return;
+  }
+
+  activeInteractionAction = null;
+  live2DModel?.restoreTemporaryPartOpacities();
+  live2DModel?.clearExpression();
+  live2DModel?.setLookTarget(0, 0);
+  live2DModel?.setLookPaused(false);
+  applyBasePresentationToModel(lastPresentation, lastAccessoryPresetId);
+}
+
+function playInteractionAction(action: PetInteractionAction): void {
+  if (activeInteractionAction) {
+    return;
+  }
+
+  live2DRenderer?.boostInteraction(action.durationMs + 250);
+  live2DModel?.setLookPaused(true);
+  live2DModel?.applyTemporaryPartOpacities(action.accessoryPartIds ?? [], 1);
+
+  if (action.expressionName) {
+    void live2DModel?.setExpression(action.expressionName);
+  } else {
+    applyBasePresentationToModel(action.presentation, lastAccessoryPresetId);
+  }
+
+  const timeoutId = window.setTimeout(() => {
+    finishInteractionAction(action);
+  }, action.durationMs);
+
+  activeInteractionAction = { action, timeoutId };
+}
+
+function triggerRandomInteractionAction(): void {
+  playInteractionAction(selectRandomPetInteractionAction());
+}
+
+const petClickActionScheduler = createClickActionScheduler({
+  delayMs: 220,
+  trigger: triggerRandomInteractionAction,
+  setTimeoutFn: window.setTimeout.bind(window),
+  clearTimeoutFn: window.clearTimeout.bind(window)
+});
 
 function endDrag(): void {
   if (isDragging) {
     window.petApi?.endDrag();
+    live2DModel?.endDragPhysics();
   }
 
   pointerDown = null;
@@ -569,8 +726,9 @@ function endDrag(): void {
 }
 
 canvas.addEventListener("pointermove", (event) => {
-  updateLookTarget(event);
-  updatePointerHit(event);
+  if (!isDragging) {
+    updatePointerHit(event);
+  }
 
   if (!pointerDown || pointerDown.pointerId !== event.pointerId) {
     return;
@@ -587,35 +745,56 @@ canvas.addEventListener("pointermove", (event) => {
     }
 
     isDragging = true;
+    live2DRenderer?.boostInteraction();
     live2DModel?.setLookPaused(true);
-    lastDragPoint = { x: event.screenX, y: event.screenY };
+    live2DModel?.startDragPhysics();
+    const nextDragPoint = { screenX: event.screenX, screenY: event.screenY };
+    const delta = getScreenDragDelta(pointerDown, nextDragPoint);
+    live2DModel?.sampleDragPhysics(delta.deltaX, delta.deltaY, event.timeStamp);
+    lastDragPoint = nextDragPoint;
     window.petApi?.startDrag();
+
+    if (delta.deltaX !== 0 || delta.deltaY !== 0) {
+      window.petApi?.moveDrag(delta);
+    }
     return;
   }
 
   if (!lastDragPoint) {
-    lastDragPoint = { x: event.screenX, y: event.screenY };
+    lastDragPoint = { screenX: event.screenX, screenY: event.screenY };
     return;
   }
 
-  const deltaX = event.screenX - lastDragPoint.x;
-  const deltaY = event.screenY - lastDragPoint.y;
-  lastDragPoint = { x: event.screenX, y: event.screenY };
+  const nextDragPoint = { screenX: event.screenX, screenY: event.screenY };
+  const delta = getScreenDragDelta(lastDragPoint, nextDragPoint);
+  lastDragPoint = nextDragPoint;
 
-  if (deltaX !== 0 || deltaY !== 0) {
-    window.petApi?.moveDrag({ deltaX, deltaY });
+  if (delta.deltaX !== 0 || delta.deltaY !== 0) {
+    live2DRenderer?.boostInteraction();
+    window.petApi?.moveDrag(delta);
+    live2DModel?.sampleDragPhysics(delta.deltaX, delta.deltaY, event.timeStamp);
   }
 });
 
 canvas.addEventListener("pointerdown", (event) => {
+  if (event.detail > 1) {
+    petClickActionScheduler.cancel();
+  }
+
   if (!updatePointerHit(event)) {
     return;
   }
 
-  pointerDown = { pointerId: event.pointerId, x: event.clientX, y: event.clientY };
+  pointerDown = {
+    pointerId: event.pointerId,
+    x: event.clientX,
+    y: event.clientY,
+    screenX: event.screenX,
+    screenY: event.screenY
+  };
   lastDragPoint = null;
   isDragging = false;
-  canvas.setPointerCapture(event.pointerId);
+  trySetPointerCapture(event.pointerId);
 });
 
 canvas.addEventListener("pointerup", (event) => {
@@ -624,22 +803,28 @@ canvas.addEventListener("pointerup", (event) => {
 
   if (pointerDown?.pointerId === event.pointerId) {
     endDrag();
-    if (canvas.hasPointerCapture(event.pointerId)) {
-      canvas.releasePointerCapture(event.pointerId);
-    }
+    tryReleasePointerCapture(event.pointerId);
   }
 
   if (isHit && !wasDragging) {
-    window.petApi?.openChat();
+    petClickActionScheduler.schedule();
   }
+});
+
+canvas.addEventListener("dblclick", (event) => {
+  if (!isPetHit(event.clientX, event.clientY)) {
+    return;
+  }
+
+  petClickActionScheduler.cancel();
+  live2DRenderer?.boostInteraction();
+  window.petApi?.openChat();
 });
 
 canvas.addEventListener("pointercancel", (event) => {
   if (pointerDown?.pointerId === event.pointerId) {
     endDrag();
-    if (canvas.hasPointerCapture(event.pointerId)) {
-      canvas.releasePointerCapture(event.pointerId);
-    }
+    tryReleasePointerCapture(event.pointerId);
   }
 });
 
@@ -657,16 +842,15 @@ window.addEventListener("keydown", (event) => {
     return;
   }
 
-  if (import.meta.env.DEV && event.key.toLowerCase() === "l") {
-    injectWebGLContextLoss();
-    return;
-  }
-
   const emotion = EXPRESSION_SHORTCUTS[event.key];
 
   if (!emotion || !live2DModel) {
     return;
   }
 
-  applyEmotion(emotion);
+  applyBasePresentation(selectEmotionPresentation({
+    emotion,
+    intensity: emotion === "neutral" ? "low" : "high"
+  }), lastAccessoryPresetId);
+  live2DRenderer?.boostInteraction();
 });
