@@ -588,6 +588,9 @@ function applyPetPresentationPreferences(window: BrowserWindow, preferences: Pet
   const scaledBounds = calculateScaledPetBounds(clampedCurrentBounds, preferences.petScale, targetWorkArea);
 
   window.setBounds(scaledBounds);
+  if (window === petWindow) {
+    pointerController?.syncWindowSize();
+  }
 }
 
 function getChatErrorMessage(errorType: ChatStreamErrorType): string {

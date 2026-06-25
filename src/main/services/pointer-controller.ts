@@ -12,6 +12,7 @@ const HIT_RECTS = [
 export type PointerController = {
   setPointerHit(isHit: boolean): void;
   setLocked(isLocked: boolean): void;
+  syncWindowSize(): void;
   isLocked(): boolean;
   startDrag(): void;
   moveDrag(delta: PetDragDelta): void;
@@ -27,6 +28,10 @@ export function createPointerController(window: BrowserWindow): PointerControlle
   let isLocked = false;
   let isIgnoringMouseEvents = true;
   let dragBounds: Electron.Rectangle | null = null;
+  let stableWindowSize = {
+    width: window.getBounds().width,
+    height: window.getBounds().height
+  };
   let restoreTimer: NodeJS.Timeout | null = null;
   let pollTimer: NodeJS.Timeout | null = null;
 
@@ -127,6 +132,17 @@ export function createPointerController(window: BrowserWindow): PointerControlle
 
   return {
     setPointerHit,
+    syncWindowSize() {
+      if (window.isDestroyed()) {
+        return;
+      }
+
+      const bounds = window.getBounds();
+      stableWindowSize = {
+        width: bounds.width,
+        height: bounds.height
+      };
+    },
     setLocked(nextIsLocked: boolean) {
       isLocked = nextIsLocked;
 
@@ -154,7 +170,12 @@ export function createPointerController(window: BrowserWindow): PointerControlle
       }
 
       isDragging = true;
-      dragBounds = window.getBounds();
+      const bounds = window.getBounds();
+      dragBounds = {
+        ...bounds,
+        width: stableWindowSize.width,
+        height: stableWindowSize.height
+      };
       setInteractive();
     },
     moveDrag(delta: PetDragDelta) {
@@ -169,6 +190,8 @@ export function createPointerController(window: BrowserWindow): PointerControlle
       const currentBounds = dragBounds ?? window.getBounds();
       const nextBounds = clampBoundsToWorkArea({
         ...currentBounds,
+        width: stableWindowSize.width,
+        height: stableWindowSize.height,
         x: Math.round(currentBounds.x + delta.deltaX),
         y: Math.round(currentBounds.y + delta.deltaY)
       });
