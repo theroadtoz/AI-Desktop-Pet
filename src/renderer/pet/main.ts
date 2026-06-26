@@ -406,7 +406,10 @@ async function startPetRenderer(): Promise<void> {
         breathUpdates: sample.breathUpdates,
         rafFramesPerSecond: sample.rafFramesPerSecond,
         renderedFramesPerSecond: sample.renderedFramesPerSecond,
-        live2DUpdatesPerSecond: sample.live2DUpdatesPerSecond
+        skippedFramesPerSecond: sample.skippedFramesPerSecond,
+        live2DUpdatesPerSecond: sample.live2DUpdatesPerSecond,
+        physicsUpdatesPerSecond: sample.physicsUpdatesPerSecond,
+        breathUpdatesPerSecond: sample.breathUpdatesPerSecond
       });
     });
     isUsingLive2D = true;

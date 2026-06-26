@@ -71,7 +71,10 @@ export type Live2DPerformanceSample = {
   breathUpdates: number;
   rafFramesPerSecond: number;
   renderedFramesPerSecond: number;
+  skippedFramesPerSecond: number;
   live2DUpdatesPerSecond: number;
+  physicsUpdatesPerSecond: number;
+  breathUpdatesPerSecond: number;
 };
 
 export function createLive2DRenderer(
@@ -128,7 +131,10 @@ export function createLive2DRenderer(
       breathUpdates,
       rafFramesPerSecond: Math.round((rafCallbacks / durationSeconds) * 10) / 10,
       renderedFramesPerSecond: Math.round((renderedFrames / durationSeconds) * 10) / 10,
-      live2DUpdatesPerSecond: Math.round((live2DUpdates / durationSeconds) * 10) / 10
+      skippedFramesPerSecond: Math.round((skippedFrames / durationSeconds) * 10) / 10,
+      live2DUpdatesPerSecond: Math.round((live2DUpdates / durationSeconds) * 10) / 10,
+      physicsUpdatesPerSecond: Math.round((physicsUpdates / durationSeconds) * 10) / 10,
+      breathUpdatesPerSecond: Math.round((breathUpdates / durationSeconds) * 10) / 10
     });
     resetPerformanceCounters(nowMs);
   };
