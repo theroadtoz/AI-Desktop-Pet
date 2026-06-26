@@ -1,6 +1,7 @@
 import "./styles.css";
 import type { ChatMessage, ChatRole } from "../../shared/chat";
 import type { Conversation, ConversationSummary } from "../../shared/chat-history";
+import { DIALOGUE_MODE_LABELS, type DialogueModeId, type DialogueModeView } from "../../shared/dialogue-style";
 import type { MemoryCard } from "../../shared/chat-memory";
 import type { ProviderConfig, ProviderStatus } from "../../shared/provider-config";
 import {
@@ -52,6 +53,7 @@ const chatTab = document.querySelector<HTMLButtonElement>("#chat-tab");
 const historyTab = document.querySelector<HTMLButtonElement>("#history-tab");
 const memoryTab = document.querySelector<HTMLButtonElement>("#memory-tab");
 const chatPage = document.querySelector<HTMLElement>("#chat-page");
+const dialogueModeControls = document.querySelector<HTMLElement>("#dialogue-mode-controls");
 const historyPage = document.querySelector<HTMLElement>("#history-page");
 const memoryPage = document.querySelector<HTMLElement>("#memory-page");
 const chatSessionNote = document.querySelector<HTMLElement>("#chat-session-note");
@@ -86,7 +88,7 @@ if (
   !deleteKeyConfirmation || !cancelDeleteApiKeyButton || !confirmDeleteApiKeyButton || !settingsFeedback ||
   !petScaleInput || !petScaleValue || !petAccessorySelect || !petAccessoryStatus || !savePetScaleButton ||
   !savePetAccessoryButton || !petLockStatus || !togglePetLockButton || !shortcutList || !shortcutStatus ||
-  !chatTab || !historyTab || !memoryTab || !chatPage || !historyPage ||
+  !chatTab || !historyTab || !memoryTab || !chatPage || !dialogueModeControls || !historyPage ||
   !memoryPage || !chatSessionNote || !memoryDraftPanel || !memoryDraftTitle || !memoryDraftContent || !memoryDraftTags ||
   !cancelMemoryDraftButton || !saveMemoryDraftButton || !newConversationButton || !clearHistoryButton || !clearHistoryConfirmation ||
   !cancelClearHistoryButton || !confirmClearHistoryButton || !historyFeedback || !conversationList || !historyDetail ||
@@ -138,6 +140,7 @@ const chatTabAction = chatTab;
 const historyTabAction = historyTab;
 const memoryTabAction = memoryTab;
 const chatPageContainer = chatPage;
+const dialogueModeControlsElement = dialogueModeControls;
 const historyPageContainer = historyPage;
 const memoryPageContainer = memoryPage;
 const chatSessionNoteBox = chatSessionNote;
@@ -188,6 +191,8 @@ let memoryEnabled = false;
 let memoryDraftSourceMessage: ChatMessage | null = null;
 let isPetLocked = false;
 let shortcutViews: ShortcutPreferenceView[] = [];
+let dialogueModes: DialogueModeView[] = [];
+let currentDialogueModeId: DialogueModeId = "default";
 let recordingShortcutActionId: ShortcutActionId | null = null;
 let pendingWheelModifierRecordTimeout: number | null = null;
 
@@ -225,6 +230,62 @@ function setProviderStatus(status: ProviderStatus): void {
 function setPartnerStatus(message: string): void {
   partnerStatusBox.textContent = message;
   partnerStatusBox.dataset.state = "ready";
+}
+
+function setDialogueMode(modeId: DialogueModeId): void {
+  currentDialogueModeId = modeId;
+  const label = DIALOGUE_MODE_LABELS[modeId];
+  setPartnerStatus(`桌面伙伴 · ${label}${modeId === "default" ? "" : "模式"}`);
+
+  for (const button of dialogueModeControlsElement.querySelectorAll<HTMLButtonElement>(".mode-button")) {
+    const isActive = button.dataset.modeId === modeId;
+    button.classList.toggle("is-active", isActive);
+    button.setAttribute("aria-pressed", String(isActive));
+  }
+}
+
+function renderDialogueModes(modes: DialogueModeView[]): void {
+  dialogueModeControlsElement.replaceChildren();
+
+  for (const mode of modes) {
+    const button = document.createElement("button");
+    button.className = "button-light mode-button";
+    button.type = "button";
+    button.dataset.modeId = mode.id;
+    button.textContent = mode.label;
+    button.setAttribute("aria-pressed", String(mode.id === currentDialogueModeId));
+    button.addEventListener("click", () => {
+      void setDialogueModeFromUi(mode.id);
+    });
+    dialogueModeControlsElement.append(button);
+  }
+}
+
+async function refreshDialogueMode(): Promise<void> {
+  if (!window.dialogueModeApi) {
+    return;
+  }
+
+  dialogueModes = window.dialogueModeApi.listModes();
+  renderDialogueModes(dialogueModes);
+
+  try {
+    setDialogueMode(await window.dialogueModeApi.getMode());
+  } catch {
+    setDialogueMode("default");
+  }
+}
+
+async function setDialogueModeFromUi(modeId: DialogueModeId): Promise<void> {
+  if (!window.dialogueModeApi || isReplying || modeId === currentDialogueModeId) {
+    return;
+  }
+
+  try {
+    setDialogueMode(await window.dialogueModeApi.setMode(modeId));
+  } catch {
+    setChatSessionNote("无法切换对话模式，请稍后重试。");
+  }
 }
 
 function setMemorySessionStatus(count: number | null): void {
@@ -1192,6 +1253,10 @@ window.petPresentationApi?.onPetLockChanged((state) => {
   setPetLockState(state.isLocked);
 });
 
+window.dialogueModeApi?.onModeChanged((modeId) => {
+  setDialogueMode(modeId);
+});
+
 chatForm.addEventListener("submit", (event) => {
   event.preventDefault();
 
@@ -1590,8 +1655,9 @@ window.addEventListener("chat:focus-input", () => {
 });
 
 window.chatApi?.focusInput();
-setPartnerStatus("桌面伙伴 · 默认陪伴");
+setDialogueMode("default");
 setMemorySessionStatus(null);
+void refreshDialogueMode();
 void refreshProviderStatus();
 void refreshMemory();
 setPetScaleValue(DEFAULT_PET_PRESENTATION_PREFERENCES.petScale);

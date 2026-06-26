@@ -9,6 +9,7 @@ import type {
   ConfigApi,
   ConfigApiKeyRequest,
   ConfigSetApiKeyRequest,
+  DialogueModeApi,
   HistoryApi,
   MemoryApi,
   PetLockState,
@@ -17,12 +18,20 @@ import type {
 } from "../shared/ipc-contract";
 import type { Conversation, ConversationSummary, HistoryMessage } from "../shared/chat-history";
 import type { MemoryCard, MemoryCardDraft, MemoryCardUpdate } from "../shared/chat-memory";
+import type { DialogueModeId, DialogueModeView } from "../shared/dialogue-style";
 import type { ProviderConfig, ProviderStatus } from "../shared/provider-config";
 import type { PetPresentationPreferences } from "../shared/pet-presentation";
 import type { ShortcutActionId, ShortcutPreferenceView, ShortcutUpdateResult } from "../shared/shortcut-preferences";
 
 const petAccessoryPresetIds = ["none", "glasses"] as const;
 const shortcutActionIds = ["togglePetLock", "adjustPetScaleWithWheel"] as const;
+const dialogueModeIds = ["default", "work", "game", "reading"] as const;
+const dialogueModeViews: readonly DialogueModeView[] = [
+  { id: "default", label: "默认陪伴" },
+  { id: "work", label: "工作" },
+  { id: "game", label: "游戏" },
+  { id: "reading", label: "读书" }
+];
 const chatStreamErrorTypes = [
   "aborted",
   "busy",
@@ -68,6 +77,12 @@ function normalizePetScale(value: unknown): number | null {
 
 function isPetAccessoryPresetId(value: unknown): value is (typeof petAccessoryPresetIds)[number] {
   return typeof value === "string" && petAccessoryPresetIds.includes(value as (typeof petAccessoryPresetIds)[number]);
+}
+
+function parseDialogueModeId(value: unknown): DialogueModeId | null {
+  return typeof value === "string" && dialogueModeIds.includes(value as DialogueModeId)
+    ? value as DialogueModeId
+    : null;
 }
 
 function parsePetPresentationPreferences(value: unknown): PetPresentationPreferences | null {
@@ -877,6 +892,48 @@ const shortcutApi: ShortcutApi = {
   }
 };
 
+const dialogueModeApi: DialogueModeApi = {
+  listModes() {
+    return dialogueModeViews.map((mode) => ({ ...mode }));
+  },
+  async getMode() {
+    const modeId = parseDialogueModeId(await ipcRenderer.invoke("dialogueMode:get"));
+
+    if (!modeId) {
+      throw new Error("Invalid dialogue mode response");
+    }
+
+    return modeId;
+  },
+  async setMode(modeId) {
+    if (!dialogueModeIds.includes(modeId)) {
+      throw new Error("Invalid dialogue mode");
+    }
+
+    const nextModeId = parseDialogueModeId(await ipcRenderer.invoke("dialogueMode:set", modeId));
+
+    if (!nextModeId) {
+      throw new Error("Invalid dialogue mode response");
+    }
+
+    return nextModeId;
+  },
+  onModeChanged(handler) {
+    const listener = (_event: Electron.IpcRendererEvent, value: unknown): void => {
+      const modeId = parseDialogueModeId(value);
+
+      if (modeId) {
+        handler(modeId);
+      }
+    };
+
+    ipcRenderer.on("dialogueMode:changed", listener);
+    return () => {
+      ipcRenderer.removeListener("dialogueMode:changed", listener);
+    };
+  }
+};
+
 ipcRenderer.on("chat:focus-input", () => {
   window.dispatchEvent(new CustomEvent("chat:focus-input"));
 });
@@ -887,3 +944,4 @@ contextBridge.exposeInMainWorld("historyApi", historyApi);
 contextBridge.exposeInMainWorld("memoryApi", memoryApi);
 contextBridge.exposeInMainWorld("petPresentationApi", petPresentationApi);
 contextBridge.exposeInMainWorld("shortcutApi", shortcutApi);
+contextBridge.exposeInMainWorld("dialogueModeApi", dialogueModeApi);

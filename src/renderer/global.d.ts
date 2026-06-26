@@ -1,4 +1,4 @@
-import type { ChatApi, ConfigApi, HistoryApi, MemoryApi, PetApi, PetPresentationApi, ShortcutApi } from "../shared/ipc-contract";
+import type { ChatApi, ConfigApi, DialogueModeApi, HistoryApi, MemoryApi, PetApi, PetPresentationApi, ShortcutApi } from "../shared/ipc-contract";
 
 declare global {
   interface Window {
@@ -9,6 +9,7 @@ declare global {
     memoryApi?: MemoryApi;
     petPresentationApi?: PetPresentationApi;
     shortcutApi?: ShortcutApi;
+    dialogueModeApi?: DialogueModeApi;
   }
 }
 

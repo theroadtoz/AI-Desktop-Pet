@@ -3,6 +3,7 @@ import type { ChatMessage } from "./chat";
 import type { MemoryCard, MemoryCardDraft, MemoryCardUpdate, MemorySettings } from "./chat-memory";
 import type { Conversation, ConversationSummary } from "./chat-history";
 import type { ChatProviderResult, ChatRequest, ChatStreamDelta } from "./chat-provider";
+import type { DialogueModeId, DialogueModeView } from "./dialogue-style";
 import type { ProviderConfig, ProviderStatus } from "./provider-config";
 import type { PetPresentationPreferences, PetScaleAdjustmentIntent } from "./pet-presentation";
 import type { PetAccessoryPresetId } from "./pet-accessory";
@@ -24,7 +25,8 @@ export type PetWindowCommand =
 
 export type ChatWindowCommand =
   | { type: "chat:focus-input" }
-  | { type: "pet-lock:changed"; payload: PetLockState };
+  | { type: "pet-lock:changed"; payload: PetLockState }
+  | { type: "dialogueMode:changed"; payload: DialogueModeId };
 
 export type ChatSendRequest = ChatRequest;
 
@@ -153,6 +155,13 @@ export type MemoryApi = {
   updateCard(id: string, update: MemoryCardUpdate): Promise<MemoryCard | null>;
   deleteCard(id: string): Promise<boolean>;
   clearCards(): Promise<void>;
+};
+
+export type DialogueModeApi = {
+  listModes(): DialogueModeView[];
+  getMode(): Promise<DialogueModeId>;
+  setMode(modeId: DialogueModeId): Promise<DialogueModeId>;
+  onModeChanged(handler: (modeId: DialogueModeId) => void): () => void;
 };
 
 export type PetPresentationApi = {

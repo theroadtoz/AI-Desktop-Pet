@@ -1,5 +1,6 @@
 import type { ChatMessage } from "../../../shared/chat";
 import type { ChatProvider, ChatProviderResult } from "../../../shared/chat-provider";
+import { DEFAULT_DIALOGUE_MODE_ID, parseDialogueModeId, type DialogueModeId } from "../../../shared/dialogue-style";
 import type { EmotionTag } from "../../../shared/emotion";
 import { getLatestUserMessage } from "./chat-message-mapper";
 import { classifyEmotion } from "./emotion-classifier";
@@ -46,6 +47,13 @@ const REPLY_VARIANTS: Readonly<Record<EmotionTag, readonly string[]>> = {
   ]
 };
 
+const MODE_PREFIXES: Readonly<Record<DialogueModeId, readonly string[]>> = {
+  default: ["我听到了。", "嗯，我在。"],
+  work: ["先抓下一步。", "我们直接拆任务。"],
+  game: ["好，来点轻快的。", "可以，先轻松一下。"],
+  reading: ["慢慢看。", "我们安静地理一遍。"]
+};
+
 export function createFakeChatProvider(): ChatProvider {
   return {
     id: "fake",
@@ -63,14 +71,17 @@ export function createFakeChatProvider(): ChatProvider {
   };
 }
 
-function createFakeReply(request: { conversationId: string; messages: ChatMessage[] }): ChatProviderResult {
+function createFakeReply(request: { conversationId: string; messages: ChatMessage[]; dialogueStyleContext?: { modeId?: unknown } }): ChatProviderResult {
   const latestUserMessage = getLatestUserMessage(request.messages);
   const classification = classifyEmotion({ latestUserMessage });
   const variants = REPLY_VARIANTS[classification.emotion] ?? [REPLIES[classification.emotion]];
   const variantIndex = stableIndex(`${request.conversationId}:${latestUserMessage.length}`, variants.length);
+  const modeId = parseDialogueModeId(request.dialogueStyleContext?.modeId) ?? DEFAULT_DIALOGUE_MODE_ID;
+  const prefixes = MODE_PREFIXES[modeId];
+  const prefix = prefixes[stableIndex(`${modeId}:${latestUserMessage.length}`, prefixes.length)] ?? "";
 
   return {
-    text: variants[variantIndex] ?? REPLIES[classification.emotion],
+    text: `${prefix}${variants[variantIndex] ?? REPLIES[classification.emotion]}`,
     ...classification
   };
 }

@@ -113,6 +113,23 @@ body {
   gap: 12px;
 }
 
+.mode-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.mode-button {
+  padding: 7px 10px;
+  font-size: 13px;
+}
+
+.mode-button.is-active {
+  border-color: #c8d9bd;
+  background: #f4f8ef;
+  font-weight: 700;
+}
+
 .history-page {
   flex: 1;
   min-height: 0;

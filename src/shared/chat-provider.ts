@@ -1,5 +1,6 @@
 import type { ChatMessage } from "./chat";
 import type { MemoryInjection } from "./chat-memory";
+import type { DialogueStyleContext } from "./dialogue-style";
 import type { EmotionClassification } from "./emotion";
 import type { ProviderId } from "./provider-config";
 
@@ -10,6 +11,7 @@ export type ChatRequest = {
   conversationId: string;
   messages: ChatMessage[];
   memoryContext?: MemoryInjection;
+  dialogueStyleContext?: DialogueStyleContext;
 };
 
 export type ChatStreamDelta = {

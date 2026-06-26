@@ -24,6 +24,7 @@ import type {
 import { isChatMessage } from "../shared/ipc-contract";
 import { isHistoryId, type HistoryMessage } from "../shared/chat-history";
 import { isMemoryId, parseMemoryCardDraft, parseMemoryCardUpdate, type MemoryCardUpdate } from "../shared/chat-memory";
+import { DIALOGUE_MODE_VIEWS, isDialogueModeId, type DialogueModeId } from "../shared/dialogue-style";
 import { selectEmotionPresentation } from "../shared/emotion-presentation";
 import { isPetAccessoryPresetId } from "../shared/pet-accessory";
 import {
@@ -50,6 +51,7 @@ import { createHistoryStore, type HistoryStore } from "./services/chat/history-s
 import { createMemoryStore, type MemoryStore } from "./services/chat/memory-store";
 import { createChatProviderFromConfig } from "./services/chat/provider-factory";
 import { readEnvProviderConfig, type EnvProviderConfig } from "./services/config/env-config";
+import { createDialogueModeStore, type DialogueModeStore } from "./services/config/dialogue-mode-store";
 import {
   createProviderConfigStore,
   createProviderTelemetryPayload,
@@ -88,6 +90,7 @@ let petPresentationStore: PetPresentationStore | null = null;
 let petPresentationPersistence: PetPresentationPersistence | null = null;
 let historyStore: HistoryStore | null = null;
 let memoryStore: MemoryStore | null = null;
+let dialogueModeStore: DialogueModeStore | null = null;
 let shortcutPreferencesStore: ShortcutPreferencesStore | null = null;
 let shortcutRegistry: ShortcutRegistry | null = null;
 let currentPetPresentationPreferences: PetPresentationPreferences = DEFAULT_PET_PRESENTATION_PREFERENCES;
@@ -95,6 +98,7 @@ let isChatInteractionActive = false;
 let petRoleSnapshot: PetRoleSnapshot = INITIAL_PET_ROLE_SNAPSHOT;
 let currentPetPresentationIntent: PetPresentationIntent = createPetPresentationIntent(petRoleSnapshot);
 let activeChatRequestVersion: number | null = null;
+let currentDialogueModeId: DialogueModeId = "default";
 let performanceHeartbeat: NodeJS.Timeout | null = null;
 let isPetLocked = false;
 
@@ -689,6 +693,8 @@ app.whenReady().then(async () => {
   petPresentationPersistence = createPetPresentationPersistence(petPresentationStore);
   historyStore = createHistoryStore();
   memoryStore = createMemoryStore();
+  dialogueModeStore = createDialogueModeStore();
+  currentDialogueModeId = dialogueModeStore.getMode();
   shortcutPreferencesStore = createShortcutPreferencesStore();
   shortcutRegistry = createUserShortcutRegistry();
   secureKeyStore = createSecureKeyStore({ logTelemetry });
@@ -864,6 +870,14 @@ app.whenReady().then(async () => {
       getApiKey,
       logTelemetry
     });
+  }
+
+  function notifyChatDialogueModeChanged(modeId: DialogueModeId): void {
+    if (!chatWindow || chatWindow.isDestroyed()) {
+      return;
+    }
+
+    chatWindow.webContents.send("dialogueMode:changed", modeId);
   }
 
   ipcMain.handle("pet:open-chat", (event) => {
@@ -1086,6 +1100,10 @@ app.whenReady().then(async () => {
     }
 
     const memoryContext = memoryStoreForRequest.createInjection();
+    const dialogueStyleContext = {
+      modeId: currentDialogueModeId,
+      styleId: "gentle-desktop-companion-v1" as const
+    };
     event.sender.send("chat:memory-injection", {
       requestVersion: request.requestVersion,
       count: memoryContext.count
@@ -1097,7 +1115,7 @@ app.whenReady().then(async () => {
       messageCount: request.messages.length
     });
 
-    void chatEngine.startChatStream({ ...request, memoryContext }, {
+    void chatEngine.startChatStream({ ...request, memoryContext, dialogueStyleContext }, {
       onDelta(delta) {
         if (!transitionPetRole({ type: "reply:delta", requestVersion: request.requestVersion })) {
           return;
@@ -1306,6 +1324,42 @@ app.whenReady().then(async () => {
     }
 
     memoryStore.clearCards();
+  });
+
+  ipcMain.handle("dialogueMode:list", (event) => {
+    if (!isChatSender(event)) {
+      throw new Error("Unauthorized dialogue mode request");
+    }
+
+    return DIALOGUE_MODE_VIEWS;
+  });
+
+  ipcMain.handle("dialogueMode:get", (event) => {
+    if (!isChatSender(event)) {
+      throw new Error("Unauthorized dialogue mode request");
+    }
+
+    return currentDialogueModeId;
+  });
+
+  ipcMain.handle("dialogueMode:set", (event, modeId: unknown) => {
+    if (!isChatSender(event) || !dialogueModeStore || !isDialogueModeId(modeId)) {
+      throw new Error("Invalid dialogue mode request");
+    }
+
+    const previousModeId = currentDialogueModeId;
+    currentDialogueModeId = dialogueModeStore.saveMode(modeId);
+
+    if (previousModeId !== currentDialogueModeId) {
+      logTelemetry("dialogue_mode_changed", {
+        previousModeId,
+        nextModeId: currentDialogueModeId,
+        reason: "chat_ui"
+      });
+      notifyChatDialogueModeChanged(currentDialogueModeId);
+    }
+
+    return currentDialogueModeId;
   });
 
   ipcMain.handle("config:get-provider-status", (event) => {
