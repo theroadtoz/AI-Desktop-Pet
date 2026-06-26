@@ -34,6 +34,25 @@ type ClickActionSchedulerOptions = {
   clearTimeoutFn?: (handle: TimeoutHandle) => void;
 };
 
+export const PET_INTERACTION_GLOBAL_COOLDOWN_MS = 450;
+export const PET_INTERACTION_HEAD_PAT_COOLDOWN_MS = 1_200;
+export const PET_INTERACTION_STRONG_ACTION_COOLDOWN_MS = 4_500;
+
+const STRONG_INTERACTION_ACTION_TYPES = new Set<PetInteractionActionType>(["playGame", "reading"]);
+
+export type InteractionActionCooldownSkipReason =
+  | "active_action"
+  | "global_cooldown"
+  | "head_pat_cooldown"
+  | "same_action_cooldown";
+
+export type InteractionActionCooldownState = {
+  activeType?: PetInteractionActionType | undefined;
+  lastActionFinishedAtMs?: number | undefined;
+  lastHeadPatFinishedAtMs?: number | undefined;
+  strongActionFinishedAtMsByType?: Partial<Record<PetInteractionActionType, number>>;
+};
+
 export const PET_INTERACTION_ACTIONS: readonly PetInteractionAction[] = [
   {
     type: "appearance",
@@ -52,13 +71,13 @@ export const PET_INTERACTION_ACTIONS: readonly PetInteractionAction[] = [
   },
   {
     type: "greeting",
-    weight: 2,
+    weight: 4,
     durationMs: 1_400,
     presentation: { emotion: "happy", intensity: "medium", mode: "micro" }
   },
   {
     type: "thinking",
-    weight: 2,
+    weight: 3,
     durationMs: 1_800,
     presentation: { emotion: "confused", intensity: "medium", mode: "micro" }
   },
@@ -83,6 +102,45 @@ export const PET_INTERACTION_ACTIONS: readonly PetInteractionAction[] = [
 export const PET_RANDOM_INTERACTION_ACTIONS: readonly PetInteractionAction[] = PET_INTERACTION_ACTIONS.filter((action) => (
   action.type !== "appearance" && action.type !== "headPat"
 ));
+
+export function isStrongInteractionAction(type: PetInteractionActionType): boolean {
+  return STRONG_INTERACTION_ACTION_TYPES.has(type);
+}
+
+function isWithinCooldown(nowMs: number, lastFinishedAtMs: number | undefined, cooldownMs: number): boolean {
+  return lastFinishedAtMs !== undefined && nowMs - lastFinishedAtMs < cooldownMs;
+}
+
+export function getInteractionActionCooldownSkipReason(
+  action: PetInteractionAction,
+  nowMs: number,
+  state: InteractionActionCooldownState
+): InteractionActionCooldownSkipReason | null {
+  if (state.activeType) {
+    return "active_action";
+  }
+
+  if (action.type === "headPat" && isWithinCooldown(nowMs, state.lastHeadPatFinishedAtMs, PET_INTERACTION_HEAD_PAT_COOLDOWN_MS)) {
+    return "head_pat_cooldown";
+  }
+
+  if (
+    isStrongInteractionAction(action.type) &&
+    isWithinCooldown(
+      nowMs,
+      state.strongActionFinishedAtMsByType?.[action.type],
+      PET_INTERACTION_STRONG_ACTION_COOLDOWN_MS
+    )
+  ) {
+    return "same_action_cooldown";
+  }
+
+  if (isWithinCooldown(nowMs, state.lastActionFinishedAtMs, PET_INTERACTION_GLOBAL_COOLDOWN_MS)) {
+    return "global_cooldown";
+  }
+
+  return null;
+}
 
 export function getPetInteractionAction(type: PetInteractionActionType): PetInteractionAction {
   const action = PET_INTERACTION_ACTIONS.find((candidate) => candidate.type === type);

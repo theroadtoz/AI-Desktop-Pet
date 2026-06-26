@@ -9,7 +9,9 @@ import { getScreenDragDelta, shouldSuppressScaleWheelDuringDrag, type ScreenPoin
 import { createScaleWheelNormalizer, hasScaleWheelModifiers } from "./scale-wheel";
 import {
   createClickActionScheduler,
+  getInteractionActionCooldownSkipReason,
   getPetInteractionAction,
+  isStrongInteractionAction,
   selectRandomPetInteractionAction,
   type PetInteractionAction
 } from "./interaction-actions";
@@ -237,6 +239,9 @@ let recoveryCount = 0;
 let pendingLive2DFrameSample: ((sample: Live2DFrameSample) => void) | null = null;
 let activeInteractionAction: { action: PetInteractionAction; timeoutId: number } | null = null;
 let hasPlayedStartupAppearance = false;
+let lastInteractionActionFinishedAtMs: number | undefined;
+let lastHeadPatFinishedAtMs: number | undefined;
+const lastStrongInteractionActionFinishedAtMsByType: Partial<Record<PetInteractionAction["type"], number>> = {};
 
 async function applyBasePresentationToLoadedModel(
   presentation: EmotionPresentation,
@@ -698,11 +703,19 @@ function finishInteractionAction(action: PetInteractionAction): void {
 type InteractionActionReason = "startup_first_visible_frame" | "click_head" | "click_body";
 
 function playInteractionAction(action: PetInteractionAction, reason: InteractionActionReason): void {
-  if (activeInteractionAction) {
+  const skipReason = getInteractionActionCooldownSkipReason(action, performance.now(), {
+    activeType: activeInteractionAction?.action.type,
+    lastActionFinishedAtMs: lastInteractionActionFinishedAtMs,
+    lastHeadPatFinishedAtMs,
+    strongActionFinishedAtMsByType: lastStrongInteractionActionFinishedAtMsByType
+  });
+
+  if (skipReason) {
     window.petApi?.reportTelemetry("pet_interaction_action_skipped", {
       type: action.type,
       reason,
-      activeType: activeInteractionAction.action.type
+      skipReason,
+      ...(activeInteractionAction ? { activeType: activeInteractionAction.action.type } : {})
     });
     return;
   }
@@ -724,6 +737,14 @@ function playInteractionAction(action: PetInteractionAction, reason: Interaction
 
   const timeoutId = window.setTimeout(() => {
     finishInteractionAction(action);
+    const finishedAtMs = performance.now();
+    lastInteractionActionFinishedAtMs = finishedAtMs;
+    if (action.type === "headPat") {
+      lastHeadPatFinishedAtMs = finishedAtMs;
+    }
+    if (isStrongInteractionAction(action.type)) {
+      lastStrongInteractionActionFinishedAtMsByType[action.type] = finishedAtMs;
+    }
     window.petApi?.reportTelemetry("pet_interaction_action_finished", {
       type: action.type,
       reason,

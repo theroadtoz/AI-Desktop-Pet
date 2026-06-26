@@ -282,10 +282,14 @@ async function main() {
   const actions = [
     { type: "headPat", random: 0.2, hitArea: "head", durationMs: 1_500, captureDelayMs: 650 },
     { type: "greeting", random: 0.05, hitArea: "body", durationMs: 1_400, captureDelayMs: 650 },
-    { type: "thinking", random: 0.4, hitArea: "body", durationMs: 1_800, captureDelayMs: 750 },
-    { type: "playGame", random: 0.72, hitArea: "body", durationMs: 1_700, captureDelayMs: 700 },
-    { type: "reading", random: 0.92, hitArea: "body", durationMs: 1_900, captureDelayMs: 800 }
+    { type: "thinking", random: 0.55, hitArea: "body", durationMs: 1_800, captureDelayMs: 750 },
+    { type: "playGame", random: 0.8, hitArea: "body", durationMs: 1_700, captureDelayMs: 700 },
+    { type: "reading", random: 0.94, hitArea: "body", durationMs: 1_900, captureDelayMs: 800 }
   ];
+  let headBurstSummary = null;
+  let bodyBurstSummary = null;
+  let dragScaleSummary = null;
+  let lockSummary = null;
 
   try {
     await waitForJson(`http://127.0.0.1:${port}/json/version`, 30_000);
@@ -318,6 +322,20 @@ async function main() {
       await triggerAction(pet.cdp, action);
     }
 
+    log("burst:head:10");
+    const headBurstStartIndex = readTelemetryEvents().events.length;
+    for (let index = 0; index < 10; index += 1) {
+      await clickPet(pet.cdp, 0.2, "head");
+      await sleep(80);
+    }
+    await sleep(2_300);
+    await screenshot(pet.cdp, "head-burst-10-after.png");
+    const headBurstEvents = readTelemetryEvents().events.slice(headBurstStartIndex);
+    headBurstSummary = {
+      started: headBurstEvents.filter((event) => event.type === "pet_interaction_action_started" && event.payload?.reason === "click_head").map((event) => event.payload),
+      skipped: headBurstEvents.filter((event) => event.type === "pet_interaction_action_skipped" && event.payload?.reason === "click_head").map((event) => event.payload)
+    };
+
     log("repeat:greeting");
     for (let index = 0; index < 5; index += 1) {
       await clickPet(pet.cdp, 0.05);
@@ -327,28 +345,35 @@ async function main() {
 
     log("repeat:playGame");
     for (let index = 0; index < 5; index += 1) {
-      await clickPet(pet.cdp, 0.72);
+      await clickPet(pet.cdp, 0.8);
       await sleep(1_950);
     }
     await screenshot(pet.cdp, "playGame-repeat-after.png");
 
     log("repeat:reading");
     for (let index = 0; index < 5; index += 1) {
-      await clickPet(pet.cdp, 0.92);
+      await clickPet(pet.cdp, 0.94);
       await sleep(2_150);
     }
     await screenshot(pet.cdp, "reading-repeat-after.png");
 
     log("mixed:20");
-    const mixed = [0.05, 0.2, 0.4, 0.72, 0.92, 0.05, 0.4, 0.72, 0.92, 0.05, 0.4, 0.2, 0.05, 0.72, 0.92, 0.4, 0.2, 0.05, 0.72, 0.92];
+    const bodyBurstStartIndex = readTelemetryEvents().events.length;
+    const mixed = [0.05, 0.2, 0.55, 0.8, 0.94, 0.05, 0.55, 0.8, 0.94, 0.05, 0.55, 0.2, 0.05, 0.8, 0.94, 0.55, 0.2, 0.05, 0.8, 0.94];
     for (const value of mixed) {
       await clickPet(pet.cdp, value);
       await sleep(160);
     }
     await sleep(2_500);
     await screenshot(pet.cdp, "mixed-20-after.png");
+    const bodyBurstEvents = readTelemetryEvents().events.slice(bodyBurstStartIndex);
+    bodyBurstSummary = {
+      started: bodyBurstEvents.filter((event) => event.type === "pet_interaction_action_started" && event.payload?.reason === "click_body").map((event) => event.payload),
+      skipped: bodyBurstEvents.filter((event) => event.type === "pet_interaction_action_skipped" && event.payload?.reason === "click_body").map((event) => event.payload)
+    };
 
     log("regression:drag-scale-chat");
+    const dragScaleStartIndex = readTelemetryEvents().events.length;
     await evaluate(pet.cdp, `
       (() => {
         const canvas = document.querySelector("#pet-canvas");
@@ -362,11 +387,25 @@ async function main() {
       })()
     `);
     await sleep(1_000);
+    const dragScaleEvents = readTelemetryEvents().events.slice(dragScaleStartIndex);
+    dragScaleSummary = {
+      started: dragScaleEvents.filter((event) => event.type === "pet_interaction_action_started").map((event) => event.payload),
+      skipped: dragScaleEvents.filter((event) => event.type === "pet_interaction_action_skipped").map((event) => event.payload)
+    };
     await doubleClickPet(pet.cdp);
     chat = await connectTarget("renderer/chat/index.html");
     await sleep(1_000);
     await screenshot(chat.cdp, "chat-open.png");
     await screenshot(pet.cdp, "after-regression.png");
+    await evaluate(chat.cdp, "document.querySelector('#settings-button')?.click()");
+    await sleep(500);
+    await evaluate(chat.cdp, "document.querySelector('#toggle-pet-lock-button')?.click()");
+    await sleep(700);
+    const lockedState = await evaluate(chat.cdp, "window.petPresentationApi.getPetLockState()", true);
+    await evaluate(chat.cdp, "document.querySelector('#toggle-pet-lock-button')?.click()");
+    await sleep(700);
+    const unlockedState = await evaluate(chat.cdp, "window.petPresentationApi.getPetLockState()", true);
+    lockSummary = { lockedState, unlockedState };
 
     const telemetry = readTelemetryEvents();
     const startedActions = telemetry.events
@@ -402,6 +441,37 @@ async function main() {
       detail: [...bodyActionTypes]
     });
     checks.push({
+      name: "headBurst10DoesNotStack",
+      ok: (headBurstSummary?.started.length ?? 0) <= 2 &&
+        (headBurstSummary?.skipped ?? []).some((event) => event.skipReason === "active_action" || event.skipReason === "head_pat_cooldown"),
+      detail: headBurstSummary
+    });
+    checks.push({
+      name: "bodyBurst20UsesCooldownSkips",
+      ok: (bodyBurstSummary?.started ?? []).every((event) => (
+        ["greeting", "thinking", "playGame", "reading"].includes(event.type)
+      )) &&
+        !(bodyBurstSummary?.started ?? []).some((event) => event.type === "appearance" || event.type === "headPat") &&
+        (bodyBurstSummary?.skipped ?? []).some((event) => event.skipReason === "active_action" || event.skipReason === "global_cooldown"),
+      detail: bodyBurstSummary
+    });
+    checks.push({
+      name: "strongAccessoryActionsDoNotRepeatImmediately",
+      ok: telemetry.events.some((event) => (
+        event.type === "pet_interaction_action_skipped" &&
+        (event.payload?.type === "playGame" || event.payload?.type === "reading") &&
+        event.payload?.skipReason === "same_action_cooldown"
+      )),
+      detail: telemetry.events
+        .filter((event) => event.type === "pet_interaction_action_skipped" && (event.payload?.type === "playGame" || event.payload?.type === "reading"))
+        .map((event) => event.payload)
+    });
+    checks.push({
+      name: "dragAndScaleDoNotTriggerActions",
+      ok: (dragScaleSummary?.started.length ?? 0) === 0,
+      detail: dragScaleSummary
+    });
+    checks.push({
       name: "temporaryActionsFinish",
       ok: ["appearance", "headPat", "greeting", "thinking", "playGame", "reading"].every((type) => (
         finishedActions.some((event) => event.type === type)
@@ -412,6 +482,11 @@ async function main() {
       name: "chatOpenedAfterDoubleClickAlternative",
       ok: Boolean(chat?.target?.url?.includes("renderer/chat/index.html")),
       detail: chat?.target?.url ?? null
+    });
+    checks.push({
+      name: "lockToggleStillWorks",
+      ok: lockSummary?.lockedState?.isLocked === true && lockSummary?.unlockedState?.isLocked === false,
+      detail: lockSummary
     });
     checks.push({
       name: "rendererStable",
@@ -431,6 +506,10 @@ async function main() {
       appDataDir,
       artifactsDir,
       actions: actions.map((action) => action.type),
+      headBurstSummary,
+      bodyBurstSummary,
+      dragScaleSummary,
+      lockSummary,
       checks,
       telemetry: {
         logDirectory: telemetry.logDirectory,

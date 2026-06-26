@@ -2,11 +2,16 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
+  PET_INTERACTION_GLOBAL_COOLDOWN_MS,
+  PET_INTERACTION_HEAD_PAT_COOLDOWN_MS,
+  PET_INTERACTION_STRONG_ACTION_COOLDOWN_MS,
   PET_INTERACTION_ACTIONS,
   PET_INTERACTION_ACTION_TYPES,
   PET_RANDOM_INTERACTION_ACTIONS,
   createClickActionScheduler,
+  getInteractionActionCooldownSkipReason,
   getPetInteractionAction,
+  isStrongInteractionAction,
   selectRandomPetInteractionAction
 } from "../src/renderer/pet/interaction-actions.ts";
 
@@ -39,6 +44,10 @@ test("ordinary random interaction pool excludes startup and head-only actions", 
     ["greeting", "playGame", "reading", "thinking"].sort()
   );
   assert.equal(selectRandomPetInteractionAction(() => 0).type, "greeting");
+  assert.equal(selectRandomPetInteractionAction(() => 0.44).type, "greeting");
+  assert.equal(selectRandomPetInteractionAction(() => 0.45).type, "thinking");
+  assert.equal(selectRandomPetInteractionAction(() => 0.78).type, "playGame");
+  assert.equal(selectRandomPetInteractionAction(() => 0.89).type, "reading");
   assert.equal(selectRandomPetInteractionAction(() => 0.999).type, "reading");
   assert.equal(getPetInteractionAction("appearance").type, "appearance");
   assert.equal(getPetInteractionAction("headPat").type, "headPat");
@@ -76,6 +85,50 @@ test("pet interaction action selection rejects invalid manifests", () => {
       presentation: { emotion: "neutral", intensity: "low", mode: "neutral" }
     }]),
     /no selectable weight/
+  );
+});
+
+test("pet interaction action cooldown rules skip dense or repeated clicks", () => {
+  const headPat = getPetInteractionAction("headPat");
+  const greeting = getPetInteractionAction("greeting");
+  const playGame = getPetInteractionAction("playGame");
+  const reading = getPetInteractionAction("reading");
+
+  assert.equal(isStrongInteractionAction("playGame"), true);
+  assert.equal(isStrongInteractionAction("reading"), true);
+  assert.equal(isStrongInteractionAction("greeting"), false);
+  assert.equal(
+    getInteractionActionCooldownSkipReason(greeting, 1_000, { activeType: "thinking" }),
+    "active_action"
+  );
+  assert.equal(
+    getInteractionActionCooldownSkipReason(greeting, 1_000, {
+      lastActionFinishedAtMs: 1_000 - PET_INTERACTION_GLOBAL_COOLDOWN_MS + 1
+    }),
+    "global_cooldown"
+  );
+  assert.equal(
+    getInteractionActionCooldownSkipReason(headPat, 2_000, {
+      lastHeadPatFinishedAtMs: 2_000 - PET_INTERACTION_HEAD_PAT_COOLDOWN_MS + 1
+    }),
+    "head_pat_cooldown"
+  );
+  assert.equal(
+    getInteractionActionCooldownSkipReason(playGame, 5_000, {
+      strongActionFinishedAtMsByType: {
+        playGame: 5_000 - PET_INTERACTION_STRONG_ACTION_COOLDOWN_MS + 1,
+        reading: 5_000 - PET_INTERACTION_STRONG_ACTION_COOLDOWN_MS + 1
+      }
+    }),
+    "same_action_cooldown"
+  );
+  assert.equal(
+    getInteractionActionCooldownSkipReason(reading, 5_000, {
+      strongActionFinishedAtMsByType: {
+        playGame: 5_000 - PET_INTERACTION_STRONG_ACTION_COOLDOWN_MS + 1
+      }
+    }),
+    null
   );
 });
 
@@ -138,6 +191,8 @@ test("pet pointer clicks route head and body actions without changing drag or do
   assert.match(source, /name: "body"/);
   assert.match(source, /getPetInteractionAction\("headPat"\)/);
   assert.match(source, /selectRandomPetInteractionAction\(\)/);
+  assert.match(source, /getInteractionActionCooldownSkipReason/);
+  assert.match(source, /skipReason/);
   assert.match(source, /scheduleClickInteractionAction\(hitArea\)/);
   assert.match(source, /!pointerDown \|\| pointerDown\.pointerId !== event\.pointerId/);
   assert.match(source, /!wasDragging && hitArea/);
