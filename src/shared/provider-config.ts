@@ -1,4 +1,4 @@
-export type ProviderId = "fake" | "openai-compatible";
+export type ProviderId = "fake" | "openai-compatible" | "local-openai-compatible";
 
 export type OpenAICompatibleConfig = {
   providerId: "openai-compatible";
@@ -11,12 +11,22 @@ export type OpenAICompatibleConfig = {
   timeoutMs: number;
 };
 
+export type LocalOpenAICompatibleConfig = {
+  providerId: "local-openai-compatible";
+  displayName: string;
+  baseURL: string;
+  model: string;
+  temperature: number;
+  maxTokens: number;
+  timeoutMs: number;
+};
+
 export type FakeProviderConfig = {
   providerId: "fake";
   displayName: string;
 };
 
-export type ProviderConfig = FakeProviderConfig | OpenAICompatibleConfig;
+export type ProviderConfig = FakeProviderConfig | OpenAICompatibleConfig | LocalOpenAICompatibleConfig;
 
 export type ProviderStatus = {
   providerId: ProviderId;

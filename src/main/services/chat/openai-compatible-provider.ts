@@ -1,4 +1,5 @@
 import type { ChatProvider, ChatProviderResult, ChatRequest } from "../../../shared/chat-provider";
+import type { ProviderId } from "../../../shared/provider-config";
 import type { TelemetryPayload } from "../telemetry";
 import { mapChatMessagesToOpenAICompatible, getLatestUserMessage } from "./chat-message-mapper";
 import { classifyEmotion } from "./emotion-classifier";
@@ -12,6 +13,7 @@ type ProviderErrorType =
 type TelemetryLogger = (type: string, payload?: TelemetryPayload) => void;
 
 export type OpenAICompatibleProviderOptions = {
+  providerId?: Extract<ProviderId, "openai-compatible" | "local-openai-compatible">;
   baseURL: string;
   model: string;
   apiKey: string;
@@ -34,15 +36,16 @@ export function createOpenAICompatibleProvider(
 ): ChatProvider {
   const baseURL = new URL(options.baseURL);
   const baseURLHost = baseURL.host;
+  const providerId = options.providerId ?? "openai-compatible";
 
   return {
-    id: "openai-compatible",
+    id: providerId,
     async streamReply(request, streamOptions) {
       const startedAt = Date.now();
       let replyText = "";
 
       log(options, "provider_request_started", {
-        providerId: "openai-compatible",
+        providerId,
         model: options.model,
         baseURLHost,
         messageCount: request.messages.length
@@ -69,7 +72,7 @@ export function createOpenAICompatibleProvider(
         };
 
         log(options, "provider_request_completed", {
-          providerId: "openai-compatible",
+          providerId,
           model: options.model,
           baseURLHost,
           messageCount: request.messages.length,
@@ -84,7 +87,7 @@ export function createOpenAICompatibleProvider(
         }
 
         log(options, "provider_request_failed", {
-          providerId: "openai-compatible",
+          providerId,
           model: options.model,
           baseURLHost,
           messageCount: request.messages.length,
@@ -115,7 +118,7 @@ async function streamChatCompletions(input: {
   input.signal.addEventListener("abort", abort, { once: true });
 
   try {
-    const response = await fetch(new URL("/chat/completions", input.options.baseURL), {
+    const response = await fetch(createChatCompletionsURL(input.options.baseURL), {
       method: "POST",
       headers: {
         Authorization: `Bearer ${input.options.apiKey}`,
@@ -158,6 +161,15 @@ async function streamChatCompletions(input: {
     clearTimeout(timeoutId);
     input.signal.removeEventListener("abort", abort);
   }
+}
+
+export function createChatCompletionsURL(baseURL: string): URL {
+  const url = new URL(baseURL);
+  const basePath = url.pathname.endsWith("/") ? url.pathname.slice(0, -1) : url.pathname;
+  url.pathname = `${basePath}/chat/completions`.replace(/\/{2,}/g, "/");
+  url.search = "";
+  url.hash = "";
+  return url;
 }
 
 async function readSseStream(

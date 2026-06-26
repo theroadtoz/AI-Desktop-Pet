@@ -14,13 +14,14 @@ const configResult = readConfig(configPath);
 const config = configResult.config;
 const apiKeyRef = config.providerId === "openai-compatible" ? config.apiKeyRef : null;
 const hasApiKey = apiKeyRef ? readHasApiKey(secretsPath, apiKeyRef) : false;
+const hasEndpointConfig = config.providerId === "openai-compatible" || config.providerId === "local-openai-compatible";
 
 console.log(`userDataPath: ${userDataPath}`);
 console.log(`configFileExists: ${String(configResult.exists)}`);
 console.log(`configSource: ${configResult.source}`);
 console.log(`providerId: ${config.providerId}`);
-console.log(`baseURL: ${config.providerId === "openai-compatible" ? config.baseURL : ""}`);
-console.log(`model: ${config.providerId === "openai-compatible" ? config.model : ""}`);
+console.log(`baseURL: ${hasEndpointConfig ? config.baseURL : ""}`);
+console.log(`model: ${hasEndpointConfig ? config.model : ""}`);
 console.log(`apiKeyRef: ${apiKeyRef || ""}`);
 console.log(`apiKeyExists: ${String(hasApiKey)}`);
 
@@ -103,6 +104,24 @@ function isProviderConfig(value) {
     );
   }
 
+  if (value.providerId === "local-openai-compatible") {
+    return (
+      typeof value.displayName === "string" &&
+      value.displayName.length > 0 &&
+      typeof value.baseURL === "string" &&
+      value.baseURL.length > 0 &&
+      typeof value.model === "string" &&
+      value.model.length > 0 &&
+      typeof value.temperature === "number" &&
+      Number.isFinite(value.temperature) &&
+      typeof value.maxTokens === "number" &&
+      Number.isInteger(value.maxTokens) &&
+      value.maxTokens > 0 &&
+      typeof value.timeoutMs === "number" &&
+      Number.isInteger(value.timeoutMs) &&
+      value.timeoutMs > 0
+    );
+  }
+
   return false;
 }
-

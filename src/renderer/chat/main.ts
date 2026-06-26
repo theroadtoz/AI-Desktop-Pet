@@ -31,6 +31,7 @@ const modelInput = document.querySelector<HTMLInputElement>("#provider-model");
 const temperatureInput = document.querySelector<HTMLInputElement>("#provider-temperature");
 const maxTokensInput = document.querySelector<HTMLInputElement>("#provider-max-tokens");
 const timeoutInput = document.querySelector<HTMLInputElement>("#provider-timeout");
+const localProviderNote = document.querySelector<HTMLElement>("#local-provider-note");
 const apiKeyInput = document.querySelector<HTMLInputElement>("#provider-api-key");
 const apiKeyStatus = document.querySelector<HTMLElement>("#api-key-status");
 const connectionSafeSection = document.querySelector<HTMLElement>("#connection-safe-section");
@@ -84,7 +85,7 @@ if (
   !form || !input || !messages || !sendButton || !abortButton || !partnerStatus || !providerStatus ||
   !memorySessionStatus || !settingsButton || !settingsPanel || !settingsCloseButton || !settingsForm || !providerIdSelect ||
   !displayNameInput || !openAIFields || !baseURLInput || !modelInput || !temperatureInput ||
-  !maxTokensInput || !timeoutInput || !apiKeyInput || !apiKeyStatus || !connectionSafeSection || !deleteApiKeyButton ||
+  !maxTokensInput || !timeoutInput || !localProviderNote || !apiKeyInput || !apiKeyStatus || !connectionSafeSection || !deleteApiKeyButton ||
   !deleteKeyConfirmation || !cancelDeleteApiKeyButton || !confirmDeleteApiKeyButton || !settingsFeedback ||
   !petScaleInput || !petScaleValue || !petAccessorySelect || !petAccessoryStatus || !savePetScaleButton ||
   !savePetAccessoryButton || !petLockStatus || !togglePetLockButton || !shortcutList || !shortcutStatus ||
@@ -118,6 +119,7 @@ const modelField = modelInput;
 const temperatureField = temperatureInput;
 const maxTokensField = maxTokensInput;
 const timeoutField = timeoutInput;
+const localProviderNoteBox = localProviderNote;
 const apiKeyField = apiKeyInput;
 const apiKeyStatusBox = apiKeyStatus;
 const connectionSafeSectionBox = connectionSafeSection;
@@ -177,6 +179,14 @@ const DEFAULT_OPENAI_CONFIG = {
   maxTokens: 1024,
   timeoutMs: 60000
 };
+const DEFAULT_LOCAL_OPENAI_CONFIG = {
+  displayName: "Ollama 本地模型",
+  baseURL: "http://localhost:11434/v1",
+  model: "qwen3:1.7b",
+  temperature: 0.7,
+  maxTokens: 240,
+  timeoutMs: 60000
+};
 
 let activeReplyMessage: ChatMessage | null = null;
 let activeReplyElement: HTMLElement | null = null;
@@ -211,6 +221,16 @@ function formatProviderStatus(status: ProviderStatus): string {
 
   if (status.providerId === "openai-compatible") {
     const parts = [`真实模型：${status.model ?? status.displayName}`];
+
+    if (status.baseURLHost) {
+      parts.push(status.baseURLHost);
+    }
+
+    return parts.join(" · ");
+  }
+
+  if (status.providerId === "local-openai-compatible") {
+    const parts = [`本地模型：${status.model ?? status.displayName}`];
 
     if (status.baseURLHost) {
       parts.push(status.baseURLHost);
@@ -1042,15 +1062,25 @@ function isOpenAICompatibleSelected(): boolean {
   return providerIdField.value === "openai-compatible";
 }
 
+function isLocalOpenAICompatibleSelected(): boolean {
+  return providerIdField.value === "local-openai-compatible";
+}
+
+function isProviderWithOpenAIFieldsSelected(): boolean {
+  return isOpenAICompatibleSelected() || isLocalOpenAICompatibleSelected();
+}
+
 function updateProviderFields(): void {
-  const isOpenAICompatible = isOpenAICompatibleSelected();
-  openAIFieldsContainer.hidden = !isOpenAICompatible;
-  connectionSafeSectionBox.hidden = !isOpenAICompatible;
-  baseURLField.required = isOpenAICompatible;
-  modelField.required = isOpenAICompatible;
-  temperatureField.required = isOpenAICompatible;
-  maxTokensField.required = isOpenAICompatible;
-  timeoutField.required = isOpenAICompatible;
+  const hasOpenAIFields = isProviderWithOpenAIFieldsSelected();
+  const isCloudOpenAI = isOpenAICompatibleSelected();
+  openAIFieldsContainer.hidden = !hasOpenAIFields;
+  connectionSafeSectionBox.hidden = !isCloudOpenAI;
+  localProviderNoteBox.hidden = !isLocalOpenAICompatibleSelected();
+  baseURLField.required = hasOpenAIFields;
+  modelField.required = hasOpenAIFields;
+  temperatureField.required = hasOpenAIFields;
+  maxTokensField.required = hasOpenAIFields;
+  timeoutField.required = hasOpenAIFields;
   deleteKeyConfirmationBox.hidden = true;
 }
 
@@ -1063,11 +1093,20 @@ function fillOpenAIDefaults(): void {
   timeoutField.value = String(DEFAULT_OPENAI_CONFIG.timeoutMs);
 }
 
+function fillLocalOpenAIDefaults(): void {
+  displayNameField.value = DEFAULT_LOCAL_OPENAI_CONFIG.displayName;
+  baseURLField.value = DEFAULT_LOCAL_OPENAI_CONFIG.baseURL;
+  modelField.value = DEFAULT_LOCAL_OPENAI_CONFIG.model;
+  temperatureField.value = String(DEFAULT_LOCAL_OPENAI_CONFIG.temperature);
+  maxTokensField.value = String(DEFAULT_LOCAL_OPENAI_CONFIG.maxTokens);
+  timeoutField.value = String(DEFAULT_LOCAL_OPENAI_CONFIG.timeoutMs);
+}
+
 function fillProviderForm(config: ProviderConfig): void {
   providerIdField.value = config.providerId;
   displayNameField.value = config.displayName;
 
-  if (config.providerId === "openai-compatible") {
+  if (config.providerId === "openai-compatible" || config.providerId === "local-openai-compatible") {
     baseURLField.value = config.baseURL;
     modelField.value = config.model;
     temperatureField.value = String(config.temperature);
@@ -1165,7 +1204,7 @@ function buildProviderConfig(): ProviderConfig | null {
     return null;
   }
 
-  if (!isOpenAICompatibleSelected()) {
+  if (!isProviderWithOpenAIFieldsSelected()) {
     return { providerId: "fake", displayName };
   }
 
@@ -1188,6 +1227,18 @@ function buildProviderConfig(): ProviderConfig | null {
   } catch {
     setSettingsFeedback("Base URL 必须是有效的 HTTP(S) 地址。");
     return null;
+  }
+
+  if (isLocalOpenAICompatibleSelected()) {
+    return {
+      providerId: "local-openai-compatible",
+      displayName,
+      baseURL,
+      model,
+      temperature,
+      maxTokens,
+      timeoutMs
+    };
   }
 
   return {
@@ -1502,6 +1553,8 @@ providerIdField.addEventListener("change", () => {
   if (isOpenAICompatibleSelected()) {
     fillOpenAIDefaults();
     void refreshApiKeyStatus();
+  } else if (isLocalOpenAICompatibleSelected()) {
+    fillLocalOpenAIDefaults();
   }
 
   updateProviderFields();

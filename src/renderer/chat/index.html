@@ -60,6 +60,7 @@
               <select id="provider-id" name="providerId">
                 <option value="fake">Fake</option>
                 <option value="openai-compatible">OpenAI-compatible</option>
+                <option value="local-openai-compatible">Ollama 本地模型</option>
               </select>
             </label>
             <label class="field-label">
@@ -89,6 +90,7 @@
                   <input id="provider-timeout" name="timeoutMs" type="number" min="1" step="1" required />
                 </label>
               </div>
+              <p id="local-provider-note" class="selection-note" hidden>请先安装并启动 Ollama，再拉取 qwen3:1.7b；应用只连接本机 HTTP 服务，不自动下载模型。</p>
             </div>
           </section>
           <section id="connection-safe-section" class="content-stack" aria-labelledby="connection-safe-title" hidden>

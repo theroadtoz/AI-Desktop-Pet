@@ -21,11 +21,46 @@ export function createChatProviderFromConfig(options: {
 
   const baseURLHost = readBaseURLHost(options.config.baseURL);
 
+  if (options.config.providerId === "local-openai-compatible") {
+    try {
+      options.logTelemetry?.("provider_selected", {
+        providerId: "local-openai-compatible",
+        model: options.config.model,
+        baseURLHost
+      });
+
+      const providerOptions: OpenAICompatibleProviderOptions = {
+        providerId: "local-openai-compatible",
+        baseURL: options.config.baseURL,
+        model: options.config.model,
+        apiKey: "ollama-local-placeholder",
+        temperature: options.config.temperature,
+        maxTokens: options.config.maxTokens,
+        timeoutMs: options.config.timeoutMs
+      };
+
+      if (options.logTelemetry) {
+        providerOptions.logTelemetry = options.logTelemetry;
+      }
+
+      return createOpenAICompatibleProvider(providerOptions);
+    } catch {
+      logFallback(options.logTelemetry, {
+        providerId: "local-openai-compatible",
+        model: options.config.model,
+        baseURLHost,
+        errorType: "provider_config_invalid"
+      });
+      return createFakeChatProvider();
+    }
+  }
+
   try {
     const apiKey = options.getApiKey(options.config.apiKeyRef);
 
     if (!apiKey) {
       logFallback(options.logTelemetry, {
+        providerId: "openai-compatible",
         model: options.config.model,
         baseURLHost,
         errorType: "missing_api_key"
@@ -55,6 +90,7 @@ export function createChatProviderFromConfig(options: {
     return createOpenAICompatibleProvider(providerOptions);
   } catch {
     logFallback(options.logTelemetry, {
+      providerId: "openai-compatible",
       model: options.config.model,
       baseURLHost,
       errorType: "provider_config_invalid"
@@ -68,7 +104,6 @@ function logFallback(
   payload: TelemetryPayload
 ): void {
   logTelemetry?.("provider_fallback_to_fake", {
-    providerId: "openai-compatible",
     ...payload
   });
   logTelemetry?.("provider_selected", { providerId: "fake" });

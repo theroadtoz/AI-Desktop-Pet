@@ -288,6 +288,25 @@ function isProviderConfig(value: unknown): value is ProviderConfig {
     );
   }
 
+  if (config.providerId === "local-openai-compatible") {
+    return (
+      typeof config.displayName === "string" &&
+      config.displayName.length > 0 &&
+      typeof config.baseURL === "string" &&
+      config.baseURL.length > 0 &&
+      typeof config.model === "string" &&
+      config.model.length > 0 &&
+      typeof config.temperature === "number" &&
+      Number.isFinite(config.temperature) &&
+      typeof config.maxTokens === "number" &&
+      Number.isInteger(config.maxTokens) &&
+      config.maxTokens > 0 &&
+      typeof config.timeoutMs === "number" &&
+      Number.isInteger(config.timeoutMs) &&
+      config.timeoutMs > 0
+    );
+  }
+
   return false;
 }
 
@@ -298,7 +317,11 @@ function isProviderStatus(value: unknown): value is ProviderStatus {
     status &&
     typeof status.displayName === "string" &&
     status.displayName.length > 0 &&
-    (status.providerId === "fake" || status.providerId === "openai-compatible") &&
+    (
+      status.providerId === "fake" ||
+      status.providerId === "openai-compatible" ||
+      status.providerId === "local-openai-compatible"
+    ) &&
     typeof status.isFallback === "boolean" &&
     (status.model === undefined || typeof status.model === "string") &&
     (status.baseURLHost === undefined || typeof status.baseURLHost === "string") &&

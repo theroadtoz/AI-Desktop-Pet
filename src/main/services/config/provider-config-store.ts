@@ -128,6 +128,29 @@ export function parseProviderConfig(value: unknown): ProviderConfig | null {
     };
   }
 
+  if (config.providerId === "local-openai-compatible") {
+    if (
+      !isNonEmptyString(config.displayName) ||
+      !isNonEmptyString(config.baseURL) ||
+      !isNonEmptyString(config.model) ||
+      !isFiniteNumber(config.temperature) ||
+      !isPositiveInteger(config.maxTokens) ||
+      !isPositiveInteger(config.timeoutMs)
+    ) {
+      return null;
+    }
+
+    return {
+      providerId: "local-openai-compatible",
+      displayName: config.displayName,
+      baseURL: config.baseURL,
+      model: config.model,
+      temperature: config.temperature,
+      maxTokens: config.maxTokens,
+      timeoutMs: config.timeoutMs
+    };
+  }
+
   return null;
 }
 

@@ -1,0 +1,137 @@
+import assert from "node:assert/strict";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { createRequire } from "node:module";
+import test from "node:test";
+
+const require = createRequire(import.meta.url);
+const {
+  createChatCompletionsURL,
+  createOpenAICompatibleProvider
+} = require("../dist/main/services/chat/openai-compatible-provider.js") as typeof import("../src/main/services/chat/openai-compatible-provider");
+
+test("chat completions URL preserves /v1 base path for local providers", () => {
+  assert.equal(
+    createChatCompletionsURL("http://localhost:11434/v1").toString(),
+    "http://localhost:11434/v1/chat/completions"
+  );
+  assert.equal(
+    createChatCompletionsURL("http://localhost:11434/v1/").toString(),
+    "http://localhost:11434/v1/chat/completions"
+  );
+});
+
+test("chat completions URL keeps cloud base URL behavior without /v1", () => {
+  assert.equal(
+    createChatCompletionsURL("https://api.deepseek.com").toString(),
+    "https://api.deepseek.com/chat/completions"
+  );
+});
+
+test("local OpenAI-compatible provider streams SSE and keeps main-process mapping", async () => {
+  let requestedURL = "";
+  let requestBody: unknown = null;
+  let authorization = "";
+
+  const server = createServer(async (request: IncomingMessage, response: ServerResponse) => {
+    requestedURL = request.url ?? "";
+    authorization = String(request.headers.authorization ?? "");
+    requestBody = JSON.parse(await readRequestBody(request));
+
+    response.writeHead(200, { "Content-Type": "text/event-stream" });
+
+    for (const chunk of ["你好", "，本地模型在。"]) {
+      response.write(`data: ${JSON.stringify({ choices: [{ delta: { content: chunk } }] })}\n\n`);
+    }
+
+    response.end("data: [DONE]\n\n");
+  });
+
+  try {
+    await listen(server);
+    const address = server.address();
+    assert.equal(typeof address, "object");
+    assert.ok(address);
+
+    const provider = createOpenAICompatibleProvider({
+      providerId: "local-openai-compatible",
+      baseURL: `http://127.0.0.1:${address.port}/v1`,
+      model: "qwen3:1.7b",
+      apiKey: "ollama-local-placeholder",
+      temperature: 0.7,
+      maxTokens: 240,
+      timeoutMs: 60000
+    });
+
+    let deltaText = "";
+    const result = await provider.streamReply({
+      requestVersion: 1,
+      conversationId: "local-provider-test",
+      messages: [{ id: crypto.randomUUID(), role: "user", content: "说一句中文短回复" }],
+      memoryContext: {
+        count: 1,
+        cards: [{ id: crypto.randomUUID(), title: "称呼", content: "用户喜欢被叫测试者", tags: [] }]
+      },
+      dialogueStyleContext: { modeId: "work", styleId: "gentle-desktop-companion-v1" }
+    }, {
+      signal: new AbortController().signal,
+      onDelta(delta) {
+        deltaText += delta.text;
+      }
+    });
+
+    const body = requestBody as {
+      model?: string;
+      stream?: boolean;
+      messages?: Array<{ role?: string; content?: string }>;
+    };
+
+    assert.equal(provider.id, "local-openai-compatible");
+    assert.equal(requestedURL, "/v1/chat/completions");
+    assert.equal(authorization, "Bearer ollama-local-placeholder");
+    assert.equal(body.model, "qwen3:1.7b");
+    assert.equal(body.stream, true);
+    assert.ok(body.messages?.some((message) => message.content?.includes("当前模式：工作")));
+    assert.ok(body.messages?.some((message) => message.content?.includes("用户喜欢被叫测试者")));
+    assert.equal(deltaText, "你好，本地模型在。");
+    assert.equal(result.text, "你好，本地模型在。");
+    assert.ok(result.emotion.length > 0);
+    assert.ok(result.intensity.length > 0);
+  } finally {
+    await close(server);
+  }
+});
+
+function readRequestBody(request: IncomingMessage): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let body = "";
+    request.setEncoding("utf8");
+    request.on("data", (chunk) => {
+      body += chunk;
+    });
+    request.on("end", () => resolve(body));
+    request.on("error", reject);
+  });
+}
+
+function listen(server: ReturnType<typeof createServer>): Promise<void> {
+  return new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      server.off("error", reject);
+      resolve();
+    });
+  });
+}
+
+function close(server: ReturnType<typeof createServer>): Promise<void> {
+  return new Promise((resolve, reject) => {
+    server.close((error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+
+      resolve();
+    });
+  });
+}

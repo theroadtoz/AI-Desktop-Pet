@@ -673,7 +673,7 @@ function getChatErrorMessage(errorType: ChatStreamErrorType): string {
   }
 
   if (errorType === "network_error") {
-    return "网络连接失败，请检查网络或 baseURL。";
+    return "连接失败，请检查网络、baseURL；若使用本地模型，请确认 Ollama 已启动且模型已拉取。";
   }
 
   return "回复失败，请稍后再试。";
@@ -818,7 +818,8 @@ app.whenReady().then(async () => {
     }
 
     const baseURLHost = readBaseURLHost(config.baseURL);
-    const keyConfigured = hasApiKey(config.apiKeyRef);
+    const isLocalProvider = config.providerId === "local-openai-compatible";
+    const keyConfigured = config.providerId === "openai-compatible" ? hasApiKey(config.apiKeyRef) : true;
 
     if (!baseURLHost) {
       return {
@@ -831,7 +832,7 @@ app.whenReady().then(async () => {
       };
     }
 
-    if (!keyConfigured) {
+    if (!isLocalProvider && !keyConfigured) {
       return {
         providerId: "fake",
         displayName: DEFAULT_PROVIDER_CONFIG.displayName,
@@ -843,14 +844,19 @@ app.whenReady().then(async () => {
       };
     }
 
-    return {
-      providerId: "openai-compatible",
+    const status: ProviderStatus = {
+      providerId: config.providerId,
       displayName: config.displayName,
       model: config.model,
       baseURLHost,
-      hasApiKey: true,
       isFallback: false
     };
+
+    if (!isLocalProvider) {
+      status.hasApiKey = true;
+    }
+
+    return status;
   }
 
   function readBaseURLHost(baseURL: string): string | undefined {
