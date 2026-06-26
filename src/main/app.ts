@@ -252,7 +252,7 @@ function ensurePetWindow(reason: string): BrowserWindow {
   pointerController?.dispose();
   pointerController = null;
   petWindow = createRecoverablePetWindow();
-  pointerController = createPointerController(petWindow);
+  pointerController = createPointerControllerForWindow(petWindow);
   pointerController.setLocked(isPetLocked);
   logTelemetry("pet_window_created", {
     reason,
@@ -264,6 +264,27 @@ function ensurePetWindow(reason: string): BrowserWindow {
 
 function logTelemetry(type: string, payload: TelemetryPayload = {}): void {
   telemetry?.logEvent(type, payload);
+}
+
+function createPointerControllerForWindow(window: BrowserWindow): PointerController {
+  return createPointerController(window, {
+    getMotionGuards: () => ({
+      isScaleGestureActive: false,
+      isChatInteractionActive
+    }),
+    onWindowMotionCandidate: (candidate) => {
+      logTelemetry("pet_window_motion_detected", {
+        eventType: candidate.eventType,
+        reason: candidate.reason,
+        directionChanges: candidate.directionChanges,
+        distancePx: candidate.distancePx,
+        durationMs: candidate.durationMs,
+        cooldownState: candidate.cooldownState,
+        isLocked: candidate.isLocked,
+        isDragging: candidate.isDragging
+      });
+    }
+  });
 }
 
 function publishPetPresentation(intent: PetPresentationIntent): void {
@@ -669,7 +690,7 @@ function rebuildPetWindow(recoverySource?: string): void {
   }
 
   petWindow = createRecoverablePetWindow();
-  pointerController = createPointerController(petWindow);
+  pointerController = createPointerControllerForWindow(petWindow);
   pointerController.setLocked(isPetLocked);
   logWindowSnapshot(recoverySource ? "pet_rebuild" : "pet_created");
   logTelemetry(recoverySource ? "pet_window_rebuilt" : "pet_window_created", {

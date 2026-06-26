@@ -1,5 +1,9 @@
 import { screen, type BrowserWindow } from "electron";
 import type { PetDragDelta } from "../../shared/ipc-contract";
+import {
+  createWindowMotionDetector,
+  type WindowMotionTelemetryCandidate
+} from "./window-motion-detector";
 
 const RESTORE_DELAY_MS = 60;
 const POINTER_POLL_INTERVAL_MS = 50;
@@ -22,7 +26,19 @@ export type PointerController = {
   dispose(): void;
 };
 
-export function createPointerController(window: BrowserWindow): PointerController {
+export type PointerControllerOptions = {
+  getMotionGuards?: () => {
+    isScaleGestureActive: boolean;
+    isChatInteractionActive: boolean;
+  };
+  onWindowMotionCandidate?: (candidate: WindowMotionTelemetryCandidate) => void;
+  nowMs?: () => number;
+};
+
+export function createPointerController(
+  window: BrowserWindow,
+  options: PointerControllerOptions = {}
+): PointerController {
   let isPointerHit = false;
   let isDragging = false;
   let isLocked = false;
@@ -34,6 +50,7 @@ export function createPointerController(window: BrowserWindow): PointerControlle
   };
   let restoreTimer: NodeJS.Timeout | null = null;
   let pollTimer: NodeJS.Timeout | null = null;
+  const windowMotionDetector = createWindowMotionDetector();
 
   function clearRestoreTimer(): void {
     if (restoreTimer) {
@@ -185,6 +202,24 @@ export function createPointerController(window: BrowserWindow): PointerControlle
 
       if (!Number.isFinite(delta.deltaX) || !Number.isFinite(delta.deltaY)) {
         return;
+      }
+
+      const motionGuards = options.getMotionGuards?.() ?? {
+        isScaleGestureActive: false,
+        isChatInteractionActive: false
+      };
+      const motionCandidate = windowMotionDetector.observe({
+        deltaX: delta.deltaX,
+        deltaY: delta.deltaY,
+        nowMs: options.nowMs?.() ?? Date.now(),
+        isLocked,
+        isDragging,
+        isScaleGestureActive: motionGuards.isScaleGestureActive,
+        isChatInteractionActive: motionGuards.isChatInteractionActive
+      });
+
+      if (motionCandidate) {
+        options.onWindowMotionCandidate?.(motionCandidate);
       }
 
       const currentBounds = dragBounds ?? window.getBounds();
