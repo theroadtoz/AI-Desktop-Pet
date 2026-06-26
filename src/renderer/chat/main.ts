@@ -345,9 +345,12 @@ async function refreshMemory(): Promise<void> {
     memoryCards = cards;
     enableMemoryAction.textContent = memoryEnabled ? "关闭记忆" : "开启记忆";
     renderMemoryList();
+    const enabledCount = cards.filter((card) => card.enabled).length;
     setMemoryFeedback(
       memoryEnabled
-        ? `记忆已开启；发送时将使用 ${cards.filter((card) => card.enabled).length} 条已启用事实卡。`
+        ? enabledCount > 0
+          ? `记忆已开启；发送时将使用 ${enabledCount} 条已启用事实卡。`
+          : "记忆已开启；当前没有已启用事实卡，发送时不会加入记忆。"
         : "记忆默认关闭；开启前不会保存、注入或提示使用事实卡。"
     );
   } catch {
@@ -1162,9 +1165,11 @@ window.chatApi?.onMemoryInjection((payload) => {
     return;
   }
 
-  if (payload.count > 0) {
-    setChatSessionNote(`本次将使用 ${payload.count} 条已启用记忆。可在记忆页查看明细。`);
-  }
+  setChatSessionNote(
+    payload.count > 0
+      ? `本次将使用 ${payload.count} 条已启用记忆。可在记忆页查看明细。`
+      : "本次未使用记忆；没有已启用事实卡加入 Provider 请求。"
+  );
 });
 
 window.petPresentationApi?.onPetLockChanged((state) => {
