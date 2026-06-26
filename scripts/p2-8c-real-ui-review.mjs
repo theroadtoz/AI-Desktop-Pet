@@ -284,7 +284,8 @@ async function main() {
     { type: "greeting", random: 0.05, hitArea: "body", durationMs: 1_400, captureDelayMs: 650 },
     { type: "thinking", random: 0.55, hitArea: "body", durationMs: 1_800, captureDelayMs: 750 },
     { type: "playGame", random: 0.8, hitArea: "body", durationMs: 1_700, captureDelayMs: 700 },
-    { type: "reading", random: 0.94, hitArea: "body", durationMs: 1_900, captureDelayMs: 800 }
+    { type: "reading", random: 0.9, hitArea: "body", durationMs: 1_900, captureDelayMs: 800 },
+    { type: "focus", random: 0.98, hitArea: "body", durationMs: 1_700, captureDelayMs: 700 }
   ];
   let headBurstSummary = null;
   let bodyBurstSummary = null;
@@ -359,7 +360,7 @@ async function main() {
 
     log("mixed:20");
     const bodyBurstStartIndex = readTelemetryEvents().events.length;
-    const mixed = [0.05, 0.2, 0.55, 0.8, 0.94, 0.05, 0.55, 0.8, 0.94, 0.05, 0.55, 0.2, 0.05, 0.8, 0.94, 0.55, 0.2, 0.05, 0.8, 0.94];
+    const mixed = [0.05, 0.2, 0.55, 0.8, 0.9, 0.98, 0.05, 0.55, 0.8, 0.9, 0.05, 0.55, 0.2, 0.05, 0.8, 0.98, 0.55, 0.2, 0.05, 0.9];
     for (const value of mixed) {
       await clickPet(pet.cdp, value);
       await sleep(160);
@@ -436,7 +437,7 @@ async function main() {
     });
     checks.push({
       name: "bodyClickUsesOrdinaryPool",
-      ok: ["greeting", "thinking", "playGame", "reading"].every((type) => bodyActionTypes.has(type)) &&
+      ok: ["greeting", "thinking", "playGame", "reading", "focus"].every((type) => bodyActionTypes.has(type)) &&
         !startedActions.some((event) => event.reason === "click_body" && (event.type === "appearance" || event.type === "headPat")),
       detail: [...bodyActionTypes]
     });
@@ -449,7 +450,7 @@ async function main() {
     checks.push({
       name: "bodyBurst20UsesCooldownSkips",
       ok: (bodyBurstSummary?.started ?? []).every((event) => (
-        ["greeting", "thinking", "playGame", "reading"].includes(event.type)
+        ["greeting", "thinking", "playGame", "reading", "focus"].includes(event.type)
       )) &&
         !(bodyBurstSummary?.started ?? []).some((event) => event.type === "appearance" || event.type === "headPat") &&
         (bodyBurstSummary?.skipped ?? []).some((event) => event.skipReason === "active_action" || event.skipReason === "global_cooldown"),
@@ -473,7 +474,7 @@ async function main() {
     });
     checks.push({
       name: "temporaryActionsFinish",
-      ok: ["appearance", "headPat", "greeting", "thinking", "playGame", "reading"].every((type) => (
+      ok: ["appearance", "headPat", "greeting", "thinking", "playGame", "reading", "focus"].every((type) => (
         finishedActions.some((event) => event.type === type)
       )),
       detail: finishedActions

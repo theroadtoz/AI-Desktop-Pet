@@ -246,6 +246,15 @@ export function auditWitchActionCapabilities(repositoryRoot = REPOSITORY_ROOT): 
       hitAreas: bodyHitArea,
       implementationRecommendation: "V1 可用 glasses 表达式/眼镜部件 + 安静 neutral 表现；书本资产未发现。",
       risk: "未发现书本相关 part/expression，不能承诺完整看书语义。"
+    }),
+    actionEntry("focus", "expression-parameter-composition", {
+      nativeMotions: [],
+      expressions: [],
+      parameters: faceParameters.slice(0, 8),
+      parts: [],
+      hitAreas: bodyHitArea,
+      implementationRecommendation: "Use a neutral low-amplitude parameter composition only; do not bind expression, part, or native motion.",
+      risk: "No native focus motion or prop is available, so the visual difference may be weak and must stay documented as a fallback."
     })
   ];
 

@@ -7,7 +7,8 @@ export const PET_INTERACTION_ACTION_TYPES = [
   "greeting",
   "thinking",
   "playGame",
-  "reading"
+  "reading",
+  "focus"
 ] as const;
 
 export type PetInteractionActionType = typeof PET_INTERACTION_ACTION_TYPES[number];
@@ -97,6 +98,12 @@ export const PET_INTERACTION_ACTIONS: readonly PetInteractionAction[] = [
     presentation: { emotion: "neutral", intensity: "low", mode: "neutral" },
     expressionName: "glasses",
     accessoryPartIds: ["Part53"]
+  },
+  {
+    type: "focus",
+    weight: 0.5,
+    durationMs: 1_700,
+    presentation: { emotion: "neutral", intensity: "low", mode: "neutral" }
   }
 ];
 
@@ -109,25 +116,29 @@ const MODE_RANDOM_INTERACTION_ACTION_WEIGHTS: Readonly<Record<DialogueModeId, Re
     greeting: 4,
     thinking: 3,
     playGame: 1,
-    reading: 1
+    reading: 1,
+    focus: 0.5
   },
   work: {
     greeting: 2,
     thinking: 4,
     playGame: 0.5,
-    reading: 1
+    reading: 1,
+    focus: 3
   },
   game: {
     greeting: 3,
     thinking: 1,
     playGame: 4,
-    reading: 0.5
+    reading: 0.5,
+    focus: 0
   },
   reading: {
     greeting: 2,
     thinking: 2,
     playGame: 0.5,
-    reading: 4
+    reading: 4,
+    focus: 1
   }
 };
 

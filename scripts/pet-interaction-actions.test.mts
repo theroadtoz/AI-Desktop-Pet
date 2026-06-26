@@ -33,6 +33,8 @@ test("pet interaction action manifest includes audited expression and accessory 
 
   assert.equal(byType.get("greeting")?.expressionName, undefined);
   assert.equal(byType.get("thinking")?.expressionName, undefined);
+  assert.equal(byType.get("focus")?.expressionName, undefined);
+  assert.equal(byType.get("focus")?.accessoryPartIds, undefined);
   assert.equal(byType.get("reading")?.expressionName, "glasses");
   assert.deepEqual(byType.get("reading")?.accessoryPartIds, ["Part53"]);
   assert.equal(byType.get("playGame")?.expressionName, "gestureGame");
@@ -42,14 +44,15 @@ test("pet interaction action manifest includes audited expression and accessory 
 test("ordinary random interaction pool excludes startup and head-only actions", () => {
   assert.deepEqual(
     PET_RANDOM_INTERACTION_ACTIONS.map((action) => action.type).sort(),
-    ["greeting", "playGame", "reading", "thinking"].sort()
+    ["focus", "greeting", "playGame", "reading", "thinking"].sort()
   );
   assert.equal(selectRandomPetInteractionAction(() => 0).type, "greeting");
-  assert.equal(selectRandomPetInteractionAction(() => 0.44).type, "greeting");
+  assert.equal(selectRandomPetInteractionAction(() => 0.4).type, "greeting");
   assert.equal(selectRandomPetInteractionAction(() => 0.45).type, "thinking");
   assert.equal(selectRandomPetInteractionAction(() => 0.78).type, "playGame");
   assert.equal(selectRandomPetInteractionAction(() => 0.89).type, "reading");
-  assert.equal(selectRandomPetInteractionAction(() => 0.999).type, "reading");
+  assert.equal(selectRandomPetInteractionAction(() => 0.95).type, "focus");
+  assert.equal(selectRandomPetInteractionAction(() => 0.999).type, "focus");
   assert.equal(getPetInteractionAction("appearance").type, "appearance");
   assert.equal(getPetInteractionAction("headPat").type, "headPat");
 });
@@ -63,15 +66,19 @@ test("dialogue modes adjust ordinary body action weights without changing the de
     greeting: 4,
     thinking: 3,
     playGame: 1,
-    reading: 1
+    reading: 1,
+    focus: 0.5
   });
   assert.deepEqual(
     getRandomPetInteractionActionsForMode("default").map((action) => action.type).sort(),
-    ["greeting", "playGame", "reading", "thinking"].sort()
+    ["focus", "greeting", "playGame", "reading", "thinking"].sort()
   );
   assert.equal(weightsFor("game").playGame, 4);
+  assert.equal(weightsFor("game").focus, 0);
   assert.equal(weightsFor("reading").reading, 4);
+  assert.equal(weightsFor("reading").focus, 1);
   assert.equal(weightsFor("work").thinking, 4);
+  assert.equal(weightsFor("work").focus, 3);
   assert.equal(weightsFor("work").playGame, 0.5);
   assert.equal(getRandomPetInteractionActionsForMode("game").some((action) => action.type === "appearance" || action.type === "headPat"), false);
 });
@@ -80,6 +87,8 @@ test("dialogue mode body action selection follows mode weights", () => {
   assert.equal(selectRandomPetInteractionAction(() => 0.68, getRandomPetInteractionActionsForMode("default")).type, "thinking");
   assert.equal(selectRandomPetInteractionAction(() => 0.68, getRandomPetInteractionActionsForMode("game")).type, "playGame");
   assert.equal(selectRandomPetInteractionAction(() => 0.72, getRandomPetInteractionActionsForMode("reading")).type, "reading");
+  assert.equal(selectRandomPetInteractionAction(() => 0.95, getRandomPetInteractionActionsForMode("reading")).type, "focus");
+  assert.equal(selectRandomPetInteractionAction(() => 0.8, getRandomPetInteractionActionsForMode("work")).type, "focus");
   assert.notEqual(selectRandomPetInteractionAction(() => 0.68, getRandomPetInteractionActionsForMode("work")).type, "playGame");
 });
 

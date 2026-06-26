@@ -211,15 +211,7 @@ async function click(cdp, selector) {
 
 async function setMode(cdp, modeId) {
   await click(cdp, `.mode-button[data-mode-id="${modeId}"]`);
-  await waitFor(cdp, `document.querySelector('#partner-status')?.textContent.includes(${JSON.stringify(modeId === "default" ? "默认陪伴" : modeLabel(modeId))})`);
-}
-
-function modeLabel(modeId) {
-  return {
-    work: "工作模式",
-    game: "游戏模式",
-    reading: "读书模式"
-  }[modeId] ?? "默认陪伴";
+  await waitFor(cdp, `document.querySelector('.mode-button.is-active')?.dataset.modeId === ${JSON.stringify(modeId)}`);
 }
 
 async function sendMessage(cdp, message) {
@@ -408,12 +400,23 @@ async function main() {
     checks.modeButtonsVisible = await evaluate(chat, "document.querySelectorAll('.mode-button').length === 4");
 
     await setMode(chat, "work");
-    checks.workModeVisible = await evaluate(chat, "document.querySelector('#partner-status')?.textContent.includes('工作模式')");
+    checks.workModeVisible = await evaluate(chat, "document.querySelector('#partner-status')?.textContent.includes('工作')");
+    await clickPet(handles.pet.cdp, 0.8);
+    const workAction = await waitForTelemetryEvent((event) => (
+      event.type === "pet_interaction_action_started" &&
+      event.payload?.reason === "click_body" &&
+      event.payload?.modeId === "work" &&
+      event.payload?.selectedActionType === "focus" &&
+      Array.isArray(event.payload?.candidateActionTypes) &&
+      event.payload.candidateActionTypes.includes("focus")
+    ));
+    checks.workModePetActionCanTriggerFocus = Boolean(workAction);
+    await sleep(2_100);
     const workReply = await sendMessage(chat, `${userSentinel} 工作模式回复`);
     checks.workReplyDiffers = workReply.at(-1)?.startsWith("先抓下一步。") || workReply.at(-1)?.startsWith("我们直接拆任务。");
 
     await setMode(chat, "game");
-    checks.gameModeVisible = await evaluate(chat, "document.querySelector('#partner-status')?.textContent.includes('游戏模式')");
+    checks.gameModeVisible = await evaluate(chat, "document.querySelector('#partner-status')?.textContent.includes('游戏')");
     await clickPet(handles.pet.cdp, 0.6);
     const gameAction = await waitForTelemetryEvent((event) => (
       event.type === "pet_interaction_action_started" &&
@@ -427,7 +430,7 @@ async function main() {
     checks.gameReplyDiffers = gameReply.at(-1)?.startsWith("好，来点轻快的。") || gameReply.at(-1)?.startsWith("可以，先轻松一下。");
 
     await setMode(chat, "reading");
-    checks.readingModeVisible = await evaluate(chat, "document.querySelector('#partner-status')?.textContent.includes('读书模式')");
+    checks.readingModeVisible = await evaluate(chat, "document.querySelector('#partner-status')?.textContent.includes('读书')");
     await clickPet(handles.pet.cdp, 0.7);
     const readingAction = await waitForTelemetryEvent((event) => (
       event.type === "pet_interaction_action_started" &&
@@ -480,7 +483,7 @@ async function main() {
       event.payload?.reason === "click_body" &&
       event.payload?.modeId === "default" &&
       Array.isArray(event.payload?.candidateActionTypes) &&
-      ["greeting", "thinking", "playGame", "reading"].every((type) => event.payload.candidateActionTypes.includes(type)) &&
+      ["greeting", "thinking", "playGame", "reading", "focus"].every((type) => event.payload.candidateActionTypes.includes(type)) &&
       !event.payload.candidateActionTypes.includes("appearance") &&
       !event.payload.candidateActionTypes.includes("headPat")
     ));
@@ -500,7 +503,7 @@ async function main() {
     child = launchElectron();
     handles = await openChat();
     const restartedChat = handles.chat.cdp;
-    checks.restartRestoresMode = await waitFor(restartedChat, "document.querySelector('#partner-status')?.textContent.includes('读书模式')", 10_000);
+    checks.restartRestoresMode = await waitFor(restartedChat, "document.querySelector('.mode-button.is-active')?.dataset.modeId === 'reading'", 10_000);
 
     finalSnapshot = await evaluate(restartedChat, `
       (() => ({
