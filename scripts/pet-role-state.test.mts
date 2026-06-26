@@ -28,6 +28,27 @@ test("role state transitions through listening, thinking, replying, and idle", (
   });
   assert.equal(completed.snapshot.state, "listening");
   assert.equal(completed.intent.expression.mode, "emphasis");
+  assert.equal(completed.intent.allowEmphasisExpression, true);
+  assert.equal(completed.intent.allowMicroExpression, true);
+});
+
+test("completed replies can apply their final presentation while the chat stays open", () => {
+  const listening = reduce({ type: "chat:opened" });
+  assert.equal(listening.intent.allowMicroExpression, false);
+  assert.equal(listening.intent.allowEmphasisExpression, false);
+
+  const thinking = reducePetRoleState(listening.snapshot, { type: "request:started", requestVersion: 1 });
+  const replying = reducePetRoleState(thinking.snapshot, { type: "reply:delta", requestVersion: 1 });
+  const completed = reducePetRoleState(replying.snapshot, {
+    type: "reply:completed",
+    requestVersion: 1,
+    expression: { emotion: "confused", intensity: "medium", mode: "micro" }
+  });
+
+  assert.equal(completed.snapshot.state, "listening");
+  assert.equal(completed.intent.expression.mode, "micro");
+  assert.equal(completed.intent.allowMicroExpression, true);
+  assert.equal(completed.intent.allowEmphasisExpression, true);
 });
 
 test("stale request events cannot replace the active presentation", () => {

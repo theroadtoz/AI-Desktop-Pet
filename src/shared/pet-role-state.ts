@@ -100,6 +100,7 @@ export function createPetPresentationIntent(
 ): PetPresentationIntent {
   const recovery = snapshot.state === "error" ? "safe-neutral" : "normal";
   const neutralExpression = recovery === "safe-neutral" ? NEUTRAL_EXPRESSION : expression;
+  const hasReplyExpression = neutralExpression.emotion !== "neutral";
 
   return {
     state: snapshot.state,
@@ -108,8 +109,8 @@ export function createPetPresentationIntent(
     workStatus: snapshot.state === "thinking" ? "thinking" : "idle",
     expression: neutralExpression,
     accessoryPresetId,
-    allowMicroExpression: snapshot.state === "idle" || snapshot.state === "replying",
-    allowEmphasisExpression: snapshot.state === "idle" || snapshot.state === "replying",
+    allowMicroExpression: snapshot.state === "idle" || snapshot.state === "replying" || hasReplyExpression,
+    allowEmphasisExpression: snapshot.state === "idle" || snapshot.state === "replying" || hasReplyExpression,
     recovery
   };
 }

@@ -92,6 +92,47 @@ test("micro expressions are low-amplitude and smooth back to base when cleared",
   assert.ok(latestWrite && latestWrite.value > 0 && latestWrite.value < 0.12);
 });
 
+test("micro-expression intensity scales low and medium targets below high targets", () => {
+  const model = createModel(PARAMETERS);
+  const controller = createCubismMicroExpressionController(model as never);
+
+  controller.setEmotion("happy", "low");
+  controller.update(model as never, 1);
+  const lowSmile = model.writes[0].value;
+
+  model.writes.length = 0;
+  controller.clear(true);
+  controller.setEmotion("happy", "medium");
+  controller.update(model as never, 1);
+  const mediumSmile = model.writes[0].value;
+
+  model.writes.length = 0;
+  controller.clear(true);
+  controller.setEmotion("happy", "high");
+  controller.update(model as never, 1);
+  const highSmile = model.writes[0].value;
+
+  assert.ok(lowSmile > 0);
+  assert.ok(lowSmile < mediumSmile);
+  assert.ok(mediumSmile < highSmile);
+  assert.ok(highSmile <= 0.12);
+});
+
+test("neutral clears every micro-expression parameter target", () => {
+  const model = createModel(PARAMETERS);
+  const controller = createCubismMicroExpressionController(model as never);
+
+  controller.setEmotion("confused", "high");
+  controller.update(model as never, 1 / 60);
+  model.writes.length = 0;
+
+  controller.setEmotion("neutral", "low");
+  controller.update(model as never, 1);
+
+  assert.equal(model.writes.length, 3);
+  assert.ok(model.writes.every((write) => Math.abs(write.value) < 0.001));
+});
+
 test("immediate clearing prevents micro-expression writes during emphasis playback", () => {
   const model = createModel(PARAMETERS);
   const controller = createCubismMicroExpressionController(model as never);

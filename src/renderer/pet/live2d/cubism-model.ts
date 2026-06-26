@@ -214,7 +214,7 @@ export async function loadWitchLive2DModel(
     },
     setEmotionPresentation(presentation): Promise<void> {
       if (presentation.mode === "micro") {
-        microExpressionController?.setEmotion(presentation.emotion);
+        microExpressionController?.setEmotion(presentation.emotion, presentation.intensity);
       } else {
         microExpressionController?.clear(presentation.mode === "emphasis");
       }

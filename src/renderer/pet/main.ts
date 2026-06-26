@@ -287,6 +287,19 @@ function applyPresentationIntent(intent: PetPresentationIntent): void {
 
   canvas.dataset.roleState = intent.state;
   canvas.dataset.workStatus = intent.workStatus;
+  canvas.dataset.expressionEmotion = intent.expression.emotion;
+  canvas.dataset.expressionIntensity = intent.expression.intensity;
+  canvas.dataset.expressionMode = intent.expression.mode;
+  window.petApi?.reportTelemetry("pet_presentation_intent_applied", {
+    state: intent.state,
+    requestVersion: intent.requestVersion,
+    emotion: intent.expression.emotion,
+    intensity: intent.expression.intensity,
+    mode: intent.expression.mode,
+    allowMicroExpression: intent.allowMicroExpression,
+    allowEmphasisExpression: intent.allowEmphasisExpression,
+    recovery: intent.recovery
+  });
   lastAccessoryPresetId = intent.accessoryPresetId;
 
   if (expressionAllowed) {

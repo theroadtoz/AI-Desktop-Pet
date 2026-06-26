@@ -118,7 +118,8 @@ const RENDERER_TELEMETRY_TYPES = new Set([
   "recovery_failed",
   "pet_interaction_action_started",
   "pet_interaction_action_finished",
-  "pet_interaction_action_skipped"
+  "pet_interaction_action_skipped",
+  "pet_presentation_intent_applied"
 ]);
 
 protocol.registerSchemesAsPrivileged([
@@ -1097,10 +1098,11 @@ app.whenReady().then(async () => {
         return;
       }
 
+      const expression = selectEmotionPresentation(result);
       const accepted = transitionPetRole({
         type: "reply:completed",
         requestVersion: request.requestVersion,
-        expression: selectEmotionPresentation(result)
+        expression
       });
       if (activeChatRequestVersion === request.requestVersion) {
         activeChatRequestVersion = null;
@@ -1115,7 +1117,10 @@ app.whenReady().then(async () => {
         messageCount: request.messages.length,
         replyLength: result.text.length,
         durationMs: Date.now() - startedAt,
-        emotion: result.emotion
+        emotion: result.emotion,
+        intensity: result.intensity,
+        presentationMode: expression.mode,
+        emphasisExpressionTriggered: expression.mode === "emphasis"
       });
       event.sender.send("chat:stream-done", { ...result, requestVersion: request.requestVersion });
     }).catch((error: unknown) => {

@@ -1,4 +1,4 @@
-import type { EmotionTag } from "../../../shared/emotion";
+import type { EmotionIntensity, EmotionTag } from "../../../shared/emotion";
 import type { CubismIdHandle } from "./vendor/framework/id/cubismid";
 import type { CubismModel } from "./vendor/framework/model/cubismmodel";
 
@@ -15,6 +15,12 @@ const MICRO_EXPRESSION_OFFSETS: Readonly<Record<EmotionTag, Readonly<Record<stri
   surprised: { ParamBrowLY: 0.05 },
   confused: { ParamBrowLY: 0.03 },
   angry: { ParamBrowLY: -0.06 }
+};
+
+const MICRO_EXPRESSION_INTENSITY_SCALE: Readonly<Record<EmotionIntensity, number>> = {
+  low: 0.55,
+  medium: 0.82,
+  high: 1
 };
 
 const MICRO_EXPRESSION_SMOOTHING_PER_SECOND = 12;
@@ -94,14 +100,15 @@ export class CubismMicroExpressionController {
     this.resetToBase();
   }
 
-  public setEmotion(emotion: EmotionTag): void {
+  public setEmotion(emotion: EmotionTag, intensity: EmotionIntensity = "medium"): void {
     this.targetValues.clear();
     const offsets = MICRO_EXPRESSION_OFFSETS[emotion];
+    const scale = MICRO_EXPRESSION_INTENSITY_SCALE[intensity];
 
     for (const parameter of this.parameters) {
       this.targetValues.set(
         parameter.id,
-        calculateMicroExpressionTarget(parameter, offsets[parameter.name] ?? 0)
+        calculateMicroExpressionTarget(parameter, (offsets[parameter.name] ?? 0) * scale)
       );
     }
 
