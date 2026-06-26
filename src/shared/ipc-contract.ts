@@ -19,7 +19,8 @@ export type PetWindowCommand =
   | { type: "pet:open-chat" }
   | { type: "pet:drag-start" }
   | { type: "pet:drag-move"; payload: PetDragDelta }
-  | { type: "pet:drag-end" };
+  | { type: "pet:drag-end" }
+  | { type: "shortcuts:scale-wheel-modifier-changed"; payload: string };
 
 export type ChatWindowCommand =
   | { type: "chat:focus-input" }
@@ -112,6 +113,8 @@ export type PetApi = {
   moveDrag(delta: PetDragDelta): void;
   endDrag(): void;
   adjustScale(intent: PetScaleAdjustmentIntent): void;
+  getScaleWheelModifier(): Promise<string>;
+  onScaleWheelModifierChanged(handler: (accelerator: string) => void): () => void;
 };
 
 export type ChatApi = {

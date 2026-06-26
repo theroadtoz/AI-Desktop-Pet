@@ -14,6 +14,7 @@ const petRoleStates = [
 const emotionTags = ["neutral", "happy", "sad", "surprised", "confused", "angry"] as const;
 const emotionIntensities = ["low", "medium", "high"] as const;
 const petAccessoryPresetIds = ["none", "glasses"] as const;
+const scaleWheelModifierPattern = /^(Ctrl|Alt|Shift|Meta)(\+(Ctrl|Alt|Shift|Meta))*$/;
 
 function isRequestVersion(value: number): boolean {
   return Number.isSafeInteger(value) && value > 0;
@@ -67,6 +68,15 @@ function isPetPresentationIntent(value: unknown): value is PetPresentationIntent
     (intent.recovery === "normal" || intent.recovery === "safe-neutral") &&
     (intent.recovery !== "safe-neutral" || intent.expression?.emotion === "neutral")
   );
+}
+
+function isScaleWheelModifierAccelerator(value: unknown): value is string {
+  if (typeof value !== "string" || !scaleWheelModifierPattern.test(value)) {
+    return false;
+  }
+
+  const parts = value.split("+");
+  return new Set(parts).size === parts.length;
 }
 
 const api: PetApi = {
@@ -127,6 +137,27 @@ const api: PetApi = {
     }
 
     ipcRenderer.send("pet:adjust-scale", intent);
+  },
+  async getScaleWheelModifier() {
+    const accelerator = await ipcRenderer.invoke("shortcuts:get-scale-wheel-modifier");
+
+    if (!isScaleWheelModifierAccelerator(accelerator)) {
+      throw new Error("Invalid scale wheel modifier response");
+    }
+
+    return accelerator;
+  },
+  onScaleWheelModifierChanged(handler) {
+    const listener = (_event: Electron.IpcRendererEvent, value: unknown): void => {
+      if (isScaleWheelModifierAccelerator(value)) {
+        handler(value);
+      }
+    };
+
+    ipcRenderer.on("shortcuts:scale-wheel-modifier-changed", listener);
+    return () => {
+      ipcRenderer.removeListener("shortcuts:scale-wheel-modifier-changed", listener);
+    };
   }
 };
 

@@ -1,19 +1,24 @@
 export const TOGGLE_PET_LOCK_SHORTCUT_ACTION_ID = "togglePetLock" as const;
+export const ADJUST_PET_SCALE_WITH_WHEEL_SHORTCUT_ACTION_ID = "adjustPetScaleWithWheel" as const;
 export const DEFAULT_TOGGLE_PET_LOCK_ACCELERATOR = "Tab+0";
+export const DEFAULT_SCALE_WHEEL_MODIFIER_ACCELERATOR = "Ctrl+Shift";
 export const WEBGL_DIAGNOSTIC_ACCELERATOR = "Ctrl+Alt+Shift+L";
 
 export const shortcutActionIds = [
-  TOGGLE_PET_LOCK_SHORTCUT_ACTION_ID
+  TOGGLE_PET_LOCK_SHORTCUT_ACTION_ID,
+  ADJUST_PET_SCALE_WITH_WHEEL_SHORTCUT_ACTION_ID
 ] as const;
 
 export type ShortcutActionId = typeof shortcutActionIds[number];
+export type ShortcutActionKind = "global" | "wheelModifier";
 
 export type ShortcutActionDefinition = {
   id: ShortcutActionId;
   label: string;
   description: string;
   defaultAccelerator: string;
-  scope: "global";
+  kind: ShortcutActionKind;
+  scope: "global" | "petRenderer";
   canDisable: boolean;
   userConfigurable: boolean;
 };
@@ -46,7 +51,18 @@ export const USER_SHORTCUT_ACTIONS: ShortcutActionDefinition[] = [
     label: "切换桌宠锁定",
     description: "锁定或解除锁定桌宠，并切换点击穿透。",
     defaultAccelerator: DEFAULT_TOGGLE_PET_LOCK_ACCELERATOR,
+    kind: "global",
     scope: "global",
+    canDisable: false,
+    userConfigurable: true
+  },
+  {
+    id: ADJUST_PET_SCALE_WITH_WHEEL_SHORTCUT_ACTION_ID,
+    label: "滚轮调整桌宠大小",
+    description: "按住修饰键后滚动鼠标滚轮，调整桌宠大小。",
+    defaultAccelerator: DEFAULT_SCALE_WHEEL_MODIFIER_ACCELERATOR,
+    kind: "wheelModifier",
+    scope: "petRenderer",
     canDisable: false,
     userConfigurable: true
   }
@@ -54,6 +70,7 @@ export const USER_SHORTCUT_ACTIONS: ShortcutActionDefinition[] = [
 
 const knownActionIds = new Set<ShortcutActionId>(shortcutActionIds);
 const modifierKeys = new Set(["CommandOrControl", "Ctrl", "Control", "Command", "Cmd", "Alt", "Option", "Shift", "Super", "Meta"]);
+const wheelModifierOrder = ["Ctrl", "Alt", "Shift", "Meta"] as const;
 const bareBlockedKeys = new Set(["Tab", "Space", "Enter", "Escape", "Esc", "Backspace", "Delete", "Insert", "Home", "End", "PageUp", "PageDown"]);
 
 export const DEFAULT_SHORTCUT_PREFERENCES: ShortcutPreferences = {
@@ -96,6 +113,10 @@ export function getShortcutAccelerator(preferences: ShortcutPreferences, actionI
     ?? getShortcutActionDefinition(actionId).defaultAccelerator;
 }
 
+export function getScaleWheelModifierAccelerator(preferences: ShortcutPreferences): string {
+  return getShortcutAccelerator(preferences, ADJUST_PET_SCALE_WITH_WHEEL_SHORTCUT_ACTION_ID);
+}
+
 export function createShortcutPreferenceView(preferences: ShortcutPreferences): ShortcutPreferenceView[] {
   return USER_SHORTCUT_ACTIONS
     .filter((action) => action.userConfigurable)
@@ -110,7 +131,76 @@ export function createShortcutPreferenceView(preferences: ShortcutPreferences): 
     });
 }
 
-export function validateShortcutAccelerator(accelerator: unknown): { ok: true; accelerator: string } | { ok: false; reason: string } {
+function normalizeModifierKey(part: string): string | null {
+  if (part === "Ctrl" || part === "Control" || part === "CommandOrControl") {
+    return "Ctrl";
+  }
+
+  if (part === "Alt" || part === "Option") {
+    return "Alt";
+  }
+
+  if (part === "Shift") {
+    return "Shift";
+  }
+
+  if (part === "Meta" || part === "Command" || part === "Cmd" || part === "Super") {
+    return "Meta";
+  }
+
+  return null;
+}
+
+function validateWheelModifierAccelerator(accelerator: unknown): { ok: true; accelerator: string } | { ok: false; reason: string } {
+  const normalized = normalizeShortcutAccelerator(accelerator);
+
+  if (!normalized) {
+    return { ok: false, reason: "滚轮缩放修饰键不能为空。" };
+  }
+
+  const parts = normalized.split("+");
+
+  if (parts.some((part) => part.toLowerCase() === "wheel")) {
+    return { ok: false, reason: "滚轮缩放只保存修饰键，不需要包含 Wheel。" };
+  }
+
+  const modifiers: string[] = [];
+
+  for (const part of parts) {
+    const modifier = normalizeModifierKey(part);
+
+    if (!modifier) {
+      return { ok: false, reason: "滚轮缩放只能使用 Ctrl、Alt、Shift、Meta 修饰键。" };
+    }
+
+    if (!modifiers.includes(modifier)) {
+      modifiers.push(modifier);
+    }
+  }
+
+  if (modifiers.length === 0) {
+    return { ok: false, reason: "滚轮缩放至少需要一个修饰键。" };
+  }
+
+  const ordered = wheelModifierOrder.filter((modifier) => modifiers.includes(modifier)).join("+");
+
+  if (ordered === "Ctrl+Alt+Shift") {
+    return { ok: false, reason: "不能占用开发诊断快捷键的修饰键组合。" };
+  }
+
+  return { ok: true, accelerator: ordered };
+}
+
+export function validateShortcutAccelerator(
+  accelerator: unknown,
+  actionId: ShortcutActionId = TOGGLE_PET_LOCK_SHORTCUT_ACTION_ID
+): { ok: true; accelerator: string } | { ok: false; reason: string } {
+  const action = getShortcutActionDefinition(actionId);
+
+  if (action.kind === "wheelModifier") {
+    return validateWheelModifierAccelerator(accelerator);
+  }
+
   const normalized = normalizeShortcutAccelerator(accelerator);
 
   if (!normalized) {
@@ -163,7 +253,7 @@ export function parseShortcutPreferences(value: unknown): ShortcutPreferences | 
       return null;
     }
 
-    const validation = validateShortcutAccelerator(shortcut.accelerator);
+    const validation = validateShortcutAccelerator(shortcut.accelerator, shortcut.actionId);
 
     if (!validation.ok) {
       return null;
@@ -198,7 +288,7 @@ export function mergeShortcutPreferencesWithDefaults(value: ShortcutPreferences)
   for (const action of USER_SHORTCUT_ACTIONS) {
     const stored = value.shortcuts.find((shortcut) => shortcut.actionId === action.id);
     const accelerator = stored?.accelerator ?? action.defaultAccelerator;
-    const validation = validateShortcutAccelerator(accelerator);
+    const validation = validateShortcutAccelerator(accelerator, action.id);
 
     if (!validation.ok) {
       return validation;
@@ -237,7 +327,7 @@ export function updateShortcutPreference(
     return { ok: false, reason: "未知快捷键动作。" };
   }
 
-  const validation = validateShortcutAccelerator(accelerator);
+  const validation = validateShortcutAccelerator(accelerator, actionId);
 
   if (!validation.ok) {
     return validation;

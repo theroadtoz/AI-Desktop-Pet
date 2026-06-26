@@ -74,6 +74,7 @@ import { createTelemetryService, type TelemetryPayload, type TelemetryService } 
 import { createChatWindow, focusChatInput, showChatWindow } from "./windows/chat-window";
 import { createPetWindow } from "./windows/pet-window";
 import { restorePetWindowOnTop } from "./windows/topmost-policy";
+import { DEFAULT_SHORTCUT_PREFERENCES, getScaleWheelModifierAccelerator, type ShortcutPreferences } from "../shared/shortcut-preferences";
 
 let petWindow: BrowserWindow | null = null;
 let chatWindow: BrowserWindow | null = null;
@@ -451,8 +452,28 @@ function createUserShortcutRegistry(): ShortcutRegistry | null {
     },
     onRegistrationResult: (result) => {
       logTelemetry("pet_lock_shortcut_registration", result);
+    },
+    onPreferencesChanged: (preferences) => {
+      publishScaleWheelModifier(preferences);
     }
   });
+}
+
+function getCurrentShortcutPreferences(): ShortcutPreferences {
+  return shortcutRegistry?.getPreferences()
+    ?? shortcutPreferencesStore?.getPreferences()
+    ?? DEFAULT_SHORTCUT_PREFERENCES;
+}
+
+function publishScaleWheelModifier(preferences = getCurrentShortcutPreferences()): void {
+  if (!petWindow || petWindow.isDestroyed()) {
+    return;
+  }
+
+  petWindow.webContents.send(
+    "shortcuts:scale-wheel-modifier-changed",
+    getScaleWheelModifierAccelerator(preferences)
+  );
 }
 
 function readNumber(value: unknown): number | undefined {
@@ -935,7 +956,16 @@ app.whenReady().then(async () => {
   ipcMain.on("pet:presentation-ready", (event) => {
     if (isPetSender(event)) {
       publishPetPresentation(currentPetPresentationIntent);
+      publishScaleWheelModifier();
     }
+  });
+
+  ipcMain.handle("shortcuts:get-scale-wheel-modifier", (event) => {
+    if (!isPetSender(event)) {
+      throw new Error("Unauthorized shortcut request");
+    }
+
+    return getScaleWheelModifierAccelerator(getCurrentShortcutPreferences());
   });
 
   ipcMain.on("chat:interaction-active", (event, isActive: unknown) => {

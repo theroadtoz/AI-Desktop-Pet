@@ -2,10 +2,16 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createScaleWheelNormalizer, hasScaleWheelModifiers } from "../src/renderer/pet/scale-wheel.ts";
 
-test("scale wheel requires exactly Ctrl+Shift", () => {
+test("scale wheel defaults to exactly Ctrl+Shift", () => {
   assert.equal(hasScaleWheelModifiers({ ctrlKey: true, shiftKey: true, altKey: false, metaKey: false }), true);
   assert.equal(hasScaleWheelModifiers({ ctrlKey: true, shiftKey: false, altKey: false, metaKey: false }), false);
   assert.equal(hasScaleWheelModifiers({ ctrlKey: true, shiftKey: true, altKey: true, metaKey: false }), false);
+});
+
+test("scale wheel can use a configured modifier combination", () => {
+  assert.equal(hasScaleWheelModifiers({ ctrlKey: true, altKey: true, shiftKey: false, metaKey: false }, "Ctrl+Alt"), true);
+  assert.equal(hasScaleWheelModifiers({ ctrlKey: true, altKey: false, shiftKey: true, metaKey: false }, "Ctrl+Alt"), false);
+  assert.equal(hasScaleWheelModifiers({ ctrlKey: true, altKey: true, shiftKey: true, metaKey: false }, "Ctrl+Alt"), false);
 });
 
 test("scale wheel normalizes a traditional wheel to one signed scale step", () => {

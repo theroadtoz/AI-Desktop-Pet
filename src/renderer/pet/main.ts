@@ -625,9 +625,21 @@ const DRAG_THRESHOLD_DIP = 4;
 const scaleWheelNormalizer = createScaleWheelNormalizer();
 
 let lastIsHit = false;
+let scaleWheelModifierAccelerator = "Ctrl+Shift";
 let pointerDown: { pointerId: number; x: number; y: number; hitArea: HitRect["name"] } & ScreenPoint | null = null;
 let lastDragPoint: ScreenPoint | null = null;
 let isDragging = false;
+
+function setScaleWheelModifierAccelerator(accelerator: string): void {
+  scaleWheelModifierAccelerator = accelerator;
+  scaleWheelNormalizer.reset();
+}
+
+void window.petApi?.getScaleWheelModifier().then(setScaleWheelModifierAccelerator).catch(() => {
+  setScaleWheelModifierAccelerator("Ctrl+Shift");
+});
+
+window.petApi?.onScaleWheelModifierChanged(setScaleWheelModifierAccelerator);
 
 function getPetHitArea(clientX: number, clientY: number): HitRect["name"] | null {
   const rect = canvas.getBoundingClientRect();
@@ -654,7 +666,7 @@ canvas.addEventListener("wheel", (event) => {
     return;
   }
 
-  if (!hasScaleWheelModifiers(event) || !isPetHit(event.clientX, event.clientY)) {
+  if (!hasScaleWheelModifiers(event, scaleWheelModifierAccelerator) || !isPetHit(event.clientX, event.clientY)) {
     scaleWheelNormalizer.reset();
     return;
   }

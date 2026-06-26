@@ -183,6 +183,7 @@ let memoryDraftSourceMessage: ChatMessage | null = null;
 let isPetLocked = false;
 let shortcutViews: ShortcutPreferenceView[] = [];
 let recordingShortcutActionId: ShortcutActionId | null = null;
+let pendingWheelModifierRecordTimeout: number | null = null;
 
 function formatProviderStatus(status: ProviderStatus): string {
   if (status.isFallback) {
@@ -771,6 +772,19 @@ function clearShortcutStatus(): void {
   delete shortcutStatusBox.dataset.state;
 }
 
+function clearPendingWheelModifierRecording(): void {
+  if (pendingWheelModifierRecordTimeout !== null) {
+    window.clearTimeout(pendingWheelModifierRecordTimeout);
+    pendingWheelModifierRecordTimeout = null;
+  }
+}
+
+function formatShortcutAccelerator(shortcut: ShortcutPreferenceView): string {
+  return shortcut.kind === "wheelModifier"
+    ? `${shortcut.accelerator}+Wheel`
+    : shortcut.accelerator;
+}
+
 function renderShortcutList(): void {
   shortcutListElement.replaceChildren();
 
@@ -795,15 +809,23 @@ function renderShortcutList(): void {
     const accelerator = document.createElement("span");
     accelerator.className = "status-box shortcut-accelerator";
     accelerator.dataset.state = shortcut.isDefault ? "fallback" : "ready";
-    accelerator.textContent = recordingShortcutActionId === shortcut.id ? "等待按键" : shortcut.accelerator;
+    accelerator.textContent = recordingShortcutActionId === shortcut.id
+      ? shortcut.kind === "wheelModifier" ? "等待修饰键" : "等待按键"
+      : formatShortcutAccelerator(shortcut);
 
     const recordButton = document.createElement("button");
     recordButton.className = "button-light";
     recordButton.type = "button";
     recordButton.textContent = recordingShortcutActionId === shortcut.id ? "取消录入" : "录入快捷键";
     recordButton.addEventListener("click", () => {
+      clearPendingWheelModifierRecording();
       recordingShortcutActionId = recordingShortcutActionId === shortcut.id ? null : shortcut.id;
-      setShortcutStatus(recordingShortcutActionId ? "请按下新的快捷键组合。" : "已取消快捷键录入。", recordingShortcutActionId ? "ready" : "fallback");
+      setShortcutStatus(
+        recordingShortcutActionId
+          ? shortcut.kind === "wheelModifier" ? "请按下新的滚轮缩放修饰键组合。" : "请按下新的快捷键组合。"
+          : "已取消快捷键录入。",
+        recordingShortcutActionId ? "ready" : "fallback"
+      );
       renderShortcutList();
     });
 
@@ -874,6 +896,32 @@ function eventToAccelerator(event: KeyboardEvent): string | null {
   return parts.join("+");
 }
 
+function eventToWheelModifierAccelerator(event: KeyboardEvent): string | null {
+  if (event.isComposing || event.key === "Process") {
+    return null;
+  }
+
+  const parts: string[] = [];
+
+  if (event.ctrlKey || event.key === "Control") {
+    parts.push("Ctrl");
+  }
+
+  if (event.altKey || event.key === "Alt") {
+    parts.push("Alt");
+  }
+
+  if (event.shiftKey || event.key === "Shift") {
+    parts.push("Shift");
+  }
+
+  if (event.metaKey || event.key === "Meta") {
+    parts.push("Meta");
+  }
+
+  return parts.length > 0 ? parts.join("+") : null;
+}
+
 async function saveRecordedShortcut(actionId: ShortcutActionId, accelerator: string): Promise<void> {
   if (!window.shortcutApi) {
     setShortcutStatus("快捷键设置不可用。", "fallback");
@@ -882,6 +930,7 @@ async function saveRecordedShortcut(actionId: ShortcutActionId, accelerator: str
 
   const result = await window.shortcutApi.updateShortcut(actionId, accelerator);
   shortcutViews = result.shortcuts;
+  clearPendingWheelModifierRecording();
   recordingShortcutActionId = null;
   renderShortcutList();
 
@@ -900,6 +949,7 @@ async function resetShortcut(actionId: ShortcutActionId): Promise<void> {
 
   const result = await window.shortcutApi.resetShortcut(actionId);
   shortcutViews = result.shortcuts;
+  clearPendingWheelModifierRecording();
   recordingShortcutActionId = null;
   renderShortcutList();
   setShortcutStatus(result.ok ? "快捷键已恢复默认。" : result.reason, result.ok ? "ready" : "fallback");
@@ -984,6 +1034,7 @@ function closeSettings(): void {
   deleteKeyConfirmationBox.hidden = true;
   apiKeyField.value = "";
   recordingShortcutActionId = null;
+  clearPendingWheelModifierRecording();
   clearShortcutStatus();
   renderShortcutList();
   clearSettingsFeedback();
@@ -1314,9 +1365,35 @@ window.addEventListener("keydown", (event) => {
   event.stopPropagation();
 
   if (event.key === "Escape") {
+    clearPendingWheelModifierRecording();
     recordingShortcutActionId = null;
     setShortcutStatus("已取消快捷键录入。", "fallback");
     renderShortcutList();
+    return;
+  }
+
+  const recordingShortcut = shortcutViews.find((shortcut) => shortcut.id === recordingShortcutActionId);
+
+  if (recordingShortcut?.kind === "wheelModifier") {
+    const accelerator = eventToWheelModifierAccelerator(event);
+
+    if (!accelerator) {
+      setShortcutStatus("请按下 Ctrl、Alt、Shift 或 Meta 修饰键。", "fallback");
+      return;
+    }
+
+    setShortcutStatus(`已捕获：${accelerator}+Wheel`, "ready");
+    clearPendingWheelModifierRecording();
+    pendingWheelModifierRecordTimeout = window.setTimeout(() => {
+      pendingWheelModifierRecordTimeout = null;
+      if (recordingShortcutActionId) {
+        void saveRecordedShortcut(recordingShortcutActionId, accelerator).catch(() => {
+          recordingShortcutActionId = null;
+          setShortcutStatus("无法保存快捷键，请稍后重试。", "fallback");
+          renderShortcutList();
+        });
+      }
+    }, 450);
     return;
   }
 

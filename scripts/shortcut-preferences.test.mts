@@ -9,7 +9,9 @@ const require = createRequire(import.meta.url);
 const { createShortcutPreferencesStore } = require("../dist/main/services/config/shortcut-preferences-store.js") as typeof import("../src/main/services/config/shortcut-preferences-store");
 const { createShortcutRegistry } = require("../dist/main/services/shortcut-registry.js") as typeof import("../src/main/services/shortcut-registry");
 const {
+  ADJUST_PET_SCALE_WITH_WHEEL_SHORTCUT_ACTION_ID,
   DEFAULT_SHORTCUT_PREFERENCES,
+  DEFAULT_SCALE_WHEEL_MODIFIER_ACCELERATOR,
   DEFAULT_TOGGLE_PET_LOCK_ACCELERATOR,
   TOGGLE_PET_LOCK_SHORTCUT_ACTION_ID,
   updateShortcutPreference,
@@ -18,10 +20,16 @@ const {
 
 test("shortcut preferences keep Tab+0 as the default lock accelerator", () => {
   assert.deepEqual(DEFAULT_SHORTCUT_PREFERENCES, {
-    shortcuts: [{
-      actionId: TOGGLE_PET_LOCK_SHORTCUT_ACTION_ID,
-      accelerator: DEFAULT_TOGGLE_PET_LOCK_ACCELERATOR
-    }]
+    shortcuts: [
+      {
+        actionId: TOGGLE_PET_LOCK_SHORTCUT_ACTION_ID,
+        accelerator: DEFAULT_TOGGLE_PET_LOCK_ACCELERATOR
+      },
+      {
+        actionId: ADJUST_PET_SCALE_WITH_WHEEL_SHORTCUT_ACTION_ID,
+        accelerator: DEFAULT_SCALE_WHEEL_MODIFIER_ACCELERATOR
+      }
+    ]
   });
 });
 
@@ -41,6 +49,39 @@ test("shortcut validation rejects unknown actions, bare keys, duplicates and dia
   assert.deepEqual(validateShortcutAccelerator("Tab+0"), {
     ok: true,
     accelerator: "Tab+0"
+  });
+});
+
+test("wheel modifier shortcut validation stores modifiers without registering Wheel", () => {
+  assert.deepEqual(
+    updateShortcutPreference(DEFAULT_SHORTCUT_PREFERENCES, "adjustPetScaleWithWheel", "Ctrl+Alt"),
+    {
+      ok: true,
+      preferences: {
+        shortcuts: [
+          {
+            actionId: "togglePetLock",
+            accelerator: "Tab+0"
+          },
+          {
+            actionId: "adjustPetScaleWithWheel",
+            accelerator: "Ctrl+Alt"
+          }
+        ]
+      }
+    }
+  );
+  assert.deepEqual(updateShortcutPreference(DEFAULT_SHORTCUT_PREFERENCES, "adjustPetScaleWithWheel", "Ctrl+Alt+Wheel"), {
+    ok: false,
+    reason: "滚轮缩放只保存修饰键，不需要包含 Wheel。"
+  });
+  assert.deepEqual(updateShortcutPreference(DEFAULT_SHORTCUT_PREFERENCES, "adjustPetScaleWithWheel", "Ctrl+Alt+Shift"), {
+    ok: false,
+    reason: "不能占用开发诊断快捷键的修饰键组合。"
+  });
+  assert.deepEqual(updateShortcutPreference(DEFAULT_SHORTCUT_PREFERENCES, "adjustPetScaleWithWheel", "L"), {
+    ok: false,
+    reason: "滚轮缩放只能使用 Ctrl、Alt、Shift、Meta 修饰键。"
   });
 });
 
@@ -85,6 +126,7 @@ test("shortcut registry updates, persists and triggers only known handlers", () 
   });
 
   assert.equal(registry.registerAll()[0].accelerator, "Tab+0");
+  assert.equal(callbacks.has("Ctrl+Shift"), false);
   callbacks.get("Tab+0")?.();
   assert.equal(toggleCount, 1);
 
@@ -93,6 +135,11 @@ test("shortcut registry updates, persists and triggers only known handlers", () 
   assert.equal(callbacks.has("Tab+0"), false);
   assert.equal(callbacks.has("Ctrl+Shift+0"), true);
   assert.equal(saved.length, 1);
+
+  const wheelResult = registry.updateShortcut("adjustPetScaleWithWheel", "Ctrl+Alt");
+  assert.equal(wheelResult.ok, true);
+  assert.equal(callbacks.has("Ctrl+Alt"), false);
+  assert.equal(saved.length, 2);
 });
 
 test("shortcut registry keeps the old accelerator when registration fails", () => {

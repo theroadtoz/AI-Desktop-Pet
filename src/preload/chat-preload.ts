@@ -22,7 +22,7 @@ import type { PetPresentationPreferences } from "../shared/pet-presentation";
 import type { ShortcutActionId, ShortcutPreferenceView, ShortcutUpdateResult } from "../shared/shortcut-preferences";
 
 const petAccessoryPresetIds = ["none", "glasses"] as const;
-const shortcutActionIds = ["togglePetLock"] as const;
+const shortcutActionIds = ["togglePetLock", "adjustPetScaleWithWheel"] as const;
 const chatStreamErrorTypes = [
   "aborted",
   "busy",
@@ -104,7 +104,8 @@ function parseShortcutPreferenceView(value: unknown): ShortcutPreferenceView | n
     typeof shortcut.description !== "string" ||
     typeof shortcut.defaultAccelerator !== "string" ||
     typeof shortcut.accelerator !== "string" ||
-    shortcut.scope !== "global" ||
+    (shortcut.kind !== "global" && shortcut.kind !== "wheelModifier") ||
+    (shortcut.scope !== "global" && shortcut.scope !== "petRenderer") ||
     typeof shortcut.canDisable !== "boolean" ||
     typeof shortcut.userConfigurable !== "boolean" ||
     typeof shortcut.isDefault !== "boolean"
@@ -118,6 +119,7 @@ function parseShortcutPreferenceView(value: unknown): ShortcutPreferenceView | n
     description: shortcut.description,
     defaultAccelerator: shortcut.defaultAccelerator,
     accelerator: shortcut.accelerator,
+    kind: shortcut.kind,
     scope: shortcut.scope,
     canDisable: shortcut.canDisable,
     userConfigurable: shortcut.userConfigurable,

@@ -1,6 +1,7 @@
 import {
   DEFAULT_SHORTCUT_PREFERENCES,
   TOGGLE_PET_LOCK_SHORTCUT_ACTION_ID,
+  USER_SHORTCUT_ACTIONS,
   createShortcutPreferenceView,
   getShortcutAccelerator,
   mergeShortcutPreferencesWithDefaults,
@@ -33,8 +34,9 @@ export function createShortcutRegistry(options: {
   unregister: (accelerator: string) => void;
   isRegistered?: (accelerator: string) => boolean;
   savePreferences: (preferences: ShortcutPreferences) => ShortcutPreferences;
-  handlers: Record<ShortcutActionId, () => void>;
+  handlers: Partial<Record<ShortcutActionId, () => void>>;
   onRegistrationResult?: (result: ShortcutRegistrationResult & { actionId: ShortcutActionId }) => void;
+  onPreferencesChanged?: (preferences: ShortcutPreferences) => void;
 }): ShortcutRegistry {
   const initialPreferences = mergeShortcutPreferencesWithDefaults(options.initialPreferences ?? DEFAULT_SHORTCUT_PREFERENCES);
   let currentPreferences = initialPreferences.ok ? initialPreferences.preferences : DEFAULT_SHORTCUT_PREFERENCES;
@@ -56,7 +58,17 @@ export function createShortcutRegistry(options: {
       registeredAccelerators.delete(actionId);
     }
 
-    const registered = options.register(accelerator, options.handlers[actionId]);
+    const handler = options.handlers[actionId];
+
+    if (!handler) {
+      return {
+        accelerator,
+        registered: false,
+        reason: "unavailable"
+      };
+    }
+
+    const registered = options.register(accelerator, handler);
 
     if (registered) {
       registeredAccelerators.set(actionId, accelerator);
@@ -77,11 +89,17 @@ export function createShortcutRegistry(options: {
   }
 
   function registerPreferences(preferences: ShortcutPreferences): ShortcutRegistrationResult[] {
-    const togglePetLockAccelerator = getShortcutAccelerator(preferences, TOGGLE_PET_LOCK_SHORTCUT_ACTION_ID);
-    const result = registerAction(TOGGLE_PET_LOCK_SHORTCUT_ACTION_ID, togglePetLockAccelerator);
+    const results: ShortcutRegistrationResult[] = [];
 
-    emitRegistration(TOGGLE_PET_LOCK_SHORTCUT_ACTION_ID, result);
-    return [result];
+    for (const action of USER_SHORTCUT_ACTIONS.filter((item) => item.kind === "global")) {
+      const accelerator = getShortcutAccelerator(preferences, action.id);
+      const result = registerAction(action.id, accelerator);
+
+      emitRegistration(action.id, result);
+      results.push(result);
+    }
+
+    return results;
   }
 
   function makeResult(ok: boolean, reason?: string): ShortcutUpdateResult {
@@ -99,10 +117,21 @@ export function createShortcutRegistry(options: {
       };
   }
 
-  function applyPreferences(nextPreferences: ShortcutPreferences): ShortcutUpdateResult {
+  function applyPreferences(nextPreferences: ShortcutPreferences, changedActionId: ShortcutActionId): ShortcutUpdateResult {
     const previousPreferences = currentPreferences;
     const previousAccelerator = registeredAccelerators.get(TOGGLE_PET_LOCK_SHORTCUT_ACTION_ID);
     const nextAccelerator = getShortcutAccelerator(nextPreferences, TOGGLE_PET_LOCK_SHORTCUT_ACTION_ID);
+
+    if (changedActionId !== TOGGLE_PET_LOCK_SHORTCUT_ACTION_ID) {
+      try {
+        currentPreferences = options.savePreferences(nextPreferences);
+        options.onPreferencesChanged?.(currentPreferences);
+        return makeResult(true);
+      } catch {
+        currentPreferences = previousPreferences;
+        return makeResult(false, "快捷键配置写入失败，已保留原快捷键。");
+      }
+    }
 
     if (previousAccelerator && previousAccelerator !== nextAccelerator) {
       options.unregister(previousAccelerator);
@@ -124,6 +153,7 @@ export function createShortcutRegistry(options: {
 
     try {
       currentPreferences = options.savePreferences(nextPreferences);
+      options.onPreferencesChanged?.(currentPreferences);
       return makeResult(true);
     } catch {
       if (previousAccelerator !== nextAccelerator) {
@@ -151,6 +181,7 @@ export function createShortcutRegistry(options: {
     registerAll(preferences = currentPreferences) {
       const merged = mergeShortcutPreferencesWithDefaults(preferences);
       currentPreferences = merged.ok ? merged.preferences : DEFAULT_SHORTCUT_PREFERENCES;
+      options.onPreferencesChanged?.(currentPreferences);
       return registerPreferences(currentPreferences);
     },
     updateShortcut(actionId, accelerator) {
@@ -160,7 +191,7 @@ export function createShortcutRegistry(options: {
         return makeResult(false, nextPreferences.reason);
       }
 
-      return applyPreferences(nextPreferences.preferences);
+      return applyPreferences(nextPreferences.preferences, actionId as ShortcutActionId);
     },
     resetShortcut(actionId) {
       const nextPreferences = resetShortcutPreference(currentPreferences, actionId);
@@ -169,7 +200,7 @@ export function createShortcutRegistry(options: {
         return makeResult(false, nextPreferences.reason);
       }
 
-      return applyPreferences(nextPreferences.preferences);
+      return applyPreferences(nextPreferences.preferences, actionId as ShortcutActionId);
     },
     unregisterAll() {
       for (const accelerator of registeredAccelerators.values()) {

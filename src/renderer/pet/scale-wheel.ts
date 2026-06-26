@@ -12,8 +12,16 @@ export type ScaleWheelInput = {
   timestamp: number;
 };
 
-export function hasScaleWheelModifiers(event: Pick<WheelEvent, "ctrlKey" | "shiftKey" | "altKey" | "metaKey">): boolean {
-  return event.ctrlKey && event.shiftKey && !event.altKey && !event.metaKey;
+export function hasScaleWheelModifiers(
+  event: Pick<WheelEvent, "ctrlKey" | "shiftKey" | "altKey" | "metaKey">,
+  accelerator = "Ctrl+Shift"
+): boolean {
+  const parts = new Set(accelerator.split("+").map((part) => part.trim()).filter(Boolean));
+
+  return event.ctrlKey === parts.has("Ctrl") &&
+    event.altKey === parts.has("Alt") &&
+    event.shiftKey === parts.has("Shift") &&
+    event.metaKey === parts.has("Meta");
 }
 
 export function createScaleWheelNormalizer(): { push(input: ScaleWheelInput): -1 | 0 | 1; reset(): void } {
