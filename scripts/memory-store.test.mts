@@ -9,6 +9,7 @@ const require = createRequire(import.meta.url);
 const { createMemoryStore } = require("../dist/main/services/chat/memory-store.js") as typeof import("../src/main/services/chat/memory-store");
 const { parseMemoryStorage } = require("../dist/shared/chat-memory.js") as typeof import("../src/shared/chat-memory");
 const { mapChatMessagesToOpenAICompatible } = require("../dist/main/services/chat/chat-message-mapper.js") as typeof import("../src/main/services/chat/chat-message-mapper");
+const { createFakeChatProvider } = require("../dist/main/services/chat/fake-provider.js") as typeof import("../src/main/services/chat/fake-provider");
 
 function createDraft(sourceConversationId = crypto.randomUUID()) {
   return {
@@ -84,11 +85,62 @@ test("corrupted memory storage falls back without exposing cards", async () => {
 test("provider message mapping only includes explicit memory context", () => {
   const messages = [{ id: crypto.randomUUID(), role: "user" as const, content: "你好" }];
   const withoutMemory = mapChatMessagesToOpenAICompatible(messages);
+  assert.equal(withoutMemory[0]?.role, "system");
+  assert.equal(withoutMemory[1]?.role, "system");
+  assert.match(withoutMemory[1]?.content ?? "", /低打扰桌面伙伴/);
+  assert.match(withoutMemory[1]?.content ?? "", /默认回复 1-3 句/);
   assert.equal(withoutMemory.some((message) => message.content.includes("用户喜欢被称呼为小夏")), false);
 
   const withMemory = mapChatMessagesToOpenAICompatible(messages, {
     count: 1,
     cards: [{ id: crypto.randomUUID(), title: "称呼", content: "用户喜欢被称呼为小夏。", tags: ["称呼"] }]
   });
+  assert.equal(withMemory[2]?.role, "system");
   assert.equal(withMemory.some((message) => message.role === "system" && message.content.includes("用户喜欢被称呼为小夏")), true);
 });
+
+test("dialogue style message does not include memory card content", () => {
+  const messages = [{ id: crypto.randomUUID(), role: "user" as const, content: "你好" }];
+  const mapped = mapChatMessagesToOpenAICompatible(messages, {
+    count: 1,
+    cards: [{ id: crypto.randomUUID(), title: "称呼", content: "用户喜欢被称呼为小夏。", tags: ["称呼"] }]
+  });
+
+  assert.equal(mapped[1]?.role, "system");
+  assert.equal(mapped[1]?.content.includes("用户喜欢被称呼为小夏"), false);
+});
+
+test("fake provider returns short varied replies with emotion classification", async () => {
+  const provider = createFakeChatProvider();
+  const firstText = await streamFakeReply(provider, "conversation-a", "我今天很开心");
+  const secondText = await streamFakeReply(provider, "conversation-b", "我今天很开心");
+  const sadText = await streamFakeReply(provider, "conversation-c", "我有点难过");
+
+  assert.equal(firstText.result.emotion, "happy");
+  assert.equal(firstText.result.intensity, "low");
+  assert.equal(firstText.deltaText, firstText.result.text);
+  assert.ok(firstText.result.text.length > 0 && firstText.result.text.length <= 40);
+  assert.ok(secondText.result.text.length > 0 && secondText.result.text.length <= 40);
+  assert.ok(sadText.result.text.length > 0 && sadText.result.text.length <= 40);
+  assert.notEqual(new Set([firstText.result.text, secondText.result.text, sadText.result.text]).size, 1);
+});
+
+async function streamFakeReply(
+  provider: ReturnType<typeof createFakeChatProvider>,
+  conversationId: string,
+  content: string
+) {
+  let deltaText = "";
+  const result = await provider.streamReply({
+    requestVersion: 1,
+    conversationId,
+    messages: [{ id: crypto.randomUUID(), role: "user", content }]
+  }, {
+    signal: new AbortController().signal,
+    onDelta(delta) {
+      deltaText += delta.text;
+    }
+  });
+
+  return { deltaText, result };
+}

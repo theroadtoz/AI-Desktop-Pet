@@ -1,5 +1,7 @@
 import type { ChatMessage } from "../../../shared/chat";
 import type { MemoryInjection } from "../../../shared/chat-memory";
+import type { DialogueStyleContext } from "../../../shared/dialogue-style";
+import { createDefaultDialogueStyleContext, createDialogueStylePrompt } from "./dialogue-style";
 
 export type OpenAICompatibleMessage = {
   role: "system" | "user" | "assistant";
@@ -10,18 +12,28 @@ const SYSTEM_PROMPT = "你是一个低打扰的桌面伙伴。回复要自然、
 
 export function mapChatMessagesToOpenAICompatible(
   messages: ChatMessage[],
-  memoryContext?: MemoryInjection
+  memoryContext?: MemoryInjection,
+  dialogueStyleContext: DialogueStyleContext = createDefaultDialogueStyleContext()
 ): OpenAICompatibleMessage[] {
+  const dialogueStyleMessage = createDialogueStyleMessage(dialogueStyleContext);
   const memoryMessage = createMemoryMessage(memoryContext);
 
   return [
     { role: "system", content: SYSTEM_PROMPT },
+    dialogueStyleMessage,
     ...(memoryMessage ? [memoryMessage] : []),
     ...messages.map((message) => ({
       role: message.role,
       content: message.content
     }))
   ];
+}
+
+function createDialogueStyleMessage(context: DialogueStyleContext): OpenAICompatibleMessage {
+  return {
+    role: "system",
+    content: createDialogueStylePrompt(context)
+  };
 }
 
 function createMemoryMessage(memoryContext?: MemoryInjection): OpenAICompatibleMessage | null {
