@@ -15,7 +15,9 @@ const input = document.querySelector<HTMLInputElement>("#chat-input");
 const messages = document.querySelector<HTMLElement>("#messages");
 const sendButton = document.querySelector<HTMLButtonElement>("#send-button");
 const abortButton = document.querySelector<HTMLButtonElement>("#abort-button");
+const partnerStatus = document.querySelector<HTMLElement>("#partner-status");
 const providerStatus = document.querySelector<HTMLElement>("#provider-status");
+const memorySessionStatus = document.querySelector<HTMLElement>("#memory-session-status");
 const settingsButton = document.querySelector<HTMLButtonElement>("#settings-button");
 const settingsPanel = document.querySelector<HTMLElement>("#settings-panel");
 const settingsCloseButton = document.querySelector<HTMLButtonElement>("#settings-close-button");
@@ -30,6 +32,7 @@ const maxTokensInput = document.querySelector<HTMLInputElement>("#provider-max-t
 const timeoutInput = document.querySelector<HTMLInputElement>("#provider-timeout");
 const apiKeyInput = document.querySelector<HTMLInputElement>("#provider-api-key");
 const apiKeyStatus = document.querySelector<HTMLElement>("#api-key-status");
+const connectionSafeSection = document.querySelector<HTMLElement>("#connection-safe-section");
 const deleteApiKeyButton = document.querySelector<HTMLButtonElement>("#delete-api-key-button");
 const deleteKeyConfirmation = document.querySelector<HTMLElement>("#delete-key-confirmation");
 const cancelDeleteApiKeyButton = document.querySelector<HTMLButtonElement>("#cancel-delete-api-key-button");
@@ -76,10 +79,10 @@ const memorySearch = document.querySelector<HTMLInputElement>("#memory-search");
 const memoryList = document.querySelector<HTMLElement>("#memory-list");
 
 if (
-  !form || !input || !messages || !sendButton || !abortButton || !providerStatus ||
-  !settingsButton || !settingsPanel || !settingsCloseButton || !settingsForm || !providerIdSelect ||
+  !form || !input || !messages || !sendButton || !abortButton || !partnerStatus || !providerStatus ||
+  !memorySessionStatus || !settingsButton || !settingsPanel || !settingsCloseButton || !settingsForm || !providerIdSelect ||
   !displayNameInput || !openAIFields || !baseURLInput || !modelInput || !temperatureInput ||
-  !maxTokensInput || !timeoutInput || !apiKeyInput || !apiKeyStatus || !deleteApiKeyButton ||
+  !maxTokensInput || !timeoutInput || !apiKeyInput || !apiKeyStatus || !connectionSafeSection || !deleteApiKeyButton ||
   !deleteKeyConfirmation || !cancelDeleteApiKeyButton || !confirmDeleteApiKeyButton || !settingsFeedback ||
   !petScaleInput || !petScaleValue || !petAccessorySelect || !petAccessoryStatus || !savePetScaleButton ||
   !savePetAccessoryButton || !petLockStatus || !togglePetLockButton || !shortcutList || !shortcutStatus ||
@@ -98,7 +101,9 @@ const chatInput = input;
 const messageList = messages;
 const sendAction = sendButton;
 const abortAction = abortButton;
+const partnerStatusBox = partnerStatus;
 const providerStatusBox = providerStatus;
+const memorySessionStatusBox = memorySessionStatus;
 const settingsAction = settingsButton;
 const providerSettingsPanel = settingsPanel;
 const settingsCloseAction = settingsCloseButton;
@@ -113,6 +118,7 @@ const maxTokensField = maxTokensInput;
 const timeoutField = timeoutInput;
 const apiKeyField = apiKeyInput;
 const apiKeyStatusBox = apiKeyStatus;
+const connectionSafeSectionBox = connectionSafeSection;
 const deleteApiKeyAction = deleteApiKeyButton;
 const deleteKeyConfirmationBox = deleteKeyConfirmation;
 const cancelDeleteApiKeyAction = cancelDeleteApiKeyButton;
@@ -214,6 +220,18 @@ function formatProviderStatus(status: ProviderStatus): string {
 function setProviderStatus(status: ProviderStatus): void {
   providerStatusBox.textContent = formatProviderStatus(status);
   providerStatusBox.dataset.state = status.isFallback ? "fallback" : "ready";
+}
+
+function setPartnerStatus(message: string): void {
+  partnerStatusBox.textContent = message;
+  partnerStatusBox.dataset.state = "ready";
+}
+
+function setMemorySessionStatus(count: number | null): void {
+  memorySessionStatusBox.textContent = count && count > 0
+    ? `本次使用 ${count} 条记忆`
+    : "本次未使用记忆";
+  memorySessionStatusBox.dataset.state = count && count > 0 ? "ready" : "fallback";
 }
 
 function appendMessage(message: ChatMessage): HTMLElement {
@@ -349,9 +367,9 @@ async function refreshMemory(): Promise<void> {
     setMemoryFeedback(
       memoryEnabled
         ? enabledCount > 0
-          ? `记忆已开启；发送时将使用 ${enabledCount} 条已启用事实卡。`
+          ? `记忆已开启；只有已启用事实卡会临时加入 Provider 请求，当前 ${enabledCount} 条。`
           : "记忆已开启；当前没有已启用事实卡，发送时不会加入记忆。"
-        : "记忆默认关闭；开启前不会保存、注入或提示使用事实卡。"
+        : "记忆默认关闭；只有启用事实卡才会临时加入 Provider 请求。"
     );
   } catch {
     setMemoryFeedback("无法读取本地记忆，请稍后重试。");
@@ -637,6 +655,7 @@ function startNewConversation(): void {
   providerContextEnabled = false;
   renderCurrentConversation();
   setChatSessionNote("已新建本地会话；发送时只包含当前消息。");
+  setMemorySessionStatus(null);
   setActivePage("chat");
 }
 
@@ -965,6 +984,7 @@ function isOpenAICompatibleSelected(): boolean {
 function updateProviderFields(): void {
   const isOpenAICompatible = isOpenAICompatibleSelected();
   openAIFieldsContainer.hidden = !isOpenAICompatible;
+  connectionSafeSectionBox.hidden = !isOpenAICompatible;
   baseURLField.required = isOpenAICompatible;
   modelField.required = isOpenAICompatible;
   temperatureField.required = isOpenAICompatible;
@@ -1165,11 +1185,7 @@ window.chatApi?.onMemoryInjection((payload) => {
     return;
   }
 
-  setChatSessionNote(
-    payload.count > 0
-      ? `本次将使用 ${payload.count} 条已启用记忆。可在记忆页查看明细。`
-      : "本次未使用记忆；没有已启用事实卡加入 Provider 请求。"
-  );
+  setMemorySessionStatus(payload.count);
 });
 
 window.petPresentationApi?.onPetLockChanged((state) => {
@@ -1574,6 +1590,8 @@ window.addEventListener("chat:focus-input", () => {
 });
 
 window.chatApi?.focusInput();
+setPartnerStatus("桌面伙伴 · 默认陪伴");
+setMemorySessionStatus(null);
 void refreshProviderStatus();
 void refreshMemory();
 setPetScaleValue(DEFAULT_PET_PRESENTATION_PREFERENCES.petScale);

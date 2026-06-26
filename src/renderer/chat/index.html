@@ -8,7 +8,11 @@
   <body>
     <main class="chat-shell">
       <div class="provider-bar">
-        <section id="provider-status" class="status-box" aria-live="polite">正在读取模型状态...</section>
+        <section class="partner-status-band" aria-label="伙伴状态带">
+          <p id="partner-status" class="status-box" aria-live="polite">桌面伙伴 · 默认陪伴</p>
+          <p id="provider-status" class="status-box" aria-live="polite">正在读取模型状态...</p>
+          <p id="memory-session-status" class="status-box" aria-live="polite">本次未使用记忆</p>
+        </section>
         <button id="settings-button" class="button-light icon-button" type="button" aria-label="打开 Provider 设置" title="Provider 设置">⚙</button>
       </div>
       <nav class="subpage-nav" aria-label="聊天导航">
@@ -49,40 +53,46 @@
             <div id="shortcut-list" class="shortcut-list content-stack" aria-live="polite"></div>
             <p id="shortcut-status" class="status-box" hidden aria-live="polite"></p>
           </section>
-          <label class="field-label">
-            Provider
-            <select id="provider-id" name="providerId">
-              <option value="fake">Fake</option>
-              <option value="openai-compatible">OpenAI-compatible</option>
-            </select>
-          </label>
-          <label class="field-label">
-            显示名称
-            <input id="provider-display-name" name="displayName" type="text" required />
-          </label>
-          <div id="openai-fields" class="content-stack" hidden>
+          <section class="content-stack" aria-labelledby="provider-settings-title">
+            <h3 id="provider-settings-title" class="settings-section-title">Provider</h3>
             <label class="field-label">
-              Base URL
-              <input id="provider-base-url" name="baseURL" type="url" inputmode="url" required />
+              Provider
+              <select id="provider-id" name="providerId">
+                <option value="fake">Fake</option>
+                <option value="openai-compatible">OpenAI-compatible</option>
+              </select>
             </label>
             <label class="field-label">
-              模型
-              <input id="provider-model" name="model" type="text" required />
+              显示名称
+              <input id="provider-display-name" name="displayName" type="text" required />
             </label>
-            <div class="field-grid">
+            <div id="openai-fields" class="content-stack" hidden>
               <label class="field-label">
-                温度
-                <input id="provider-temperature" name="temperature" type="number" step="any" required />
+                Base URL
+                <input id="provider-base-url" name="baseURL" type="url" inputmode="url" required />
               </label>
               <label class="field-label">
-                最大 Token
-                <input id="provider-max-tokens" name="maxTokens" type="number" min="1" step="1" required />
+                模型
+                <input id="provider-model" name="model" type="text" required />
               </label>
-              <label class="field-label">
-                超时时间（毫秒）
-                <input id="provider-timeout" name="timeoutMs" type="number" min="1" step="1" required />
-              </label>
+              <div class="field-grid">
+                <label class="field-label">
+                  温度
+                  <input id="provider-temperature" name="temperature" type="number" step="any" required />
+                </label>
+                <label class="field-label">
+                  最大 Token
+                  <input id="provider-max-tokens" name="maxTokens" type="number" min="1" step="1" required />
+                </label>
+                <label class="field-label">
+                  超时时间（毫秒）
+                  <input id="provider-timeout" name="timeoutMs" type="number" min="1" step="1" required />
+                </label>
+              </div>
             </div>
+          </section>
+          <section id="connection-safe-section" class="content-stack" aria-labelledby="connection-safe-title" hidden>
+            <h3 id="connection-safe-title" class="settings-section-title">连接安全</h3>
             <div class="api-key-section">
               <span id="api-key-status" class="status-box" aria-live="polite">API Key：未配置</span>
               <label class="field-label">
@@ -98,7 +108,7 @@
                 </span>
               </div>
             </div>
-          </div>
+          </section>
           <div class="settings-actions">
             <button class="button" type="submit">保存设置</button>
           </div>
@@ -138,7 +148,7 @@
           <button id="new-conversation-button" class="button" type="button">新建会话</button>
           <button id="clear-history-button" class="button-danger" type="button">清空全部历史</button>
         </div>
-        <p id="history-feedback" class="selection-note" aria-live="polite">历史仅保存在本机，不会自动上传或发送给 Provider。</p>
+        <p id="history-feedback" class="selection-note" aria-live="polite">历史仅保存在本机；打开查看不会自动发送给 Provider。</p>
         <div id="clear-history-confirmation" class="status-box delete-confirmation" hidden>
           <span>清空后无法恢复，是否继续？</span>
           <span class="inline-actions">
@@ -158,7 +168,7 @@
           <button id="enable-memory-button" class="button" type="button">开启记忆</button>
           <button id="clear-memory-button" class="button-danger" type="button">清空全部记忆</button>
         </div>
-        <p id="memory-feedback" class="selection-note" aria-live="polite">记忆默认关闭；开启后仅已启用事实卡会临时加入 Provider 请求。</p>
+        <p id="memory-feedback" class="selection-note" aria-live="polite">记忆默认关闭；只有启用事实卡才会临时加入 Provider 请求。</p>
         <div id="clear-memory-confirmation" class="status-box delete-confirmation" hidden>
           <span>清空后无法恢复，是否继续？</span>
           <span class="inline-actions">
