@@ -16,6 +16,7 @@ export type PetWindowCommand =
   | { type: "pet:telemetry"; payload: PetTelemetryEvent }
   | { type: "pet:pointer-hit-change"; payload: PetPointerHitState }
   | { type: "pet:apply-presentation"; payload: PetPresentationIntent }
+  | { type: "pet:window-motion-feedback"; payload: PetWindowMotionFeedback }
   | { type: "pet:inject-webgl-context-loss" }
   | { type: "pet:open-chat" }
   | { type: "pet:drag-start" }
@@ -98,6 +99,10 @@ export type PetDragDelta = {
   deltaY: number;
 };
 
+export type PetWindowMotionFeedback = {
+  type: "shake_light_feedback";
+};
+
 export type PetLockState = {
   isLocked: boolean;
 };
@@ -110,6 +115,7 @@ export type PetApi = {
   presentationReady(): void;
   onPresentationIntent(handler: (intent: PetPresentationIntent) => void): () => void;
   onInjectWebGLContextLoss(handler: () => void): () => void;
+  onWindowMotionFeedback(handler: (feedback: PetWindowMotionFeedback) => void): () => void;
   openChat(): void;
   startDrag(): void;
   moveDrag(delta: PetDragDelta): void;

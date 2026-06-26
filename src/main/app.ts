@@ -124,6 +124,7 @@ const RENDERER_TELEMETRY_TYPES = new Set([
   "pet_interaction_action_started",
   "pet_interaction_action_finished",
   "pet_interaction_action_skipped",
+  "pet_window_motion_feedback",
   "pet_presentation_intent_applied"
 ]);
 
@@ -283,6 +284,11 @@ function createPointerControllerForWindow(window: BrowserWindow): PointerControl
         isLocked: candidate.isLocked,
         isDragging: candidate.isDragging
       });
+      if (candidate.eventType === "window_shake_candidate" && !window.isDestroyed()) {
+        window.webContents.send("pet:window-motion-feedback", {
+          type: "shake_light_feedback"
+        });
+      }
     }
   });
 }

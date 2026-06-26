@@ -5,6 +5,7 @@ import {
   PET_INTERACTION_GLOBAL_COOLDOWN_MS,
   PET_INTERACTION_HEAD_PAT_COOLDOWN_MS,
   PET_INTERACTION_STRONG_ACTION_COOLDOWN_MS,
+  PET_WINDOW_SHAKE_LIGHT_FEEDBACK_COOLDOWN_MS,
   PET_INTERACTION_ACTIONS,
   PET_INTERACTION_ACTION_TYPES,
   PET_RANDOM_INTERACTION_ACTIONS,
@@ -12,6 +13,7 @@ import {
   getInteractionActionCooldownSkipReason,
   getRandomPetInteractionActionsForMode,
   getPetInteractionAction,
+  getWindowShakeLightFeedbackSkipReason,
   isStrongInteractionAction,
   selectRandomPetInteractionAction
 } from "../src/renderer/pet/interaction-actions.ts";
@@ -171,6 +173,36 @@ test("pet interaction action cooldown rules skip dense or repeated clicks", () =
   );
 });
 
+test("window shake light feedback reuses thinking with active and independent cooldown guards", () => {
+  const thinking = getPetInteractionAction("thinking");
+
+  assert.equal(thinking.presentation.emotion, "confused");
+  assert.equal(thinking.expressionName, undefined);
+  assert.equal(thinking.accessoryPartIds, undefined);
+  assert.equal(
+    getWindowShakeLightFeedbackSkipReason(thinking, 1_000, { activeType: "headPat" }),
+    "active_action"
+  );
+  assert.equal(
+    getWindowShakeLightFeedbackSkipReason(thinking, 2_000, {
+      lastActionFinishedAtMs: 2_000 - PET_INTERACTION_GLOBAL_COOLDOWN_MS + 1
+    }),
+    "global_cooldown"
+  );
+  assert.equal(
+    getWindowShakeLightFeedbackSkipReason(thinking, 20_000, {
+      lastWindowShakeFeedbackStartedAtMs: 20_000 - PET_WINDOW_SHAKE_LIGHT_FEEDBACK_COOLDOWN_MS + 1
+    }),
+    "window_shake_feedback_cooldown"
+  );
+  assert.equal(
+    getWindowShakeLightFeedbackSkipReason(thinking, 20_000, {
+      lastWindowShakeFeedbackStartedAtMs: 20_000 - PET_WINDOW_SHAKE_LIGHT_FEEDBACK_COOLDOWN_MS
+    }),
+    null
+  );
+});
+
 test("click action scheduler delays clicks and lets double click cancel the action", () => {
   type FakeTimer = {
     callback: () => void;
@@ -239,6 +271,27 @@ test("pet pointer clicks route head and body actions without changing drag or do
   assert.match(source, /!pointerDown \|\| pointerDown\.pointerId !== event\.pointerId/);
   assert.match(source, /!wasDragging && hitArea/);
   assert.match(source, /cancelClickInteractionAction\(\)/);
+});
+
+test("window shake feedback IPC uses a fixed safe enum and dedicated reason", async () => {
+  const petPreload = await readFile(new URL("../src/preload/pet-preload.ts", import.meta.url), "utf8");
+  const appSource = await readFile(new URL("../src/main/app.ts", import.meta.url), "utf8");
+  const rendererSource = await readFile(new URL("../src/renderer/pet/main.ts", import.meta.url), "utf8");
+
+  assert.match(appSource, /candidate\.eventType === "window_shake_candidate"/);
+  assert.match(appSource, /window\.webContents\.send\("pet:window-motion-feedback",\s*{\s*type: "shake_light_feedback"\s*}\)/s);
+  assert.match(appSource, /"pet_window_motion_feedback"/);
+  assert.match(petPreload, /isPetWindowMotionFeedback/);
+  assert.match(petPreload, /type === "shake_light_feedback"/);
+  const feedbackPreloadStart = petPreload.indexOf("onWindowMotionFeedback(handler)");
+  const feedbackPreloadEnd = petPreload.indexOf("openChat()", feedbackPreloadStart);
+  const feedbackPreload = petPreload.slice(feedbackPreloadStart, feedbackPreloadEnd);
+  assert.doesNotMatch(feedbackPreload, /expressionName|partIds|durationMs|\.motion|motion:/);
+  assert.match(rendererSource, /onWindowMotionFeedback/);
+  assert.match(rendererSource, /getPetInteractionAction\("thinking"\)/);
+  assert.match(rendererSource, /"window_shake_feedback"/);
+  assert.match(rendererSource, /getWindowShakeLightFeedbackSkipReason/);
+  assert.doesNotMatch(rendererSource, /feedback\.(expression|motion|part|duration|resource)/);
 });
 
 test("pet renderer reads dialogue mode without owning mode writes", async () => {

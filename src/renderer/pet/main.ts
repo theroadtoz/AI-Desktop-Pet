@@ -12,6 +12,7 @@ import {
   getRandomPetInteractionActionsForMode,
   getInteractionActionCooldownSkipReason,
   getPetInteractionAction,
+  getWindowShakeLightFeedbackSkipReason,
   isStrongInteractionAction,
   selectRandomPetInteractionAction,
   type PetInteractionAction
@@ -243,6 +244,7 @@ let activeInteractionAction: { action: PetInteractionAction; timeoutId: number }
 let hasPlayedStartupAppearance = false;
 let lastInteractionActionFinishedAtMs: number | undefined;
 let lastHeadPatFinishedAtMs: number | undefined;
+let lastWindowShakeFeedbackStartedAtMs: number | undefined;
 const lastStrongInteractionActionFinishedAtMsByType: Partial<Record<PetInteractionAction["type"], number>> = {};
 let currentDialogueModeId: DialogueModeId = DEFAULT_DIALOGUE_MODE_ID;
 
@@ -553,6 +555,11 @@ const removeInjectWebGLContextLossListener = window.petApi?.onInjectWebGLContext
 const removeDialogueModeChangedListener = window.petApi?.onDialogueModeChanged((modeId) => {
   currentDialogueModeId = modeId;
 }) ?? null;
+const removeWindowMotionFeedbackListener = window.petApi?.onWindowMotionFeedback((feedback) => {
+  if (feedback.type === "shake_light_feedback") {
+    handleWindowMotionFeedback();
+  }
+}) ?? null;
 
 void window.petApi?.getDialogueMode().then((modeId) => {
   currentDialogueModeId = modeId;
@@ -582,6 +589,7 @@ window.addEventListener("beforeunload", () => {
   removePresentationIntentListener?.();
   removeInjectWebGLContextLossListener?.();
   removeDialogueModeChangedListener?.();
+  removeWindowMotionFeedbackListener?.();
   cancelClickInteractionAction();
   live2DRenderer?.release();
   live2DRenderer = null;
@@ -742,12 +750,13 @@ function finishInteractionAction(action: PetInteractionAction): void {
 }
 
 type InteractionActionReason = "startup_first_visible_frame" | "click_head" | "click_body";
+type WindowMotionFeedbackReason = "window_shake_feedback";
 
 function playInteractionAction(
   action: PetInteractionAction,
-  reason: InteractionActionReason,
+  reason: InteractionActionReason | WindowMotionFeedbackReason,
   strategy?: { modeId: DialogueModeId; candidateActionTypes: readonly PetInteractionAction["type"][] }
-): void {
+): boolean {
   const skipReason = getInteractionActionCooldownSkipReason(action, performance.now(), {
     activeType: activeInteractionAction?.action.type,
     lastActionFinishedAtMs: lastInteractionActionFinishedAtMs,
@@ -763,7 +772,7 @@ function playInteractionAction(
       ...(strategy ? { modeId: strategy.modeId } : {}),
       ...(activeInteractionAction ? { activeType: activeInteractionAction.action.type } : {})
     });
-    return;
+    return false;
   }
 
   window.petApi?.reportTelemetry("pet_interaction_action_started", {
@@ -804,6 +813,44 @@ function playInteractionAction(
   }, action.durationMs);
 
   activeInteractionAction = { action, timeoutId };
+  return true;
+}
+
+function handleWindowMotionFeedback(): void {
+  const action = getPetInteractionAction("thinking");
+  const nowMs = performance.now();
+  const skipReason = getWindowShakeLightFeedbackSkipReason(action, nowMs, {
+    activeType: activeInteractionAction?.action.type,
+    lastActionFinishedAtMs: lastInteractionActionFinishedAtMs,
+    lastHeadPatFinishedAtMs,
+    strongActionFinishedAtMsByType: lastStrongInteractionActionFinishedAtMsByType,
+    lastWindowShakeFeedbackStartedAtMs
+  });
+
+  if (skipReason) {
+    window.petApi?.reportTelemetry("pet_window_motion_feedback", {
+      eventType: "window_shake_candidate",
+      reason: "window_shake_feedback",
+      feedbackType: "shake_light_feedback",
+      result: "skipped",
+      skipReason,
+      cooldownState: skipReason === "window_shake_feedback_cooldown" ? "cooling_down" : "available",
+      durationMs: action.durationMs
+    });
+    return;
+  }
+
+  if (playInteractionAction(action, "window_shake_feedback")) {
+    lastWindowShakeFeedbackStartedAtMs = nowMs;
+    window.petApi?.reportTelemetry("pet_window_motion_feedback", {
+      eventType: "window_shake_candidate",
+      reason: "window_shake_feedback",
+      feedbackType: "shake_light_feedback",
+      result: "started",
+      cooldownState: "available",
+      durationMs: action.durationMs
+    });
+  }
 }
 
 type PendingClickAction = {

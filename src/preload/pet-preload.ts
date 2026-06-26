@@ -1,5 +1,11 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { PetApi, RenderHealth, PetDragDelta, PetFirstFrameInfo } from "../shared/ipc-contract";
+import type {
+  PetApi,
+  PetWindowMotionFeedback,
+  RenderHealth,
+  PetDragDelta,
+  PetFirstFrameInfo
+} from "../shared/ipc-contract";
 import type { DialogueModeId } from "../shared/dialogue-style";
 import type { PetPresentationIntent, PetRoleState } from "../shared/pet-role-state";
 import type { PetScaleAdjustmentIntent } from "../shared/pet-presentation";
@@ -87,6 +93,14 @@ function isScaleWheelModifierAccelerator(value: unknown): value is string {
   return new Set(parts).size === parts.length;
 }
 
+function isPetWindowMotionFeedback(value: unknown): value is PetWindowMotionFeedback {
+  return Boolean(
+    typeof value === "object" &&
+    value !== null &&
+    (value as Partial<PetWindowMotionFeedback>).type === "shake_light_feedback"
+  );
+}
+
 const api: PetApi = {
   reportFirstFrame(info: PetFirstFrameInfo) {
     ipcRenderer.send("pet:first-frame", info);
@@ -125,6 +139,19 @@ const api: PetApi = {
 
     return () => {
       ipcRenderer.removeListener("pet:inject-webgl-context-loss", listener);
+    };
+  },
+  onWindowMotionFeedback(handler) {
+    const listener = (_event: Electron.IpcRendererEvent, value: unknown): void => {
+      if (isPetWindowMotionFeedback(value)) {
+        handler(value);
+      }
+    };
+
+    ipcRenderer.on("pet:window-motion-feedback", listener);
+
+    return () => {
+      ipcRenderer.removeListener("pet:window-motion-feedback", listener);
     };
   },
   openChat() {

@@ -39,6 +39,7 @@ type ClickActionSchedulerOptions = {
 export const PET_INTERACTION_GLOBAL_COOLDOWN_MS = 450;
 export const PET_INTERACTION_HEAD_PAT_COOLDOWN_MS = 1_200;
 export const PET_INTERACTION_STRONG_ACTION_COOLDOWN_MS = 4_500;
+export const PET_WINDOW_SHAKE_LIGHT_FEEDBACK_COOLDOWN_MS = 10_000;
 
 const STRONG_INTERACTION_ACTION_TYPES = new Set<PetInteractionActionType>(["playGame", "reading"]);
 
@@ -48,11 +49,19 @@ export type InteractionActionCooldownSkipReason =
   | "head_pat_cooldown"
   | "same_action_cooldown";
 
+export type WindowShakeLightFeedbackSkipReason =
+  | InteractionActionCooldownSkipReason
+  | "window_shake_feedback_cooldown";
+
 export type InteractionActionCooldownState = {
   activeType?: PetInteractionActionType | undefined;
   lastActionFinishedAtMs?: number | undefined;
   lastHeadPatFinishedAtMs?: number | undefined;
   strongActionFinishedAtMsByType?: Partial<Record<PetInteractionActionType, number>>;
+};
+
+export type WindowShakeLightFeedbackCooldownState = InteractionActionCooldownState & {
+  lastWindowShakeFeedbackStartedAtMs?: number | undefined;
 };
 
 export const PET_INTERACTION_ACTIONS: readonly PetInteractionAction[] = [
@@ -185,6 +194,28 @@ export function getInteractionActionCooldownSkipReason(
 
   if (isWithinCooldown(nowMs, state.lastActionFinishedAtMs, PET_INTERACTION_GLOBAL_COOLDOWN_MS)) {
     return "global_cooldown";
+  }
+
+  return null;
+}
+
+export function getWindowShakeLightFeedbackSkipReason(
+  action: PetInteractionAction,
+  nowMs: number,
+  state: WindowShakeLightFeedbackCooldownState
+): WindowShakeLightFeedbackSkipReason | null {
+  const interactionSkipReason = getInteractionActionCooldownSkipReason(action, nowMs, state);
+
+  if (interactionSkipReason) {
+    return interactionSkipReason;
+  }
+
+  if (isWithinCooldown(
+    nowMs,
+    state.lastWindowShakeFeedbackStartedAtMs,
+    PET_WINDOW_SHAKE_LIGHT_FEEDBACK_COOLDOWN_MS
+  )) {
+    return "window_shake_feedback_cooldown";
   }
 
   return null;

@@ -4,11 +4,11 @@ import { join, resolve } from "node:path";
 
 const root = resolve(new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"));
 const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-const runDir = join(root, ".tmp", "p2-10d-4-window-motion-telemetry-real-ui", stamp);
+const runDir = join(root, ".tmp", "p2-10d-5-window-shake-light-feedback-real-ui", stamp);
 const appDataDir = join(runDir, "user-data");
 const resultPath = join(runDir, "result.json");
 const progressPath = join(runDir, "progress.log");
-const port = Number(process.env.P2_10D_4_CDP_PORT || 9374);
+const port = Number(process.env.P2_10D_5_CDP_PORT || 9375);
 
 mkdirSync(runDir, { recursive: true });
 
@@ -320,6 +320,10 @@ function actionStarts(events) {
   return events.filter((event) => event.type === "pet_interaction_action_started");
 }
 
+function actionSkips(events) {
+  return events.filter((event) => event.type === "pet_interaction_action_skipped");
+}
+
 function feedbackEvents(events) {
   return events.filter((event) => event.type === "pet_window_motion_feedback");
 }
@@ -390,11 +394,13 @@ async function main() {
     await dragWithOffsets(pet.cdp, 310, [[18, 4], [36, 6], [54, 8], [72, 10]], 80);
     const ordinaryEvents = eventsSince(ordinaryStartIndex);
     checks.push({
-      name: "ordinaryDragDoesNotEmitShakeOrAction",
+      name: "ordinaryDragDoesNotEmitShakeOrFeedback",
       ok: !motionEvents(ordinaryEvents).some((event) => event.payload?.eventType === "window_shake_candidate") &&
-        actionStarts(ordinaryEvents).length === 0,
+        !feedbackEvents(ordinaryEvents).some((event) => event.payload?.feedbackType === "shake_light_feedback") &&
+        !actionStarts(ordinaryEvents).some((event) => event.payload?.reason === "window_shake_feedback"),
       detail: {
         motion: motionEvents(ordinaryEvents).map((event) => event.payload),
+        feedback: feedbackEvents(ordinaryEvents).map((event) => event.payload),
         actionStarts: actionStarts(ordinaryEvents).map((event) => event.payload)
       }
     });
@@ -407,36 +413,77 @@ async function main() {
     const fastEvents = eventsSince(fastStartIndex);
     const fastMotion = motionEvents(fastEvents);
     checks.push({
-      name: "fastLinearDragDoesNotEmitShakeOrResize",
+      name: "fastLinearDragDoesNotEmitShakeFeedbackOrResize",
       ok: !fastMotion.some((event) => event.payload?.eventType === "window_shake_candidate") &&
+        !feedbackEvents(fastEvents).some((event) => event.payload?.feedbackType === "shake_light_feedback") &&
+        !actionStarts(fastEvents).some((event) => event.payload?.reason === "window_shake_feedback") &&
         Math.abs(afterFast.viewport.innerWidth - beforeFast.viewport.innerWidth) <= 2 &&
         Math.abs(afterFast.viewport.innerHeight - beforeFast.viewport.innerHeight) <= 2,
       detail: {
         beforeFast,
         afterFast,
-        motion: fastMotion.map((event) => event.payload)
+        motion: fastMotion.map((event) => event.payload),
+        feedback: feedbackEvents(fastEvents).map((event) => event.payload),
+        actionStarts: actionStarts(fastEvents).map((event) => event.payload)
       }
     });
 
-    log("check:shake-candidate");
+    log("check:shake-light-feedback");
     await sleep(8_200);
     const shakeStartIndex = readTelemetryEvents().events.length;
+    const beforeShake = await measurePet(pet.cdp, "before-shake");
     await dragWithOffsets(pet.cdp, 330, [[60, 0], [-60, 0], [60, 0], [-60, 0], [60, 0], [-60, 0]], 60);
+    await sleep(600);
+    const afterShake = await measurePet(pet.cdp, "after-shake");
     const shakeEvents = eventsSince(shakeStartIndex);
     const shakeMotion = motionEvents(shakeEvents);
-    const shakeActionStarts = actionStarts(shakeEvents);
+    const shakeFeedback = feedbackEvents(shakeEvents);
+    const shakeActionStarts = actionStarts(shakeEvents).filter((event) => event.payload?.reason === "window_shake_feedback");
     checks.push({
-      name: "shakeEmitsSafeTelemetryAndNoUnsafeAction",
+      name: "shakeCandidateStartsOneSafeThinkingFeedback",
       ok: shakeMotion.some((event) => event.payload?.eventType === "window_shake_candidate") &&
-        shakeActionStarts.every((event) => (
-          event.payload?.type === "thinking" &&
+        shakeFeedback.some((event) => (
+          event.payload?.feedbackType === "shake_light_feedback" &&
+          event.payload?.result === "started" &&
           event.payload?.reason === "window_shake_feedback"
         )) &&
-        shakeMotion.every((event) => !hasForbiddenTelemetryKeys(event)),
+        shakeActionStarts.length === 1 &&
+        shakeActionStarts[0]?.payload?.type === "thinking" &&
+        shakeActionStarts[0]?.payload?.reason === "window_shake_feedback" &&
+        Math.abs(afterShake.viewport.innerWidth - beforeShake.viewport.innerWidth) <= 2 &&
+        Math.abs(afterShake.viewport.innerHeight - beforeShake.viewport.innerHeight) <= 2 &&
+        [...shakeMotion, ...shakeFeedback].every((event) => !hasForbiddenTelemetryKeys(event)),
       detail: {
+        beforeShake,
+        afterShake,
         motion: shakeMotion.map((event) => event.payload),
-        feedback: feedbackEvents(shakeEvents).map((event) => event.payload),
-        actionStarts: shakeActionStarts.map((event) => event.payload)
+        feedback: shakeFeedback.map((event) => event.payload),
+        actionStarts: actionStarts(shakeEvents).map((event) => event.payload)
+      }
+    });
+
+    log("check:feedback-cooldown");
+    await sleep(8_200);
+    const cooldownStartIndex = readTelemetryEvents().events.length;
+    await dragWithOffsets(pet.cdp, 331, [[60, 0], [-60, 0], [60, 0], [-60, 0], [60, 0], [-60, 0]], 60);
+    await sleep(600);
+    const cooldownEvents = eventsSince(cooldownStartIndex);
+    const cooldownFeedback = feedbackEvents(cooldownEvents);
+    checks.push({
+      name: "secondShakeCandidateRespectsFeedbackCooldown",
+      ok: motionEvents(cooldownEvents).some((event) => event.payload?.eventType === "window_shake_candidate") &&
+        cooldownFeedback.some((event) => (
+          event.payload?.feedbackType === "shake_light_feedback" &&
+          event.payload?.result === "skipped" &&
+          event.payload?.skipReason === "window_shake_feedback_cooldown" &&
+          event.payload?.cooldownState === "cooling_down"
+        )) &&
+        !actionStarts(cooldownEvents).some((event) => event.payload?.reason === "window_shake_feedback"),
+      detail: {
+        motion: motionEvents(cooldownEvents).map((event) => event.payload),
+        feedback: cooldownFeedback.map((event) => event.payload),
+        actionStarts: actionStarts(cooldownEvents).map((event) => event.payload),
+        actionSkips: actionSkips(cooldownEvents).map((event) => event.payload)
       }
     });
 
@@ -453,8 +500,10 @@ async function main() {
     const lockEvents = eventsSince(lockStartIndex);
     const lockSnapshot = latestPetWindowSnapshot(readTelemetryEvents().events);
     checks.push({
-      name: "lockedDragDoesNotMoveOrEmitMotion",
+      name: "lockedDragDoesNotMoveOrEmitMotionFeedback",
       ok: motionEvents(lockEvents).length === 0 &&
+        feedbackEvents(lockEvents).length === 0 &&
+        !actionStarts(lockEvents).some((event) => event.payload?.reason === "window_shake_feedback") &&
         Math.abs(afterLockDrag.screen.x - beforeLockDrag.screen.x) <= 2 &&
         Math.abs(afterLockDrag.screen.y - beforeLockDrag.screen.y) <= 2 &&
         lockSnapshot?.ignoreMouseEvents === true &&
@@ -463,7 +512,9 @@ async function main() {
         beforeLockDrag,
         afterLockDrag,
         latestPetWindow: lockSnapshot,
-        motion: motionEvents(lockEvents).map((event) => event.payload)
+        motion: motionEvents(lockEvents).map((event) => event.payload),
+        feedback: feedbackEvents(lockEvents).map((event) => event.payload),
+        actionStarts: actionStarts(lockEvents).map((event) => event.payload)
       }
     });
     await evaluate(chat.cdp, "window.petPresentationApi.setPetLocked(false)", true);
@@ -498,12 +549,16 @@ async function main() {
     checks.push({
       name: "scaleEntryRemainsSuppressedDuringPointerDown",
       ok: scaleEvents.filter((event) => event.type === "pet_scale_adjusted").length === 0 &&
+        !feedbackEvents(scaleEvents).some((event) => event.payload?.feedbackType === "shake_light_feedback") &&
+        !actionStarts(scaleEvents).some((event) => event.payload?.reason === "window_shake_feedback") &&
         Math.abs(afterScaleGuard.viewport.innerWidth - beforeScaleGuard.viewport.innerWidth) <= 2 &&
         Math.abs(afterScaleGuard.viewport.innerHeight - beforeScaleGuard.viewport.innerHeight) <= 2,
       detail: {
         beforeScaleGuard,
         afterScaleGuard,
-        scaleAdjusted: scaleEvents.filter((event) => event.type === "pet_scale_adjusted").map((event) => event.payload)
+        scaleAdjusted: scaleEvents.filter((event) => event.type === "pet_scale_adjusted").map((event) => event.payload),
+        feedback: feedbackEvents(scaleEvents).map((event) => event.payload),
+        actionStarts: actionStarts(scaleEvents).map((event) => event.payload)
       }
     });
 
@@ -518,6 +573,10 @@ async function main() {
         files: telemetry.files,
         eventCount: telemetry.events.length,
         motionEvents: motionEvents(telemetry.events).map((event) => event.payload),
+        feedbackEvents: feedbackEvents(telemetry.events).map((event) => event.payload),
+        windowShakeFeedbackActionStarts: actionStarts(telemetry.events)
+          .filter((event) => event.payload?.reason === "window_shake_feedback")
+          .map((event) => event.payload),
         rendererGoneCount: telemetry.events.filter((event) => event.type === "renderer_process_gone").length,
         childProcessGoneCount: telemetry.events.filter((event) => event.type === "child_process_gone").length,
         webglContextLostCount: telemetry.events.filter((event) => event.type === "webgl_context_lost").length
@@ -542,7 +601,8 @@ async function main() {
         logDirectory: telemetry.logDirectory,
         files: telemetry.files,
         eventCount: telemetry.events.length,
-        motionEvents: motionEvents(telemetry.events).map((event) => event.payload)
+        motionEvents: motionEvents(telemetry.events).map((event) => event.payload),
+        feedbackEvents: feedbackEvents(telemetry.events).map((event) => event.payload)
       }
     }, null, 2));
     log(`failed=${error instanceof Error ? error.message : String(error)}`);
