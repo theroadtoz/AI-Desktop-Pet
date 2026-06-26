@@ -9,6 +9,7 @@ import { getScreenDragDelta, shouldSuppressScaleWheelDuringDrag, type ScreenPoin
 import { createScaleWheelNormalizer, hasScaleWheelModifiers } from "./scale-wheel";
 import {
   createClickActionScheduler,
+  getPetInteractionAction,
   selectRandomPetInteractionAction,
   type PetInteractionAction
 } from "./interaction-actions";
@@ -235,6 +236,7 @@ let firstFrameMs: number | undefined;
 let recoveryCount = 0;
 let pendingLive2DFrameSample: ((sample: Live2DFrameSample) => void) | null = null;
 let activeInteractionAction: { action: PetInteractionAction; timeoutId: number } | null = null;
+let hasPlayedStartupAppearance = false;
 
 async function applyBasePresentationToLoadedModel(
   presentation: EmotionPresentation,
@@ -391,6 +393,7 @@ async function startPetRenderer(): Promise<void> {
     });
     isUsingLive2D = true;
     live2DModel.setLookTarget(0, 0);
+    const firstLive2DFrameSample = waitForNextLive2DFrameSample();
     live2DRenderer.start();
     if (pendingPresentation) {
       applyBasePresentationToModel(pendingPresentation, pendingAccessoryPresetId ?? lastAccessoryPresetId);
@@ -400,6 +403,11 @@ async function startPetRenderer(): Promise<void> {
       applyBasePresentationToModel(lastPresentation, lastAccessoryPresetId);
     }
     reportRenderHealth("live2d");
+    const sample = await firstLive2DFrameSample;
+    if (!hasPlayedStartupAppearance && sample && sample.nonTransparentPixels > 0) {
+      hasPlayedStartupAppearance = true;
+      playInteractionAction(getPetInteractionAction("appearance"), "startup_first_visible_frame");
+    }
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
     console.warn("[live2d] failed to start Live2D renderer; using placeholder", {
@@ -540,7 +548,7 @@ window.addEventListener("beforeunload", () => {
   removeWebGLContextRecovery();
   removePresentationIntentListener?.();
   removeInjectWebGLContextLossListener?.();
-  petClickActionScheduler.cancel();
+  cancelClickInteractionAction();
   live2DRenderer?.release();
   live2DRenderer = null;
   live2DModel = null;
@@ -580,6 +588,7 @@ if (import.meta.env.DEV) {
 }
 
 type HitRect = {
+  name: "head" | "body";
   left: number;
   right: number;
   top: number;
@@ -587,29 +596,35 @@ type HitRect = {
 };
 
 const HIT_RECTS: readonly HitRect[] = [
-  { left: 0.25, right: 0.75, top: 0.05, bottom: 0.33 },
-  { left: 0.22, right: 0.78, top: 0.28, bottom: 0.83 }
+  { name: "head", left: 0.25, right: 0.75, top: 0.05, bottom: 0.33 },
+  { name: "body", left: 0.22, right: 0.78, top: 0.28, bottom: 0.83 }
 ];
 
 const DRAG_THRESHOLD_DIP = 4;
 const scaleWheelNormalizer = createScaleWheelNormalizer();
 
 let lastIsHit = false;
-let pointerDown: { pointerId: number; x: number; y: number } & ScreenPoint | null = null;
+let pointerDown: { pointerId: number; x: number; y: number; hitArea: HitRect["name"] } & ScreenPoint | null = null;
 let lastDragPoint: ScreenPoint | null = null;
 let isDragging = false;
 
-function isPetHit(clientX: number, clientY: number): boolean {
+function getPetHitArea(clientX: number, clientY: number): HitRect["name"] | null {
   const rect = canvas.getBoundingClientRect();
   const x = (clientX - rect.left) / rect.width;
   const y = (clientY - rect.top) / rect.height;
 
-  return HIT_RECTS.some((hitRect) => (
-    x >= hitRect.left &&
-    x <= hitRect.right &&
-    y >= hitRect.top &&
-    y <= hitRect.bottom
+  const hitRect = HIT_RECTS.find((candidate) => (
+    x >= candidate.left &&
+    x <= candidate.right &&
+    y >= candidate.top &&
+    y <= candidate.bottom
   ));
+
+  return hitRect?.name ?? null;
+}
+
+function isPetHit(clientX: number, clientY: number): boolean {
+  return getPetHitArea(clientX, clientY) !== null;
 }
 
 canvas.addEventListener("wheel", (event) => {
@@ -680,11 +695,23 @@ function finishInteractionAction(action: PetInteractionAction): void {
   applyBasePresentationToModel(lastPresentation, lastAccessoryPresetId);
 }
 
-function playInteractionAction(action: PetInteractionAction): void {
+type InteractionActionReason = "startup_first_visible_frame" | "click_head" | "click_body";
+
+function playInteractionAction(action: PetInteractionAction, reason: InteractionActionReason): void {
   if (activeInteractionAction) {
+    window.petApi?.reportTelemetry("pet_interaction_action_skipped", {
+      type: action.type,
+      reason,
+      activeType: activeInteractionAction.action.type
+    });
     return;
   }
 
+  window.petApi?.reportTelemetry("pet_interaction_action_started", {
+    type: action.type,
+    reason,
+    durationMs: action.durationMs
+  });
   live2DRenderer?.boostInteraction(action.durationMs + 250);
   live2DModel?.setLookPaused(true);
   live2DModel?.applyTemporaryPartOpacities(action.accessoryPartIds ?? [], 1);
@@ -697,21 +724,45 @@ function playInteractionAction(action: PetInteractionAction): void {
 
   const timeoutId = window.setTimeout(() => {
     finishInteractionAction(action);
+    window.petApi?.reportTelemetry("pet_interaction_action_finished", {
+      type: action.type,
+      reason,
+      restoredAccessoryPresetId: lastAccessoryPresetId
+    });
   }, action.durationMs);
 
   activeInteractionAction = { action, timeoutId };
 }
 
-function triggerRandomInteractionAction(): void {
-  playInteractionAction(selectRandomPetInteractionAction());
+let pendingClickAction: { action: PetInteractionAction; reason: InteractionActionReason } | null = null;
+
+function triggerPendingClickInteractionAction(): void {
+  const pending = pendingClickAction ?? {
+    action: selectRandomPetInteractionAction(),
+    reason: "click_body" as const
+  };
+  pendingClickAction = null;
+  playInteractionAction(pending.action, pending.reason);
 }
 
 const petClickActionScheduler = createClickActionScheduler({
   delayMs: 220,
-  trigger: triggerRandomInteractionAction,
+  trigger: triggerPendingClickInteractionAction,
   setTimeoutFn: window.setTimeout.bind(window),
   clearTimeoutFn: window.clearTimeout.bind(window)
 });
+
+function scheduleClickInteractionAction(hitArea: HitRect["name"]): void {
+  pendingClickAction = hitArea === "head"
+    ? { action: getPetInteractionAction("headPat"), reason: "click_head" }
+    : { action: selectRandomPetInteractionAction(), reason: "click_body" };
+  petClickActionScheduler.schedule();
+}
+
+function cancelClickInteractionAction(): void {
+  pendingClickAction = null;
+  petClickActionScheduler.cancel();
+}
 
 function endDrag(): void {
   if (isDragging) {
@@ -778,10 +829,13 @@ canvas.addEventListener("pointermove", (event) => {
 
 canvas.addEventListener("pointerdown", (event) => {
   if (event.detail > 1) {
-    petClickActionScheduler.cancel();
+    cancelClickInteractionAction();
   }
 
-  if (!updatePointerHit(event)) {
+  const hitArea = getPetHitArea(event.clientX, event.clientY);
+  updatePointerHit(event);
+
+  if (!hitArea) {
     return;
   }
 
@@ -789,6 +843,7 @@ canvas.addEventListener("pointerdown", (event) => {
     pointerId: event.pointerId,
     x: event.clientX,
     y: event.clientY,
+    hitArea,
     screenX: event.screenX,
     screenY: event.screenY
   };
@@ -801,13 +856,16 @@ canvas.addEventListener("pointerup", (event) => {
   const wasDragging = isDragging;
   const isHit = updatePointerHit(event);
 
-  if (pointerDown?.pointerId === event.pointerId) {
-    endDrag();
-    tryReleasePointerCapture(event.pointerId);
+  if (!pointerDown || pointerDown.pointerId !== event.pointerId) {
+    return;
   }
 
-  if (isHit && !wasDragging) {
-    petClickActionScheduler.schedule();
+  const hitArea = pointerDown.hitArea;
+  endDrag();
+  tryReleasePointerCapture(event.pointerId);
+
+  if (isHit && !wasDragging && hitArea) {
+    scheduleClickInteractionAction(hitArea);
   }
 });
 
@@ -816,7 +874,7 @@ canvas.addEventListener("dblclick", (event) => {
     return;
   }
 
-  petClickActionScheduler.cancel();
+  cancelClickInteractionAction();
   live2DRenderer?.boostInteraction();
   window.petApi?.openChat();
 });

@@ -80,9 +80,23 @@ export const PET_INTERACTION_ACTIONS: readonly PetInteractionAction[] = [
   }
 ];
 
+export const PET_RANDOM_INTERACTION_ACTIONS: readonly PetInteractionAction[] = PET_INTERACTION_ACTIONS.filter((action) => (
+  action.type !== "appearance" && action.type !== "headPat"
+));
+
+export function getPetInteractionAction(type: PetInteractionActionType): PetInteractionAction {
+  const action = PET_INTERACTION_ACTIONS.find((candidate) => candidate.type === type);
+
+  if (!action) {
+    throw new Error(`pet interaction action not found: ${type}`);
+  }
+
+  return action;
+}
+
 export function selectRandomPetInteractionAction(
   random: () => number = Math.random,
-  actions: readonly PetInteractionAction[] = PET_INTERACTION_ACTIONS
+  actions: readonly PetInteractionAction[] = PET_RANDOM_INTERACTION_ACTIONS
 ): PetInteractionAction {
   if (actions.length === 0) {
     throw new Error("pet interaction action manifest is empty");

@@ -115,7 +115,10 @@ const RENDERER_TELEMETRY_TYPES = new Set([
   "webgl_context_restored",
   "recovery_started",
   "recovery_succeeded",
-  "recovery_failed"
+  "recovery_failed",
+  "pet_interaction_action_started",
+  "pet_interaction_action_finished",
+  "pet_interaction_action_skipped"
 ]);
 
 protocol.registerSchemesAsPrivileged([

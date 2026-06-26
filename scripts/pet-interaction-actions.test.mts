@@ -4,7 +4,9 @@ import test from "node:test";
 import {
   PET_INTERACTION_ACTIONS,
   PET_INTERACTION_ACTION_TYPES,
+  PET_RANDOM_INTERACTION_ACTIONS,
   createClickActionScheduler,
+  getPetInteractionAction,
   selectRandomPetInteractionAction
 } from "../src/renderer/pet/interaction-actions.ts";
 
@@ -29,6 +31,17 @@ test("pet interaction action manifest includes audited expression and accessory 
   assert.deepEqual(byType.get("reading")?.accessoryPartIds, ["Part53"]);
   assert.equal(byType.get("playGame")?.expressionName, "gestureGame");
   assert.deepEqual(byType.get("playGame")?.accessoryPartIds, ["Part17", "Part21"]);
+});
+
+test("ordinary random interaction pool excludes startup and head-only actions", () => {
+  assert.deepEqual(
+    PET_RANDOM_INTERACTION_ACTIONS.map((action) => action.type).sort(),
+    ["greeting", "playGame", "reading", "thinking"].sort()
+  );
+  assert.equal(selectRandomPetInteractionAction(() => 0).type, "greeting");
+  assert.equal(selectRandomPetInteractionAction(() => 0.999).type, "reading");
+  assert.equal(getPetInteractionAction("appearance").type, "appearance");
+  assert.equal(getPetInteractionAction("headPat").type, "headPat");
 });
 
 test("pet interaction action selection follows manifest weights", () => {
@@ -116,4 +129,26 @@ test("pet pointermove no longer drives the Live2D look target", async () => {
   const pointerMoveHandler = source.slice(pointerMoveStart, pointerDownStart);
 
   assert.equal(pointerMoveHandler.includes("setLookTarget"), false);
+});
+
+test("pet pointer clicks route head and body actions without changing drag or double-click guards", async () => {
+  const source = await readFile(new URL("../src/renderer/pet/main.ts", import.meta.url), "utf8");
+
+  assert.match(source, /name: "head"/);
+  assert.match(source, /name: "body"/);
+  assert.match(source, /getPetInteractionAction\("headPat"\)/);
+  assert.match(source, /selectRandomPetInteractionAction\(\)/);
+  assert.match(source, /scheduleClickInteractionAction\(hitArea\)/);
+  assert.match(source, /!pointerDown \|\| pointerDown\.pointerId !== event\.pointerId/);
+  assert.match(source, /!wasDragging && hitArea/);
+  assert.match(source, /cancelClickInteractionAction\(\)/);
+});
+
+test("pet startup appearance waits for a visible Live2D frame and only plays once per renderer lifecycle", async () => {
+  const source = await readFile(new URL("../src/renderer/pet/main.ts", import.meta.url), "utf8");
+
+  assert.match(source, /let hasPlayedStartupAppearance = false/);
+  assert.match(source, /waitForNextLive2DFrameSample\(\)/);
+  assert.match(source, /!hasPlayedStartupAppearance && sample && sample\.nonTransparentPixels > 0/);
+  assert.match(source, /playInteractionAction\(getPetInteractionAction\("appearance"\), "startup_first_visible_frame"\)/);
 });

@@ -173,14 +173,31 @@ function readTelemetryEvents() {
   return { logDirectory, files, events };
 }
 
-async function clickPet(cdp, randomValue) {
+async function waitForTelemetryEvent(predicate, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() < deadline) {
+    const telemetry = readTelemetryEvents();
+    const event = telemetry.events.find(predicate);
+
+    if (event) {
+      return event;
+    }
+
+    await sleep(250);
+  }
+
+  return null;
+}
+
+async function clickPet(cdp, randomValue, hitArea = "body") {
   await evaluate(cdp, `Math.random = () => ${randomValue}`);
   await evaluate(cdp, `
     (() => {
       const canvas = document.querySelector("#pet-canvas");
       const rect = canvas.getBoundingClientRect();
       const x = rect.left + rect.width * 0.5;
-      const y = rect.top + rect.height * 0.48;
+      const y = rect.top + rect.height * ${hitArea === "head" ? "0.2" : "0.48"};
       canvas.dispatchEvent(new PointerEvent("pointerdown", {
         pointerId: 8,
         pointerType: "mouse",
@@ -207,11 +224,29 @@ async function clickPet(cdp, randomValue) {
 
 async function triggerAction(cdp, action) {
   await screenshot(cdp, `${action.type}-before.png`);
-  await clickPet(cdp, action.random);
+  await clickPet(cdp, action.random, action.hitArea);
   await sleep(action.captureDelayMs);
   await screenshot(cdp, `${action.type}-active.png`);
   await sleep(action.durationMs + 450);
   await screenshot(cdp, `${action.type}-after.png`);
+}
+
+async function doubleClickPet(cdp) {
+  await evaluate(cdp, `
+    (() => {
+      const canvas = document.querySelector("#pet-canvas");
+      const rect = canvas.getBoundingClientRect();
+      const x = rect.left + rect.width * 0.5;
+      const y = rect.top + rect.height * 0.48;
+      canvas.dispatchEvent(new MouseEvent("dblclick", {
+        clientX: x,
+        clientY: y,
+        screenX: x,
+        screenY: y,
+        bubbles: true
+      }));
+    })()
+  `);
 }
 
 async function main() {
@@ -243,13 +278,13 @@ async function main() {
   let chat;
   let browser;
 
+  const checks = [];
   const actions = [
-    { type: "appearance", random: 0.05, durationMs: 1_600, captureDelayMs: 700 },
-    { type: "headPat", random: 0.2, durationMs: 1_500, captureDelayMs: 650 },
-    { type: "greeting", random: 0.4, durationMs: 1_400, captureDelayMs: 650 },
-    { type: "thinking", random: 0.62, durationMs: 1_800, captureDelayMs: 750 },
-    { type: "playGame", random: 0.8, durationMs: 1_700, captureDelayMs: 700 },
-    { type: "reading", random: 0.92, durationMs: 1_900, captureDelayMs: 800 }
+    { type: "headPat", random: 0.2, hitArea: "head", durationMs: 1_500, captureDelayMs: 650 },
+    { type: "greeting", random: 0.05, hitArea: "body", durationMs: 1_400, captureDelayMs: 650 },
+    { type: "thinking", random: 0.4, hitArea: "body", durationMs: 1_800, captureDelayMs: 750 },
+    { type: "playGame", random: 0.72, hitArea: "body", durationMs: 1_700, captureDelayMs: 700 },
+    { type: "reading", random: 0.92, hitArea: "body", durationMs: 1_900, captureDelayMs: 800 }
   ];
 
   try {
@@ -259,8 +294,24 @@ async function main() {
     browser = new CdpClient(browserVersion.webSocketDebuggerUrl);
     await browser.open();
 
-    await sleep(4_000);
-    await screenshot(pet.cdp, "cold-start.png");
+    const appearanceStarted = await waitForTelemetryEvent((event) => (
+      event.type === "pet_interaction_action_started" &&
+      event.payload?.type === "appearance" &&
+      event.payload?.reason === "startup_first_visible_frame"
+    ), 8_000);
+    await screenshot(pet.cdp, "startup-appearance-observed.png");
+    const appearanceFinished = await waitForTelemetryEvent((event) => (
+      event.type === "pet_interaction_action_finished" &&
+      event.payload?.type === "appearance" &&
+      event.payload?.reason === "startup_first_visible_frame"
+    ), 4_000);
+    checks.push({
+      name: "startupAppearanceOnce",
+      ok: Boolean(appearanceStarted && appearanceFinished),
+      detail: { started: appearanceStarted?.payload ?? null, finished: appearanceFinished?.payload ?? null }
+    });
+    await sleep(400);
+    await screenshot(pet.cdp, "cold-start-after-appearance.png");
 
     for (const action of actions) {
       log(`action:${action.type}`);
@@ -269,14 +320,14 @@ async function main() {
 
     log("repeat:greeting");
     for (let index = 0; index < 5; index += 1) {
-      await clickPet(pet.cdp, 0.4);
+      await clickPet(pet.cdp, 0.05);
       await sleep(1_650);
     }
     await screenshot(pet.cdp, "greeting-repeat-after.png");
 
     log("repeat:playGame");
     for (let index = 0; index < 5; index += 1) {
-      await clickPet(pet.cdp, 0.8);
+      await clickPet(pet.cdp, 0.72);
       await sleep(1_950);
     }
     await screenshot(pet.cdp, "playGame-repeat-after.png");
@@ -289,7 +340,7 @@ async function main() {
     await screenshot(pet.cdp, "reading-repeat-after.png");
 
     log("mixed:20");
-    const mixed = [0.05, 0.2, 0.4, 0.62, 0.8, 0.92, 0.4, 0.8, 0.92, 0.05, 0.62, 0.2, 0.4, 0.8, 0.92, 0.62, 0.2, 0.05, 0.8, 0.92];
+    const mixed = [0.05, 0.2, 0.4, 0.72, 0.92, 0.05, 0.4, 0.72, 0.92, 0.05, 0.4, 0.2, 0.05, 0.72, 0.92, 0.4, 0.2, 0.05, 0.72, 0.92];
     for (const value of mixed) {
       await clickPet(pet.cdp, value);
       await sleep(160);
@@ -311,19 +362,76 @@ async function main() {
       })()
     `);
     await sleep(1_000);
-    await evaluate(pet.cdp, "window.petApi?.openChat()");
+    await doubleClickPet(pet.cdp);
     chat = await connectTarget("renderer/chat/index.html");
     await sleep(1_000);
     await screenshot(chat.cdp, "chat-open.png");
     await screenshot(pet.cdp, "after-regression.png");
 
     const telemetry = readTelemetryEvents();
+    const startedActions = telemetry.events
+      .filter((event) => event.type === "pet_interaction_action_started")
+      .map((event) => event.payload);
+    const finishedActions = telemetry.events
+      .filter((event) => event.type === "pet_interaction_action_finished")
+      .map((event) => event.payload);
+    const startupAppearanceStarts = startedActions.filter((event) => (
+      event.type === "appearance" && event.reason === "startup_first_visible_frame"
+    ));
+    const clickHeadPatStarts = startedActions.filter((event) => (
+      event.type === "headPat" && event.reason === "click_head"
+    ));
+    const bodyActionTypes = new Set(startedActions
+      .filter((event) => event.reason === "click_body")
+      .map((event) => event.type));
+
+    checks.push({
+      name: "startupAppearanceNotRepeated",
+      ok: startupAppearanceStarts.length === 1,
+      detail: startupAppearanceStarts
+    });
+    checks.push({
+      name: "headClickTriggersHeadPat",
+      ok: clickHeadPatStarts.length >= 1,
+      detail: clickHeadPatStarts
+    });
+    checks.push({
+      name: "bodyClickUsesOrdinaryPool",
+      ok: ["greeting", "thinking", "playGame", "reading"].every((type) => bodyActionTypes.has(type)) &&
+        !startedActions.some((event) => event.reason === "click_body" && (event.type === "appearance" || event.type === "headPat")),
+      detail: [...bodyActionTypes]
+    });
+    checks.push({
+      name: "temporaryActionsFinish",
+      ok: ["appearance", "headPat", "greeting", "thinking", "playGame", "reading"].every((type) => (
+        finishedActions.some((event) => event.type === type)
+      )),
+      detail: finishedActions
+    });
+    checks.push({
+      name: "chatOpenedAfterDoubleClickAlternative",
+      ok: Boolean(chat?.target?.url?.includes("renderer/chat/index.html")),
+      detail: chat?.target?.url ?? null
+    });
+    checks.push({
+      name: "rendererStable",
+      ok: telemetry.events.filter((event) => event.type === "renderer_process_gone").length === 0 &&
+        telemetry.events.filter((event) => event.type === "child_process_gone").length === 0 &&
+        telemetry.events.filter((event) => event.type === "webgl_context_lost").length === 0,
+      detail: {
+        rendererGoneCount: telemetry.events.filter((event) => event.type === "renderer_process_gone").length,
+        childProcessGoneCount: telemetry.events.filter((event) => event.type === "child_process_gone").length,
+        webglContextLostCount: telemetry.events.filter((event) => event.type === "webgl_context_lost").length
+      }
+    });
+    const ok = checks.every((check) => check.ok);
     const result = {
-      ok: true,
+      ok,
       runDir,
       appDataDir,
       artifactsDir,
       actions: actions.map((action) => action.type),
+      checks,
       telemetry: {
         logDirectory: telemetry.logDirectory,
         files: telemetry.files,
@@ -338,6 +446,9 @@ async function main() {
     };
     writeFileSync(resultPath, JSON.stringify(result, null, 2));
     log(`result=${resultPath}`);
+    if (!ok) {
+      process.exitCode = 1;
+    }
   } catch (error) {
     const telemetry = readTelemetryEvents();
     writeFileSync(resultPath, JSON.stringify({
