@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { PetApi, RenderHealth, PetDragDelta, PetFirstFrameInfo } from "../shared/ipc-contract";
+import type { DialogueModeId } from "../shared/dialogue-style";
 import type { PetPresentationIntent, PetRoleState } from "../shared/pet-role-state";
 import type { PetScaleAdjustmentIntent } from "../shared/pet-presentation";
 
@@ -14,6 +15,7 @@ const petRoleStates = [
 const emotionTags = ["neutral", "happy", "sad", "surprised", "confused", "angry"] as const;
 const emotionIntensities = ["low", "medium", "high"] as const;
 const petAccessoryPresetIds = ["none", "glasses"] as const;
+const dialogueModeIds = ["default", "work", "game", "reading"] as const;
 const scaleWheelModifierPattern = /^(Ctrl|Alt|Shift|Meta)(\+(Ctrl|Alt|Shift|Meta))*$/;
 
 function isRequestVersion(value: number): boolean {
@@ -45,6 +47,12 @@ function isEmotionPresentation(value: unknown): boolean {
 
 function isPetAccessoryPresetId(value: unknown): boolean {
   return typeof value === "string" && petAccessoryPresetIds.includes(value as (typeof petAccessoryPresetIds)[number]);
+}
+
+function parseDialogueModeId(value: unknown): DialogueModeId | null {
+  return typeof value === "string" && dialogueModeIds.includes(value as DialogueModeId)
+    ? value as DialogueModeId
+    : null;
 }
 
 function isPetPresentationIntent(value: unknown): value is PetPresentationIntent {
@@ -157,6 +165,26 @@ const api: PetApi = {
     ipcRenderer.on("shortcuts:scale-wheel-modifier-changed", listener);
     return () => {
       ipcRenderer.removeListener("shortcuts:scale-wheel-modifier-changed", listener);
+    };
+  },
+  async getDialogueMode() {
+    const modeId = parseDialogueModeId(await ipcRenderer.invoke("dialogueMode:get"));
+    if (!modeId) {
+      throw new Error("Invalid dialogue mode response");
+    }
+    return modeId;
+  },
+  onDialogueModeChanged(handler) {
+    const listener = (_event: Electron.IpcRendererEvent, value: unknown): void => {
+      const modeId = parseDialogueModeId(value);
+      if (modeId) {
+        handler(modeId);
+      }
+    };
+
+    ipcRenderer.on("dialogueMode:changed", listener);
+    return () => {
+      ipcRenderer.removeListener("dialogueMode:changed", listener);
     };
   }
 };

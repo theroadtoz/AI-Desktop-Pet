@@ -117,6 +117,8 @@ export type PetApi = {
   adjustScale(intent: PetScaleAdjustmentIntent): void;
   getScaleWheelModifier(): Promise<string>;
   onScaleWheelModifierChanged(handler: (accelerator: string) => void): () => void;
+  getDialogueMode(): Promise<DialogueModeId>;
+  onDialogueModeChanged(handler: (modeId: DialogueModeId) => void): () => void;
 };
 
 export type ChatApi = {

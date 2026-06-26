@@ -9,12 +9,14 @@ import { getScreenDragDelta, shouldSuppressScaleWheelDuringDrag, type ScreenPoin
 import { createScaleWheelNormalizer, hasScaleWheelModifiers } from "./scale-wheel";
 import {
   createClickActionScheduler,
+  getRandomPetInteractionActionsForMode,
   getInteractionActionCooldownSkipReason,
   getPetInteractionAction,
   isStrongInteractionAction,
   selectRandomPetInteractionAction,
   type PetInteractionAction
 } from "./interaction-actions";
+import { DEFAULT_DIALOGUE_MODE_ID, type DialogueModeId } from "../../shared/dialogue-style";
 import {
   selectEmotionPresentation,
   type EmotionPresentation
@@ -242,6 +244,7 @@ let hasPlayedStartupAppearance = false;
 let lastInteractionActionFinishedAtMs: number | undefined;
 let lastHeadPatFinishedAtMs: number | undefined;
 const lastStrongInteractionActionFinishedAtMsByType: Partial<Record<PetInteractionAction["type"], number>> = {};
+let currentDialogueModeId: DialogueModeId = DEFAULT_DIALOGUE_MODE_ID;
 
 async function applyBasePresentationToLoadedModel(
   presentation: EmotionPresentation,
@@ -547,6 +550,15 @@ function injectWebGLContextLoss(): void {
 const removeInjectWebGLContextLossListener = window.petApi?.onInjectWebGLContextLoss(() => {
   injectWebGLContextLoss();
 }) ?? null;
+const removeDialogueModeChangedListener = window.petApi?.onDialogueModeChanged((modeId) => {
+  currentDialogueModeId = modeId;
+}) ?? null;
+
+void window.petApi?.getDialogueMode().then((modeId) => {
+  currentDialogueModeId = modeId;
+}).catch(() => {
+  currentDialogueModeId = DEFAULT_DIALOGUE_MODE_ID;
+});
 
 window.addEventListener("resize", () => {
   resizeCanvas();
@@ -569,6 +581,7 @@ window.addEventListener("beforeunload", () => {
   removeWebGLContextRecovery();
   removePresentationIntentListener?.();
   removeInjectWebGLContextLossListener?.();
+  removeDialogueModeChangedListener?.();
   cancelClickInteractionAction();
   live2DRenderer?.release();
   live2DRenderer = null;
@@ -730,7 +743,11 @@ function finishInteractionAction(action: PetInteractionAction): void {
 
 type InteractionActionReason = "startup_first_visible_frame" | "click_head" | "click_body";
 
-function playInteractionAction(action: PetInteractionAction, reason: InteractionActionReason): void {
+function playInteractionAction(
+  action: PetInteractionAction,
+  reason: InteractionActionReason,
+  strategy?: { modeId: DialogueModeId; candidateActionTypes: readonly PetInteractionAction["type"][] }
+): void {
   const skipReason = getInteractionActionCooldownSkipReason(action, performance.now(), {
     activeType: activeInteractionAction?.action.type,
     lastActionFinishedAtMs: lastInteractionActionFinishedAtMs,
@@ -743,6 +760,7 @@ function playInteractionAction(action: PetInteractionAction, reason: Interaction
       type: action.type,
       reason,
       skipReason,
+      ...(strategy ? { modeId: strategy.modeId } : {}),
       ...(activeInteractionAction ? { activeType: activeInteractionAction.action.type } : {})
     });
     return;
@@ -751,7 +769,12 @@ function playInteractionAction(action: PetInteractionAction, reason: Interaction
   window.petApi?.reportTelemetry("pet_interaction_action_started", {
     type: action.type,
     reason,
-    durationMs: action.durationMs
+    durationMs: action.durationMs,
+    ...(strategy ? {
+      modeId: strategy.modeId,
+      candidateActionTypes: strategy.candidateActionTypes,
+      selectedActionType: action.type
+    } : {})
   });
   live2DRenderer?.boostInteraction(action.durationMs + 250);
   live2DModel?.setLookPaused(true);
@@ -783,15 +806,31 @@ function playInteractionAction(action: PetInteractionAction, reason: Interaction
   activeInteractionAction = { action, timeoutId };
 }
 
-let pendingClickAction: { action: PetInteractionAction; reason: InteractionActionReason } | null = null;
+type PendingClickAction = {
+  action: PetInteractionAction;
+  reason: InteractionActionReason;
+  strategy?: { modeId: DialogueModeId; candidateActionTypes: readonly PetInteractionAction["type"][] };
+};
+
+function createBodyClickAction(): PendingClickAction {
+  const modeActions = getRandomPetInteractionActionsForMode(currentDialogueModeId);
+
+  return {
+    action: selectRandomPetInteractionAction(Math.random, modeActions),
+    reason: "click_body",
+    strategy: {
+      modeId: currentDialogueModeId,
+      candidateActionTypes: modeActions.map((action) => action.type)
+    }
+  };
+}
+
+let pendingClickAction: PendingClickAction | null = null;
 
 function triggerPendingClickInteractionAction(): void {
-  const pending = pendingClickAction ?? {
-    action: selectRandomPetInteractionAction(),
-    reason: "click_body" as const
-  };
+  const pending = pendingClickAction ?? createBodyClickAction();
   pendingClickAction = null;
-  playInteractionAction(pending.action, pending.reason);
+  playInteractionAction(pending.action, pending.reason, pending.strategy);
 }
 
 const petClickActionScheduler = createClickActionScheduler({
@@ -804,7 +843,7 @@ const petClickActionScheduler = createClickActionScheduler({
 function scheduleClickInteractionAction(hitArea: HitRect["name"]): void {
   pendingClickAction = hitArea === "head"
     ? { action: getPetInteractionAction("headPat"), reason: "click_head" }
-    : { action: selectRandomPetInteractionAction(), reason: "click_body" };
+    : createBodyClickAction();
   petClickActionScheduler.schedule();
 }
 

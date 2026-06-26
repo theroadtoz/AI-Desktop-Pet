@@ -526,6 +526,8 @@ function sanitizeRendererTelemetry(event: PetTelemetryEvent): TelemetryPayload {
       value === null
     ) {
       safePayload[key] = value;
+    } else if (Array.isArray(value) && value.every((item) => typeof item === "string")) {
+      safePayload[key] = value;
     }
   }
 
@@ -878,6 +880,14 @@ app.whenReady().then(async () => {
     }
 
     chatWindow.webContents.send("dialogueMode:changed", modeId);
+  }
+
+  function notifyPetDialogueModeChanged(modeId: DialogueModeId): void {
+    if (!petWindow || petWindow.isDestroyed()) {
+      return;
+    }
+
+    petWindow.webContents.send("dialogueMode:changed", modeId);
   }
 
   ipcMain.handle("pet:open-chat", (event) => {
@@ -1335,7 +1345,7 @@ app.whenReady().then(async () => {
   });
 
   ipcMain.handle("dialogueMode:get", (event) => {
-    if (!isChatSender(event)) {
+    if (!isChatSender(event) && !isPetSender(event)) {
       throw new Error("Unauthorized dialogue mode request");
     }
 
@@ -1357,6 +1367,7 @@ app.whenReady().then(async () => {
         reason: "chat_ui"
       });
       notifyChatDialogueModeChanged(currentDialogueModeId);
+      notifyPetDialogueModeChanged(currentDialogueModeId);
     }
 
     return currentDialogueModeId;

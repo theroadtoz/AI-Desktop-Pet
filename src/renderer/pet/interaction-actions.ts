@@ -1,4 +1,5 @@
 import type { EmotionPresentation } from "../../shared/emotion-presentation";
+import type { DialogueModeId } from "../../shared/dialogue-style";
 
 export const PET_INTERACTION_ACTION_TYPES = [
   "appearance",
@@ -102,6 +103,42 @@ export const PET_INTERACTION_ACTIONS: readonly PetInteractionAction[] = [
 export const PET_RANDOM_INTERACTION_ACTIONS: readonly PetInteractionAction[] = PET_INTERACTION_ACTIONS.filter((action) => (
   action.type !== "appearance" && action.type !== "headPat"
 ));
+
+const MODE_RANDOM_INTERACTION_ACTION_WEIGHTS: Readonly<Record<DialogueModeId, Readonly<Partial<Record<PetInteractionActionType, number>>>>> = {
+  default: {
+    greeting: 4,
+    thinking: 3,
+    playGame: 1,
+    reading: 1
+  },
+  work: {
+    greeting: 2,
+    thinking: 4,
+    playGame: 0.5,
+    reading: 1
+  },
+  game: {
+    greeting: 3,
+    thinking: 1,
+    playGame: 4,
+    reading: 0.5
+  },
+  reading: {
+    greeting: 2,
+    thinking: 2,
+    playGame: 0.5,
+    reading: 4
+  }
+};
+
+export function getRandomPetInteractionActionsForMode(modeId: DialogueModeId): readonly PetInteractionAction[] {
+  const weights = MODE_RANDOM_INTERACTION_ACTION_WEIGHTS[modeId];
+
+  return PET_RANDOM_INTERACTION_ACTIONS.map((action) => ({
+    ...action,
+    weight: weights[action.type] ?? action.weight
+  }));
+}
 
 export function isStrongInteractionAction(type: PetInteractionActionType): boolean {
   return STRONG_INTERACTION_ACTION_TYPES.has(type);

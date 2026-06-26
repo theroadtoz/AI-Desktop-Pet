@@ -298,6 +298,76 @@ function readTelemetrySummary() {
   return { logDirectory, files, eventCount, containsForbiddenText, changedEvents };
 }
 
+function readTelemetryEvents() {
+  const logDirectory = join(appDataDir, "logs");
+  if (!existsSync(logDirectory)) {
+    return [];
+  }
+
+  const files = readdirSync(logDirectory)
+    .filter((name) => name.startsWith("telemetry-") && name.endsWith(".jsonl"))
+    .map((name) => join(logDirectory, name))
+    .sort();
+  const events = [];
+
+  for (const file of files) {
+    for (const line of readFileSync(file, "utf8").split(/\r?\n/)) {
+      if (!line.trim()) {
+        continue;
+      }
+      events.push(JSON.parse(line));
+    }
+  }
+
+  return events;
+}
+
+async function clickPet(cdp, randomValue, hitArea = "body") {
+  await evaluate(cdp, `Math.random = () => ${randomValue}`);
+  await evaluate(cdp, `
+    (() => {
+      const canvas = document.querySelector("#pet-canvas");
+      const rect = canvas.getBoundingClientRect();
+      const x = rect.left + rect.width * 0.5;
+      const y = rect.top + rect.height * ${hitArea === "head" ? "0.2" : "0.48"};
+      canvas.dispatchEvent(new PointerEvent("pointerdown", {
+        pointerId: 18,
+        pointerType: "mouse",
+        clientX: x,
+        clientY: y,
+        screenX: x,
+        screenY: y,
+        buttons: 1,
+        bubbles: true
+      }));
+      canvas.dispatchEvent(new PointerEvent("pointerup", {
+        pointerId: 18,
+        pointerType: "mouse",
+        clientX: x,
+        clientY: y,
+        screenX: x,
+        screenY: y,
+        bubbles: true
+      }));
+    })()
+  `);
+  await sleep(260);
+}
+
+async function waitForTelemetryEvent(predicate, timeoutMs = 6_000) {
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() < deadline) {
+    const event = readTelemetryEvents().find(predicate);
+    if (event) {
+      return event;
+    }
+    await sleep(200);
+  }
+
+  return null;
+}
+
 function findScreenshotResidue(directory) {
   const ignored = new Set([".git", "node_modules", "dist"]);
   const matches = [];
@@ -344,11 +414,29 @@ async function main() {
 
     await setMode(chat, "game");
     checks.gameModeVisible = await evaluate(chat, "document.querySelector('#partner-status')?.textContent.includes('游戏模式')");
+    await clickPet(handles.pet.cdp, 0.6);
+    const gameAction = await waitForTelemetryEvent((event) => (
+      event.type === "pet_interaction_action_started" &&
+      event.payload?.reason === "click_body" &&
+      event.payload?.modeId === "game" &&
+      event.payload?.selectedActionType === "playGame"
+    ));
+    checks.gameModePetActionPrefersPlayGame = Boolean(gameAction);
+    await sleep(2_100);
     const gameReply = await sendMessage(chat, "游戏模式回复");
     checks.gameReplyDiffers = gameReply.at(-1)?.startsWith("好，来点轻快的。") || gameReply.at(-1)?.startsWith("可以，先轻松一下。");
 
     await setMode(chat, "reading");
     checks.readingModeVisible = await evaluate(chat, "document.querySelector('#partner-status')?.textContent.includes('读书模式')");
+    await clickPet(handles.pet.cdp, 0.7);
+    const readingAction = await waitForTelemetryEvent((event) => (
+      event.type === "pet_interaction_action_started" &&
+      event.payload?.reason === "click_body" &&
+      event.payload?.modeId === "reading" &&
+      event.payload?.selectedActionType === "reading"
+    ));
+    checks.readingModePetActionPrefersReading = Boolean(readingAction);
+    await sleep(2_300);
     const readingReply = await sendMessage(chat, "读书模式回复");
     checks.readingReplyDiffers = readingReply.at(-1)?.startsWith("慢慢看。") || readingReply.at(-1)?.startsWith("我们安静地理一遍。");
 
@@ -386,6 +474,25 @@ async function main() {
 
     await setMode(chat, "default");
     checks.defaultModeVisibleAfterSwitch = await evaluate(chat, "document.querySelector('#partner-status')?.textContent.includes('默认陪伴')");
+    await clickPet(handles.pet.cdp, 0.05);
+    const defaultAction = await waitForTelemetryEvent((event) => (
+      event.type === "pet_interaction_action_started" &&
+      event.payload?.reason === "click_body" &&
+      event.payload?.modeId === "default" &&
+      Array.isArray(event.payload?.candidateActionTypes) &&
+      ["greeting", "thinking", "playGame", "reading"].every((type) => event.payload.candidateActionTypes.includes(type)) &&
+      !event.payload.candidateActionTypes.includes("appearance") &&
+      !event.payload.candidateActionTypes.includes("headPat")
+    ));
+    checks.defaultModePetActionPoolSummary = Boolean(defaultAction);
+    await sleep(2_400);
+    await clickPet(handles.pet.cdp, 0.2, "head");
+    const headAction = await waitForTelemetryEvent((event) => (
+      event.type === "pet_interaction_action_started" &&
+      event.payload?.reason === "click_head" &&
+      event.payload?.type === "headPat"
+    ));
+    checks.headClickStillTriggersHeadPat = Boolean(headAction);
     await setMode(chat, "reading");
 
     await stopElectron(child, handles);
