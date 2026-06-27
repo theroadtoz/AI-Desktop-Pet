@@ -54,7 +54,7 @@ export function log(context, message) {
   writeFileSync(context.progressPath, `${line}\n`, { flag: "a" });
 }
 
-export async function fetchJson(url) {
+async function fetchJson(url) {
   const response = await fetch(url);
   if (!response.ok) {
     throw new Error(`${url} -> ${response.status}`);
@@ -62,7 +62,7 @@ export async function fetchJson(url) {
   return response.json();
 }
 
-export async function waitForJson(url, timeoutMs) {
+async function waitForJson(url, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
   let lastError = null;
 
@@ -255,7 +255,7 @@ export async function saveWelcomeProfile(page, profile) {
   await waitFor(page, "document.querySelector('#user-welcome-panel')?.hidden === true");
 }
 
-export async function setViewport(page, width, height) {
+async function setViewport(page, width, height) {
   await asCdp(page).send("Emulation.setDeviceMetricsOverride", {
     width,
     height,
@@ -310,7 +310,7 @@ export async function checkLayout(page, width, height, options = {}) {
   return result;
 }
 
-export function readTextFiles(directory) {
+function readTextFiles(directory) {
   if (!existsSync(directory)) {
     return [];
   }
