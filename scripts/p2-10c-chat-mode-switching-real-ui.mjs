@@ -209,6 +209,17 @@ async function click(cdp, selector) {
   await sleep(250);
 }
 
+async function saveWelcomeProfile(cdp) {
+  await evaluate(cdp, `
+    (() => {
+      document.querySelector("#welcome-user-display-name").value = "P2-10C 验收用户";
+      document.querySelector("#welcome-user-preferred-name").value = "馆长";
+      document.querySelector("#welcome-save-user-profile-button").click();
+    })()
+  `);
+  await waitFor(cdp, "document.querySelector('#user-welcome-panel')?.hidden === true");
+}
+
 async function setMode(cdp, modeId) {
   await click(cdp, `.mode-button[data-mode-id="${modeId}"]`);
   await waitFor(cdp, `document.querySelector('.mode-button.is-active')?.dataset.modeId === ${JSON.stringify(modeId)}`);
@@ -244,13 +255,28 @@ async function checkNarrowModeLayout(cdp) {
   await sleep(300);
   const ok = await evaluate(cdp, `
     (() => {
+      const visible = (node) => {
+        if (!node || node.hidden || node.closest("[hidden]")) return false;
+        const style = getComputedStyle(node);
+        return style.display !== "none" && style.visibility !== "hidden";
+      };
+      const withinViewport = (node) => {
+        if (!visible(node)) return false;
+        const rect = node.getBoundingClientRect();
+        return rect.left >= -1 && rect.right <= window.innerWidth + 1 && rect.width > 0 && rect.height > 0;
+      };
+      const shelf = document.querySelector("#companion-control-shelf");
       const controls = document.querySelector("#dialogue-mode-controls");
-      const statusBoxes = [...document.querySelectorAll(".partner-status-band .status-box")];
-      const buttons = [...document.querySelectorAll(".mode-button")];
-      const rects = [...statusBoxes, ...buttons].map((node) => node.getBoundingClientRect());
-      return controls &&
+      const buttons = [...document.querySelectorAll("#dialogue-mode-controls .mode-button")];
+      const checkedNodes = [
+        document.querySelector(".partner-status-band"),
+        shelf,
+        controls,
+        ...buttons
+      ];
+      return visible(shelf) &&
         buttons.length === 4 &&
-        rects.every((rect) => rect.left >= 0 && rect.right <= window.innerWidth + 1 && rect.height > 0);
+        checkedNodes.every(withinViewport);
     })()
   `);
   await cdp.send("Emulation.clearDeviceMetricsOverride");
@@ -395,6 +421,7 @@ async function main() {
   try {
     handles = await openChat();
     const chat = handles.chat.cdp;
+    await saveWelcomeProfile(chat);
 
     checks.initialDefaultMode = await evaluate(chat, "document.querySelector('#partner-status')?.textContent.includes('默认陪伴')");
     checks.modeButtonsVisible = await evaluate(chat, "document.querySelectorAll('.mode-button').length === 4");
@@ -456,13 +483,19 @@ async function main() {
       })()
     `);
     await sendMessage(chat, "检查记忆状态");
+    await waitFor(chat, `document.querySelector("#memory-session-status")?.textContent.includes("本次使用 1 条记忆")`, 10_000);
     checks.memoryStatusHidesFactContent = await evaluate(chat, `
       (() => {
+        const checkedText = [
+          document.querySelector("#memory-session-status")?.textContent ?? "",
+          document.querySelector("#chat-session-note")?.textContent ?? "",
+          document.querySelector("#partner-status-band")?.textContent ?? "",
+          document.querySelector(".partner-status-band")?.textContent ?? "",
+          document.querySelector("#companion-control-shelf")?.textContent ?? ""
+        ].join("\\n");
         const memoryStatus = document.querySelector("#memory-session-status")?.textContent ?? "";
-        const chatNote = document.querySelector("#chat-session-note")?.textContent ?? "";
         return memoryStatus.includes("本次使用 1 条记忆") &&
-          !memoryStatus.includes(${JSON.stringify(memorySentinel)}) &&
-          !chatNote.includes(${JSON.stringify(memorySentinel)});
+          !checkedText.includes(${JSON.stringify(memorySentinel)});
       })()
     `);
 
