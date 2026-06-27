@@ -1,5 +1,5 @@
 import type { ChatMessage } from "../../../shared/chat";
-import type { ChatProvider, ChatProviderResult } from "../../../shared/chat-provider";
+import type { ChatProvider, ChatProviderResult, ChatRequest } from "../../../shared/chat-provider";
 import { DEFAULT_DIALOGUE_MODE_ID, parseDialogueModeId, type DialogueModeId } from "../../../shared/dialogue-style";
 import type { EmotionTag } from "../../../shared/emotion";
 import { getLatestUserMessage } from "./chat-message-mapper";
@@ -71,19 +71,81 @@ export function createFakeChatProvider(): ChatProvider {
   };
 }
 
-function createFakeReply(request: { conversationId: string; messages: ChatMessage[]; dialogueStyleContext?: { modeId?: unknown } }): ChatProviderResult {
+function createFakeReply(request: ChatRequest): ChatProviderResult {
   const latestUserMessage = getLatestUserMessage(request.messages);
   const classification = classifyEmotion({ latestUserMessage });
+  const qualityReply = createQualityReply(request, latestUserMessage, classification);
+
+  if (qualityReply) {
+    return qualityReply;
+  }
+
   const variants = REPLY_VARIANTS[classification.emotion] ?? [REPLIES[classification.emotion]];
   const variantIndex = stableIndex(`${request.conversationId}:${latestUserMessage.length}`, variants.length);
   const modeId = parseDialogueModeId(request.dialogueStyleContext?.modeId) ?? DEFAULT_DIALOGUE_MODE_ID;
   const prefixes = MODE_PREFIXES[modeId];
-  const prefix = prefixes[stableIndex(`${modeId}:${latestUserMessage.length}`, prefixes.length)] ?? "";
+  const prefix = prefixes[stableIndex(`${request.conversationId}:${modeId}:${latestUserMessage.length}`, prefixes.length)] ?? "";
 
   return {
     text: `${prefix}${variants[variantIndex] ?? REPLIES[classification.emotion]}`,
     ...classification
   };
+}
+
+function createQualityReply(
+  request: ChatRequest,
+  latestUserMessage: string,
+  classification: ReturnType<typeof classifyEmotion>
+): ChatProviderResult | null {
+  if (asksForUnknownMemory(latestUserMessage)) {
+    return {
+      text: "这点我无法确认。你还没把它告诉我时，我不会假装记得；我们可以先按你现在给的信息来。",
+      ...classification
+    };
+  }
+
+  if (asksForUncertainFact(latestUserMessage)) {
+    return {
+      text: "这点我不确定，需要查证后再下结论。先把已知条件列出来，会更稳一些。",
+      ...classification
+    };
+  }
+
+  if (asksForSavedPreference(latestUserMessage) && request.memoryContext && request.memoryContext.count > 0) {
+    const firstCard = request.memoryContext.cards[0];
+
+    if (firstCard) {
+      return {
+        text: `你提过：${firstCard.content}。我先只按这条已保存的信息判断。`,
+        ...classification
+      };
+    }
+  }
+
+  if (asksForDetail(latestUserMessage)) {
+    return {
+      text: "可以，展开说就是三步：先确认目标，再拆最小行动，最后留一个可检查的结果。这样不容易散。",
+      ...classification
+    };
+  }
+
+  return null;
+}
+
+function asksForDetail(message: string): boolean {
+  return /详细|展开|讲讲|说明|说细/.test(message);
+}
+
+function asksForUncertainFact(message: string): boolean {
+  return /现在的总统|今天新闻|最新版本|明天会不会|准确价格|实时/.test(message);
+}
+
+function asksForUnknownMemory(message: string): boolean {
+  return /你应该记得|你还记得/.test(message) && /我没说|我没有说|没告诉|没有告诉|生日|住在哪|昨天/.test(message);
+}
+
+function asksForSavedPreference(message: string): boolean {
+  return /我喜欢什么|我的偏好|我常用什么|我爱用什么/.test(message);
 }
 
 function stableIndex(seed: string, length: number): number {
