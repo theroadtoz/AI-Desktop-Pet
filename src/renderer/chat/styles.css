@@ -168,6 +168,7 @@ body {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+  min-width: 0;
 }
 
 .mode-button {
@@ -193,6 +194,55 @@ body {
   border-color: #c8d9bd;
   background: #f4f8ef;
   font-weight: 700;
+}
+
+.companion-control-shelf {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  align-items: stretch;
+  padding: 8px;
+  border: 1px solid #e7dccb;
+  border-radius: 8px;
+  background: #fbf4e8;
+}
+
+.companion-control-shelf[hidden] {
+  display: none;
+}
+
+.shelf-mode-group {
+  display: flex;
+  grid-column: 1 / -1;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.shelf-label {
+  flex: 0 0 auto;
+  color: #6b5745;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.shelf-button {
+  width: 100%;
+  min-width: 0;
+  padding: 7px 10px;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.shelf-button[data-state="ready"] {
+  border-color: #c8d9bd;
+  background: #f4f8ef;
+}
+
+.shelf-echo {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 7px 10px;
 }
 
 .history-page {
@@ -692,6 +742,20 @@ textarea:disabled {
   .partner-status-band {
     width: 100%;
     grid-template-columns: 1fr;
+  }
+
+  .companion-control-shelf {
+    grid-template-columns: 1fr;
+  }
+
+  .shelf-mode-group {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .shelf-mode-group .mode-controls,
+  .shelf-mode-group .mode-button {
+    width: 100%;
   }
 
   .icon-button {

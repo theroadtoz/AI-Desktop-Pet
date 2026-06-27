@@ -15,6 +15,7 @@ import type {
   ConfigSetApiKeyRequest,
   ChatStreamErrorType,
   ChatSendRequest,
+  PetActivityEcho,
   PetDragDelta,
   PetFirstFrameInfo,
   PetPointerHitState,
@@ -410,6 +411,46 @@ function notifyChatPetLockChanged(state: { isLocked: boolean }): boolean {
 
   chatWindow.webContents.send("pet-lock:changed", state);
   return true;
+}
+
+function notifyChatPetActivityEcho(echo: PetActivityEcho): boolean {
+  if (!chatWindow || chatWindow.isDestroyed()) {
+    return false;
+  }
+
+  chatWindow.webContents.send("pet-activity:echo", echo);
+  return true;
+}
+
+function createPetActivityEcho(event: PetTelemetryEvent): PetActivityEcho | null {
+  const payload = event.payload ?? {};
+
+  if (event.type === "pet_window_motion_feedback" && payload.result === "started") {
+    return { message: "刚刚被晃了一下" };
+  }
+
+  if (event.type !== "pet_interaction_action_started") {
+    return null;
+  }
+
+  switch (payload.type) {
+    case "appearance":
+      return { message: "刚刚打招呼" };
+    case "headPat":
+      return { message: "刚刚摸头" };
+    case "greeting":
+      return { message: "刚刚打招呼" };
+    case "thinking":
+      return { message: "刚刚思考" };
+    case "playGame":
+      return { message: "刚刚玩游戏" };
+    case "reading":
+      return { message: "刚刚读书" };
+    case "focus":
+      return { message: "刚刚专注" };
+    default:
+      return null;
+  }
 }
 
 function startPerformanceHeartbeat(): void {
@@ -1002,6 +1043,12 @@ app.whenReady().then(async () => {
     }
 
     logTelemetry(rendererEvent.type, sanitizeRendererTelemetry(rendererEvent));
+    const activityEcho = createPetActivityEcho(rendererEvent);
+
+    if (activityEcho) {
+      notifyChatPetActivityEcho(activityEcho);
+    }
+
     if (rendererEvent.type === "webgl_context_lost" || rendererEvent.type === "recovery_failed") {
       const requestVersion = activeChatRequestVersion;
       transitionPetRole({ type: "renderer:failed" });

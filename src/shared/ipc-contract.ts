@@ -28,7 +28,8 @@ export type PetWindowCommand =
 export type ChatWindowCommand =
   | { type: "chat:focus-input" }
   | { type: "pet-lock:changed"; payload: PetLockState }
-  | { type: "dialogueMode:changed"; payload: DialogueModeId };
+  | { type: "dialogueMode:changed"; payload: DialogueModeId }
+  | { type: "pet-activity:echo"; payload: PetActivityEcho };
 
 export type ChatSendRequest = ChatRequest;
 
@@ -104,6 +105,10 @@ export type PetWindowMotionFeedback = {
   type: "shake_light_feedback";
 };
 
+export type PetActivityEcho = {
+  message: string;
+};
+
 export type PetLockState = {
   isLocked: boolean;
 };
@@ -136,6 +141,7 @@ export type ChatApi = {
   onReplyDone(handler: (result: ChatStreamDonePayload) => void): () => void;
   onReplyError(handler: (error: ChatStreamErrorPayload) => void): () => void;
   onMemoryInjection(handler: (payload: ChatMemoryInjectionPayload) => void): () => void;
+  onPetActivityEcho(handler: (echo: PetActivityEcho) => void): () => void;
   setInteractionActive(isActive: boolean): void;
 };
 

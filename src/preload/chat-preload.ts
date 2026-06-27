@@ -12,6 +12,7 @@ import type {
   DialogueModeApi,
   HistoryApi,
   MemoryApi,
+  PetActivityEcho,
   PetLockState,
   PetPresentationApi,
   ShortcutApi,
@@ -151,6 +152,14 @@ function parsePetLockState(value: unknown): PetLockState | null {
 
   return state && typeof state.isLocked === "boolean"
     ? { isLocked: state.isLocked }
+    : null;
+}
+
+function parsePetActivityEcho(value: unknown): PetActivityEcho | null {
+  const echo = value as Partial<PetActivityEcho> | null;
+
+  return echo && typeof echo.message === "string" && echo.message.length > 0 && echo.message.length <= 24
+    ? { message: echo.message }
     : null;
 }
 
@@ -655,6 +664,20 @@ const api: ChatApi = {
     ipcRenderer.on("chat:memory-injection", listener);
     return () => {
       ipcRenderer.removeListener("chat:memory-injection", listener);
+    };
+  },
+  onPetActivityEcho(handler) {
+    const listener = (_event: Electron.IpcRendererEvent, payload: unknown): void => {
+      const echo = parsePetActivityEcho(payload);
+
+      if (echo) {
+        handler(echo);
+      }
+    };
+
+    ipcRenderer.on("pet-activity:echo", listener);
+    return () => {
+      ipcRenderer.removeListener("pet-activity:echo", listener);
     };
   },
   setInteractionActive(isActive: boolean) {

@@ -61,7 +61,12 @@ const chatTab = document.querySelector<HTMLButtonElement>("#chat-tab");
 const historyTab = document.querySelector<HTMLButtonElement>("#history-tab");
 const memoryTab = document.querySelector<HTMLButtonElement>("#memory-tab");
 const chatPage = document.querySelector<HTMLElement>("#chat-page");
+const companionControlShelf = document.querySelector<HTMLElement>("#companion-control-shelf");
 const dialogueModeControls = document.querySelector<HTMLElement>("#dialogue-mode-controls");
+const shelfAccessoryButton = document.querySelector<HTMLButtonElement>("#shelf-accessory-button");
+const shelfScaleButton = document.querySelector<HTMLButtonElement>("#shelf-scale-button");
+const shelfLockButton = document.querySelector<HTMLButtonElement>("#shelf-lock-button");
+const shelfActionEcho = document.querySelector<HTMLElement>("#shelf-action-echo");
 const historyPage = document.querySelector<HTMLElement>("#history-page");
 const memoryPage = document.querySelector<HTMLElement>("#memory-page");
 const chatSessionNote = document.querySelector<HTMLElement>("#chat-session-note");
@@ -103,7 +108,8 @@ if (
   !savePetAccessoryButton || !petLockStatus || !togglePetLockButton || !userProfileSummary ||
   !settingsUserDisplayName || !settingsUserPreferredName || !saveUserProfileButton || !clearUserProfileButton ||
   !settingsDialogueModeSummary || !shortcutList || !shortcutStatus ||
-  !chatTab || !historyTab || !memoryTab || !chatPage || !dialogueModeControls || !historyPage ||
+  !chatTab || !historyTab || !memoryTab || !chatPage || !companionControlShelf || !dialogueModeControls ||
+  !shelfAccessoryButton || !shelfScaleButton || !shelfLockButton || !shelfActionEcho || !historyPage ||
   !memoryPage || !chatSessionNote || !memoryDraftPanel || !memoryDraftTitle || !memoryDraftContent || !memoryDraftTags ||
   !cancelMemoryDraftButton || !saveMemoryDraftButton || !newConversationButton || !clearHistoryButton || !clearHistoryConfirmation ||
   !cancelClearHistoryButton || !confirmClearHistoryButton || !historyFeedback || !conversationList || !historyDetail ||
@@ -163,7 +169,12 @@ const chatTabAction = chatTab;
 const historyTabAction = historyTab;
 const memoryTabAction = memoryTab;
 const chatPageContainer = chatPage;
+const companionControlShelfBox = companionControlShelf;
 const dialogueModeControlsElement = dialogueModeControls;
+const shelfAccessoryAction = shelfAccessoryButton;
+const shelfScaleAction = shelfScaleButton;
+const shelfLockAction = shelfLockButton;
+const shelfActionEchoBox = shelfActionEcho;
 const historyPageContainer = historyPage;
 const memoryPageContainer = memoryPage;
 const chatSessionNoteBox = chatSessionNote;
@@ -226,6 +237,8 @@ let memoryCards: MemoryCard[] = [];
 let memoryEnabled = false;
 let memoryDraftSourceMessage: ChatMessage | null = null;
 let isPetLocked = false;
+let currentPetScale = DEFAULT_PET_PRESENTATION_PREFERENCES.petScale;
+let currentPetAccessoryPresetId: PetAccessoryPresetId = DEFAULT_PET_PRESENTATION_PREFERENCES.accessoryPresetId;
 let shortcutViews: ShortcutPreferenceView[] = [];
 let dialogueModes: DialogueModeView[] = [];
 let currentDialogueModeId: DialogueModeId = "default";
@@ -309,6 +322,18 @@ function renderRibbonEcho(): void {
 function setActivityEcho(message: string): void {
   currentActivityEcho = message;
   renderRibbonEcho();
+  renderCompanionControlShelf();
+}
+
+function renderCompanionControlShelf(): void {
+  const hasProfile = Boolean(currentUserProfile);
+  companionControlShelfBox.hidden = !hasProfile;
+  shelfAccessoryAction.textContent = `配件：${getPetAccessoryLabel(currentPetAccessoryPresetId)}`;
+  shelfScaleAction.textContent = `大小：${Math.round(currentPetScale * 100)}%`;
+  shelfLockAction.textContent = `锁定：${isPetLocked ? "已锁定" : "未锁定"}`;
+  shelfLockAction.dataset.state = isPetLocked ? "ready" : "fallback";
+  shelfActionEchoBox.textContent = `最近动作：${currentActivityEcho}`;
+  shelfActionEchoBox.dataset.state = currentActivityEcho === "等待中" ? "fallback" : "ready";
 }
 
 function formatUserProfileSummary(profile: UserProfile | null): string {
@@ -376,6 +401,7 @@ function renderUserProfile(profile: UserProfile | null): void {
   userProfileSummaryBox.textContent = formatUserProfileSummary(profile);
   userProfileSummaryBox.dataset.state = hasProfile ? "ready" : "fallback";
   renderPartnerStatus();
+  renderCompanionControlShelf();
 }
 
 async function refreshUserProfile(): Promise<void> {
@@ -435,6 +461,7 @@ async function saveUserProfileFromFields(
 function setDialogueMode(modeId: DialogueModeId): void {
   currentDialogueModeId = modeId;
   renderPartnerStatus();
+  renderCompanionControlShelf();
 
   for (const button of dialogueModeControlsElement.querySelectorAll<HTMLButtonElement>(".mode-button")) {
     const isActive = button.dataset.modeId === modeId;
@@ -452,6 +479,7 @@ function renderDialogueModes(modes: DialogueModeView[]): void {
     button.type = "button";
     button.dataset.modeId = mode.id;
     button.textContent = mode.label;
+    button.disabled = isReplying;
     button.setAttribute("aria-pressed", String(mode.id === currentDialogueModeId));
     button.addEventListener("click", () => {
       void setDialogueModeFromUi(mode.id);
@@ -964,6 +992,12 @@ function setReplying(isReplying: boolean): void {
   saveUserProfileAction.disabled = isReplying;
   clearUserProfileAction.disabled = isReplying;
   welcomeSaveUserProfileAction.disabled = isReplying;
+  shelfAccessoryAction.disabled = isReplying;
+  shelfScaleAction.disabled = isReplying;
+  shelfLockAction.disabled = isReplying;
+  dialogueModeControlsElement.querySelectorAll<HTMLButtonElement>(".mode-button").forEach((control) => {
+    control.disabled = isReplying;
+  });
   historyDetailElement.querySelectorAll<HTMLButtonElement>("button").forEach((control) => {
     control.disabled = isReplying;
   });
@@ -1024,8 +1058,10 @@ function clearSettingsFeedback(): void {
 }
 
 function setPetScaleValue(petScale: number): void {
+  currentPetScale = petScale;
   petScaleField.value = petScale.toFixed(2);
   petScaleValueBox.value = `${petScale.toFixed(2)} 倍`;
+  renderCompanionControlShelf();
 }
 
 function getPetAccessoryLabel(presetId: PetAccessoryPresetId): string {
@@ -1033,9 +1069,11 @@ function getPetAccessoryLabel(presetId: PetAccessoryPresetId): string {
 }
 
 function setPetAccessoryValue(presetId: PetAccessoryPresetId): void {
+  currentPetAccessoryPresetId = presetId;
   petAccessoryField.value = presetId;
   petAccessoryStatusBox.textContent = `角色配件：${getPetAccessoryLabel(presetId)}`;
   petAccessoryStatusBox.dataset.state = presetId === "glasses" ? "ready" : "fallback";
+  renderCompanionControlShelf();
 }
 
 async function refreshPetPresentationPreferences(): Promise<void> {
@@ -1054,6 +1092,7 @@ function setPetLockState(nextIsLocked: boolean): void {
   petLockStatusBox.textContent = `桌宠锁定：${isPetLocked ? "已锁定，点击可穿透" : "未锁定"}`;
   petLockStatusBox.dataset.state = isPetLocked ? "ready" : "fallback";
   togglePetLockAction.textContent = isPetLocked ? "解除锁定" : "锁定桌宠";
+  renderCompanionControlShelf();
 }
 
 async function refreshPetLockState(): Promise<void> {
@@ -1502,6 +1541,10 @@ window.chatApi?.onMemoryInjection((payload) => {
   setMemorySessionStatus(payload.count);
 });
 
+window.chatApi?.onPetActivityEcho((echo) => {
+  setActivityEcho(echo.message);
+});
+
 window.petPresentationApi?.onPetLockChanged((state) => {
   setPetLockState(state.isLocked);
 });
@@ -1569,6 +1612,40 @@ abortAction.addEventListener("click", () => {
 
 settingsAction.addEventListener("click", () => {
   void openSettings();
+});
+
+shelfAccessoryAction.addEventListener("click", () => {
+  if (isReplying || !window.petPresentationApi) {
+    return;
+  }
+
+  const nextPresetId: PetAccessoryPresetId = currentPetAccessoryPresetId === "glasses" ? "none" : "glasses";
+
+  void window.petPresentationApi.setAccessoryPreset(nextPresetId).then((preferences) => {
+    setPetAccessoryValue(preferences.accessoryPresetId);
+    setChatSessionNote(`角色配件已切换为${getPetAccessoryLabel(preferences.accessoryPresetId)}。`, "ready");
+  }).catch(() => {
+    setChatSessionNote("无法切换角色配件，请稍后重试。", "error");
+  });
+});
+
+shelfScaleAction.addEventListener("click", () => {
+  void openSettings().then(() => {
+    petScaleField.focus();
+  });
+});
+
+shelfLockAction.addEventListener("click", () => {
+  if (isReplying || !window.petPresentationApi) {
+    return;
+  }
+
+  void window.petPresentationApi.setPetLocked(!isPetLocked).then((state) => {
+    setPetLockState(state.isLocked);
+    setChatSessionNote(state.isLocked ? "桌宠已锁定，点击会穿透到后方窗口。" : "桌宠已解除锁定。", "ready");
+  }).catch(() => {
+    setChatSessionNote("无法切换桌宠锁定，请稍后重试。", "error");
+  });
 });
 
 welcomeSaveUserProfileAction.addEventListener("click", () => {
@@ -1954,3 +2031,9 @@ void refreshMemory();
 setPetScaleValue(DEFAULT_PET_PRESENTATION_PREFERENCES.petScale);
 setPetAccessoryValue(DEFAULT_PET_PRESENTATION_PREFERENCES.accessoryPresetId);
 setPetLockState(false);
+void refreshPetPresentationPreferences().catch(() => {
+  setChatSessionNote("无法读取伙伴外观摘要；请稍后打开设置重试。", "fallback");
+});
+void refreshPetLockState().catch(() => {
+  setChatSessionNote("无法读取桌宠锁定摘要；请稍后打开设置重试。", "fallback");
+});
