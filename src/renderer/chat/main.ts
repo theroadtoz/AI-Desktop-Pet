@@ -3,7 +3,13 @@ import type { ChatMessage, ChatRole } from "../../shared/chat";
 import type { Conversation, ConversationSummary } from "../../shared/chat-history";
 import { DIALOGUE_MODE_LABELS, type DialogueModeId, type DialogueModeView } from "../../shared/dialogue-style";
 import type { MemoryCard } from "../../shared/chat-memory";
-import type { ProviderConfig, ProviderStatus } from "../../shared/provider-config";
+import {
+  LOCAL_PROVIDER_PRESETS,
+  type LocalProviderPresetId,
+  type ProviderConfig,
+  type ProviderStatus
+} from "../../shared/provider-config";
+import type { ProviderHealthCheckRequest, ProviderHealthResult } from "../../shared/provider-health";
 import {
   DEFAULT_PET_PRESENTATION_PREFERENCES,
   normalizePetScale
@@ -32,7 +38,11 @@ const modelInput = document.querySelector<HTMLInputElement>("#provider-model");
 const temperatureInput = document.querySelector<HTMLInputElement>("#provider-temperature");
 const maxTokensInput = document.querySelector<HTMLInputElement>("#provider-max-tokens");
 const timeoutInput = document.querySelector<HTMLInputElement>("#provider-timeout");
+const localProviderPresetContainer = document.querySelector<HTMLElement>("#local-provider-preset-field");
+const localProviderPresetSelect = document.querySelector<HTMLSelectElement>("#local-provider-preset");
 const localProviderNote = document.querySelector<HTMLElement>("#local-provider-note");
+const providerHealthCheckButton = document.querySelector<HTMLButtonElement>("#provider-health-check-button");
+const providerHealthStatus = document.querySelector<HTMLElement>("#provider-health-status");
 const apiKeyInput = document.querySelector<HTMLInputElement>("#provider-api-key");
 const apiKeyStatus = document.querySelector<HTMLElement>("#api-key-status");
 const connectionSafeSection = document.querySelector<HTMLElement>("#connection-safe-section");
@@ -103,7 +113,8 @@ if (
   !form || !input || !messages || !sendButton || !abortButton || !partnerStatus || !providerStatus ||
   !memorySessionStatus || !settingsButton || !settingsPanel || !settingsCloseButton || !settingsForm || !providerIdSelect ||
   !displayNameInput || !openAIFields || !baseURLInput || !modelInput || !temperatureInput ||
-  !maxTokensInput || !timeoutInput || !localProviderNote || !apiKeyInput || !apiKeyStatus || !connectionSafeSection || !deleteApiKeyButton ||
+  !maxTokensInput || !timeoutInput || !localProviderPresetContainer || !localProviderPresetSelect || !localProviderNote ||
+  !providerHealthCheckButton || !providerHealthStatus || !apiKeyInput || !apiKeyStatus || !connectionSafeSection || !deleteApiKeyButton ||
   !deleteKeyConfirmation || !cancelDeleteApiKeyButton || !confirmDeleteApiKeyButton || !settingsFeedback ||
   !petScaleInput || !petScaleValue || !petAccessorySelect || !petAccessoryStatus || !savePetScaleButton ||
   !savePetAccessoryButton || !petLockStatus || !togglePetLockButton || !userProfileSummary ||
@@ -141,7 +152,11 @@ const modelField = modelInput;
 const temperatureField = temperatureInput;
 const maxTokensField = maxTokensInput;
 const timeoutField = timeoutInput;
+const localProviderPresetFieldBox = localProviderPresetContainer;
+const localProviderPresetField = localProviderPresetSelect;
 const localProviderNoteBox = localProviderNote;
+const providerHealthCheckAction = providerHealthCheckButton;
+const providerHealthStatusBox = providerHealthStatus;
 const apiKeyField = apiKeyInput;
 const apiKeyStatusBox = apiKeyStatus;
 const connectionSafeSectionBox = connectionSafeSection;
@@ -222,6 +237,7 @@ const DEFAULT_LOCAL_OPENAI_CONFIG = {
   displayName: "Ollama 本地模型",
   baseURL: "http://localhost:11434/v1",
   model: "qwen3:1.7b",
+  localPresetId: "ollama" as LocalProviderPresetId,
   temperature: 0.7,
   maxTokens: 240,
   timeoutMs: 60000
@@ -303,6 +319,51 @@ function formatProviderStatus(status: ProviderStatus): string {
 function setProviderStatus(status: ProviderStatus): void {
   providerStatusBox.textContent = formatProviderStatus(status);
   providerStatusBox.dataset.state = status.isFallback ? "fallback" : "ready";
+}
+
+function resetProviderHealthStatus(): void {
+  providerHealthStatusBox.textContent = "连接检查尚未运行。";
+  providerHealthStatusBox.dataset.state = "fallback";
+}
+
+function setProviderHealthStatus(message: string, state: "ready" | "fallback" = "fallback"): void {
+  providerHealthStatusBox.textContent = message;
+  providerHealthStatusBox.dataset.state = state;
+}
+
+function formatProviderHealthResult(result: ProviderHealthResult): string {
+  const host = result.baseURLHost ? ` · ${result.baseURLHost}` : "";
+  const count = typeof result.modelCount === "number" ? ` · 可见模型 ${result.modelCount} 个` : "";
+
+  if (result.status === "ready") {
+    return `连接可用：已找到当前模型${host}${count}`;
+  }
+
+  if (result.status === "model_missing") {
+    return `服务可达，但未找到当前模型${host}${count}`;
+  }
+
+  if (result.status === "incompatible_response") {
+    return `响应格式不兼容，请确认端点支持 OpenAI-compatible /models${host}`;
+  }
+
+  if (result.status === "service_unreachable") {
+    return `服务不可达，请确认服务已启动且 Base URL 正确${host}`;
+  }
+
+  if (result.status === "timeout") {
+    return `连接检查超时，请确认服务状态或调大超时时间${host}`;
+  }
+
+  if (result.status === "missing_api_key") {
+    return "云端 Provider 需要先配置 API Key；本次未发起检查请求。";
+  }
+
+  if (result.status === "cancelled") {
+    return "连接检查已取消。";
+  }
+
+  return "Provider 配置无效，请检查 Base URL、模型和超时时间。";
 }
 
 function setPartnerStatus(message: string): void {
@@ -1410,12 +1471,71 @@ function isProviderWithOpenAIFieldsSelected(): boolean {
   return isOpenAICompatibleSelected() || isLocalOpenAICompatibleSelected();
 }
 
+function isLocalProviderPresetId(value: string): value is LocalProviderPresetId {
+  return value === "ollama" || value === "lm-studio" || value === "custom-local";
+}
+
+function getLocalProviderPreset(id: LocalProviderPresetId) {
+  const preset = LOCAL_PROVIDER_PRESETS.find((item) => item.id === id);
+
+  if (preset) {
+    return preset;
+  }
+
+  return {
+    id: DEFAULT_LOCAL_OPENAI_CONFIG.localPresetId,
+    label: "Ollama",
+    displayName: DEFAULT_LOCAL_OPENAI_CONFIG.displayName,
+    baseURL: DEFAULT_LOCAL_OPENAI_CONFIG.baseURL
+  };
+}
+
+function inferLocalProviderPresetId(config: ProviderConfig): LocalProviderPresetId {
+  if (config.providerId === "local-openai-compatible" && config.localPresetId) {
+    return config.localPresetId;
+  }
+
+  if (config.providerId === "local-openai-compatible") {
+    const matchedPreset = LOCAL_PROVIDER_PRESETS.find((preset) => (
+      preset.baseURL.length > 0 && preset.baseURL === config.baseURL
+    ));
+
+    return matchedPreset?.id ?? "custom-local";
+  }
+
+  return DEFAULT_LOCAL_OPENAI_CONFIG.localPresetId;
+}
+
+function getSelectedLocalProviderPresetId(): LocalProviderPresetId {
+  return isLocalProviderPresetId(localProviderPresetField.value)
+    ? localProviderPresetField.value
+    : DEFAULT_LOCAL_OPENAI_CONFIG.localPresetId;
+}
+
+function applyLocalProviderPreset(presetId: LocalProviderPresetId): void {
+  const preset = getLocalProviderPreset(presetId);
+  localProviderPresetField.value = preset.id;
+
+  if (preset.baseURL) {
+    baseURLField.value = preset.baseURL;
+    displayNameField.value = preset.displayName;
+  } else if (!displayNameField.value.trim()) {
+    displayNameField.value = preset.displayName;
+  }
+
+  resetProviderHealthStatus();
+}
+
 function updateProviderFields(): void {
   const hasOpenAIFields = isProviderWithOpenAIFieldsSelected();
   const isCloudOpenAI = isOpenAICompatibleSelected();
+  const isLocalOpenAI = isLocalOpenAICompatibleSelected();
   openAIFieldsContainer.hidden = !hasOpenAIFields;
   connectionSafeSectionBox.hidden = !isCloudOpenAI;
-  localProviderNoteBox.hidden = !isLocalOpenAICompatibleSelected();
+  localProviderPresetFieldBox.hidden = !isLocalOpenAI;
+  localProviderNoteBox.hidden = !isLocalOpenAI;
+  providerHealthCheckAction.hidden = !hasOpenAIFields;
+  providerHealthStatusBox.hidden = !hasOpenAIFields;
   baseURLField.required = hasOpenAIFields;
   modelField.required = hasOpenAIFields;
   temperatureField.required = hasOpenAIFields;
@@ -1431,15 +1551,18 @@ function fillOpenAIDefaults(): void {
   temperatureField.value = String(DEFAULT_OPENAI_CONFIG.temperature);
   maxTokensField.value = String(DEFAULT_OPENAI_CONFIG.maxTokens);
   timeoutField.value = String(DEFAULT_OPENAI_CONFIG.timeoutMs);
+  resetProviderHealthStatus();
 }
 
 function fillLocalOpenAIDefaults(): void {
   displayNameField.value = DEFAULT_LOCAL_OPENAI_CONFIG.displayName;
   baseURLField.value = DEFAULT_LOCAL_OPENAI_CONFIG.baseURL;
   modelField.value = DEFAULT_LOCAL_OPENAI_CONFIG.model;
+  localProviderPresetField.value = DEFAULT_LOCAL_OPENAI_CONFIG.localPresetId;
   temperatureField.value = String(DEFAULT_LOCAL_OPENAI_CONFIG.temperature);
   maxTokensField.value = String(DEFAULT_LOCAL_OPENAI_CONFIG.maxTokens);
   timeoutField.value = String(DEFAULT_LOCAL_OPENAI_CONFIG.timeoutMs);
+  resetProviderHealthStatus();
 }
 
 function fillProviderForm(config: ProviderConfig): void {
@@ -1454,8 +1577,15 @@ function fillProviderForm(config: ProviderConfig): void {
     timeoutField.value = String(config.timeoutMs);
   }
 
+  if (config.providerId === "local-openai-compatible") {
+    localProviderPresetField.value = inferLocalProviderPresetId(config);
+  } else {
+    localProviderPresetField.value = DEFAULT_LOCAL_OPENAI_CONFIG.localPresetId;
+  }
+
   apiKeyField.value = "";
   updateProviderFields();
+  resetProviderHealthStatus();
 }
 
 function getApiKeyRef(): string {
@@ -1575,6 +1705,7 @@ function buildProviderConfig(): ProviderConfig | null {
       displayName,
       baseURL,
       model,
+      localPresetId: getSelectedLocalProviderPresetId(),
       temperature,
       maxTokens,
       timeoutMs
@@ -1589,6 +1720,49 @@ function buildProviderConfig(): ProviderConfig | null {
     apiKeyRef: getApiKeyRef(),
     temperature,
     maxTokens,
+    timeoutMs
+  };
+}
+
+function buildProviderHealthRequest(): ProviderHealthCheckRequest | null {
+  if (!isProviderWithOpenAIFieldsSelected()) {
+    setProviderHealthStatus("Fake Provider 不需要连接检查。", "fallback");
+    return null;
+  }
+
+  const baseURL = parseNonEmptyString(baseURLField, "Base URL");
+  const model = parseNonEmptyString(modelField, "模型");
+  const timeoutMs = parsePositiveInteger(timeoutField, "超时时间");
+
+  if (!baseURL || !model || timeoutMs === null) {
+    return null;
+  }
+
+  try {
+    const url = new URL(baseURL);
+
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      throw new Error("unsupported protocol");
+    }
+  } catch {
+    setProviderHealthStatus("Base URL 必须是有效的 HTTP(S) 地址。", "fallback");
+    return null;
+  }
+
+  if (isLocalOpenAICompatibleSelected()) {
+    return {
+      providerId: "local-openai-compatible",
+      baseURL,
+      model,
+      timeoutMs,
+      localPresetId: getSelectedLocalProviderPresetId()
+    };
+  }
+
+  return {
+    providerId: "openai-compatible",
+    baseURL,
+    model,
     timeoutMs
   };
 }
@@ -1967,6 +2141,42 @@ providerIdField.addEventListener("change", () => {
 
   updateProviderFields();
   clearSettingsFeedback();
+});
+
+localProviderPresetField.addEventListener("change", () => {
+  if (!isLocalOpenAICompatibleSelected()) {
+    return;
+  }
+
+  applyLocalProviderPreset(getSelectedLocalProviderPresetId());
+  clearSettingsFeedback();
+});
+
+for (const field of [baseURLField, modelField, timeoutField]) {
+  field.addEventListener("input", resetProviderHealthStatus);
+}
+
+providerHealthCheckAction.addEventListener("click", () => {
+  if (isReplying || !window.configApi) {
+    return;
+  }
+
+  const request = buildProviderHealthRequest();
+
+  if (!request) {
+    return;
+  }
+
+  setProviderHealthStatus("正在检查连接...", "fallback");
+
+  void window.configApi.checkProviderHealth(request).then((result) => {
+    setProviderHealthStatus(
+      formatProviderHealthResult(result),
+      result.status === "ready" ? "ready" : "fallback"
+    );
+  }).catch(() => {
+    setProviderHealthStatus("连接检查不可用，请稍后重试。", "fallback");
+  });
 });
 
 petScaleField.addEventListener("input", () => {

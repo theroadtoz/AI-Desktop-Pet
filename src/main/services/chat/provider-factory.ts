@@ -26,7 +26,8 @@ export function createChatProviderFromConfig(options: {
       options.logTelemetry?.("provider_selected", {
         providerId: "local-openai-compatible",
         model: options.config.model,
-        baseURLHost
+        baseURLHost,
+        localPresetId: options.config.localPresetId
       });
 
       const providerOptions: OpenAICompatibleProviderOptions = {
@@ -49,6 +50,7 @@ export function createChatProviderFromConfig(options: {
         providerId: "local-openai-compatible",
         model: options.config.model,
         baseURLHost,
+        localPresetId: options.config.localPresetId,
         errorType: "provider_config_invalid"
       });
       return createFakeChatProvider();

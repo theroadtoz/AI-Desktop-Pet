@@ -1,5 +1,35 @@
 export type ProviderId = "fake" | "openai-compatible" | "local-openai-compatible";
 
+export type LocalProviderPresetId = "ollama" | "lm-studio" | "custom-local";
+
+export type LocalProviderPreset = {
+  id: LocalProviderPresetId;
+  label: string;
+  displayName: string;
+  baseURL: string;
+};
+
+export const LOCAL_PROVIDER_PRESETS: readonly LocalProviderPreset[] = [
+  {
+    id: "ollama",
+    label: "Ollama",
+    displayName: "Ollama 本地模型",
+    baseURL: "http://localhost:11434/v1"
+  },
+  {
+    id: "lm-studio",
+    label: "LM Studio",
+    displayName: "LM Studio 本地模型",
+    baseURL: "http://localhost:1234/v1"
+  },
+  {
+    id: "custom-local",
+    label: "自定义本地端点",
+    displayName: "本地 OpenAI-compatible",
+    baseURL: ""
+  }
+] as const;
+
 export type OpenAICompatibleConfig = {
   providerId: "openai-compatible";
   displayName: string;
@@ -16,6 +46,7 @@ export type LocalOpenAICompatibleConfig = {
   displayName: string;
   baseURL: string;
   model: string;
+  localPresetId?: LocalProviderPresetId;
   temperature: number;
   maxTokens: number;
   timeoutMs: number;

@@ -4,6 +4,7 @@ import test from "node:test";
 
 const require = createRequire(import.meta.url);
 const {
+  createProviderTelemetryPayload,
   parseProviderConfig
 } = require("../dist/main/services/config/provider-config-store.js") as typeof import("../src/main/services/config/provider-config-store");
 const {
@@ -16,6 +17,7 @@ test("local OpenAI-compatible provider parser accepts local config without api k
     displayName: "Ollama 本地模型",
     baseURL: "http://localhost:11434/v1",
     model: "qwen3:1.7b",
+    localPresetId: "ollama",
     apiKeyRef: "should-not-be-saved",
     temperature: 0.7,
     maxTokens: 240,
@@ -27,10 +29,30 @@ test("local OpenAI-compatible provider parser accepts local config without api k
     displayName: "Ollama 本地模型",
     baseURL: "http://localhost:11434/v1",
     model: "qwen3:1.7b",
+    localPresetId: "ollama",
     temperature: 0.7,
     maxTokens: 240,
     timeoutMs: 60000
   });
+});
+
+test("local provider telemetry records preset and host without key material", () => {
+  const payload = createProviderTelemetryPayload({
+    providerId: "local-openai-compatible",
+    displayName: "LM Studio",
+    baseURL: "http://localhost:1234/v1",
+    model: "local-model",
+    localPresetId: "lm-studio",
+    temperature: 0.7,
+    maxTokens: 240,
+    timeoutMs: 60000
+  }, "file");
+
+  assert.equal(payload.providerId, "local-openai-compatible");
+  assert.equal(payload.localPresetId, "lm-studio");
+  assert.equal(payload.baseURLHost, "localhost:1234");
+  assert.equal("apiKey" in payload, false);
+  assert.equal(payload.apiKeyRef, undefined);
 });
 
 test("local OpenAI-compatible provider parser rejects invalid local config", () => {

@@ -1,7 +1,7 @@
 import { app } from "electron";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import type { ProviderConfig } from "../../../shared/provider-config";
+import type { LocalProviderPresetId, ProviderConfig } from "../../../shared/provider-config";
 import type { TelemetryPayload } from "../telemetry";
 
 export const DEFAULT_PROVIDER_CONFIG: ProviderConfig = {
@@ -129,6 +129,8 @@ export function parseProviderConfig(value: unknown): ProviderConfig | null {
   }
 
   if (config.providerId === "local-openai-compatible") {
+    const localPresetId = parseLocalProviderPresetId(config.localPresetId);
+
     if (
       !isNonEmptyString(config.displayName) ||
       !isNonEmptyString(config.baseURL) ||
@@ -145,6 +147,7 @@ export function parseProviderConfig(value: unknown): ProviderConfig | null {
       displayName: config.displayName,
       baseURL: config.baseURL,
       model: config.model,
+      ...(localPresetId ? { localPresetId } : {}),
       temperature: config.temperature,
       maxTokens: config.maxTokens,
       timeoutMs: config.timeoutMs
@@ -161,6 +164,8 @@ export function createProviderTelemetryPayload(
   return {
     providerId: config.providerId,
     apiKeyRef: config.providerId === "openai-compatible" ? config.apiKeyRef : undefined,
+    localPresetId: config.providerId === "local-openai-compatible" ? config.localPresetId : undefined,
+    baseURLHost: config.providerId === "fake" ? undefined : readBaseURLHost(config.baseURL),
     source
   };
 }
@@ -175,4 +180,16 @@ function isFiniteNumber(value: unknown): value is number {
 
 function isPositiveInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value > 0;
+}
+
+function parseLocalProviderPresetId(value: unknown): LocalProviderPresetId | null {
+  return value === "ollama" || value === "lm-studio" || value === "custom-local" ? value : null;
+}
+
+function readBaseURLHost(baseURL: string): string | undefined {
+  try {
+    return new URL(baseURL).host;
+  } catch {
+    return undefined;
+  }
 }

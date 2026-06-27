@@ -3,6 +3,7 @@ import type { ChatMessage } from "./chat";
 import type { MemoryCard, MemoryCardDraft, MemoryCardUpdate, MemorySettings } from "./chat-memory";
 import type { Conversation, ConversationSummary } from "./chat-history";
 import type { ChatProviderResult, ChatRequest, ChatStreamDelta } from "./chat-provider";
+import type { ProviderHealthCheckRequest, ProviderHealthResult } from "./provider-health";
 import type { DialogueModeId, DialogueModeView } from "./dialogue-style";
 import type { ProviderConfig, ProviderStatus } from "./provider-config";
 import type { PetPresentationPreferences, PetScaleAdjustmentIntent } from "./pet-presentation";
@@ -46,6 +47,9 @@ export type ChatStreamErrorType =
   | "auth_failed"
   | "rate_limited"
   | "server_error"
+  | "timeout"
+  | "model_missing"
+  | "incompatible_response"
   | "network_error"
   | "failed";
 
@@ -146,6 +150,7 @@ export type ChatApi = {
 export type ConfigApi = {
   getProvider(): Promise<ProviderConfig>;
   getProviderStatus(): Promise<ProviderStatus>;
+  checkProviderHealth(request: ProviderHealthCheckRequest): Promise<ProviderHealthResult>;
   setProvider(config: ProviderConfig): Promise<ProviderConfig>;
   hasApiKey(request: ConfigApiKeyRequest): Promise<boolean>;
   setApiKey(request: ConfigSetApiKeyRequest): Promise<boolean>;

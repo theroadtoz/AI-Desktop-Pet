@@ -77,6 +77,14 @@
               <input id="provider-display-name" name="displayName" type="text" required />
             </label>
             <div id="openai-fields" class="content-stack" hidden>
+              <label id="local-provider-preset-field" class="field-label" hidden>
+                本地运行时
+                <select id="local-provider-preset" name="localPresetId">
+                  <option value="ollama">Ollama · http://localhost:11434/v1</option>
+                  <option value="lm-studio">LM Studio · http://localhost:1234/v1</option>
+                  <option value="custom-local">自定义 OpenAI-compatible 端点</option>
+                </select>
+              </label>
               <label class="field-label">
                 Base URL
                 <input id="provider-base-url" name="baseURL" type="url" inputmode="url" required />
@@ -99,7 +107,11 @@
                   <input id="provider-timeout" name="timeoutMs" type="number" min="1" step="1" required />
                 </label>
               </div>
-              <p id="local-provider-note" class="selection-note" hidden>请先安装并启动 Ollama，再拉取 qwen3:1.7b；应用只连接本机 HTTP 服务，不自动下载模型。</p>
+              <p id="local-provider-note" class="selection-note" hidden>本地服务不会要求 API Key；连接检查只访问你填写的本地 OpenAI-compatible 端点。真实本地模型通过需要你已启动服务并准备模型。</p>
+              <div class="inline-actions">
+                <button id="provider-health-check-button" class="button-light" type="button">检查连接</button>
+              </div>
+              <p id="provider-health-status" class="status-box" aria-live="polite">连接检查尚未运行。</p>
             </div>
           </section>
           <section id="connection-safe-section" class="content-stack" aria-labelledby="connection-safe-title" hidden>

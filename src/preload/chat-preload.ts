@@ -22,6 +22,7 @@ import type { Conversation, ConversationSummary, HistoryMessage } from "../share
 import type { MemoryCard, MemoryCardDraft, MemoryCardUpdate } from "../shared/chat-memory";
 import type { DialogueModeId, DialogueModeView } from "../shared/dialogue-style";
 import type { ProviderConfig, ProviderStatus } from "../shared/provider-config";
+import type { ProviderHealthCheckRequest, ProviderHealthResult, ProviderHealthStatus } from "../shared/provider-health";
 import type { PetPresentationPreferences } from "../shared/pet-presentation";
 import type { ShortcutActionId, ShortcutPreferenceView, ShortcutUpdateResult } from "../shared/shortcut-preferences";
 import type { UserProfile, UserProfileInput } from "../shared/user-profile";
@@ -41,8 +42,21 @@ const chatStreamErrorTypes = [
   "auth_failed",
   "rate_limited",
   "server_error",
+  "timeout",
+  "model_missing",
+  "incompatible_response",
   "network_error",
   "failed"
+] as const;
+const providerHealthStatuses: readonly ProviderHealthStatus[] = [
+  "ready",
+  "model_missing",
+  "incompatible_response",
+  "service_unreachable",
+  "timeout",
+  "missing_api_key",
+  "cancelled",
+  "invalid_config"
 ] as const;
 
 const emotionTags = ["neutral", "happy", "sad", "surprised", "confused", "angry"] as const;
@@ -354,6 +368,12 @@ function isProviderConfig(value: unknown): value is ProviderConfig {
       config.baseURL.length > 0 &&
       typeof config.model === "string" &&
       config.model.length > 0 &&
+      (
+        config.localPresetId === undefined ||
+        config.localPresetId === "ollama" ||
+        config.localPresetId === "lm-studio" ||
+        config.localPresetId === "custom-local"
+      ) &&
       typeof config.temperature === "number" &&
       Number.isFinite(config.temperature) &&
       typeof config.maxTokens === "number" &&
@@ -366,6 +386,61 @@ function isProviderConfig(value: unknown): value is ProviderConfig {
   }
 
   return false;
+}
+
+function isProviderHealthCheckRequest(value: unknown): value is ProviderHealthCheckRequest {
+  const request = value as Partial<ProviderHealthCheckRequest> | null;
+
+  return Boolean(
+    request &&
+    (
+      request.providerId === "openai-compatible" ||
+      request.providerId === "local-openai-compatible"
+    ) &&
+    typeof request.baseURL === "string" &&
+    request.baseURL.length > 0 &&
+    typeof request.model === "string" &&
+    request.model.length > 0 &&
+    typeof request.timeoutMs === "number" &&
+    Number.isInteger(request.timeoutMs) &&
+    request.timeoutMs > 0 &&
+    (
+      request.localPresetId === undefined ||
+      request.localPresetId === "ollama" ||
+      request.localPresetId === "lm-studio" ||
+      request.localPresetId === "custom-local"
+    )
+  );
+}
+
+function isProviderHealthResult(value: unknown): value is ProviderHealthResult {
+  const result = value as Partial<ProviderHealthResult> | null;
+
+  return Boolean(
+    result &&
+    (
+      result.providerId === "openai-compatible" ||
+      result.providerId === "local-openai-compatible"
+    ) &&
+    typeof result.status === "string" &&
+    providerHealthStatuses.includes(result.status as ProviderHealthStatus) &&
+    typeof result.model === "string" &&
+    (result.baseURLHost === undefined || typeof result.baseURLHost === "string") &&
+    (
+      result.localPresetId === undefined ||
+      result.localPresetId === "ollama" ||
+      result.localPresetId === "lm-studio" ||
+      result.localPresetId === "custom-local"
+    ) &&
+    (
+      result.modelCount === undefined ||
+      (
+        typeof result.modelCount === "number" &&
+        Number.isSafeInteger(result.modelCount) &&
+        result.modelCount >= 0
+      )
+    )
+  );
 }
 
 function isProviderStatus(value: unknown): value is ProviderStatus {
@@ -743,6 +818,19 @@ const configApi: ConfigApi = {
     }
 
     return status;
+  },
+  async checkProviderHealth(request) {
+    if (!isProviderHealthCheckRequest(request)) {
+      throw new Error("Invalid provider health request");
+    }
+
+    const result = await ipcRenderer.invoke("config:check-provider-health", request);
+
+    if (!isProviderHealthResult(result)) {
+      throw new Error("Invalid provider health response");
+    }
+
+    return result;
   },
   async setProvider(config) {
     if (!isProviderConfig(config)) {

@@ -41,6 +41,7 @@ import {
   type PetRoleSnapshot
 } from "../shared/pet-role-state";
 import type { ProviderConfig, ProviderStatus } from "../shared/provider-config";
+import type { ProviderHealthCheckRequest } from "../shared/provider-health";
 import { createUserProfilePromptContext } from "../shared/user-profile";
 import {
   calculateScaledPetBounds,
@@ -56,6 +57,7 @@ import { ChatEngineBusyError, createChatEngine, type ChatEngine } from "./servic
 import { createHistoryStore, type HistoryStore } from "./services/chat/history-store";
 import { createMemoryStore, type MemoryStore } from "./services/chat/memory-store";
 import { createChatProviderFromConfig } from "./services/chat/provider-factory";
+import { checkProviderHealth } from "./services/chat/provider-health";
 import { readEnvProviderConfig, type EnvProviderConfig } from "./services/config/env-config";
 import { createDialogueModeStore, type DialogueModeStore } from "./services/config/dialogue-mode-store";
 import {
@@ -116,6 +118,7 @@ let performanceHeartbeat: NodeJS.Timeout | null = null;
 let isPetLocked = false;
 
 const PET_RENDERER_RECOVERY_WINDOW_MS = 60_000;
+const DEFAULT_API_KEY_REF = "openai-compatible-default";
 const PET_RENDERER_MAX_RECOVERIES = 3;
 const PET_WINDOW_TITLE = "Desktop Pet";
 const isAcceptanceTelemetryEnabled = process.env.AI_DESKTOP_PET_ACCEPTANCE_TELEMETRY === "1";
@@ -614,6 +617,31 @@ function isConfigSetApiKeyRequest(value: unknown): value is ConfigSetApiKeyReque
   );
 }
 
+function isProviderHealthCheckRequest(value: unknown): value is ProviderHealthCheckRequest {
+  const request = value as Partial<ProviderHealthCheckRequest> | null;
+
+  return Boolean(
+    request &&
+    (
+      request.providerId === "openai-compatible" ||
+      request.providerId === "local-openai-compatible"
+    ) &&
+    typeof request.baseURL === "string" &&
+    request.baseURL.length > 0 &&
+    typeof request.model === "string" &&
+    request.model.length > 0 &&
+    typeof request.timeoutMs === "number" &&
+    Number.isInteger(request.timeoutMs) &&
+    request.timeoutMs > 0 &&
+    (
+      request.localPresetId === undefined ||
+      request.localPresetId === "ollama" ||
+      request.localPresetId === "lm-studio" ||
+      request.localPresetId === "custom-local"
+    )
+  );
+}
+
 function isAbortError(error: unknown): boolean {
   return error instanceof DOMException && error.name === "AbortError";
 }
@@ -638,6 +666,18 @@ function getChatErrorType(error: unknown): ChatStreamErrorType {
 
     if (error.name === "provider_server_error") {
       return "server_error";
+    }
+
+    if (error.name === "provider_timeout") {
+      return "timeout";
+    }
+
+    if (error.name === "provider_model_missing") {
+      return "model_missing";
+    }
+
+    if (error.name === "provider_incompatible_response") {
+      return "incompatible_response";
     }
 
     if (error.name === "provider_network_error") {
@@ -688,6 +728,18 @@ function getChatErrorMessage(errorType: ChatStreamErrorType): string {
 
   if (errorType === "server_error") {
     return "模型服务暂时不可用，请稍后再试。";
+  }
+
+  if (errorType === "timeout") {
+    return "连接超时，请检查本地服务是否已启动，或适当调大超时时间。";
+  }
+
+  if (errorType === "model_missing") {
+    return "模型服务可达，但找不到当前模型，请检查模型名称。";
+  }
+
+  if (errorType === "incompatible_response") {
+    return "服务响应不是兼容格式，请确认端点支持 OpenAI-compatible API。";
   }
 
   if (errorType === "network_error") {
@@ -1474,6 +1526,18 @@ app.whenReady().then(async () => {
     }
 
     return getCurrentProviderStatus();
+  });
+
+  ipcMain.handle("config:check-provider-health", async (event, request: unknown) => {
+    if (!isChatSender(event) || !isProviderHealthCheckRequest(request)) {
+      throw new Error("Invalid provider health request");
+    }
+
+    return checkProviderHealth({
+      request,
+      apiKey: request.providerId === "openai-compatible" ? getApiKey(DEFAULT_API_KEY_REF) : null,
+      logTelemetry
+    });
   });
 
   ipcMain.handle("config:set-provider", (event, config: unknown) => {

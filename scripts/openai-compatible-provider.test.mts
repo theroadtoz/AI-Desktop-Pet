@@ -153,6 +153,87 @@ test("cloud OpenAI-compatible provider keeps cloud prompt template", async () =>
   }
 });
 
+test("OpenAI-compatible provider classifies missing model and incompatible stream", async () => {
+  const missingModelServer = createServer((_request: IncomingMessage, response: ServerResponse) => {
+    response.writeHead(404, { "Content-Type": "application/json" });
+    response.end(JSON.stringify({ error: { type: "not_found" } }));
+  });
+  const incompatibleServer = createServer((_request: IncomingMessage, response: ServerResponse) => {
+    response.writeHead(200, { "Content-Type": "text/plain" });
+    response.end("not an event stream");
+  });
+
+  try {
+    await listen(missingModelServer);
+    await listen(incompatibleServer);
+
+    await assert.rejects(
+      createOpenAICompatibleProvider({
+        providerId: "local-openai-compatible",
+        baseURL: localBaseURL(missingModelServer),
+        model: "missing-model",
+        apiKey: "local-placeholder",
+        temperature: 0.7,
+        maxTokens: 240,
+        timeoutMs: 500
+      }).streamReply(createMinimalRequest(), {
+        signal: new AbortController().signal,
+        onDelta() {}
+      }),
+      (error: unknown) => error instanceof Error && error.name === "provider_model_missing"
+    );
+
+    await assert.rejects(
+      createOpenAICompatibleProvider({
+        providerId: "local-openai-compatible",
+        baseURL: localBaseURL(incompatibleServer),
+        model: "qwen3:1.7b",
+        apiKey: "local-placeholder",
+        temperature: 0.7,
+        maxTokens: 240,
+        timeoutMs: 500
+      }).streamReply(createMinimalRequest(), {
+        signal: new AbortController().signal,
+        onDelta() {}
+      }),
+      (error: unknown) => error instanceof Error && error.name === "provider_incompatible_response"
+    );
+  } finally {
+    await close(missingModelServer);
+    await close(incompatibleServer);
+  }
+});
+
+test("OpenAI-compatible provider classifies timeout", async () => {
+  const server = createServer((_request: IncomingMessage, response: ServerResponse) => {
+    setTimeout(() => {
+      response.writeHead(200, { "Content-Type": "text/event-stream" });
+      response.end("data: [DONE]\n\n");
+    }, 100);
+  });
+
+  try {
+    await listen(server);
+    await assert.rejects(
+      createOpenAICompatibleProvider({
+        providerId: "local-openai-compatible",
+        baseURL: localBaseURL(server),
+        model: "qwen3:1.7b",
+        apiKey: "local-placeholder",
+        temperature: 0.7,
+        maxTokens: 240,
+        timeoutMs: 10
+      }).streamReply(createMinimalRequest(), {
+        signal: new AbortController().signal,
+        onDelta() {}
+      }),
+      (error: unknown) => error instanceof Error && error.name === "provider_timeout"
+    );
+  } finally {
+    await close(server);
+  }
+});
+
 function readRequestBody(request: IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
     let body = "";
@@ -163,6 +244,21 @@ function readRequestBody(request: IncomingMessage): Promise<string> {
     request.on("end", () => resolve(body));
     request.on("error", reject);
   });
+}
+
+function localBaseURL(server: ReturnType<typeof createServer>): string {
+  const address = server.address();
+  assert.equal(typeof address, "object");
+  assert.ok(address);
+  return `http://127.0.0.1:${address.port}/v1`;
+}
+
+function createMinimalRequest() {
+  return {
+    requestVersion: 1,
+    conversationId: "provider-error-test",
+    messages: [{ id: crypto.randomUUID(), role: "user" as const, content: "test" }]
+  };
 }
 
 function listen(server: ReturnType<typeof createServer>): Promise<void> {

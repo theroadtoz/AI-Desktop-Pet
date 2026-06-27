@@ -12,6 +12,9 @@ type ProviderErrorType =
   | "provider_auth_failed"
   | "provider_rate_limited"
   | "provider_server_error"
+  | "provider_timeout"
+  | "provider_model_missing"
+  | "provider_incompatible_response"
   | "provider_network_error";
 
 type TelemetryLogger = (type: string, payload?: TelemetryPayload) => void;
@@ -117,7 +120,11 @@ async function streamChatCompletions(input: {
   onDelta(text: string): void;
 }): Promise<string> {
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), input.options.timeoutMs);
+  let timeoutReached = false;
+  const timeoutId = setTimeout(() => {
+    timeoutReached = true;
+    controller.abort();
+  }, input.options.timeoutMs);
 
   function abort(): void {
     controller.abort();
@@ -153,13 +160,17 @@ async function streamChatCompletions(input: {
     }
 
     if (!response.body) {
-      throw createProviderError("provider_network_error");
+      throw createProviderError("provider_incompatible_response");
     }
 
     return await readSseStream(response.body, input.onDelta, input.signal);
   } catch (error: unknown) {
     if (input.signal.aborted) {
       throw createAbortError();
+    }
+
+    if (timeoutReached) {
+      throw createProviderError("provider_timeout");
     }
 
     if (isProviderError(error)) {
@@ -196,6 +207,7 @@ async function readSseStream(
   let buffer = "";
   let reply = "";
   let done = false;
+  let sawOpenAIEvent = false;
 
   try {
     while (!done) {
@@ -217,6 +229,12 @@ async function readSseStream(
           continue;
         }
 
+        if ("invalid" in delta) {
+          throw createProviderError("provider_incompatible_response");
+        }
+
+        sawOpenAIEvent = true;
+
         if (delta.done) {
           done = true;
           break;
@@ -229,13 +247,17 @@ async function readSseStream(
       }
     }
 
+    if (!sawOpenAIEvent) {
+      throw createProviderError("provider_incompatible_response");
+    }
+
     return reply;
   } finally {
     reader.releaseLock();
   }
 }
 
-function parseSseLine(line: string): { done: true } | { done: false; text: string } | null {
+function parseSseLine(line: string): { done: true } | { done: false; text: string } | { invalid: true } | null {
   const trimmed = line.trim();
 
   if (!trimmed.startsWith("data:")) {
@@ -255,7 +277,7 @@ function parseSseLine(line: string): { done: true } | { done: false; text: strin
       text: parsed.choices?.[0]?.delta?.content ?? ""
     };
   } catch {
-    return null;
+    return { invalid: true };
   }
 }
 
@@ -270,6 +292,10 @@ function classifyHttpStatus(status: number): ProviderErrorType {
 
   if (status >= 500) {
     return "provider_server_error";
+  }
+
+  if (status === 404) {
+    return "provider_model_missing";
   }
 
   return "provider_network_error";
@@ -291,6 +317,9 @@ function getProviderErrorType(error: unknown): ProviderErrorType {
       error.name === "provider_auth_failed" ||
       error.name === "provider_rate_limited" ||
       error.name === "provider_server_error" ||
+      error.name === "provider_timeout" ||
+      error.name === "provider_model_missing" ||
+      error.name === "provider_incompatible_response" ||
       error.name === "provider_network_error"
     ) {
       return error.name;
