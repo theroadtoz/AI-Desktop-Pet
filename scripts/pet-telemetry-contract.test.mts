@@ -86,11 +86,12 @@ test("pet interaction action started keeps only safe action summary fields", () 
       reason: "click_body",
       durationMs: 1400,
       modeId: "work",
+      presenceModeId: "quiet",
       candidateActionTypes: ["thinking", "focus"],
       selectedActionType: "thinking",
-      apiKey: "redacted-api-key",
-      content: "用户完整消息正文",
-      prompt: "完整 system prompt",
+      apiKey: "sentinel",
+      content: "sentinel",
+      prompt: "sentinel",
       bounds: [{ x: 1, y: 2 }],
       url: "https://example.invalid/private",
       path: "C:\\private\\file.txt",
@@ -105,8 +106,36 @@ test("pet interaction action started keeps only safe action summary fields", () 
       reason: "click_body",
       durationMs: 1400,
       modeId: "work",
+      presenceModeId: "quiet",
       candidateActionTypes: ["thinking", "focus"],
       selectedActionType: "thinking"
+    }
+  });
+  assertNoForbiddenKeys(event?.payload);
+});
+
+test("performance telemetry keeps presence budget mode only as safe enum", () => {
+  const event = parsePetRendererTelemetryEvent({
+    type: "pet_performance_sample",
+    payload: {
+      mode: "idle",
+      presenceModeId: "sleep",
+      targetFramesPerSecond: 12,
+      rafCallbacks: 300,
+      renderedFramesPerSecond: 12,
+      prompt: "sentinel",
+      request: { body: "sentinel" }
+    }
+  });
+
+  assert.deepEqual(event, {
+    type: "pet_performance_sample",
+    payload: {
+      mode: "idle",
+      presenceModeId: "sleep",
+      targetFramesPerSecond: 12,
+      rafCallbacks: 300,
+      renderedFramesPerSecond: 12
     }
   });
   assertNoForbiddenKeys(event?.payload);
@@ -163,8 +192,8 @@ test("health and recovery telemetry drop text bodies and unsafe context", () => 
       source: "webgl_context_restored",
       renderer: "placeholder",
       recoveryCount: 2,
-      message: "Provider request body or local path should not pass",
-      response: "AI 完整回复正文"
+      message: "sentinel",
+      response: "sentinel"
     }
   });
 
@@ -203,8 +232,8 @@ test("presentation telemetry lists every safe retained field", () => {
       recovery: "safe-neutral",
       allowMicroExpression: true,
       allowEmphasisExpression: false,
-      prompt: "完整 system prompt",
-      content: "用户完整消息正文"
+      prompt: "sentinel",
+      content: "sentinel"
     }
   });
 

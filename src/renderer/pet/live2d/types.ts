@@ -1,5 +1,6 @@
 import type { CubismUserModel } from "./vendor/framework/model/cubismusermodel";
 import type { EmotionPresentation } from "../../../shared/emotion-presentation";
+import type { PresenceModeId } from "../../../shared/presence-mode";
 
 export type Model3Json = {
   FileReferences?: {
@@ -31,6 +32,7 @@ export type Live2DRenderer = {
   resize(width: number, height: number): void;
   boostInteraction(durationMs?: number): void;
   setVisible(isVisible: boolean): void;
+  setPresenceMode(modeId: PresenceModeId): void;
   stop(): void;
   release(): void;
 };

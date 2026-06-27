@@ -11,6 +11,7 @@ import {
   PET_RANDOM_INTERACTION_ACTIONS,
   createClickActionScheduler,
   getInteractionActionCooldownSkipReason,
+  getPresenceFilteredPetInteractionActions,
   getRandomPetInteractionActionsForMode,
   getPetInteractionAction,
   getWindowShakeLightFeedbackSkipReason,
@@ -260,6 +261,38 @@ test("dialogue mode body action selection follows mode weights", () => {
   assert.equal(selectRandomPetInteractionAction(() => 0.95, getRandomPetInteractionActionsForMode("reading")).type, "focus");
   assert.equal(selectRandomPetInteractionAction(() => 0.8, getRandomPetInteractionActionsForMode("work")).type, "focus");
   assert.notEqual(selectRandomPetInteractionAction(() => 0.68, getRandomPetInteractionActionsForMode("work")).type, "playGame");
+});
+
+test("presence modes filter ordinary body actions without changing default or headPat", () => {
+  const defaultActions = getRandomPetInteractionActionsForMode("default");
+  const focusActions = getPresenceFilteredPetInteractionActions(defaultActions, "focus");
+  const quietActions = getPresenceFilteredPetInteractionActions(defaultActions, "quiet");
+  const sleepActions = getPresenceFilteredPetInteractionActions(defaultActions, "sleep");
+
+  assert.deepEqual(getPresenceFilteredPetInteractionActions(defaultActions, "default"), defaultActions);
+  assert.equal(focusActions.find((action) => action.type === "playGame")?.weight, 0);
+  assert.equal(focusActions.find((action) => action.type === "thinking")?.weight, 3);
+  assert.deepEqual(
+    quietActions.map((action) => action.type).sort(),
+    ["focus", "greeting", "thinking"].sort()
+  );
+  assert.deepEqual(
+    sleepActions.map((action) => action.type).sort(),
+    ["focus", "thinking"].sort()
+  );
+  assert.equal(quietActions.some((action) => isStrongInteractionAction(action.type)), false);
+  assert.equal(sleepActions.some((action) => isStrongInteractionAction(action.type)), false);
+  assert.equal(getPetInteractionAction("headPat").type, "headPat");
+});
+
+test("presence filtered selection avoids strong accessory actions in quiet and sleep", () => {
+  const quietActions = getPresenceFilteredPetInteractionActions(getRandomPetInteractionActionsForMode("game"), "quiet");
+  const sleepActions = getPresenceFilteredPetInteractionActions(getRandomPetInteractionActionsForMode("reading"), "sleep");
+
+  for (const sample of [0, 0.25, 0.5, 0.75, 0.999]) {
+    assert.equal(isStrongInteractionAction(selectRandomPetInteractionAction(() => sample, quietActions).type), false);
+    assert.equal(isStrongInteractionAction(selectRandomPetInteractionAction(() => sample, sleepActions).type), false);
+  }
 });
 
 test("pet interaction action selection follows manifest weights", () => {
@@ -647,6 +680,20 @@ test("pet renderer reads dialogue mode without owning mode writes", async () => 
   assert.doesNotMatch(petPreload, /dialogueMode:set/);
   assert.match(appSource, /!isChatSender\(event\) && !isPetSender\(event\)/);
   assert.match(appSource, /notifyPetDialogueModeChanged\(currentDialogueModeId\)/);
+});
+
+test("pet renderer reads presence mode without owning mode writes", async () => {
+  const petPreload = await readFile(new URL("../src/preload/pet-preload.ts", import.meta.url), "utf8");
+  const appSource = await readFile(new URL("../src/main/app.ts", import.meta.url), "utf8");
+  const rendererSource = await readFile(new URL("../src/renderer/pet/main.ts", import.meta.url), "utf8");
+
+  assert.match(petPreload, /getPresenceMode/);
+  assert.match(petPreload, /onPresenceModeChanged/);
+  assert.doesNotMatch(petPreload, /presenceMode:set/);
+  assert.match(appSource, /!isChatSender\(event\) && !isPetSender\(event\)/);
+  assert.match(appSource, /notifyPetPresenceModeChanged\(currentPresenceModeId\)/);
+  assert.match(rendererSource, /getPresenceFilteredPetInteractionActions/);
+  assert.match(rendererSource, /presenceModeId: currentPresenceModeId/);
 });
 
 test("renderer telemetry sanitizer delegates to the shared pet telemetry contract", async () => {

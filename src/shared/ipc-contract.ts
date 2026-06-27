@@ -5,6 +5,7 @@ import type { Conversation, ConversationSummary } from "./chat-history";
 import type { ChatProviderResult, ChatRequest, ChatStreamDelta } from "./chat-provider";
 import type { ProviderHealthCheckRequest, ProviderHealthResult } from "./provider-health";
 import type { DialogueModeId, DialogueModeView } from "./dialogue-style";
+import type { PresenceModeId, PresenceModeView } from "./presence-mode";
 import type { ProviderConfig, ProviderStatus } from "./provider-config";
 import type { PetPresentationPreferences, PetScaleAdjustmentIntent } from "./pet-presentation";
 import type { PetAccessoryPresetId } from "./pet-accessory";
@@ -22,6 +23,7 @@ export type PetWindowCommand =
   | { type: "pet:pointer-hit-change"; payload: PetPointerHitState }
   | { type: "pet:apply-presentation"; payload: PetPresentationIntent }
   | { type: "pet:window-motion-feedback"; payload: PetWindowMotionFeedback }
+  | { type: "presenceMode:changed"; payload: PresenceModeId }
   | { type: "pet:inject-webgl-context-loss" }
   | { type: "pet:open-chat" }
   | { type: "pet:drag-start" }
@@ -33,6 +35,7 @@ export type ChatWindowCommand =
   | { type: "chat:focus-input" }
   | { type: "pet-lock:changed"; payload: PetLockState }
   | { type: "dialogueMode:changed"; payload: DialogueModeId }
+  | { type: "presenceMode:changed"; payload: PresenceModeId }
   | { type: "pet-activity:echo"; payload: PetActivityEcho };
 
 export type ChatSendRequest = ChatRequest;
@@ -133,6 +136,8 @@ export type PetApi = {
   onScaleWheelModifierChanged(handler: (accelerator: string) => void): () => void;
   getDialogueMode(): Promise<DialogueModeId>;
   onDialogueModeChanged(handler: (modeId: DialogueModeId) => void): () => void;
+  getPresenceMode(): Promise<PresenceModeId>;
+  onPresenceModeChanged(handler: (modeId: PresenceModeId) => void): () => void;
 };
 
 export type ChatApi = {
@@ -180,6 +185,13 @@ export type DialogueModeApi = {
   getMode(): Promise<DialogueModeId>;
   setMode(modeId: DialogueModeId): Promise<DialogueModeId>;
   onModeChanged(handler: (modeId: DialogueModeId) => void): () => void;
+};
+
+export type PresenceModeApi = {
+  listModes(): PresenceModeView[];
+  getMode(): Promise<PresenceModeId>;
+  setMode(modeId: PresenceModeId): Promise<PresenceModeId>;
+  onModeChanged(handler: (modeId: PresenceModeId) => void): () => void;
 };
 
 export type UserProfileApi = {

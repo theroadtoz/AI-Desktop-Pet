@@ -1,6 +1,7 @@
 import type { DialogueModeId } from "../../shared/dialogue-style";
 import type { EmotionPresentation } from "../../shared/emotion-presentation";
 import type { PetAccessoryPresetId } from "../../shared/pet-accessory";
+import type { PresenceModeId } from "../../shared/presence-mode";
 import type {
   InteractionActionCooldownSkipReason,
   InteractionActionCooldownState,
@@ -20,6 +21,7 @@ export type InteractionActionReason =
 
 export type InteractionActionStrategy = {
   modeId: DialogueModeId;
+  presenceModeId?: PresenceModeId;
   candidateActionTypes: readonly PetInteractionActionType[];
 };
 
@@ -157,6 +159,7 @@ export function createInteractionActionPlayer({
         reason,
         skipReason,
         ...(strategy ? { modeId: strategy.modeId } : {}),
+        ...(strategy?.presenceModeId ? { presenceModeId: strategy.presenceModeId } : {}),
         ...(activeInteractionAction ? { activeType: activeInteractionAction.action.type } : {})
       });
       return false;
@@ -168,6 +171,7 @@ export function createInteractionActionPlayer({
       durationMs: action.durationMs,
       ...(strategy ? {
         modeId: strategy.modeId,
+        ...(strategy.presenceModeId ? { presenceModeId: strategy.presenceModeId } : {}),
         candidateActionTypes: strategy.candidateActionTypes,
         selectedActionType: action.type
       } : {})

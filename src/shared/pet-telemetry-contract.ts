@@ -1,4 +1,5 @@
 import type { DialogueModeId } from "./dialogue-style";
+import type { PresenceModeId } from "./presence-mode";
 
 export const PET_TELEMETRY_EVENT_TYPES = [
   "pet_health",
@@ -43,6 +44,7 @@ export const PET_TELEMETRY_ALLOWED_FIELDS = [
   "skipReason",
   "cooldownState",
   "modeId",
+  "presenceModeId",
   "candidateActionTypes",
   "selectedActionType",
   "activeType",
@@ -119,6 +121,7 @@ const PET_INTERACTION_ACTION_TYPES = [
 ] as const;
 
 const DIALOGUE_MODE_IDS = ["default", "work", "game", "reading"] as const;
+const PRESENCE_MODE_IDS = ["default", "focus", "quiet", "sleep"] as const;
 const PET_ACCESSORY_PRESET_IDS = ["none", "glasses"] as const;
 const PET_INTERACTION_REASONS = [
   "startup_first_visible_frame",
@@ -178,6 +181,10 @@ function readDialogueModeId(value: unknown): DialogueModeId | undefined {
   return readStringFrom(value, DIALOGUE_MODE_IDS);
 }
 
+function readPresenceModeId(value: unknown): PresenceModeId | undefined {
+  return readStringFrom(value, PRESENCE_MODE_IDS);
+}
+
 function readActionTypes(value: unknown): readonly string[] | undefined {
   if (!Array.isArray(value) || value.length > PET_INTERACTION_ACTION_TYPES.length) {
     return undefined;
@@ -201,6 +208,13 @@ function putString<const T extends readonly string[]>(
 
 function putDialogueModeId(target: PetTelemetryPayload, payload: Record<string, unknown>, key: string): void {
   const value = readDialogueModeId(payload[key]);
+  if (value !== undefined) {
+    target[key] = value;
+  }
+}
+
+function putPresenceModeId(target: PetTelemetryPayload, payload: Record<string, unknown>, key: string): void {
+  const value = readPresenceModeId(payload[key]);
   if (value !== undefined) {
     target[key] = value;
   }
@@ -250,6 +264,7 @@ function sanitizeHealthPayload(payload: Record<string, unknown>): PetTelemetryPa
 function sanitizePerformancePayload(payload: Record<string, unknown>): PetTelemetryPayload {
   const safe: PetTelemetryPayload = {};
   putString(safe, payload, "mode", PET_RENDER_BUDGET_MODES);
+  putPresenceModeId(safe, payload, "presenceModeId");
   for (const key of [
     "targetFramesPerSecond",
     "rafCallbacks",
@@ -321,6 +336,7 @@ function sanitizeInteractionActionPayload(payload: Record<string, unknown>): Pet
   putString(safe, payload, "reason", PET_INTERACTION_REASONS);
   putNumber(safe, payload, "durationMs");
   putDialogueModeId(safe, payload, "modeId");
+  putPresenceModeId(safe, payload, "presenceModeId");
   putActionTypes(safe, payload, "candidateActionTypes");
   putString(safe, payload, "selectedActionType", PET_INTERACTION_ACTION_TYPES);
   putString(safe, payload, "activeType", PET_INTERACTION_ACTION_TYPES);

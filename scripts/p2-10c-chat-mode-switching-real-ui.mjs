@@ -221,8 +221,8 @@ async function saveWelcomeProfile(cdp) {
 }
 
 async function setMode(cdp, modeId) {
-  await click(cdp, `.mode-button[data-mode-id="${modeId}"]`);
-  await waitFor(cdp, `document.querySelector('.mode-button.is-active')?.dataset.modeId === ${JSON.stringify(modeId)}`);
+  await click(cdp, `#dialogue-mode-controls .mode-button[data-mode-id="${modeId}"]`);
+  await waitFor(cdp, `document.querySelector('#dialogue-mode-controls .mode-button.is-active')?.dataset.modeId === ${JSON.stringify(modeId)}`);
 }
 
 async function sendMessage(cdp, message) {
@@ -444,7 +444,7 @@ async function main() {
     await saveWelcomeProfile(chat);
 
     checks.initialDefaultMode = await evaluate(chat, "document.querySelector('#partner-status')?.textContent.includes('默认陪伴')");
-    checks.modeButtonsVisible = await evaluate(chat, "document.querySelectorAll('.mode-button').length === 4");
+    checks.modeButtonsVisible = await evaluate(chat, "document.querySelectorAll('#dialogue-mode-controls .mode-button').length === 4");
 
     await setMode(chat, "work");
     checks.workModeVisible = await evaluate(chat, "document.querySelector('#partner-status')?.textContent.includes('工作')");
@@ -553,14 +553,14 @@ async function main() {
     child = launchElectron();
     handles = await openChat();
     const restartedChat = handles.chat.cdp;
-    checks.restartRestoresMode = await waitFor(restartedChat, "document.querySelector('.mode-button.is-active')?.dataset.modeId === 'reading'", 10_000);
+    checks.restartRestoresMode = await waitFor(restartedChat, "document.querySelector('#dialogue-mode-controls .mode-button.is-active')?.dataset.modeId === 'reading'", 10_000);
 
     finalSnapshot = await evaluate(restartedChat, `
       (() => ({
         partnerStatus: document.querySelector("#partner-status")?.textContent ?? "",
         providerStatus: document.querySelector("#provider-status")?.textContent ?? "",
         memoryStatus: document.querySelector("#memory-session-status")?.textContent ?? "",
-        activeMode: document.querySelector(".mode-button.is-active")?.textContent ?? ""
+        activeMode: document.querySelector("#dialogue-mode-controls .mode-button.is-active")?.textContent ?? ""
       }))()
     `);
 

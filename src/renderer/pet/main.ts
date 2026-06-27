@@ -10,6 +10,7 @@ import { createScaleWheelNormalizer, hasScaleWheelModifiers } from "./scale-whee
 import {
   createClickActionScheduler,
   getInteractionActionCooldownSkipReason,
+  getPresenceFilteredPetInteractionActions,
   getRandomPetInteractionActionsForMode,
   getPetInteractionAction,
   getWindowShakeLightFeedbackSkipReason,
@@ -23,6 +24,7 @@ import {
   type InteractionActionStrategy
 } from "./interaction-action-player";
 import { DEFAULT_DIALOGUE_MODE_ID, type DialogueModeId } from "../../shared/dialogue-style";
+import { DEFAULT_PRESENCE_MODE_ID, type PresenceModeId } from "../../shared/presence-mode";
 import {
   selectEmotionPresentation,
   type EmotionPresentation
@@ -247,6 +249,7 @@ let recoveryCount = 0;
 let pendingLive2DFrameSample: ((sample: Live2DFrameSample) => void) | null = null;
 let hasPlayedStartupAppearance = false;
 let currentDialogueModeId: DialogueModeId = DEFAULT_DIALOGUE_MODE_ID;
+let currentPresenceModeId: PresenceModeId = DEFAULT_PRESENCE_MODE_ID;
 
 async function applyBasePresentationToLoadedModel(
   presentation: EmotionPresentation,
@@ -444,6 +447,7 @@ async function startPetRenderer(): Promise<void> {
     }, (sample) => {
       window.petApi?.reportTelemetry("pet_performance_sample", {
         mode: sample.mode,
+        presenceModeId: sample.presenceModeId,
         targetFramesPerSecond: sample.targetFramesPerSecond,
         rafCallbacks: sample.rafCallbacks,
         renderedFrames: sample.renderedFrames,
@@ -459,6 +463,7 @@ async function startPetRenderer(): Promise<void> {
         breathUpdatesPerSecond: sample.breathUpdatesPerSecond
       });
     });
+    live2DRenderer.setPresenceMode(currentPresenceModeId);
     isUsingLive2D = true;
     live2DModel.setLookTarget(0, 0);
     const firstLive2DFrameSample = waitForNextLive2DFrameSample();
@@ -597,6 +602,10 @@ const removeInjectWebGLContextLossListener = window.petApi?.onInjectWebGLContext
 const removeDialogueModeChangedListener = window.petApi?.onDialogueModeChanged((modeId) => {
   currentDialogueModeId = modeId;
 }) ?? null;
+const removePresenceModeChangedListener = window.petApi?.onPresenceModeChanged((modeId) => {
+  currentPresenceModeId = modeId;
+  live2DRenderer?.setPresenceMode(modeId);
+}) ?? null;
 const removeWindowMotionFeedbackListener = window.petApi?.onWindowMotionFeedback((feedback) => {
   if (feedback.type === "shake_light_feedback") {
     interactionActionPlayer.playWindowShakeLightFeedback();
@@ -607,6 +616,13 @@ void window.petApi?.getDialogueMode().then((modeId) => {
   currentDialogueModeId = modeId;
 }).catch(() => {
   currentDialogueModeId = DEFAULT_DIALOGUE_MODE_ID;
+});
+
+void window.petApi?.getPresenceMode().then((modeId) => {
+  currentPresenceModeId = modeId;
+  live2DRenderer?.setPresenceMode(modeId);
+}).catch(() => {
+  currentPresenceModeId = DEFAULT_PRESENCE_MODE_ID;
 });
 
 window.addEventListener("resize", () => {
@@ -631,6 +647,7 @@ window.addEventListener("beforeunload", () => {
   removePresentationIntentListener?.();
   removeInjectWebGLContextLossListener?.();
   removeDialogueModeChangedListener?.();
+  removePresenceModeChangedListener?.();
   removeWindowMotionFeedbackListener?.();
   cancelClickInteractionAction();
   interactionActionPlayer.dispose();
@@ -786,13 +803,17 @@ type PendingClickAction = {
 };
 
 function createBodyClickAction(): PendingClickAction {
-  const modeActions = getRandomPetInteractionActionsForMode(currentDialogueModeId);
+  const modeActions = getPresenceFilteredPetInteractionActions(
+    getRandomPetInteractionActionsForMode(currentDialogueModeId),
+    currentPresenceModeId
+  );
 
   return {
     action: selectRandomPetInteractionAction(Math.random, modeActions),
     reason: "click_body",
     strategy: {
       modeId: currentDialogueModeId,
+      presenceModeId: currentPresenceModeId,
       candidateActionTypes: modeActions.map((action) => action.type)
     }
   };

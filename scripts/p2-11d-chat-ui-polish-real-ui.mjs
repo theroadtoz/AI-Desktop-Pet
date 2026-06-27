@@ -392,7 +392,7 @@ async function main() {
     await click(chat, "#settings-button");
     checks.settingsSectionsOrdered = await evaluate(chat, `
       (() => [...document.querySelectorAll(".settings-section-title")].map((node) => node.textContent).join("|"))()
-    `) === "伙伴外观|本地身份|对话模式|Provider / 模型|连接安全|操作方式";
+    `) === "伙伴外观|本地身份|对话模式|存在模式|Provider / 模型|连接安全|操作方式";
     checks.providerAndSafetySections = await evaluate(chat, `
       (() => {
         const provider = document.querySelector("#provider-id");

@@ -1,5 +1,6 @@
 import type { EmotionPresentation } from "../../shared/emotion-presentation";
 import type { DialogueModeId } from "../../shared/dialogue-style";
+import type { PresenceModeId } from "../../shared/presence-mode";
 
 export const PET_INTERACTION_ACTION_TYPES = [
   "appearance",
@@ -158,6 +159,42 @@ export function getRandomPetInteractionActionsForMode(modeId: DialogueModeId): r
     ...action,
     weight: weights[action.type] ?? action.weight
   }));
+}
+
+export function getPresenceFilteredPetInteractionActions(
+  actions: readonly PetInteractionAction[],
+  presenceModeId: PresenceModeId
+): readonly PetInteractionAction[] {
+  if (presenceModeId === "default") {
+    return actions;
+  }
+
+  if (presenceModeId === "focus") {
+    return actions.map((action) => {
+      if (action.type === "playGame") {
+        return { ...action, weight: 0 };
+      }
+
+      if (action.type === "reading" || action.type === "focus" || action.type === "thinking") {
+        return { ...action, weight: Math.max(action.weight, 1) };
+      }
+
+      return action;
+    });
+  }
+
+  const allowedTypes = presenceModeId === "quiet"
+    ? new Set<PetInteractionActionType>(["greeting", "thinking", "focus"])
+    : new Set<PetInteractionActionType>(["thinking", "focus"]);
+
+  return actions
+    .filter((action) => allowedTypes.has(action.type))
+    .map((action) => ({
+      ...action,
+      weight: action.type === "focus" || action.type === "thinking"
+        ? Math.max(action.weight, 1)
+        : action.weight
+    }));
 }
 
 export function isStrongInteractionAction(type: PetInteractionActionType): boolean {

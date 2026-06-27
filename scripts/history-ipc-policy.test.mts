@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 
-test("history, memory and user profile IPC are restricted to the chat window and expose no file access bridge", async () => {
+test("history, memory, mode and user profile IPC are restricted and expose no file access bridge", async () => {
   const appSource = await readFile(join(process.cwd(), "src", "main", "app.ts"), "utf8");
   const preloadSource = await readFile(join(process.cwd(), "dist", "preload", "chat-preload.js"), "utf8");
 
@@ -16,9 +16,13 @@ test("history, memory and user profile IPC are restricted to the chat window and
   assert.match(appSource, /ipcMain\.handle\("userProfile:get", \(event\) => \{\s+if \(!isChatSender\(event\) \|\| !userProfileStore\)/);
   assert.match(appSource, /ipcMain\.handle\("userProfile:save", \(event, profile: unknown\) => \{\s+if \(!isChatSender\(event\) \|\| !userProfileStore\)/);
   assert.match(appSource, /ipcMain\.handle\("userProfile:clear", \(event\) => \{\s+if \(!isChatSender\(event\) \|\| !userProfileStore\)/);
+  assert.match(appSource, /ipcMain\.handle\("presenceMode:list", \(event\) => \{\s+if \(!isChatSender\(event\)\)/);
+  assert.match(appSource, /ipcMain\.handle\("presenceMode:get", \(event\) => \{\s+if \(!isChatSender\(event\) && !isPetSender\(event\)\)/);
+  assert.match(appSource, /ipcMain\.handle\("presenceMode:set", \(event, modeId: unknown\) => \{\s+if \(!isChatSender\(event\) \|\| !presenceModeStore \|\| !isPresenceModeId\(modeId\)\)/);
   assert.match(preloadSource, /exposeInMainWorld\("historyApi", historyApi\)/);
   assert.match(preloadSource, /exposeInMainWorld\("memoryApi", memoryApi\)/);
   assert.match(preloadSource, /exposeInMainWorld\("userProfileApi", userProfileApi\)/);
+  assert.match(preloadSource, /exposeInMainWorld\("presenceModeApi", presenceModeApi\)/);
   assert.doesNotMatch(preloadSource, /exposeInMainWorld\("ipcRenderer"/);
-  assert.doesNotMatch(preloadSource, /historyPath|memoryPath|profilePath|readFile|writeFile/);
+  assert.doesNotMatch(preloadSource, /historyPath|memoryPath|profilePath|presenceModePath|readFile|writeFile/);
 });

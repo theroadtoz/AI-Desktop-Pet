@@ -26,6 +26,7 @@ import { isChatMessage } from "../shared/ipc-contract";
 import { isHistoryId, type HistoryMessage } from "../shared/chat-history";
 import { isMemoryId, parseMemoryCardDraft, parseMemoryCardUpdate, type MemoryCardUpdate } from "../shared/chat-memory";
 import { DIALOGUE_MODE_VIEWS, isDialogueModeId, type DialogueModeId } from "../shared/dialogue-style";
+import { PRESENCE_MODE_VIEWS, isPresenceModeId, type PresenceModeId } from "../shared/presence-mode";
 import { selectEmotionPresentation } from "../shared/emotion-presentation";
 import {
   getPetInteractionActionSafeEchoMessage,
@@ -60,6 +61,7 @@ import { createChatProviderFromConfig } from "./services/chat/provider-factory";
 import { checkProviderHealth } from "./services/chat/provider-health";
 import { readEnvProviderConfig, type EnvProviderConfig } from "./services/config/env-config";
 import { createDialogueModeStore, type DialogueModeStore } from "./services/config/dialogue-mode-store";
+import { createPresenceModeStore, type PresenceModeStore } from "./services/config/presence-mode-store";
 import {
   createProviderConfigStore,
   createProviderTelemetryPayload,
@@ -105,6 +107,7 @@ let petPresentationPersistence: PetPresentationPersistence | null = null;
 let historyStore: HistoryStore | null = null;
 let memoryStore: MemoryStore | null = null;
 let dialogueModeStore: DialogueModeStore | null = null;
+let presenceModeStore: PresenceModeStore | null = null;
 let shortcutPreferencesStore: ShortcutPreferencesStore | null = null;
 let userProfileStore: UserProfileStore | null = null;
 let shortcutRegistry: ShortcutRegistry | null = null;
@@ -114,6 +117,7 @@ let petRoleSnapshot: PetRoleSnapshot = INITIAL_PET_ROLE_SNAPSHOT;
 let currentPetPresentationIntent: PetPresentationIntent = createPetPresentationIntent(petRoleSnapshot);
 let activeChatRequestVersion: number | null = null;
 let currentDialogueModeId: DialogueModeId = "default";
+let currentPresenceModeId: PresenceModeId = "default";
 let performanceHeartbeat: NodeJS.Timeout | null = null;
 let isPetLocked = false;
 
@@ -800,6 +804,8 @@ app.whenReady().then(async () => {
   memoryStore = createMemoryStore();
   dialogueModeStore = createDialogueModeStore();
   currentDialogueModeId = dialogueModeStore.getMode();
+  presenceModeStore = createPresenceModeStore();
+  currentPresenceModeId = presenceModeStore.getMode();
   shortcutPreferencesStore = createShortcutPreferencesStore();
   userProfileStore = createUserProfileStore({ logTelemetry });
   shortcutRegistry = createUserShortcutRegistry();
@@ -998,6 +1004,22 @@ app.whenReady().then(async () => {
     }
 
     petWindow.webContents.send("dialogueMode:changed", modeId);
+  }
+
+  function notifyChatPresenceModeChanged(modeId: PresenceModeId): void {
+    if (!chatWindow || chatWindow.isDestroyed()) {
+      return;
+    }
+
+    chatWindow.webContents.send("presenceMode:changed", modeId);
+  }
+
+  function notifyPetPresenceModeChanged(modeId: PresenceModeId): void {
+    if (!petWindow || petWindow.isDestroyed()) {
+      return;
+    }
+
+    petWindow.webContents.send("presenceMode:changed", modeId);
   }
 
   ipcMain.handle("pet:open-chat", (event) => {
@@ -1494,6 +1516,43 @@ app.whenReady().then(async () => {
     }
 
     return currentDialogueModeId;
+  });
+
+  ipcMain.handle("presenceMode:list", (event) => {
+    if (!isChatSender(event)) {
+      throw new Error("Unauthorized presence mode request");
+    }
+
+    return PRESENCE_MODE_VIEWS;
+  });
+
+  ipcMain.handle("presenceMode:get", (event) => {
+    if (!isChatSender(event) && !isPetSender(event)) {
+      throw new Error("Unauthorized presence mode request");
+    }
+
+    return currentPresenceModeId;
+  });
+
+  ipcMain.handle("presenceMode:set", (event, modeId: unknown) => {
+    if (!isChatSender(event) || !presenceModeStore || !isPresenceModeId(modeId)) {
+      throw new Error("Invalid presence mode request");
+    }
+
+    const previousModeId = currentPresenceModeId;
+    currentPresenceModeId = presenceModeStore.saveMode(modeId);
+
+    if (previousModeId !== currentPresenceModeId) {
+      logTelemetry("presence_mode_changed", {
+        previousModeId,
+        nextModeId: currentPresenceModeId,
+        reason: "chat_ui"
+      });
+      notifyChatPresenceModeChanged(currentPresenceModeId);
+      notifyPetPresenceModeChanged(currentPresenceModeId);
+    }
+
+    return currentPresenceModeId;
   });
 
   ipcMain.handle("userProfile:get", (event) => {

@@ -7,6 +7,7 @@ import type {
   PetFirstFrameInfo
 } from "../shared/ipc-contract";
 import type { DialogueModeId } from "../shared/dialogue-style";
+import type { PresenceModeId } from "../shared/presence-mode";
 import type { PetPresentationIntent, PetRoleState } from "../shared/pet-role-state";
 import type { PetScaleAdjustmentIntent } from "../shared/pet-presentation";
 
@@ -22,6 +23,7 @@ const emotionTags = ["neutral", "happy", "sad", "surprised", "confused", "angry"
 const emotionIntensities = ["low", "medium", "high"] as const;
 const petAccessoryPresetIds = ["none", "glasses"] as const;
 const dialogueModeIds = ["default", "work", "game", "reading"] as const;
+const presenceModeIds = ["default", "focus", "quiet", "sleep"] as const;
 const scaleWheelModifierPattern = /^(Ctrl|Alt|Shift|Meta)(\+(Ctrl|Alt|Shift|Meta))*$/;
 
 function isRequestVersion(value: number): boolean {
@@ -58,6 +60,12 @@ function isPetAccessoryPresetId(value: unknown): boolean {
 function parseDialogueModeId(value: unknown): DialogueModeId | null {
   return typeof value === "string" && dialogueModeIds.includes(value as DialogueModeId)
     ? value as DialogueModeId
+    : null;
+}
+
+function parsePresenceModeId(value: unknown): PresenceModeId | null {
+  return typeof value === "string" && presenceModeIds.includes(value as PresenceModeId)
+    ? value as PresenceModeId
     : null;
 }
 
@@ -212,6 +220,26 @@ const api: PetApi = {
     ipcRenderer.on("dialogueMode:changed", listener);
     return () => {
       ipcRenderer.removeListener("dialogueMode:changed", listener);
+    };
+  },
+  async getPresenceMode() {
+    const modeId = parsePresenceModeId(await ipcRenderer.invoke("presenceMode:get"));
+    if (!modeId) {
+      throw new Error("Invalid presence mode response");
+    }
+    return modeId;
+  },
+  onPresenceModeChanged(handler) {
+    const listener = (_event: Electron.IpcRendererEvent, value: unknown): void => {
+      const modeId = parsePresenceModeId(value);
+      if (modeId) {
+        handler(modeId);
+      }
+    };
+
+    ipcRenderer.on("presenceMode:changed", listener);
+    return () => {
+      ipcRenderer.removeListener("presenceMode:changed", listener);
     };
   }
 };

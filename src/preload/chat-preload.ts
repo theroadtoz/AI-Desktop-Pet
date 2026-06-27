@@ -15,12 +15,14 @@ import type {
   PetActivityEcho,
   PetLockState,
   PetPresentationApi,
+  PresenceModeApi,
   ShortcutApi,
   UserProfileApi
 } from "../shared/ipc-contract";
 import type { Conversation, ConversationSummary, HistoryMessage } from "../shared/chat-history";
 import type { MemoryCard, MemoryCardDraft, MemoryCardUpdate } from "../shared/chat-memory";
 import type { DialogueModeId, DialogueModeView } from "../shared/dialogue-style";
+import type { PresenceModeId, PresenceModeView } from "../shared/presence-mode";
 import type { ProviderConfig, ProviderStatus } from "../shared/provider-config";
 import type { ProviderHealthCheckRequest, ProviderHealthResult, ProviderHealthStatus } from "../shared/provider-health";
 import type { PetPresentationPreferences } from "../shared/pet-presentation";
@@ -30,11 +32,18 @@ import type { UserProfile, UserProfileInput } from "../shared/user-profile";
 const petAccessoryPresetIds = ["none", "glasses"] as const;
 const shortcutActionIds = ["togglePetLock", "adjustPetScaleWithWheel"] as const;
 const dialogueModeIds = ["default", "work", "game", "reading"] as const;
+const presenceModeIds = ["default", "focus", "quiet", "sleep"] as const;
 const dialogueModeViews: readonly DialogueModeView[] = [
   { id: "default", label: "默认陪伴" },
   { id: "work", label: "工作" },
   { id: "game", label: "游戏" },
   { id: "reading", label: "读书" }
+];
+const presenceModeViews: readonly PresenceModeView[] = [
+  { id: "default", label: "默认陪伴", description: "保留日常呼吸与动作节奏。" },
+  { id: "focus", label: "专注陪伴", description: "降低待机打扰，保留清晰回应。" },
+  { id: "quiet", label: "安静陪伴", description: "减少强动作与空闲渲染。" },
+  { id: "sleep", label: "睡眠待机", description: "低频待机，保留微弱生命感。" }
 ];
 const chatStreamErrorTypes = [
   "aborted",
@@ -100,6 +109,12 @@ function isPetAccessoryPresetId(value: unknown): value is (typeof petAccessoryPr
 function parseDialogueModeId(value: unknown): DialogueModeId | null {
   return typeof value === "string" && dialogueModeIds.includes(value as DialogueModeId)
     ? value as DialogueModeId
+    : null;
+}
+
+function parsePresenceModeId(value: unknown): PresenceModeId | null {
+  return typeof value === "string" && presenceModeIds.includes(value as PresenceModeId)
+    ? value as PresenceModeId
     : null;
 }
 
@@ -1157,6 +1172,48 @@ const dialogueModeApi: DialogueModeApi = {
   }
 };
 
+const presenceModeApi: PresenceModeApi = {
+  listModes() {
+    return presenceModeViews.map((mode) => ({ ...mode }));
+  },
+  async getMode() {
+    const modeId = parsePresenceModeId(await ipcRenderer.invoke("presenceMode:get"));
+
+    if (!modeId) {
+      throw new Error("Invalid presence mode response");
+    }
+
+    return modeId;
+  },
+  async setMode(modeId) {
+    if (!presenceModeIds.includes(modeId)) {
+      throw new Error("Invalid presence mode");
+    }
+
+    const nextModeId = parsePresenceModeId(await ipcRenderer.invoke("presenceMode:set", modeId));
+
+    if (!nextModeId) {
+      throw new Error("Invalid presence mode response");
+    }
+
+    return nextModeId;
+  },
+  onModeChanged(handler) {
+    const listener = (_event: Electron.IpcRendererEvent, value: unknown): void => {
+      const modeId = parsePresenceModeId(value);
+
+      if (modeId) {
+        handler(modeId);
+      }
+    };
+
+    ipcRenderer.on("presenceMode:changed", listener);
+    return () => {
+      ipcRenderer.removeListener("presenceMode:changed", listener);
+    };
+  }
+};
+
 const userProfileApi: UserProfileApi = {
   async getUserProfile() {
     const profile = await ipcRenderer.invoke("userProfile:get");
@@ -1204,4 +1261,5 @@ contextBridge.exposeInMainWorld("memoryApi", memoryApi);
 contextBridge.exposeInMainWorld("petPresentationApi", petPresentationApi);
 contextBridge.exposeInMainWorld("shortcutApi", shortcutApi);
 contextBridge.exposeInMainWorld("dialogueModeApi", dialogueModeApi);
+contextBridge.exposeInMainWorld("presenceModeApi", presenceModeApi);
 contextBridge.exposeInMainWorld("userProfileApi", userProfileApi);

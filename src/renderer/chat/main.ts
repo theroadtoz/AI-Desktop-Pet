@@ -2,6 +2,7 @@ import "./styles.css";
 import type { ChatMessage, ChatRole } from "../../shared/chat";
 import type { Conversation, ConversationSummary } from "../../shared/chat-history";
 import { DIALOGUE_MODE_LABELS, type DialogueModeId, type DialogueModeView } from "../../shared/dialogue-style";
+import { PRESENCE_MODE_LABELS, type PresenceModeId, type PresenceModeView } from "../../shared/presence-mode";
 import type { MemoryCard } from "../../shared/chat-memory";
 import {
   LOCAL_PROVIDER_PRESETS,
@@ -65,6 +66,7 @@ const settingsUserPreferredName = document.querySelector<HTMLInputElement>("#set
 const saveUserProfileButton = document.querySelector<HTMLButtonElement>("#save-user-profile-button");
 const clearUserProfileButton = document.querySelector<HTMLButtonElement>("#clear-user-profile-button");
 const settingsDialogueModeSummary = document.querySelector<HTMLElement>("#settings-dialogue-mode-summary");
+const settingsPresenceModeSummary = document.querySelector<HTMLElement>("#settings-presence-mode-summary");
 const shortcutList = document.querySelector<HTMLElement>("#shortcut-list");
 const shortcutStatus = document.querySelector<HTMLElement>("#shortcut-status");
 const chatTab = document.querySelector<HTMLButtonElement>("#chat-tab");
@@ -73,6 +75,7 @@ const memoryTab = document.querySelector<HTMLButtonElement>("#memory-tab");
 const chatPage = document.querySelector<HTMLElement>("#chat-page");
 const companionControlShelf = document.querySelector<HTMLElement>("#companion-control-shelf");
 const dialogueModeControls = document.querySelector<HTMLElement>("#dialogue-mode-controls");
+const presenceModeControls = document.querySelector<HTMLElement>("#presence-mode-controls");
 const shelfAccessoryButton = document.querySelector<HTMLButtonElement>("#shelf-accessory-button");
 const shelfScaleButton = document.querySelector<HTMLButtonElement>("#shelf-scale-button");
 const shelfLockButton = document.querySelector<HTMLButtonElement>("#shelf-lock-button");
@@ -119,8 +122,8 @@ if (
   !petScaleInput || !petScaleValue || !petAccessorySelect || !petAccessoryStatus || !savePetScaleButton ||
   !savePetAccessoryButton || !petLockStatus || !togglePetLockButton || !userProfileSummary ||
   !settingsUserDisplayName || !settingsUserPreferredName || !saveUserProfileButton || !clearUserProfileButton ||
-  !settingsDialogueModeSummary || !shortcutList || !shortcutStatus ||
-  !chatTab || !historyTab || !memoryTab || !chatPage || !companionControlShelf || !dialogueModeControls ||
+  !settingsDialogueModeSummary || !settingsPresenceModeSummary || !shortcutList || !shortcutStatus ||
+  !chatTab || !historyTab || !memoryTab || !chatPage || !companionControlShelf || !dialogueModeControls || !presenceModeControls ||
   !shelfAccessoryButton || !shelfScaleButton || !shelfLockButton || !shelfActionEcho || !historyPage ||
   !memoryPage || !chatSessionNote || !memoryDraftPanel || !memoryDraftTitle || !memoryDraftContent || !memoryDraftTags ||
   !cancelMemoryDraftButton || !saveMemoryDraftButton || !newConversationButton || !clearHistoryButton || !clearHistoryConfirmation ||
@@ -179,6 +182,7 @@ const settingsUserPreferredNameField = settingsUserPreferredName;
 const saveUserProfileAction = saveUserProfileButton;
 const clearUserProfileAction = clearUserProfileButton;
 const settingsDialogueModeSummaryBox = settingsDialogueModeSummary;
+const settingsPresenceModeSummaryBox = settingsPresenceModeSummary;
 const shortcutListElement = shortcutList;
 const shortcutStatusBox = shortcutStatus;
 const chatTabAction = chatTab;
@@ -187,6 +191,7 @@ const memoryTabAction = memoryTab;
 const chatPageContainer = chatPage;
 const companionControlShelfBox = companionControlShelf;
 const dialogueModeControlsElement = dialogueModeControls;
+const presenceModeControlsElement = presenceModeControls;
 const shelfAccessoryAction = shelfAccessoryButton;
 const shelfScaleAction = shelfScaleButton;
 const shelfLockAction = shelfLockButton;
@@ -260,6 +265,8 @@ let currentPetAccessoryPresetId: PetAccessoryPresetId = DEFAULT_PET_PRESENTATION
 let shortcutViews: ShortcutPreferenceView[] = [];
 let dialogueModes: DialogueModeView[] = [];
 let currentDialogueModeId: DialogueModeId = "default";
+let presenceModes: PresenceModeView[] = [];
+let currentPresenceModeId: PresenceModeId = "default";
 let currentUserProfile: UserProfile | null = null;
 let currentMemoryInjectionCount: number | null = null;
 type ActivityEchoState = "idle" | "active" | "fading";
@@ -376,15 +383,22 @@ function formatModeLabel(modeId: DialogueModeId): string {
   return modeId === "default" ? label : `${label}模式`;
 }
 
+function formatPresenceLabel(modeId: PresenceModeId): string {
+  return PRESENCE_MODE_LABELS[modeId];
+}
+
 function renderPartnerStatus(): void {
   const modeLabel = formatModeLabel(currentDialogueModeId);
+  const presenceLabel = formatPresenceLabel(currentPresenceModeId);
   const roleLabel = currentUserProfile
     ? currentUserProfile.preferredName ?? currentUserProfile.displayName
     : "等待本地身份";
 
-  setPartnerStatus(`桌面伙伴：${roleLabel} · ${modeLabel}`);
+  setPartnerStatus(`桌面伙伴：${roleLabel} · ${modeLabel} · 存在：${presenceLabel}`);
   settingsDialogueModeSummaryBox.textContent = `当前模式：${modeLabel}`;
   settingsDialogueModeSummaryBox.dataset.state = "ready";
+  settingsPresenceModeSummaryBox.textContent = `当前存在：${presenceLabel}`;
+  settingsPresenceModeSummaryBox.dataset.state = "ready";
 }
 
 function renderRibbonEcho(): void {
@@ -525,6 +539,7 @@ function renderUserProfile(profile: UserProfile | null): void {
 
   userWelcomePanelBox.hidden = hasProfile;
   dialogueModeControlsElement.hidden = !hasProfile;
+  presenceModeControlsElement.hidden = !hasProfile;
   chatSessionNoteBox.hidden = !hasProfile;
   messageList.hidden = !hasProfile;
   chatForm.hidden = !hasProfile;
@@ -602,6 +617,18 @@ function setDialogueMode(modeId: DialogueModeId): void {
   }
 }
 
+function setPresenceMode(modeId: PresenceModeId): void {
+  currentPresenceModeId = modeId;
+  renderPartnerStatus();
+  renderCompanionControlShelf();
+
+  for (const button of presenceModeControlsElement.querySelectorAll<HTMLButtonElement>(".mode-button")) {
+    const isActive = button.dataset.modeId === modeId;
+    button.classList.toggle("is-active", isActive);
+    button.setAttribute("aria-pressed", String(isActive));
+  }
+}
+
 function renderDialogueModes(modes: DialogueModeView[]): void {
   dialogueModeControlsElement.replaceChildren();
 
@@ -644,6 +671,53 @@ async function setDialogueModeFromUi(modeId: DialogueModeId): Promise<void> {
     setDialogueMode(await window.dialogueModeApi.setMode(modeId));
   } catch {
     setChatSessionNote("无法切换对话模式，请稍后重试。", "error");
+  }
+}
+
+function renderPresenceModes(modes: PresenceModeView[]): void {
+  presenceModeControlsElement.replaceChildren();
+
+  for (const mode of modes) {
+    const button = document.createElement("button");
+    button.className = "button-light mode-button";
+    button.type = "button";
+    button.dataset.modeId = mode.id;
+    button.textContent = mode.label;
+    button.title = mode.description;
+    button.disabled = isReplying;
+    button.setAttribute("aria-pressed", String(mode.id === currentPresenceModeId));
+    button.addEventListener("click", () => {
+      void setPresenceModeFromUi(mode.id);
+    });
+    presenceModeControlsElement.append(button);
+  }
+}
+
+async function refreshPresenceMode(): Promise<void> {
+  if (!window.presenceModeApi) {
+    return;
+  }
+
+  presenceModes = window.presenceModeApi.listModes();
+  renderPresenceModes(presenceModes);
+
+  try {
+    setPresenceMode(await window.presenceModeApi.getMode());
+  } catch {
+    setPresenceMode("default");
+  }
+}
+
+async function setPresenceModeFromUi(modeId: PresenceModeId): Promise<void> {
+  if (!window.presenceModeApi || isReplying || modeId === currentPresenceModeId) {
+    return;
+  }
+
+  try {
+    setPresenceMode(await window.presenceModeApi.setMode(modeId));
+    setChatSessionNote(`存在模式已切换为${formatPresenceLabel(modeId)}。`, "ready");
+  } catch {
+    setChatSessionNote("无法切换存在模式，请稍后重试。", "error");
   }
 }
 
@@ -1155,6 +1229,9 @@ function setReplying(isReplying: boolean): void {
   shelfScaleAction.disabled = isReplying;
   shelfLockAction.disabled = isReplying;
   dialogueModeControlsElement.querySelectorAll<HTMLButtonElement>(".mode-button").forEach((control) => {
+    control.disabled = isReplying;
+  });
+  presenceModeControlsElement.querySelectorAll<HTMLButtonElement>(".mode-button").forEach((control) => {
     control.disabled = isReplying;
   });
   historyDetailElement.querySelectorAll<HTMLButtonElement>("button").forEach((control) => {
@@ -1825,6 +1902,10 @@ window.dialogueModeApi?.onModeChanged((modeId) => {
   setDialogueMode(modeId);
 });
 
+window.presenceModeApi?.onModeChanged((modeId) => {
+  setPresenceMode(modeId);
+});
+
 chatForm.addEventListener("submit", (event) => {
   event.preventDefault();
 
@@ -2331,8 +2412,10 @@ window.addEventListener("chat:focus-input", () => {
 
 window.chatApi?.focusInput();
 setDialogueMode("default");
+setPresenceMode("default");
 setMemorySessionStatus(null);
 void refreshDialogueMode();
+void refreshPresenceMode();
 void refreshUserProfile();
 void refreshProviderStatus();
 void refreshMemory();

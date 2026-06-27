@@ -62,6 +62,11 @@
             <p id="settings-dialogue-mode-summary" class="status-box" aria-live="polite">当前模式：默认陪伴</p>
             <p class="selection-note">默认、工作、游戏、读书模式在聊天页状态缎带下切换；切换后会同步到这里。</p>
           </section>
+          <section class="content-stack" aria-labelledby="presence-mode-settings-title">
+            <h3 id="presence-mode-settings-title" class="settings-section-title">存在模式</h3>
+            <p id="settings-presence-mode-summary" class="status-box" aria-live="polite">当前存在：默认陪伴</p>
+            <p class="selection-note">存在模式影响她在桌面上的低打扰程度、待机预算和普通身体动作；不改变对话风格。</p>
+          </section>
           <section class="content-stack" aria-labelledby="provider-settings-title">
             <h3 id="provider-settings-title" class="settings-section-title">Provider / 模型</h3>
             <label class="field-label">
@@ -171,6 +176,10 @@
           <div class="shelf-mode-group">
             <span class="shelf-label">模式</span>
             <div id="dialogue-mode-controls" class="mode-controls" aria-label="对话模式"></div>
+          </div>
+          <div class="shelf-mode-group">
+            <span class="shelf-label">存在</span>
+            <div id="presence-mode-controls" class="mode-controls" aria-label="存在模式"></div>
           </div>
           <button id="shelf-accessory-button" class="button-light shelf-button" type="button">配件：无配件</button>
           <button id="shelf-scale-button" class="button-light shelf-button" type="button">大小：100%</button>

@@ -3,6 +3,7 @@ import { calculateCubismFitLayout, calculateCubismModelBounds, getProjectionView
 import { getCubismRenderBudget, type CubismRenderMode } from "./cubism-render-budget";
 import { CubismMatrix44 } from "./vendor/framework/math/cubismmatrix44";
 import type { Live2DUpdateSample, LoadedLive2DModel, Live2DFrameSample, Live2DRenderer } from "./types";
+import { DEFAULT_PRESENCE_MODE_ID, type PresenceModeId } from "../../../shared/presence-mode";
 
 function resizeCanvas(canvas: HTMLCanvasElement): void {
   const ratio = window.devicePixelRatio || 1;
@@ -62,6 +63,7 @@ function updateModelMatrix(model: LoadedLive2DModel, canvas: HTMLCanvasElement, 
 
 export type Live2DPerformanceSample = {
   mode: CubismRenderMode;
+  presenceModeId: PresenceModeId;
   targetFramesPerSecond: number;
   rafCallbacks: number;
   renderedFrames: number;
@@ -95,6 +97,7 @@ export function createLive2DRenderer(
   let lastCanvasHeight = 0;
   let didLogLayout = false;
   let currentMode: CubismRenderMode = "active";
+  let currentPresenceModeId: PresenceModeId = DEFAULT_PRESENCE_MODE_ID;
   let sampleWindowStartMs = performance.now();
   let rafCallbacks = 0;
   let renderedFrames = 0;
@@ -122,6 +125,7 @@ export function createLive2DRenderer(
 
     onPerformanceSample({
       mode: currentMode,
+      presenceModeId: currentPresenceModeId,
       targetFramesPerSecond,
       rafCallbacks,
       renderedFrames,
@@ -163,7 +167,8 @@ export function createLive2DRenderer(
       nowMs: frameTime,
       lastRenderMs: lastRenderTime,
       isVisible,
-      interactionBoostUntilMs
+      interactionBoostUntilMs,
+      presenceModeId: currentPresenceModeId
     });
     currentMode = budget.mode;
 
@@ -228,6 +233,9 @@ export function createLive2DRenderer(
       if (nextIsVisible) {
         this.boostInteraction();
       }
+    },
+    setPresenceMode(modeId: PresenceModeId): void {
+      currentPresenceModeId = modeId;
     },
     stop(): void {
       if (animationFrameId !== 0) {
