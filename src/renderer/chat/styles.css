@@ -245,6 +245,24 @@ body {
   padding: 7px 10px;
 }
 
+.shelf-echo[data-state="idle"] {
+  border-color: #ead7ad;
+  background: #fff8e8;
+  color: #6b5745;
+}
+
+.shelf-echo[data-state="active"] {
+  border-color: #c8d9bd;
+  background: #f4f8ef;
+  color: #48633e;
+}
+
+.shelf-echo[data-state="fading"] {
+  border-color: #e8d7bc;
+  background: #fffaf0;
+  color: #806b56;
+}
+
 .history-page {
   flex: 1;
   min-height: 0;

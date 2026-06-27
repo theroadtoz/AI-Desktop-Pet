@@ -352,7 +352,8 @@ async function runFirstSession(checks) {
           shelf.textContent.includes("配件：无配件") &&
           shelf.textContent.includes("大小：100%") &&
           shelf.textContent.includes("锁定：未锁定") &&
-          shelf.textContent.includes("最近动作：等待中");
+          shelf.textContent.includes("最近动作：等待中") &&
+          document.querySelector("#shelf-action-echo")?.dataset.state === "idle";
       })()
     `);
 
@@ -410,9 +411,42 @@ async function runFirstSession(checks) {
       (() => {
         const text = document.querySelector("#shelf-action-echo")?.textContent ?? "";
         return text.includes("刚刚摸头") &&
+          document.querySelector("#shelf-action-echo")?.dataset.state === "active" &&
           !text.includes("p2_11e_acceptance") &&
           !text.includes("durationMs");
       })()
+    `);
+    await evaluate(pet, `
+      (() => {
+        window.petApi?.reportTelemetry("pet_interaction_action_started", {
+          type: "headPat",
+          reason: "p2_11e_duplicate_acceptance",
+          durationMs: 99
+        });
+      })()
+    `);
+    await sleep(400);
+    checks.duplicateActionEchoIsStable = await evaluate(chat, `
+      (() => {
+        const echo = document.querySelector("#shelf-action-echo");
+        const text = echo?.textContent ?? "";
+        return text === "最近动作：刚刚摸头" &&
+          echo?.dataset.state === "active" &&
+          !text.includes("p2_11e_duplicate_acceptance") &&
+          !text.includes("durationMs");
+      })()
+    `);
+    await waitFor(chat, "document.querySelector('#shelf-action-echo')?.dataset.state === 'fading'", 7_000);
+    checks.actionEchoFadesNaturally = await evaluate(chat, `
+      (() => {
+        const echo = document.querySelector("#shelf-action-echo");
+        return echo?.dataset.state === "fading" &&
+          echo.textContent.includes("安静陪伴中");
+      })()
+    `);
+    await waitFor(chat, "document.querySelector('#shelf-action-echo')?.dataset.state === 'idle'", 6_000);
+    checks.actionEchoReturnsToIdle = await evaluate(chat, `
+      document.querySelector("#shelf-action-echo")?.textContent === "最近动作：等待中"
     `);
 
     await evaluate(pet, `

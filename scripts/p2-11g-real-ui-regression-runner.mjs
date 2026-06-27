@@ -46,15 +46,29 @@ const extendedScripts = [
   }
 ];
 
-function parseScope() {
-  const scopeIndex = process.argv.indexOf("--scope");
-  if (scopeIndex !== -1) {
-    return process.argv[scopeIndex + 1] || "smoke";
+function parseOption(name) {
+  const optionIndex = process.argv.indexOf(name);
+  if (optionIndex !== -1) {
+    return process.argv[optionIndex + 1] || "smoke";
   }
 
-  const inline = process.argv.find((arg) => arg.startsWith("--scope="));
+  const inline = process.argv.find((arg) => arg.startsWith(`${name}=`));
   if (inline) {
-    return inline.slice("--scope=".length);
+    return inline.slice(name.length + 1);
+  }
+
+  return null;
+}
+
+function parseScope() {
+  const scope = parseOption("--scope");
+  if (scope) {
+    return scope;
+  }
+
+  const mode = parseOption("--mode");
+  if (mode) {
+    return mode;
   }
 
   return "smoke";
@@ -200,7 +214,7 @@ function removeNewTmpDirs(before, after) {
 async function main() {
   const scope = parseScope();
   if (!["smoke", "extended"].includes(scope)) {
-    throw new Error(`Unsupported scope: ${scope}. Use --scope smoke or --scope extended.`);
+    throw new Error(`Unsupported scope: ${scope}. Use --scope smoke, --mode smoke, or extended.`);
   }
 
   mkdirSync(runDir, { recursive: true });

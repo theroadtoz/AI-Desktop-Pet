@@ -244,7 +244,21 @@ let dialogueModes: DialogueModeView[] = [];
 let currentDialogueModeId: DialogueModeId = "default";
 let currentUserProfile: UserProfile | null = null;
 let currentMemoryInjectionCount: number | null = null;
-let currentActivityEcho = "等待中";
+type ActivityEchoState = "idle" | "active" | "fading";
+
+const ACTIVITY_ECHO_IDLE_MESSAGE = "等待中";
+const ACTIVITY_ECHO_FADING_MESSAGE = "安静陪伴中";
+const ACTIVITY_ECHO_ACTIVE_MS = 5_000;
+const ACTIVITY_ECHO_FADING_MS = 4_000;
+const ACTIVITY_ECHO_DEDUPE_MS = 2_500;
+
+let currentActivityEcho = ACTIVITY_ECHO_IDLE_MESSAGE;
+let currentActivityEchoState: ActivityEchoState = "idle";
+let currentRibbonEcho = ACTIVITY_ECHO_IDLE_MESSAGE;
+let lastActivityEchoMessage: string | null = null;
+let lastActivityEchoAt = 0;
+let activityEchoActiveTimer: number | null = null;
+let activityEchoIdleTimer: number | null = null;
 let recordingShortcutActionId: ShortcutActionId | null = null;
 let pendingWheelModifierRecordTimeout: number | null = null;
 
@@ -315,14 +329,69 @@ function renderRibbonEcho(): void {
     ? `本次使用 ${currentMemoryInjectionCount} 条记忆`
     : "本次未使用记忆";
 
-  memorySessionStatusBox.textContent = `${memoryText} · ${currentActivityEcho}`;
+  memorySessionStatusBox.textContent = `${memoryText} · ${currentRibbonEcho}`;
   memorySessionStatusBox.dataset.state = currentMemoryInjectionCount && currentMemoryInjectionCount > 0 ? "ready" : "fallback";
 }
 
-function setActivityEcho(message: string): void {
+function renderActivityEcho(message: string, state: ActivityEchoState): void {
   currentActivityEcho = message;
+  currentActivityEchoState = state;
+
+  if (!isReplying) {
+    currentRibbonEcho = message;
+  }
+
   renderRibbonEcho();
   renderCompanionControlShelf();
+}
+
+function clearActivityEchoTimers(): void {
+  if (activityEchoActiveTimer !== null) {
+    window.clearTimeout(activityEchoActiveTimer);
+    activityEchoActiveTimer = null;
+  }
+
+  if (activityEchoIdleTimer !== null) {
+    window.clearTimeout(activityEchoIdleTimer);
+    activityEchoIdleTimer = null;
+  }
+}
+
+function scheduleActivityEchoLifecycle(): void {
+  clearActivityEchoTimers();
+  activityEchoActiveTimer = window.setTimeout(() => {
+    activityEchoActiveTimer = null;
+    renderActivityEcho(ACTIVITY_ECHO_FADING_MESSAGE, "fading");
+    activityEchoIdleTimer = window.setTimeout(() => {
+      activityEchoIdleTimer = null;
+      lastActivityEchoMessage = null;
+      renderActivityEcho(ACTIVITY_ECHO_IDLE_MESSAGE, "idle");
+    }, ACTIVITY_ECHO_FADING_MS);
+  }, ACTIVITY_ECHO_ACTIVE_MS);
+}
+
+function setPetActivityEcho(message: string): void {
+  const now = Date.now();
+
+  if (
+    message === lastActivityEchoMessage &&
+    currentActivityEchoState === "active" &&
+    now - lastActivityEchoAt <= ACTIVITY_ECHO_DEDUPE_MS
+  ) {
+    lastActivityEchoAt = now;
+    scheduleActivityEchoLifecycle();
+    return;
+  }
+
+  lastActivityEchoMessage = message;
+  lastActivityEchoAt = now;
+  renderActivityEcho(message, "active");
+  scheduleActivityEchoLifecycle();
+}
+
+function setChatLifecycleEcho(message: string): void {
+  currentRibbonEcho = message;
+  renderRibbonEcho();
 }
 
 function renderCompanionControlShelf(): void {
@@ -333,7 +402,7 @@ function renderCompanionControlShelf(): void {
   shelfLockAction.textContent = `锁定：${isPetLocked ? "已锁定" : "未锁定"}`;
   shelfLockAction.dataset.state = isPetLocked ? "ready" : "fallback";
   shelfActionEchoBox.textContent = `最近动作：${currentActivityEcho}`;
-  shelfActionEchoBox.dataset.state = currentActivityEcho === "等待中" ? "fallback" : "ready";
+  shelfActionEchoBox.dataset.state = currentActivityEchoState;
 }
 
 function formatUserProfileSummary(profile: UserProfile | null): string {
@@ -1007,7 +1076,7 @@ function setReplying(isReplying: boolean): void {
     });
 
   if (isReplying) {
-    setActivityEcho("正在回复");
+    setChatLifecycleEcho("正在回复");
     setChatSessionNote("正在等待她回复；可以随时中断本次生成。", "ready");
   }
 }
@@ -1018,7 +1087,7 @@ function finishReplying(activityEcho = "回复完成"): void {
   activeRequestVersion = null;
   isReplying = false;
   setReplying(false);
-  setActivityEcho(activityEcho);
+  setChatLifecycleEcho(activityEcho);
   setChatSessionNote(
     activityEcho === "回复完成"
       ? "回复完成；下一条仍只发送当前输入。"
@@ -1542,7 +1611,7 @@ window.chatApi?.onMemoryInjection((payload) => {
 });
 
 window.chatApi?.onPetActivityEcho((echo) => {
-  setActivityEcho(echo.message);
+  setPetActivityEcho(echo.message);
 });
 
 window.petPresentationApi?.onPetLockChanged((state) => {
