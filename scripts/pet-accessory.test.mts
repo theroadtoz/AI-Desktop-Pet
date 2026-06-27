@@ -75,8 +75,12 @@ test("chat preload exposes accessory preset IPC without arbitrary part or expres
 
 test("pet renderer restores the latest persistent accessory after temporary actions", async () => {
   const source = await readFile(new URL("../src/renderer/pet/main.ts", import.meta.url), "utf8");
+  const playerSource = await readFile(new URL("../src/renderer/pet/interaction-action-player.ts", import.meta.url), "utf8");
 
   assert.match(source, /lastAccessoryPresetId/);
-  assert.match(source, /finishInteractionAction[\s\S]*applyBasePresentationToModel\(lastPresentation, lastAccessoryPresetId\)/);
-  assert.match(source, /activeInteractionAction[\s\S]*applyBasePresentationToModel\(lastPresentation, lastAccessoryPresetId\)/);
+  assert.match(source, /getPersistentPresentation:\s*\(\) => \(\{\s*presentation: lastPresentation,\s*accessoryPresetId: lastAccessoryPresetId\s*\}\)/);
+  assert.match(source, /interactionActionPlayer\.isActive\(\)/);
+  assert.match(playerSource, /const persistent = getPersistentPresentation\(\)/);
+  assert.match(playerSource, /applyPresentation\(persistent\.presentation, persistent\.accessoryPresetId\)/);
+  assert.match(playerSource, /restoredAccessoryPresetId: persistent\.accessoryPresetId/);
 });

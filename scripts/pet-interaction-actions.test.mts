@@ -17,6 +17,90 @@ import {
   isStrongInteractionAction,
   selectRandomPetInteractionAction
 } from "../src/renderer/pet/interaction-actions.ts";
+import { createInteractionActionPlayer } from "../src/renderer/pet/interaction-action-player.ts";
+import {
+  PET_TELEMETRY_ALLOWED_FIELDS,
+  parsePetRendererTelemetryEvent,
+  type PetTelemetryEventType
+} from "../src/shared/pet-telemetry-contract.ts";
+import type { EmotionPresentation } from "../src/shared/emotion-presentation.ts";
+import type { PetAccessoryPresetId } from "../src/shared/pet-accessory.ts";
+
+type FakePlayerTimer = {
+  callback: () => void;
+  delayMs: number;
+  cleared: boolean;
+};
+
+function createFakeInteractionActionPlayer() {
+  let nowMs = 1_000;
+  let persistent: { presentation: EmotionPresentation; accessoryPresetId: PetAccessoryPresetId } = {
+    presentation: { emotion: "neutral", intensity: "low", mode: "neutral" },
+    accessoryPresetId: "none"
+  };
+  const timers: FakePlayerTimer[] = [];
+  const calls: string[] = [];
+  const telemetry: { type: PetTelemetryEventType; payload: Record<string, unknown> }[] = [];
+  const player = createInteractionActionPlayer({
+    now: () => nowMs,
+    scheduleTimeout: (callback, delayMs) => {
+      const timer = { callback, delayMs, cleared: false };
+      timers.push(timer);
+      return timer as ReturnType<typeof setTimeout>;
+    },
+    clearScheduledTimeout: (handle) => {
+      (handle as unknown as FakePlayerTimer).cleared = true;
+    },
+    getAction: getPetInteractionAction,
+    getCooldownSkipReason: getInteractionActionCooldownSkipReason,
+    getWindowShakeLightFeedbackSkipReason,
+    isStrongAction: isStrongInteractionAction,
+    boostInteraction: (durationMs) => {
+      calls.push(`boost:${durationMs ?? "default"}`);
+    },
+    pauseLook: () => {
+      calls.push("pauseLook");
+    },
+    resumeLook: () => {
+      calls.push("resumeLook");
+    },
+    resetLookTarget: () => {
+      calls.push("resetLookTarget");
+    },
+    applyTemporaryPartOpacities: (partIds) => {
+      calls.push(`temporaryParts:${partIds.join(",")}`);
+    },
+    restoreTemporaryPartOpacities: () => {
+      calls.push("restoreParts");
+    },
+    setExpression: (expressionName) => {
+      calls.push(`setExpression:${expressionName}`);
+    },
+    clearExpression: () => {
+      calls.push("clearExpression");
+    },
+    applyPresentation: (presentation, accessoryPresetId) => {
+      calls.push(`applyPresentation:${presentation.emotion}:${accessoryPresetId}`);
+    },
+    getPersistentPresentation: () => persistent,
+    reportTelemetry: (type, payload) => {
+      telemetry.push({ type, payload });
+    }
+  });
+
+  return {
+    player,
+    timers,
+    calls,
+    telemetry,
+    setNow(value: number): void {
+      nowMs = value;
+    },
+    setPersistentAccessory(accessoryPresetId: PetAccessoryPresetId): void {
+      persistent = { ...persistent, accessoryPresetId };
+    }
+  };
+}
 
 test("pet interaction action manifest covers the P2-8A action types", () => {
   assert.deepEqual(
@@ -203,6 +287,175 @@ test("window shake light feedback reuses thinking with active and independent co
   );
 });
 
+test("interaction action player owns start, finish, restore, and finished telemetry", () => {
+  const harness = createFakeInteractionActionPlayer();
+  const reading = getPetInteractionAction("reading");
+
+  assert.equal(harness.player.playAction(reading, "click_body", {
+    modeId: "reading",
+    candidateActionTypes: ["greeting", "thinking", "reading"]
+  }), true);
+  assert.equal(harness.player.isActive(), true);
+  assert.equal(harness.player.getActiveActionType(), "reading");
+  assert.deepEqual(harness.calls, [
+    `boost:${reading.durationMs + 250}`,
+    "pauseLook",
+    "temporaryParts:Part53",
+    "setExpression:glasses"
+  ]);
+  assert.equal(harness.timers.length, 1);
+  assert.equal(harness.timers[0]?.delayMs, reading.durationMs);
+  assert.deepEqual(harness.telemetry[0], {
+    type: "pet_interaction_action_started",
+    payload: {
+      type: "reading",
+      reason: "click_body",
+      durationMs: reading.durationMs,
+      modeId: "reading",
+      candidateActionTypes: ["greeting", "thinking", "reading"],
+      selectedActionType: "reading"
+    }
+  });
+
+  harness.setPersistentAccessory("glasses");
+  harness.setNow(1_000 + reading.durationMs);
+  harness.timers[0]?.callback();
+
+  assert.equal(harness.player.isActive(), false);
+  assert.deepEqual(harness.calls.slice(4), [
+    "restoreParts",
+    "clearExpression",
+    "resetLookTarget",
+    "resumeLook",
+    "applyPresentation:neutral:glasses"
+  ]);
+  assert.deepEqual(harness.telemetry[1], {
+    type: "pet_interaction_action_finished",
+    payload: {
+      type: "reading",
+      reason: "click_body",
+      restoredAccessoryPresetId: "glasses"
+    }
+  });
+});
+
+test("interaction action player prevents stacking and reports active action skips", () => {
+  const harness = createFakeInteractionActionPlayer();
+  const thinking = getPetInteractionAction("thinking");
+
+  assert.equal(harness.player.playAction(thinking, "click_body"), true);
+  assert.equal(harness.player.playAction(getPetInteractionAction("headPat"), "click_head"), false);
+
+  assert.deepEqual(harness.telemetry[1], {
+    type: "pet_interaction_action_skipped",
+    payload: {
+      type: "headPat",
+      reason: "click_head",
+      skipReason: "active_action",
+      activeType: "thinking"
+    }
+  });
+});
+
+test("interaction action player keeps global, headPat, and strong accessory cooldowns", () => {
+  const globalHarness = createFakeInteractionActionPlayer();
+  const greeting = getPetInteractionAction("greeting");
+  assert.equal(globalHarness.player.playAction(greeting, "click_body"), true);
+  globalHarness.setNow(1_000 + greeting.durationMs);
+  globalHarness.timers[0]?.callback();
+  globalHarness.setNow(1_000 + greeting.durationMs + PET_INTERACTION_GLOBAL_COOLDOWN_MS - 1);
+  assert.equal(globalHarness.player.playAction(getPetInteractionAction("thinking"), "click_body"), false);
+  assert.equal(globalHarness.telemetry.at(-1)?.payload.skipReason, "global_cooldown");
+
+  const headHarness = createFakeInteractionActionPlayer();
+  const headPat = getPetInteractionAction("headPat");
+  assert.equal(headHarness.player.playAction(headPat, "click_head"), true);
+  headHarness.setNow(1_000 + headPat.durationMs);
+  headHarness.timers[0]?.callback();
+  headHarness.setNow(1_000 + headPat.durationMs + PET_INTERACTION_HEAD_PAT_COOLDOWN_MS - 1);
+  assert.equal(headHarness.player.playAction(headPat, "click_head"), false);
+  assert.equal(headHarness.telemetry.at(-1)?.payload.skipReason, "head_pat_cooldown");
+
+  const strongHarness = createFakeInteractionActionPlayer();
+  const playGame = getPetInteractionAction("playGame");
+  assert.equal(strongHarness.player.playAction(playGame, "click_body"), true);
+  strongHarness.setNow(1_000 + playGame.durationMs);
+  strongHarness.timers[0]?.callback();
+  strongHarness.setNow(1_000 + playGame.durationMs + PET_INTERACTION_GLOBAL_COOLDOWN_MS + 1);
+  assert.equal(strongHarness.player.playAction(playGame, "click_body"), false);
+  assert.equal(strongHarness.telemetry.at(-1)?.payload.skipReason, "same_action_cooldown");
+});
+
+test("interaction action player owns window shake feedback lifecycle and cooldown telemetry", () => {
+  const harness = createFakeInteractionActionPlayer();
+  const thinking = getPetInteractionAction("thinking");
+
+  assert.equal(harness.player.playWindowShakeLightFeedback(), true);
+  assert.deepEqual(harness.telemetry.map((event) => event.type), [
+    "pet_interaction_action_started",
+    "pet_window_motion_feedback"
+  ]);
+  assert.deepEqual(harness.telemetry[0]?.payload, {
+    type: "thinking",
+    reason: "window_shake_feedback",
+    durationMs: thinking.durationMs
+  });
+  assert.deepEqual(harness.telemetry[1]?.payload, {
+    eventType: "window_shake_candidate",
+    reason: "window_shake_feedback",
+    feedbackType: "shake_light_feedback",
+    result: "started",
+    cooldownState: "available",
+    durationMs: thinking.durationMs
+  });
+
+  harness.setNow(1_000 + thinking.durationMs);
+  harness.timers[0]?.callback();
+  harness.setNow(1_000 + PET_WINDOW_SHAKE_LIGHT_FEEDBACK_COOLDOWN_MS - 1);
+
+  assert.equal(harness.player.playWindowShakeLightFeedback(), false);
+  assert.deepEqual(harness.telemetry.at(-1), {
+    type: "pet_window_motion_feedback",
+    payload: {
+      eventType: "window_shake_candidate",
+      reason: "window_shake_feedback",
+      feedbackType: "shake_light_feedback",
+      result: "skipped",
+      skipReason: "window_shake_feedback_cooldown",
+      cooldownState: "cooling_down",
+      durationMs: thinking.durationMs
+    }
+  });
+});
+
+test("interaction action player only emits renderer telemetry contract fields", () => {
+  const harness = createFakeInteractionActionPlayer();
+  const reading = getPetInteractionAction("reading");
+  const allowedFields = new Set(PET_TELEMETRY_ALLOWED_FIELDS);
+
+  harness.player.playAction(reading, "click_body", {
+    modeId: "reading",
+    candidateActionTypes: ["greeting", "thinking", "reading"]
+  });
+  harness.player.playAction(getPetInteractionAction("headPat"), "click_head");
+  harness.setPersistentAccessory("glasses");
+  harness.setNow(1_000 + reading.durationMs);
+  harness.timers[0]?.callback();
+  harness.setNow(1_000 + PET_WINDOW_SHAKE_LIGHT_FEEDBACK_COOLDOWN_MS - 1);
+  harness.player.playWindowShakeLightFeedback();
+
+  assert.equal(harness.telemetry.length, 5);
+  for (const event of harness.telemetry) {
+    assert.notEqual(parsePetRendererTelemetryEvent(event), null);
+    for (const key of Object.keys(event.payload)) {
+      assert.equal(allowedFields.has(key as typeof PET_TELEMETRY_ALLOWED_FIELDS[number]), true, key);
+    }
+    assert.deepEqual(Object.keys(event.payload).filter((key) => (
+      /prompt|message|content|api|key|body|path|url/i.test(key)
+    )), []);
+  }
+});
+
 test("click action scheduler delays clicks and lets double click cancel the action", () => {
   type FakeTimer = {
     callback: () => void;
@@ -257,15 +510,19 @@ test("pet pointermove no longer drives the Live2D look target", async () => {
 
 test("pet pointer clicks route head and body actions without changing drag or double-click guards", async () => {
   const source = await readFile(new URL("../src/renderer/pet/main.ts", import.meta.url), "utf8");
+  const playerSource = await readFile(new URL("../src/renderer/pet/interaction-action-player.ts", import.meta.url), "utf8");
 
   assert.match(source, /name: "head"/);
   assert.match(source, /name: "body"/);
   assert.match(source, /getPetInteractionAction\("headPat"\)/);
   assert.match(source, /getRandomPetInteractionActionsForMode\(currentDialogueModeId\)/);
-  assert.match(source, /getInteractionActionCooldownSkipReason/);
-  assert.match(source, /skipReason/);
+  assert.match(source, /createInteractionActionPlayer/);
+  assert.match(source, /interactionActionPlayer\.playAction/);
+  assert.match(source, /getCooldownSkipReason: getInteractionActionCooldownSkipReason/);
+  assert.match(playerSource, /getCooldownSkipReason/);
+  assert.match(playerSource, /skipReason/);
   assert.match(source, /candidateActionTypes/);
-  assert.match(source, /selectedActionType/);
+  assert.match(playerSource, /selectedActionType/);
   assert.match(source, /modeId/);
   assert.match(source, /scheduleClickInteractionAction\(hitArea\)/);
   assert.match(source, /!pointerDown \|\| pointerDown\.pointerId !== event\.pointerId/);
@@ -277,6 +534,7 @@ test("window shake feedback IPC uses a fixed safe enum and dedicated reason", as
   const petPreload = await readFile(new URL("../src/preload/pet-preload.ts", import.meta.url), "utf8");
   const appSource = await readFile(new URL("../src/main/app.ts", import.meta.url), "utf8");
   const rendererSource = await readFile(new URL("../src/renderer/pet/main.ts", import.meta.url), "utf8");
+  const playerSource = await readFile(new URL("../src/renderer/pet/interaction-action-player.ts", import.meta.url), "utf8");
 
   assert.match(appSource, /candidate\.eventType === "window_shake_candidate"/);
   assert.match(appSource, /window\.webContents\.send\("pet:window-motion-feedback",\s*{\s*type: "shake_light_feedback"\s*}\)/s);
@@ -288,9 +546,11 @@ test("window shake feedback IPC uses a fixed safe enum and dedicated reason", as
   const feedbackPreload = petPreload.slice(feedbackPreloadStart, feedbackPreloadEnd);
   assert.doesNotMatch(feedbackPreload, /expressionName|partIds|durationMs|\.motion|motion:/);
   assert.match(rendererSource, /onWindowMotionFeedback/);
-  assert.match(rendererSource, /getPetInteractionAction\("thinking"\)/);
-  assert.match(rendererSource, /"window_shake_feedback"/);
-  assert.match(rendererSource, /getWindowShakeLightFeedbackSkipReason/);
+  assert.match(rendererSource, /interactionActionPlayer\.playWindowShakeLightFeedback\(\)/);
+  assert.match(rendererSource, /getAction: getPetInteractionAction/);
+  assert.match(playerSource, /getAction\("thinking"\)/);
+  assert.match(playerSource, /"window_shake_feedback"/);
+  assert.match(playerSource, /getWindowShakeLightFeedbackSkipReason/);
   assert.doesNotMatch(rendererSource, /feedback\.(expression|motion|part|duration|resource)/);
 });
 
@@ -319,5 +579,5 @@ test("pet startup appearance waits for a visible Live2D frame and only plays onc
   assert.match(source, /let hasPlayedStartupAppearance = false/);
   assert.match(source, /waitForNextLive2DFrameSample\(\)/);
   assert.match(source, /!hasPlayedStartupAppearance && sample && sample\.nonTransparentPixels > 0/);
-  assert.match(source, /playInteractionAction\(getPetInteractionAction\("appearance"\), "startup_first_visible_frame"\)/);
+  assert.match(source, /interactionActionPlayer\.playAction\(getPetInteractionAction\("appearance"\), "startup_first_visible_frame"\)/);
 });

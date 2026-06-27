@@ -9,14 +9,19 @@ import { getScreenDragDelta, shouldSuppressScaleWheelDuringDrag, type ScreenPoin
 import { createScaleWheelNormalizer, hasScaleWheelModifiers } from "./scale-wheel";
 import {
   createClickActionScheduler,
-  getRandomPetInteractionActionsForMode,
   getInteractionActionCooldownSkipReason,
+  getRandomPetInteractionActionsForMode,
   getPetInteractionAction,
   getWindowShakeLightFeedbackSkipReason,
   isStrongInteractionAction,
   selectRandomPetInteractionAction,
   type PetInteractionAction
 } from "./interaction-actions";
+import {
+  createInteractionActionPlayer,
+  type InteractionActionReason,
+  type InteractionActionStrategy
+} from "./interaction-action-player";
 import { DEFAULT_DIALOGUE_MODE_ID, type DialogueModeId } from "../../shared/dialogue-style";
 import {
   selectEmotionPresentation,
@@ -240,12 +245,7 @@ let currentRenderStartMs = 0;
 let firstFrameMs: number | undefined;
 let recoveryCount = 0;
 let pendingLive2DFrameSample: ((sample: Live2DFrameSample) => void) | null = null;
-let activeInteractionAction: { action: PetInteractionAction; timeoutId: number } | null = null;
 let hasPlayedStartupAppearance = false;
-let lastInteractionActionFinishedAtMs: number | undefined;
-let lastHeadPatFinishedAtMs: number | undefined;
-let lastWindowShakeFeedbackStartedAtMs: number | undefined;
-const lastStrongInteractionActionFinishedAtMsByType: Partial<Record<PetInteractionAction["type"], number>> = {};
 let currentDialogueModeId: DialogueModeId = DEFAULT_DIALOGUE_MODE_ID;
 
 async function applyBasePresentationToLoadedModel(
@@ -276,6 +276,48 @@ function applyBasePresentationToModel(presentation: EmotionPresentation, accesso
 
   void applyBasePresentationToLoadedModel(presentation, accessoryPresetId);
 }
+
+const interactionActionPlayer = createInteractionActionPlayer({
+  now: () => performance.now(),
+  scheduleTimeout: (callback, delayMs) => window.setTimeout(callback, delayMs),
+  clearScheduledTimeout: (handle) => window.clearTimeout(handle),
+  getAction: getPetInteractionAction,
+  getCooldownSkipReason: getInteractionActionCooldownSkipReason,
+  getWindowShakeLightFeedbackSkipReason,
+  isStrongAction: isStrongInteractionAction,
+  boostInteraction: (durationMs) => {
+    live2DRenderer?.boostInteraction(durationMs);
+  },
+  pauseLook: () => {
+    live2DModel?.setLookPaused(true);
+  },
+  resumeLook: () => {
+    live2DModel?.setLookPaused(false);
+  },
+  resetLookTarget: () => {
+    live2DModel?.setLookTarget(0, 0);
+  },
+  applyTemporaryPartOpacities: (partIds) => {
+    live2DModel?.applyTemporaryPartOpacities(partIds, 1);
+  },
+  restoreTemporaryPartOpacities: () => {
+    live2DModel?.restoreTemporaryPartOpacities();
+  },
+  setExpression: (expressionName) => {
+    void live2DModel?.setExpression(expressionName);
+  },
+  clearExpression: () => {
+    live2DModel?.clearExpression();
+  },
+  applyPresentation: applyBasePresentationToModel,
+  getPersistentPresentation: () => ({
+    presentation: lastPresentation,
+    accessoryPresetId: lastAccessoryPresetId
+  }),
+  reportTelemetry: (type, payload) => {
+    window.petApi?.reportTelemetry(type, payload);
+  }
+});
 
 function applyBasePresentation(presentation: EmotionPresentation, accessoryPresetId: PetAccessoryPresetId): void {
   lastPresentation = presentation;
@@ -311,7 +353,7 @@ function applyPresentationIntent(intent: PetPresentationIntent): void {
     lastPresentation = intent.expression;
   }
 
-  if (!activeInteractionAction) {
+  if (!interactionActionPlayer.isActive()) {
     applyBasePresentationToModel(lastPresentation, lastAccessoryPresetId);
   }
 
@@ -432,7 +474,7 @@ async function startPetRenderer(): Promise<void> {
     const sample = await firstLive2DFrameSample;
     if (!hasPlayedStartupAppearance && sample && sample.nonTransparentPixels > 0) {
       hasPlayedStartupAppearance = true;
-      playInteractionAction(getPetInteractionAction("appearance"), "startup_first_visible_frame");
+      interactionActionPlayer.playAction(getPetInteractionAction("appearance"), "startup_first_visible_frame");
     }
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
@@ -557,7 +599,7 @@ const removeDialogueModeChangedListener = window.petApi?.onDialogueModeChanged((
 }) ?? null;
 const removeWindowMotionFeedbackListener = window.petApi?.onWindowMotionFeedback((feedback) => {
   if (feedback.type === "shake_light_feedback") {
-    handleWindowMotionFeedback();
+    interactionActionPlayer.playWindowShakeLightFeedback();
   }
 }) ?? null;
 
@@ -591,6 +633,7 @@ window.addEventListener("beforeunload", () => {
   removeDialogueModeChangedListener?.();
   removeWindowMotionFeedbackListener?.();
   cancelClickInteractionAction();
+  interactionActionPlayer.dispose();
   live2DRenderer?.release();
   live2DRenderer = null;
   live2DModel = null;
@@ -736,127 +779,10 @@ function tryReleasePointerCapture(pointerId: number): void {
   }
 }
 
-function finishInteractionAction(action: PetInteractionAction): void {
-  if (activeInteractionAction?.action !== action) {
-    return;
-  }
-
-  activeInteractionAction = null;
-  live2DModel?.restoreTemporaryPartOpacities();
-  live2DModel?.clearExpression();
-  live2DModel?.setLookTarget(0, 0);
-  live2DModel?.setLookPaused(false);
-  applyBasePresentationToModel(lastPresentation, lastAccessoryPresetId);
-}
-
-type InteractionActionReason = "startup_first_visible_frame" | "click_head" | "click_body";
-type WindowMotionFeedbackReason = "window_shake_feedback";
-
-function playInteractionAction(
-  action: PetInteractionAction,
-  reason: InteractionActionReason | WindowMotionFeedbackReason,
-  strategy?: { modeId: DialogueModeId; candidateActionTypes: readonly PetInteractionAction["type"][] }
-): boolean {
-  const skipReason = getInteractionActionCooldownSkipReason(action, performance.now(), {
-    activeType: activeInteractionAction?.action.type,
-    lastActionFinishedAtMs: lastInteractionActionFinishedAtMs,
-    lastHeadPatFinishedAtMs,
-    strongActionFinishedAtMsByType: lastStrongInteractionActionFinishedAtMsByType
-  });
-
-  if (skipReason) {
-    window.petApi?.reportTelemetry("pet_interaction_action_skipped", {
-      type: action.type,
-      reason,
-      skipReason,
-      ...(strategy ? { modeId: strategy.modeId } : {}),
-      ...(activeInteractionAction ? { activeType: activeInteractionAction.action.type } : {})
-    });
-    return false;
-  }
-
-  window.petApi?.reportTelemetry("pet_interaction_action_started", {
-    type: action.type,
-    reason,
-    durationMs: action.durationMs,
-    ...(strategy ? {
-      modeId: strategy.modeId,
-      candidateActionTypes: strategy.candidateActionTypes,
-      selectedActionType: action.type
-    } : {})
-  });
-  live2DRenderer?.boostInteraction(action.durationMs + 250);
-  live2DModel?.setLookPaused(true);
-  live2DModel?.applyTemporaryPartOpacities(action.accessoryPartIds ?? [], 1);
-
-  if (action.expressionName) {
-    void live2DModel?.setExpression(action.expressionName);
-  } else {
-    applyBasePresentationToModel(action.presentation, lastAccessoryPresetId);
-  }
-
-  const timeoutId = window.setTimeout(() => {
-    finishInteractionAction(action);
-    const finishedAtMs = performance.now();
-    lastInteractionActionFinishedAtMs = finishedAtMs;
-    if (action.type === "headPat") {
-      lastHeadPatFinishedAtMs = finishedAtMs;
-    }
-    if (isStrongInteractionAction(action.type)) {
-      lastStrongInteractionActionFinishedAtMsByType[action.type] = finishedAtMs;
-    }
-    window.petApi?.reportTelemetry("pet_interaction_action_finished", {
-      type: action.type,
-      reason,
-      restoredAccessoryPresetId: lastAccessoryPresetId
-    });
-  }, action.durationMs);
-
-  activeInteractionAction = { action, timeoutId };
-  return true;
-}
-
-function handleWindowMotionFeedback(): void {
-  const action = getPetInteractionAction("thinking");
-  const nowMs = performance.now();
-  const skipReason = getWindowShakeLightFeedbackSkipReason(action, nowMs, {
-    activeType: activeInteractionAction?.action.type,
-    lastActionFinishedAtMs: lastInteractionActionFinishedAtMs,
-    lastHeadPatFinishedAtMs,
-    strongActionFinishedAtMsByType: lastStrongInteractionActionFinishedAtMsByType,
-    lastWindowShakeFeedbackStartedAtMs
-  });
-
-  if (skipReason) {
-    window.petApi?.reportTelemetry("pet_window_motion_feedback", {
-      eventType: "window_shake_candidate",
-      reason: "window_shake_feedback",
-      feedbackType: "shake_light_feedback",
-      result: "skipped",
-      skipReason,
-      cooldownState: skipReason === "window_shake_feedback_cooldown" ? "cooling_down" : "available",
-      durationMs: action.durationMs
-    });
-    return;
-  }
-
-  if (playInteractionAction(action, "window_shake_feedback")) {
-    lastWindowShakeFeedbackStartedAtMs = nowMs;
-    window.petApi?.reportTelemetry("pet_window_motion_feedback", {
-      eventType: "window_shake_candidate",
-      reason: "window_shake_feedback",
-      feedbackType: "shake_light_feedback",
-      result: "started",
-      cooldownState: "available",
-      durationMs: action.durationMs
-    });
-  }
-}
-
 type PendingClickAction = {
   action: PetInteractionAction;
   reason: InteractionActionReason;
-  strategy?: { modeId: DialogueModeId; candidateActionTypes: readonly PetInteractionAction["type"][] };
+  strategy?: InteractionActionStrategy;
 };
 
 function createBodyClickAction(): PendingClickAction {
@@ -877,7 +803,7 @@ let pendingClickAction: PendingClickAction | null = null;
 function triggerPendingClickInteractionAction(): void {
   const pending = pendingClickAction ?? createBodyClickAction();
   pendingClickAction = null;
-  playInteractionAction(pending.action, pending.reason, pending.strategy);
+  interactionActionPlayer.playAction(pending.action, pending.reason, pending.strategy);
 }
 
 const petClickActionScheduler = createClickActionScheduler({
