@@ -1019,8 +1019,9 @@ app.whenReady().then(async () => {
       return;
     }
 
-    logTelemetry("pet_health", sanitizeRenderHealth(state));
-    console.info("[pet] health", state);
+    const healthPayload = sanitizeRenderHealth(state);
+    logTelemetry("pet_health", healthPayload);
+    console.info("[pet] health", healthPayload);
   });
 
   ipcMain.on("pet:telemetry", (event, rendererEvent: unknown) => {

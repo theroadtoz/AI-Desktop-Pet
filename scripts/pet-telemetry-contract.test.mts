@@ -191,6 +191,39 @@ test("health and recovery telemetry drop text bodies and unsafe context", () => 
   assertNoForbiddenKeys(recoveryFailed?.payload);
 });
 
+test("presentation telemetry lists every safe retained field", () => {
+  const event = parsePetRendererTelemetryEvent({
+    type: "pet_presentation_intent_applied",
+    payload: {
+      state: "thinking",
+      requestVersion: 7,
+      emotion: "happy",
+      intensity: "medium",
+      mode: "micro",
+      recovery: "safe-neutral",
+      allowMicroExpression: true,
+      allowEmphasisExpression: false,
+      prompt: "完整 system prompt",
+      content: "用户完整消息正文"
+    }
+  });
+
+  assert.deepEqual(event, {
+    type: "pet_presentation_intent_applied",
+    payload: {
+      state: "thinking",
+      requestVersion: 7,
+      emotion: "happy",
+      intensity: "medium",
+      mode: "micro",
+      recovery: "safe-neutral",
+      allowMicroExpression: true,
+      allowEmphasisExpression: false
+    }
+  });
+  assertNoForbiddenKeys(event?.payload);
+});
+
 test("main pet telemetry path uses the shared contract parser and sanitizer", async () => {
   const source = await readFile(new URL("../src/main/app.ts", import.meta.url), "utf8");
 
@@ -198,4 +231,5 @@ test("main pet telemetry path uses the shared contract parser and sanitizer", as
   assert.match(source, /sanitizePetTelemetryEvent/);
   assert.doesNotMatch(source, /RENDERER_TELEMETRY_TYPES/);
   assert.doesNotMatch(source, /function sanitizeRendererTelemetry/);
+  assert.doesNotMatch(source, /console\.info\("\[pet\] health", state\)/);
 });

@@ -70,6 +70,7 @@ export const PET_TELEMETRY_ALLOWED_FIELDS = [
   "requestVersion",
   "emotion",
   "intensity",
+  "recovery",
   "allowMicroExpression",
   "allowEmphasisExpression",
   "targetFramesPerSecond",
