@@ -23,6 +23,20 @@ import {
   parsePetRendererTelemetryEvent,
   type PetTelemetryEventType
 } from "../src/shared/pet-telemetry-contract.ts";
+import {
+  PET_BODY_POOL_ACTION_TYPES,
+  PET_INTERACTION_ACTION_CATALOG,
+  PET_STRONG_ACCESSORY_ACTION_TYPES,
+  PET_WINDOW_SHAKE_SAFE_ECHO_MESSAGE,
+  getPetInteractionActionSafeEchoMessage,
+  getPetWindowMotionFeedbackSafeEchoMessage
+} from "../src/shared/interaction-action-catalog.ts";
+import {
+  PET_BODY_POOL_ACTION_TYPES as SCRIPT_BODY_POOL_ACTION_TYPES,
+  PET_INTERACTION_ACTION_CATALOG as SCRIPT_INTERACTION_ACTION_CATALOG,
+  PET_STRONG_ACCESSORY_ACTION_TYPES as SCRIPT_STRONG_ACCESSORY_ACTION_TYPES,
+  PET_WINDOW_SHAKE_SAFE_ECHO_MESSAGE as SCRIPT_WINDOW_SHAKE_SAFE_ECHO_MESSAGE
+} from "./support/pet-action-semantic-constants.mjs";
 import type { EmotionPresentation } from "../src/shared/emotion-presentation.ts";
 import type { PetAccessoryPresetId } from "../src/shared/pet-accessory.ts";
 
@@ -111,6 +125,76 @@ test("pet interaction action manifest covers the P2-8A action types", () => {
   for (const action of PET_INTERACTION_ACTIONS) {
     assert.equal(action.weight > 0, true);
     assert.equal(action.durationMs > 0, true);
+  }
+});
+
+test("pet interaction action catalog covers manifest semantics and safe echoes", () => {
+  assert.deepEqual(
+    Object.keys(PET_INTERACTION_ACTION_CATALOG).sort(),
+    [...PET_INTERACTION_ACTION_TYPES].sort()
+  );
+
+  for (const action of PET_INTERACTION_ACTIONS) {
+    const semantic = PET_INTERACTION_ACTION_CATALOG[action.type];
+    assert.equal(semantic.actionType, action.type);
+    assert.equal(semantic.safeEchoMessage.length > 0, true);
+    assert.equal(semantic.defaultDurationMs, action.durationMs);
+    assert.equal(getPetInteractionActionSafeEchoMessage(action.type), semantic.safeEchoMessage);
+  }
+});
+
+test("pet interaction action catalog owns body pool eligibility and strong accessory markers", () => {
+  assert.deepEqual(
+    [...PET_BODY_POOL_ACTION_TYPES].sort(),
+    ["focus", "greeting", "playGame", "reading", "thinking"].sort()
+  );
+  assert.equal(PET_INTERACTION_ACTION_CATALOG.appearance.bodyPoolEligible, false);
+  assert.equal(PET_INTERACTION_ACTION_CATALOG.headPat.bodyPoolEligible, false);
+  assert.deepEqual([...PET_STRONG_ACCESSORY_ACTION_TYPES].sort(), ["playGame", "reading"].sort());
+  assert.equal(PET_INTERACTION_ACTION_CATALOG.playGame.strongAccessory, true);
+  assert.equal(PET_INTERACTION_ACTION_CATALOG.reading.strongAccessory, true);
+  assert.equal(PET_INTERACTION_ACTION_CATALOG.greeting.strongAccessory, false);
+});
+
+test("safe echo helpers reject unknown actions and strip window shake payload detail", () => {
+  assert.equal(getPetInteractionActionSafeEchoMessage("unknown_action"), null);
+  assert.equal(getPetWindowMotionFeedbackSafeEchoMessage("skipped"), null);
+  assert.equal(getPetWindowMotionFeedbackSafeEchoMessage("started"), PET_WINDOW_SHAKE_SAFE_ECHO_MESSAGE);
+  assert.equal(PET_WINDOW_SHAKE_SAFE_ECHO_MESSAGE, "刚刚被晃了一下");
+  assert.equal(/reason|duration|payload|window_shake_feedback/i.test(PET_WINDOW_SHAKE_SAFE_ECHO_MESSAGE), false);
+});
+
+test("main pet activity echo delegates safe messages to the shared catalog helpers", async () => {
+  const source = await readFile(new URL("../src/main/app.ts", import.meta.url), "utf8");
+  const createEchoStart = source.indexOf("function createPetActivityEcho");
+  const createEchoEnd = source.indexOf("function startPerformanceHeartbeat", createEchoStart);
+  const createEchoSource = source.slice(createEchoStart, createEchoEnd);
+
+  assert.notEqual(createEchoStart, -1);
+  assert.match(createEchoSource, /getPetInteractionActionSafeEchoMessage\(payload\.type\)/);
+  assert.match(createEchoSource, /getPetWindowMotionFeedbackSafeEchoMessage\(payload\.result\)/);
+  assert.match(createEchoSource, /return message \? \{ message \} : null/);
+  assert.doesNotMatch(createEchoSource, /case "headPat"|case "playGame"|刚刚摸头|刚刚玩游戏|durationMs|reason/);
+});
+
+test("real UI script action constants stay aligned with the shared catalog", () => {
+  assert.deepEqual(
+    Object.keys(SCRIPT_INTERACTION_ACTION_CATALOG).sort(),
+    Object.keys(PET_INTERACTION_ACTION_CATALOG).sort()
+  );
+  assert.deepEqual([...SCRIPT_BODY_POOL_ACTION_TYPES].sort(), [...PET_BODY_POOL_ACTION_TYPES].sort());
+  assert.deepEqual([...SCRIPT_STRONG_ACCESSORY_ACTION_TYPES].sort(), [...PET_STRONG_ACCESSORY_ACTION_TYPES].sort());
+  assert.equal(SCRIPT_WINDOW_SHAKE_SAFE_ECHO_MESSAGE, PET_WINDOW_SHAKE_SAFE_ECHO_MESSAGE);
+
+  for (const type of PET_INTERACTION_ACTION_TYPES) {
+    assert.equal(
+      SCRIPT_INTERACTION_ACTION_CATALOG[type]?.safeEchoMessage,
+      PET_INTERACTION_ACTION_CATALOG[type].safeEchoMessage
+    );
+    assert.equal(
+      SCRIPT_INTERACTION_ACTION_CATALOG[type]?.defaultDurationMs,
+      PET_INTERACTION_ACTION_CATALOG[type].defaultDurationMs
+    );
   }
 });
 

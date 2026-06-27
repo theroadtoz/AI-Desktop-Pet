@@ -1,6 +1,12 @@
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import {
+  PET_BODY_POOL_ACTION_TYPES,
+  PET_INTERACTION_ACTION_CATALOG,
+  PET_INTERACTION_ACTION_TYPES,
+  PET_STRONG_ACCESSORY_ACTION_TYPES
+} from "./support/pet-action-semantic-constants.mjs";
 
 const root = resolve(new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"));
 const stamp = new Date().toISOString().replace(/[:.]/g, "-");
@@ -280,17 +286,19 @@ async function main() {
 
   const checks = [];
   const actions = [
-    { type: "headPat", random: 0.2, hitArea: "head", durationMs: 1_500, captureDelayMs: 650 },
-    { type: "greeting", random: 0.05, hitArea: "body", durationMs: 1_400, captureDelayMs: 650 },
-    { type: "thinking", random: 0.55, hitArea: "body", durationMs: 1_800, captureDelayMs: 750 },
-    { type: "playGame", random: 0.8, hitArea: "body", durationMs: 1_700, captureDelayMs: 700 },
-    { type: "reading", random: 0.9, hitArea: "body", durationMs: 1_900, captureDelayMs: 800 },
-    { type: "focus", random: 0.98, hitArea: "body", durationMs: 1_700, captureDelayMs: 700 }
+    { type: "headPat", random: 0.2, hitArea: "head", durationMs: PET_INTERACTION_ACTION_CATALOG.headPat.defaultDurationMs, captureDelayMs: 650 },
+    { type: "greeting", random: 0.05, hitArea: "body", durationMs: PET_INTERACTION_ACTION_CATALOG.greeting.defaultDurationMs, captureDelayMs: 650 },
+    { type: "thinking", random: 0.55, hitArea: "body", durationMs: PET_INTERACTION_ACTION_CATALOG.thinking.defaultDurationMs, captureDelayMs: 750 },
+    { type: "playGame", random: 0.8, hitArea: "body", durationMs: PET_INTERACTION_ACTION_CATALOG.playGame.defaultDurationMs, captureDelayMs: 700 },
+    { type: "reading", random: 0.9, hitArea: "body", durationMs: PET_INTERACTION_ACTION_CATALOG.reading.defaultDurationMs, captureDelayMs: 800 },
+    { type: "focus", random: 0.98, hitArea: "body", durationMs: PET_INTERACTION_ACTION_CATALOG.focus.defaultDurationMs, captureDelayMs: 700 }
   ];
   let headBurstSummary = null;
   let bodyBurstSummary = null;
   let dragScaleSummary = null;
   let lockSummary = null;
+  const bodyPoolActionTypes = new Set(PET_BODY_POOL_ACTION_TYPES);
+  const strongAccessoryActionTypes = new Set(PET_STRONG_ACCESSORY_ACTION_TYPES);
 
   try {
     await waitForJson(`http://127.0.0.1:${port}/json/version`, 30_000);
@@ -437,8 +445,8 @@ async function main() {
     });
     checks.push({
       name: "bodyClickUsesOrdinaryPool",
-      ok: ["greeting", "thinking", "playGame", "reading", "focus"].every((type) => bodyActionTypes.has(type)) &&
-        !startedActions.some((event) => event.reason === "click_body" && (event.type === "appearance" || event.type === "headPat")),
+      ok: PET_BODY_POOL_ACTION_TYPES.every((type) => bodyActionTypes.has(type)) &&
+        !startedActions.some((event) => event.reason === "click_body" && !bodyPoolActionTypes.has(event.type)),
       detail: [...bodyActionTypes]
     });
     checks.push({
@@ -450,9 +458,8 @@ async function main() {
     checks.push({
       name: "bodyBurst20UsesCooldownSkips",
       ok: (bodyBurstSummary?.started ?? []).every((event) => (
-        ["greeting", "thinking", "playGame", "reading", "focus"].includes(event.type)
+        bodyPoolActionTypes.has(event.type)
       )) &&
-        !(bodyBurstSummary?.started ?? []).some((event) => event.type === "appearance" || event.type === "headPat") &&
         (bodyBurstSummary?.skipped ?? []).some((event) => event.skipReason === "active_action" || event.skipReason === "global_cooldown"),
       detail: bodyBurstSummary
     });
@@ -460,11 +467,11 @@ async function main() {
       name: "strongAccessoryActionsDoNotRepeatImmediately",
       ok: telemetry.events.some((event) => (
         event.type === "pet_interaction_action_skipped" &&
-        (event.payload?.type === "playGame" || event.payload?.type === "reading") &&
+        strongAccessoryActionTypes.has(event.payload?.type) &&
         event.payload?.skipReason === "same_action_cooldown"
       )),
       detail: telemetry.events
-        .filter((event) => event.type === "pet_interaction_action_skipped" && (event.payload?.type === "playGame" || event.payload?.type === "reading"))
+        .filter((event) => event.type === "pet_interaction_action_skipped" && strongAccessoryActionTypes.has(event.payload?.type))
         .map((event) => event.payload)
     });
     checks.push({
@@ -474,7 +481,7 @@ async function main() {
     });
     checks.push({
       name: "temporaryActionsFinish",
-      ok: ["appearance", "headPat", "greeting", "thinking", "playGame", "reading", "focus"].every((type) => (
+      ok: PET_INTERACTION_ACTION_TYPES.every((type) => (
         finishedActions.some((event) => event.type === type)
       )),
       detail: finishedActions

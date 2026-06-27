@@ -27,6 +27,10 @@ import { isHistoryId, type HistoryMessage } from "../shared/chat-history";
 import { isMemoryId, parseMemoryCardDraft, parseMemoryCardUpdate, type MemoryCardUpdate } from "../shared/chat-memory";
 import { DIALOGUE_MODE_VIEWS, isDialogueModeId, type DialogueModeId } from "../shared/dialogue-style";
 import { selectEmotionPresentation } from "../shared/emotion-presentation";
+import {
+  getPetInteractionActionSafeEchoMessage,
+  getPetWindowMotionFeedbackSafeEchoMessage
+} from "../shared/interaction-action-catalog";
 import { isPetAccessoryPresetId } from "../shared/pet-accessory";
 import {
   createPetPresentationIntent,
@@ -430,32 +434,17 @@ function notifyChatPetActivityEcho(echo: PetActivityEcho): boolean {
 function createPetActivityEcho(event: PetTelemetryEvent): PetActivityEcho | null {
   const payload = event.payload ?? {};
 
-  if (event.type === "pet_window_motion_feedback" && payload.result === "started") {
-    return { message: "刚刚被晃了一下" };
+  if (event.type === "pet_window_motion_feedback") {
+    const message = getPetWindowMotionFeedbackSafeEchoMessage(payload.result);
+    return message ? { message } : null;
   }
 
   if (event.type !== "pet_interaction_action_started") {
     return null;
   }
 
-  switch (payload.type) {
-    case "appearance":
-      return { message: "刚刚打招呼" };
-    case "headPat":
-      return { message: "刚刚摸头" };
-    case "greeting":
-      return { message: "刚刚打招呼" };
-    case "thinking":
-      return { message: "刚刚思考" };
-    case "playGame":
-      return { message: "刚刚玩游戏" };
-    case "reading":
-      return { message: "刚刚读书" };
-    case "focus":
-      return { message: "刚刚专注" };
-    default:
-      return null;
-  }
+  const message = getPetInteractionActionSafeEchoMessage(payload.type);
+  return message ? { message } : null;
 }
 
 function startPerformanceHeartbeat(): void {

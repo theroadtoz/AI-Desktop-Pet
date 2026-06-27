@@ -16,6 +16,11 @@ import {
   stopElectron,
   waitFor
 } from "./support/real-ui-harness.mjs";
+import {
+  PET_WINDOW_SHAKE_FEEDBACK_REASON,
+  PET_WINDOW_SHAKE_SAFE_ECHO_MESSAGE,
+  getPetInteractionActionSafeEchoMessage
+} from "./support/pet-action-semantic-constants.mjs";
 
 const context = createRealUiRunContext({
   runName: "p2-11e-companion-control-shelf-real-ui",
@@ -30,6 +35,8 @@ const forbiddenTexts = [
   ".env.local",
   "原始鼠标轨迹"
 ];
+const HEAD_PAT_ACTION_TYPE = "headPat";
+const HEAD_PAT_SAFE_ECHO_MESSAGE = getPetInteractionActionSafeEchoMessage(HEAD_PAT_ACTION_TYPE);
 
 function log(message) {
   logRun(context, message);
@@ -123,17 +130,17 @@ async function runFirstSession(checks) {
     await evaluate(pet, `
       (() => {
         window.petApi?.reportTelemetry("pet_interaction_action_started", {
-          type: "headPat",
+          type: ${JSON.stringify(HEAD_PAT_ACTION_TYPE)},
           reason: "p2_11e_acceptance",
           durationMs: 1
         });
       })()
     `);
-    await waitFor(chat, "document.querySelector('#shelf-action-echo')?.textContent.includes('刚刚摸头')");
+    await waitFor(chat, `document.querySelector('#shelf-action-echo')?.textContent.includes(${JSON.stringify(HEAD_PAT_SAFE_ECHO_MESSAGE)})`);
     checks.actionEchoIsShortAndVisible = await evaluate(chat, `
       (() => {
         const text = document.querySelector("#shelf-action-echo")?.textContent ?? "";
-        return text.includes("刚刚摸头") &&
+        return text.includes(${JSON.stringify(HEAD_PAT_SAFE_ECHO_MESSAGE)}) &&
           document.querySelector("#shelf-action-echo")?.dataset.state === "active" &&
           !text.includes("p2_11e_acceptance") &&
           !text.includes("durationMs");
@@ -142,7 +149,7 @@ async function runFirstSession(checks) {
     await evaluate(pet, `
       (() => {
         window.petApi?.reportTelemetry("pet_interaction_action_started", {
-          type: "headPat",
+          type: ${JSON.stringify(HEAD_PAT_ACTION_TYPE)},
           reason: "p2_11e_duplicate_acceptance",
           durationMs: 99
         });
@@ -153,7 +160,7 @@ async function runFirstSession(checks) {
       (() => {
         const echo = document.querySelector("#shelf-action-echo");
         const text = echo?.textContent ?? "";
-        return text === "最近动作：刚刚摸头" &&
+        return text === ${JSON.stringify(`最近动作：${HEAD_PAT_SAFE_ECHO_MESSAGE}`)} &&
           echo?.dataset.state === "active" &&
           !text.includes("p2_11e_duplicate_acceptance") &&
           !text.includes("durationMs");
@@ -176,15 +183,15 @@ async function runFirstSession(checks) {
       (() => {
         window.petApi?.reportTelemetry("pet_window_motion_feedback", {
           eventType: "window_shake_candidate",
-          reason: "window_shake_feedback",
+          reason: ${JSON.stringify(PET_WINDOW_SHAKE_FEEDBACK_REASON)},
           feedbackType: "shake_light_feedback",
           result: "started"
         });
       })()
     `);
-    await waitFor(chat, "document.querySelector('#shelf-action-echo')?.textContent.includes('刚刚被晃了一下')");
+    await waitFor(chat, `document.querySelector('#shelf-action-echo')?.textContent.includes(${JSON.stringify(PET_WINDOW_SHAKE_SAFE_ECHO_MESSAGE)})`);
     checks.windowMotionEchoIsShort = await evaluate(chat, `
-      document.querySelector("#shelf-action-echo")?.textContent.includes("刚刚被晃了一下")
+      document.querySelector("#shelf-action-echo")?.textContent.includes(${JSON.stringify(PET_WINDOW_SHAKE_SAFE_ECHO_MESSAGE)})
     `);
 
     const desktopLayout = await checkLayout(chat, 420, 640);
