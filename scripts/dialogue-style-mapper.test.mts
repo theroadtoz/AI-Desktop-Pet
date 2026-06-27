@@ -38,6 +38,20 @@ test("dialogue style mapper creates distinct mode prompts without expanding memo
   assert.equal(readingMapped.some((message) => message.role === "system" && message.content.includes("P2-10C-事实卡正文")), true);
 });
 
+test("provider message mapping injects only sanitized user profile call name", () => {
+  const messages = [{ id: crypto.randomUUID(), role: "user" as const, content: "你好" }];
+  const mapped = mapChatMessagesToOpenAICompatible(messages, undefined, {
+    modeId: "default",
+    styleId: "gentle-desktop-companion-v1"
+  }, {
+    preferredName: "夏夏"
+  });
+
+  assert.equal(mapped.some((message) => message.role === "system" && message.content === "用户希望被称呼为：夏夏"), true);
+  assert.equal(mapped.some((message) => message.content.includes("displayName")), false);
+  assert.equal(mapped.some((message) => message.content.includes("completedAt")), false);
+});
+
 test("fake provider replies vary by dialogue mode and stay short", async () => {
   const provider = createFakeChatProvider();
   const defaultReply = await streamFakeReply(provider, "conversation-mode", "我们聊聊");

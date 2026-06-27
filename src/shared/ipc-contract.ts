@@ -9,6 +9,7 @@ import type { PetPresentationPreferences, PetScaleAdjustmentIntent } from "./pet
 import type { PetAccessoryPresetId } from "./pet-accessory";
 import type { PetPresentationIntent } from "./pet-role-state";
 import type { ShortcutActionId, ShortcutPreferenceView, ShortcutUpdateResult } from "./shortcut-preferences";
+import type { UserProfile, UserProfileInput } from "./user-profile";
 
 export type PetWindowCommand =
   | { type: "pet:first-frame"; payload?: PetFirstFrameInfo }
@@ -170,6 +171,12 @@ export type DialogueModeApi = {
   getMode(): Promise<DialogueModeId>;
   setMode(modeId: DialogueModeId): Promise<DialogueModeId>;
   onModeChanged(handler: (modeId: DialogueModeId) => void): () => void;
+};
+
+export type UserProfileApi = {
+  getUserProfile(): Promise<UserProfile | null>;
+  saveUserProfile(profile: UserProfileInput): Promise<UserProfile>;
+  clearUserProfile(): Promise<void>;
 };
 
 export type PetPresentationApi = {

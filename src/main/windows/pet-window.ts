@@ -15,6 +15,7 @@ export function createPetWindow(): BrowserWindow {
     skipTaskbar: true,
     show: false,
     focusable: false,
+    icon: join(process.cwd(), "resources/icons/app-icon-256.png"),
     webPreferences: {
       preload,
       nodeIntegration: false,

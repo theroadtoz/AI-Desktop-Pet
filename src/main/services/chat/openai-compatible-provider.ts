@@ -129,7 +129,8 @@ async function streamChatCompletions(input: {
         messages: mapChatMessagesToOpenAICompatible(
           input.request.messages,
           input.request.memoryContext,
-          input.request.dialogueStyleContext
+          input.request.dialogueStyleContext,
+          input.request.userProfileContext
         ),
         temperature: input.options.temperature,
         max_tokens: input.options.maxTokens,

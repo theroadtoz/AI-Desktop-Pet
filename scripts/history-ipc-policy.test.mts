@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 
-test("history and memory IPC are restricted to the chat window and expose no file access bridge", async () => {
+test("history, memory and user profile IPC are restricted to the chat window and expose no file access bridge", async () => {
   const appSource = await readFile(join(process.cwd(), "src", "main", "app.ts"), "utf8");
   const preloadSource = await readFile(join(process.cwd(), "dist", "preload", "chat-preload.js"), "utf8");
 
@@ -13,8 +13,12 @@ test("history and memory IPC are restricted to the chat window and expose no fil
   assert.match(appSource, /ipcMain\.handle\("memory:list", \(event\) => \{\s+if \(!isChatSender\(event\) \|\| !memoryStore\)/);
   assert.match(appSource, /ipcMain\.handle\("memory:create", \(event, draft: unknown\) => \{\s+const parsedDraft = parseMemoryCardDraft\(draft\);/);
   assert.match(appSource, /ipcMain\.handle\("memory:clear", \(event\) => \{\s+if \(!isChatSender\(event\) \|\| !memoryStore\)/);
+  assert.match(appSource, /ipcMain\.handle\("userProfile:get", \(event\) => \{\s+if \(!isChatSender\(event\) \|\| !userProfileStore\)/);
+  assert.match(appSource, /ipcMain\.handle\("userProfile:save", \(event, profile: unknown\) => \{\s+if \(!isChatSender\(event\) \|\| !userProfileStore\)/);
+  assert.match(appSource, /ipcMain\.handle\("userProfile:clear", \(event\) => \{\s+if \(!isChatSender\(event\) \|\| !userProfileStore\)/);
   assert.match(preloadSource, /exposeInMainWorld\("historyApi", historyApi\)/);
   assert.match(preloadSource, /exposeInMainWorld\("memoryApi", memoryApi\)/);
+  assert.match(preloadSource, /exposeInMainWorld\("userProfileApi", userProfileApi\)/);
   assert.doesNotMatch(preloadSource, /exposeInMainWorld\("ipcRenderer"/);
-  assert.doesNotMatch(preloadSource, /historyPath|memoryPath|readFile|writeFile/);
+  assert.doesNotMatch(preloadSource, /historyPath|memoryPath|profilePath|readFile|writeFile/);
 });

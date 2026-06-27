@@ -10,6 +10,7 @@ import {
 } from "../../shared/pet-presentation";
 import { isPetAccessoryPresetId, type PetAccessoryPresetId } from "../../shared/pet-accessory";
 import type { ShortcutActionId, ShortcutPreferenceView } from "../../shared/shortcut-preferences";
+import type { UserProfile } from "../../shared/user-profile";
 
 const form = document.querySelector<HTMLFormElement>("#chat-form");
 const input = document.querySelector<HTMLInputElement>("#chat-input");
@@ -48,6 +49,11 @@ const savePetScaleButton = document.querySelector<HTMLButtonElement>("#save-pet-
 const savePetAccessoryButton = document.querySelector<HTMLButtonElement>("#save-pet-accessory-button");
 const petLockStatus = document.querySelector<HTMLElement>("#pet-lock-status");
 const togglePetLockButton = document.querySelector<HTMLButtonElement>("#toggle-pet-lock-button");
+const userProfileSummary = document.querySelector<HTMLElement>("#user-profile-summary");
+const settingsUserDisplayName = document.querySelector<HTMLInputElement>("#settings-user-display-name");
+const settingsUserPreferredName = document.querySelector<HTMLInputElement>("#settings-user-preferred-name");
+const saveUserProfileButton = document.querySelector<HTMLButtonElement>("#save-user-profile-button");
+const clearUserProfileButton = document.querySelector<HTMLButtonElement>("#clear-user-profile-button");
 const shortcutList = document.querySelector<HTMLElement>("#shortcut-list");
 const shortcutStatus = document.querySelector<HTMLElement>("#shortcut-status");
 const chatTab = document.querySelector<HTMLButtonElement>("#chat-tab");
@@ -80,6 +86,11 @@ const confirmClearMemoryButton = document.querySelector<HTMLButtonElement>("#con
 const memoryFeedback = document.querySelector<HTMLElement>("#memory-feedback");
 const memorySearch = document.querySelector<HTMLInputElement>("#memory-search");
 const memoryList = document.querySelector<HTMLElement>("#memory-list");
+const userWelcomePanel = document.querySelector<HTMLElement>("#user-welcome-panel");
+const welcomeUserDisplayName = document.querySelector<HTMLInputElement>("#welcome-user-display-name");
+const welcomeUserPreferredName = document.querySelector<HTMLInputElement>("#welcome-user-preferred-name");
+const welcomeSaveUserProfileButton = document.querySelector<HTMLButtonElement>("#welcome-save-user-profile-button");
+const userWelcomeFeedback = document.querySelector<HTMLElement>("#user-welcome-feedback");
 
 if (
   !form || !input || !messages || !sendButton || !abortButton || !partnerStatus || !providerStatus ||
@@ -88,13 +99,16 @@ if (
   !maxTokensInput || !timeoutInput || !localProviderNote || !apiKeyInput || !apiKeyStatus || !connectionSafeSection || !deleteApiKeyButton ||
   !deleteKeyConfirmation || !cancelDeleteApiKeyButton || !confirmDeleteApiKeyButton || !settingsFeedback ||
   !petScaleInput || !petScaleValue || !petAccessorySelect || !petAccessoryStatus || !savePetScaleButton ||
-  !savePetAccessoryButton || !petLockStatus || !togglePetLockButton || !shortcutList || !shortcutStatus ||
+  !savePetAccessoryButton || !petLockStatus || !togglePetLockButton || !userProfileSummary ||
+  !settingsUserDisplayName || !settingsUserPreferredName || !saveUserProfileButton || !clearUserProfileButton ||
+  !shortcutList || !shortcutStatus ||
   !chatTab || !historyTab || !memoryTab || !chatPage || !dialogueModeControls || !historyPage ||
   !memoryPage || !chatSessionNote || !memoryDraftPanel || !memoryDraftTitle || !memoryDraftContent || !memoryDraftTags ||
   !cancelMemoryDraftButton || !saveMemoryDraftButton || !newConversationButton || !clearHistoryButton || !clearHistoryConfirmation ||
   !cancelClearHistoryButton || !confirmClearHistoryButton || !historyFeedback || !conversationList || !historyDetail ||
   !enableMemoryButton || !clearMemoryButton || !clearMemoryConfirmation || !cancelClearMemoryButton ||
-  !confirmClearMemoryButton || !memoryFeedback || !memorySearch || !memoryList
+  !confirmClearMemoryButton || !memoryFeedback || !memorySearch || !memoryList || !userWelcomePanel ||
+  !welcomeUserDisplayName || !welcomeUserPreferredName || !welcomeSaveUserProfileButton || !userWelcomeFeedback
 ) {
   throw new Error("chat elements missing");
 }
@@ -136,6 +150,11 @@ const savePetScaleAction = savePetScaleButton;
 const savePetAccessoryAction = savePetAccessoryButton;
 const petLockStatusBox = petLockStatus;
 const togglePetLockAction = togglePetLockButton;
+const userProfileSummaryBox = userProfileSummary;
+const settingsUserDisplayNameField = settingsUserDisplayName;
+const settingsUserPreferredNameField = settingsUserPreferredName;
+const saveUserProfileAction = saveUserProfileButton;
+const clearUserProfileAction = clearUserProfileButton;
 const shortcutListElement = shortcutList;
 const shortcutStatusBox = shortcutStatus;
 const chatTabAction = chatTab;
@@ -168,6 +187,11 @@ const confirmClearMemoryAction = confirmClearMemoryButton;
 const memoryFeedbackBox = memoryFeedback;
 const memorySearchField = memorySearch;
 const memoryListElement = memoryList;
+const userWelcomePanelBox = userWelcomePanel;
+const welcomeUserDisplayNameField = welcomeUserDisplayName;
+const welcomeUserPreferredNameField = welcomeUserPreferredName;
+const welcomeSaveUserProfileAction = welcomeSaveUserProfileButton;
+const userWelcomeFeedbackBox = userWelcomeFeedback;
 const chatHistory: ChatMessage[] = [];
 let conversationId: string = crypto.randomUUID();
 const DEFAULT_API_KEY_REF = "openai-compatible-default";
@@ -203,6 +227,7 @@ let isPetLocked = false;
 let shortcutViews: ShortcutPreferenceView[] = [];
 let dialogueModes: DialogueModeView[] = [];
 let currentDialogueModeId: DialogueModeId = "default";
+let currentUserProfile: UserProfile | null = null;
 let recordingShortcutActionId: ShortcutActionId | null = null;
 let pendingWheelModifierRecordTimeout: number | null = null;
 
@@ -252,10 +277,139 @@ function setPartnerStatus(message: string): void {
   partnerStatusBox.dataset.state = "ready";
 }
 
+function formatUserProfileSummary(profile: UserProfile | null): string {
+  if (!profile) {
+    return "尚未设置本地昵称。";
+  }
+
+  return profile.preferredName
+    ? `本地身份：${profile.displayName} · 称呼：${profile.preferredName}`
+    : `本地身份：${profile.displayName}`;
+}
+
+function setUserWelcomeFeedback(message: string, state: "ready" | "fallback" = "fallback"): void {
+  userWelcomeFeedbackBox.textContent = message;
+  userWelcomeFeedbackBox.dataset.state = state;
+  userWelcomeFeedbackBox.hidden = false;
+}
+
+function clearUserWelcomeFeedback(): void {
+  userWelcomeFeedbackBox.textContent = "";
+  userWelcomeFeedbackBox.hidden = true;
+  delete userWelcomeFeedbackBox.dataset.state;
+}
+
+function normalizeUserProfileField(field: HTMLInputElement): string | null {
+  if (/[\r\n<>]/.test(field.value)) {
+    return null;
+  }
+
+  const value = field.value.trim().replace(/\s+/g, " ");
+
+  if (value.length === 0 || value.length > 32) {
+    return null;
+  }
+
+  return value;
+}
+
+function readUserProfileFields(displayNameField: HTMLInputElement, preferredNameField: HTMLInputElement): { displayName: string; preferredName?: string } | null {
+  const displayName = normalizeUserProfileField(displayNameField);
+  const preferredNameRaw = preferredNameField.value.trim();
+  const preferredName = preferredNameRaw.length > 0 ? normalizeUserProfileField(preferredNameField) : undefined;
+
+  if (!displayName || preferredName === null) {
+    return null;
+  }
+
+  return {
+    displayName,
+    ...(preferredName ? { preferredName } : {})
+  };
+}
+
+function renderUserProfile(profile: UserProfile | null): void {
+  currentUserProfile = profile;
+  const hasProfile = Boolean(profile);
+
+  userWelcomePanelBox.hidden = hasProfile;
+  dialogueModeControlsElement.hidden = !hasProfile;
+  chatSessionNoteBox.hidden = !hasProfile;
+  messageList.hidden = !hasProfile;
+  chatForm.hidden = !hasProfile;
+  settingsUserDisplayNameField.value = profile?.displayName ?? "";
+  settingsUserPreferredNameField.value = profile?.preferredName ?? "";
+  userProfileSummaryBox.textContent = formatUserProfileSummary(profile);
+  userProfileSummaryBox.dataset.state = hasProfile ? "ready" : "fallback";
+
+  if (profile) {
+    const label = DIALOGUE_MODE_LABELS[currentDialogueModeId];
+    setPartnerStatus(`${profile.preferredName ?? profile.displayName} · ${label}${currentDialogueModeId === "default" ? "" : "模式"}`);
+  } else {
+    setPartnerStatus("桌面伙伴 · 等待本地身份");
+  }
+}
+
+async function refreshUserProfile(): Promise<void> {
+  if (!window.userProfileApi) {
+    renderUserProfile(null);
+    setUserWelcomeFeedback("本地身份入口不可用。");
+    return;
+  }
+
+  try {
+    renderUserProfile(await window.userProfileApi.getUserProfile());
+  } catch {
+    renderUserProfile(null);
+    setUserWelcomeFeedback("无法读取本地身份，请稍后重试。");
+  }
+}
+
+async function saveUserProfileFromFields(
+  displayNameField: HTMLInputElement,
+  preferredNameField: HTMLInputElement,
+  source: "welcome" | "settings"
+): Promise<void> {
+  if (!window.userProfileApi || isReplying) {
+    return;
+  }
+
+  const profileInput = readUserProfileFields(displayNameField, preferredNameField);
+
+  if (!profileInput) {
+    if (source === "welcome") {
+      setUserWelcomeFeedback("昵称和称呼需为 1 到 32 个字符，不能包含换行或尖括号。");
+    } else {
+      setSettingsFeedback("昵称和称呼需为 1 到 32 个字符，不能包含换行或尖括号。", "fallback");
+    }
+    return;
+  }
+
+  try {
+    const savedProfile = await window.userProfileApi.saveUserProfile(profileInput);
+    clearUserWelcomeFeedback();
+    renderUserProfile(savedProfile);
+    if (source === "settings") {
+      setSettingsFeedback("本地身份已保存。", "ready");
+    } else {
+      setChatSessionNote("本地身份已设置；之后只会把清洗后的称呼加入当前回复。");
+      chatInput.focus();
+    }
+  } catch {
+    if (source === "welcome") {
+      setUserWelcomeFeedback("无法保存本地身份，请稍后重试。");
+    } else {
+      setSettingsFeedback("无法保存本地身份，请稍后重试。", "fallback");
+    }
+  }
+}
+
 function setDialogueMode(modeId: DialogueModeId): void {
   currentDialogueModeId = modeId;
   const label = DIALOGUE_MODE_LABELS[modeId];
-  setPartnerStatus(`桌面伙伴 · ${label}${modeId === "default" ? "" : "模式"}`);
+  setPartnerStatus(currentUserProfile
+    ? `${currentUserProfile.preferredName ?? currentUserProfile.displayName} · ${label}${modeId === "default" ? "" : "模式"}`
+    : `桌面伙伴 · ${label}${modeId === "default" ? "" : "模式"}`);
 
   for (const button of dialogueModeControlsElement.querySelectorAll<HTMLButtonElement>(".mode-button")) {
     const isActive = button.dataset.modeId === modeId;
@@ -775,6 +929,9 @@ function setReplying(isReplying: boolean): void {
   enableMemoryAction.disabled = isReplying;
   clearMemoryAction.disabled = isReplying;
   saveMemoryDraftAction.disabled = isReplying;
+  saveUserProfileAction.disabled = isReplying;
+  clearUserProfileAction.disabled = isReplying;
+  welcomeSaveUserProfileAction.disabled = isReplying;
   historyDetailElement.querySelectorAll<HTMLButtonElement>("button").forEach((control) => {
     control.disabled = isReplying;
   });
@@ -1146,7 +1303,7 @@ async function openSettings(): Promise<void> {
   try {
     const config = await window.configApi.getProvider();
     fillProviderForm(config);
-    await Promise.all([refreshApiKeyStatus(), refreshPetPresentationPreferences(), refreshPetLockState(), refreshShortcuts()]);
+    await Promise.all([refreshApiKeyStatus(), refreshPetPresentationPreferences(), refreshPetLockState(), refreshShortcuts(), refreshUserProfile()]);
   } catch {
     setSettingsFeedback("无法读取当前设置，请稍后重试。");
   }
@@ -1311,7 +1468,11 @@ window.dialogueModeApi?.onModeChanged((modeId) => {
 chatForm.addEventListener("submit", (event) => {
   event.preventDefault();
 
-  if (isReplying) {
+  if (isReplying || !currentUserProfile) {
+    if (!currentUserProfile) {
+      setUserWelcomeFeedback("请先设置本地昵称后再开始聊天。");
+      welcomeUserDisplayNameField.focus();
+    }
     return;
   }
 
@@ -1362,6 +1523,32 @@ abortAction.addEventListener("click", () => {
 
 settingsAction.addEventListener("click", () => {
   void openSettings();
+});
+
+welcomeSaveUserProfileAction.addEventListener("click", () => {
+  void saveUserProfileFromFields(welcomeUserDisplayNameField, welcomeUserPreferredNameField, "welcome");
+});
+
+saveUserProfileAction.addEventListener("click", () => {
+  void saveUserProfileFromFields(settingsUserDisplayNameField, settingsUserPreferredNameField, "settings");
+});
+
+clearUserProfileAction.addEventListener("click", () => {
+  if (!window.userProfileApi || isReplying) {
+    return;
+  }
+
+  void window.userProfileApi.clearUserProfile().then(() => {
+    settingsUserDisplayNameField.value = "";
+    settingsUserPreferredNameField.value = "";
+    welcomeUserDisplayNameField.value = "";
+    welcomeUserPreferredNameField.value = "";
+    renderUserProfile(null);
+    setSettingsFeedback("本地身份已清除。", "ready");
+    welcomeUserDisplayNameField.focus();
+  }).catch(() => {
+    setSettingsFeedback("无法清除本地身份，请稍后重试。", "fallback");
+  });
 });
 
 chatTabAction.addEventListener("click", () => {
@@ -1704,13 +1891,18 @@ confirmDeleteApiKeyAction.addEventListener("click", () => {
 });
 
 window.addEventListener("chat:focus-input", () => {
-  chatInput.focus();
+  if (currentUserProfile) {
+    chatInput.focus();
+  } else {
+    welcomeUserDisplayNameField.focus();
+  }
 });
 
 window.chatApi?.focusInput();
 setDialogueMode("default");
 setMemorySessionStatus(null);
 void refreshDialogueMode();
+void refreshUserProfile();
 void refreshProviderStatus();
 void refreshMemory();
 setPetScaleValue(DEFAULT_PET_PRESENTATION_PREFERENCES.petScale);

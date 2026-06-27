@@ -1,6 +1,7 @@
 import type { ChatMessage } from "../../../shared/chat";
 import type { MemoryInjection } from "../../../shared/chat-memory";
 import type { DialogueStyleContext } from "../../../shared/dialogue-style";
+import type { UserProfilePromptContext } from "../../../shared/user-profile";
 import { createDefaultDialogueStyleContext, createDialogueStylePrompt } from "./dialogue-style";
 
 export type OpenAICompatibleMessage = {
@@ -13,20 +14,34 @@ const SYSTEM_PROMPT = "你是一个低打扰的桌面伙伴。回复要自然、
 export function mapChatMessagesToOpenAICompatible(
   messages: ChatMessage[],
   memoryContext?: MemoryInjection,
-  dialogueStyleContext: DialogueStyleContext = createDefaultDialogueStyleContext()
+  dialogueStyleContext: DialogueStyleContext = createDefaultDialogueStyleContext(),
+  userProfileContext?: UserProfilePromptContext
 ): OpenAICompatibleMessage[] {
   const dialogueStyleMessage = createDialogueStyleMessage(dialogueStyleContext);
+  const userProfileMessage = createUserProfileMessage(userProfileContext);
   const memoryMessage = createMemoryMessage(memoryContext);
 
   return [
     { role: "system", content: SYSTEM_PROMPT },
     dialogueStyleMessage,
+    ...(userProfileMessage ? [userProfileMessage] : []),
     ...(memoryMessage ? [memoryMessage] : []),
     ...messages.map((message) => ({
       role: message.role,
       content: message.content
     }))
   ];
+}
+
+function createUserProfileMessage(context?: UserProfilePromptContext): OpenAICompatibleMessage | null {
+  if (!context?.preferredName) {
+    return null;
+  }
+
+  return {
+    role: "system",
+    content: `用户希望被称呼为：${context.preferredName}`
+  };
 }
 
 function createDialogueStyleMessage(context: DialogueStyleContext): OpenAICompatibleMessage {

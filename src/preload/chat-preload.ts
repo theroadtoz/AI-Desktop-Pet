@@ -14,7 +14,8 @@ import type {
   MemoryApi,
   PetLockState,
   PetPresentationApi,
-  ShortcutApi
+  ShortcutApi,
+  UserProfileApi
 } from "../shared/ipc-contract";
 import type { Conversation, ConversationSummary, HistoryMessage } from "../shared/chat-history";
 import type { MemoryCard, MemoryCardDraft, MemoryCardUpdate } from "../shared/chat-memory";
@@ -22,6 +23,7 @@ import type { DialogueModeId, DialogueModeView } from "../shared/dialogue-style"
 import type { ProviderConfig, ProviderStatus } from "../shared/provider-config";
 import type { PetPresentationPreferences } from "../shared/pet-presentation";
 import type { ShortcutActionId, ShortcutPreferenceView, ShortcutUpdateResult } from "../shared/shortcut-preferences";
+import type { UserProfile, UserProfileInput } from "../shared/user-profile";
 
 const petAccessoryPresetIds = ["none", "glasses"] as const;
 const shortcutActionIds = ["togglePetLock", "adjustPetScaleWithWheel"] as const;
@@ -47,6 +49,7 @@ const emotionIntensities = ["low", "medium", "high"] as const;
 const PET_SCALE_MIN = 0.7;
 const PET_SCALE_MAX = 1.35;
 const PET_SCALE_STEP = 0.05;
+const USER_PROFILE_TEXT_MAX_LENGTH = 32;
 
 function isEmotionTag(value: unknown): boolean {
   return typeof value === "string" && emotionTags.includes(value as (typeof emotionTags)[number]);
@@ -83,6 +86,52 @@ function parseDialogueModeId(value: unknown): DialogueModeId | null {
   return typeof value === "string" && dialogueModeIds.includes(value as DialogueModeId)
     ? value as DialogueModeId
     : null;
+}
+
+function normalizeUserProfileText(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  if (/[\r\n<>]/.test(value)) {
+    return null;
+  }
+
+  const normalized = value.trim().replace(/\s+/g, " ");
+  return normalized.length > 0 && normalized.length <= USER_PROFILE_TEXT_MAX_LENGTH
+    ? normalized
+    : null;
+}
+
+function parseUserProfileInput(value: unknown): UserProfileInput | null {
+  const profile = value as Partial<UserProfileInput> | null;
+  const displayName = normalizeUserProfileText(profile?.displayName);
+  const preferredName = profile?.preferredName === undefined || profile.preferredName === ""
+    ? undefined
+    : normalizeUserProfileText(profile.preferredName);
+
+  if (!profile || !displayName || preferredName === null) {
+    return null;
+  }
+
+  return {
+    displayName,
+    ...(preferredName ? { preferredName } : {})
+  };
+}
+
+function parseUserProfile(value: unknown): UserProfile | null {
+  const profile = value as Partial<UserProfile> | null;
+  const input = parseUserProfileInput(profile);
+
+  if (!profile || !input || typeof profile.completedAt !== "string" || Number.isNaN(Date.parse(profile.completedAt))) {
+    return null;
+  }
+
+  return {
+    ...input,
+    completedAt: profile.completedAt
+  };
 }
 
 function parsePetPresentationPreferences(value: unknown): PetPresentationPreferences | null {
@@ -957,6 +1006,42 @@ const dialogueModeApi: DialogueModeApi = {
   }
 };
 
+const userProfileApi: UserProfileApi = {
+  async getUserProfile() {
+    const profile = await ipcRenderer.invoke("userProfile:get");
+
+    if (profile === null) {
+      return null;
+    }
+
+    const parsedProfile = parseUserProfile(profile);
+
+    if (!parsedProfile) {
+      throw new Error("Invalid user profile response");
+    }
+
+    return parsedProfile;
+  },
+  async saveUserProfile(profile) {
+    const parsedInput = parseUserProfileInput(profile);
+
+    if (!parsedInput) {
+      throw new Error("Invalid user profile");
+    }
+
+    const savedProfile = parseUserProfile(await ipcRenderer.invoke("userProfile:save", parsedInput));
+
+    if (!savedProfile) {
+      throw new Error("Invalid user profile response");
+    }
+
+    return savedProfile;
+  },
+  async clearUserProfile() {
+    await ipcRenderer.invoke("userProfile:clear");
+  }
+};
+
 ipcRenderer.on("chat:focus-input", () => {
   window.dispatchEvent(new CustomEvent("chat:focus-input"));
 });
@@ -968,3 +1053,4 @@ contextBridge.exposeInMainWorld("memoryApi", memoryApi);
 contextBridge.exposeInMainWorld("petPresentationApi", petPresentationApi);
 contextBridge.exposeInMainWorld("shortcutApi", shortcutApi);
 contextBridge.exposeInMainWorld("dialogueModeApi", dialogueModeApi);
+contextBridge.exposeInMainWorld("userProfileApi", userProfileApi);

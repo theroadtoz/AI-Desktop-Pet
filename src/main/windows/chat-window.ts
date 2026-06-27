@@ -9,6 +9,7 @@ export function createChatWindow(): BrowserWindow {
     height: 640,
     show: false,
     title: "Desktop Pet Chat",
+    icon: join(process.cwd(), "resources/icons/app-icon-256.png"),
     webPreferences: {
       preload,
       nodeIntegration: false,

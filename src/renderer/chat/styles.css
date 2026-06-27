@@ -317,7 +317,8 @@ body {
 }
 
 .memory-draft-panel,
-.memory-card {
+.memory-card,
+.user-welcome-panel {
   padding: 12px;
   border: 1px solid #e7dccb;
   border-radius: 8px;

@@ -36,6 +36,7 @@ import {
   type PetRoleSnapshot
 } from "../shared/pet-role-state";
 import type { ProviderConfig, ProviderStatus } from "../shared/provider-config";
+import { createUserProfilePromptContext } from "../shared/user-profile";
 import {
   calculateScaledPetBounds,
   canApplyPetScaleAdjustment,
@@ -59,6 +60,7 @@ import {
   type ProviderConfigStore
 } from "./services/config/provider-config-store";
 import { createSecureKeyStore, type SecureKeyStore } from "./services/config/secure-key-store";
+import { createUserProfileStore, type UserProfileStore } from "./services/config/user-profile-store";
 import {
   registerWebGLDiagnosticShortcut,
   sendWebGLDiagnosticTrigger
@@ -92,6 +94,7 @@ let historyStore: HistoryStore | null = null;
 let memoryStore: MemoryStore | null = null;
 let dialogueModeStore: DialogueModeStore | null = null;
 let shortcutPreferencesStore: ShortcutPreferencesStore | null = null;
+let userProfileStore: UserProfileStore | null = null;
 let shortcutRegistry: ShortcutRegistry | null = null;
 let currentPetPresentationPreferences: PetPresentationPreferences = DEFAULT_PET_PRESENTATION_PREFERENCES;
 let isChatInteractionActive = false;
@@ -725,6 +728,7 @@ app.whenReady().then(async () => {
   dialogueModeStore = createDialogueModeStore();
   currentDialogueModeId = dialogueModeStore.getMode();
   shortcutPreferencesStore = createShortcutPreferencesStore();
+  userProfileStore = createUserProfileStore({ logTelemetry });
   shortcutRegistry = createUserShortcutRegistry();
   secureKeyStore = createSecureKeyStore({ logTelemetry });
   envProviderConfig = readEnvProviderConfig();
@@ -1147,6 +1151,7 @@ app.whenReady().then(async () => {
       modeId: currentDialogueModeId,
       styleId: "gentle-desktop-companion-v1" as const
     };
+    const userProfileContext = createUserProfilePromptContext(userProfileStore?.getProfile() ?? null);
     event.sender.send("chat:memory-injection", {
       requestVersion: request.requestVersion,
       count: memoryContext.count
@@ -1158,7 +1163,12 @@ app.whenReady().then(async () => {
       messageCount: request.messages.length
     });
 
-    void chatEngine.startChatStream({ ...request, memoryContext, dialogueStyleContext }, {
+    void chatEngine.startChatStream({
+      ...request,
+      memoryContext,
+      dialogueStyleContext,
+      ...(userProfileContext ? { userProfileContext } : {})
+    }, {
       onDelta(delta) {
         if (!transitionPetRole({ type: "reply:delta", requestVersion: request.requestVersion })) {
           return;
@@ -1404,6 +1414,30 @@ app.whenReady().then(async () => {
     }
 
     return currentDialogueModeId;
+  });
+
+  ipcMain.handle("userProfile:get", (event) => {
+    if (!isChatSender(event) || !userProfileStore) {
+      throw new Error("Unauthorized user profile request");
+    }
+
+    return userProfileStore.getProfile();
+  });
+
+  ipcMain.handle("userProfile:save", (event, profile: unknown) => {
+    if (!isChatSender(event) || !userProfileStore) {
+      throw new Error("Unauthorized user profile request");
+    }
+
+    return userProfileStore.saveProfile(profile);
+  });
+
+  ipcMain.handle("userProfile:clear", (event) => {
+    if (!isChatSender(event) || !userProfileStore) {
+      throw new Error("Unauthorized user profile request");
+    }
+
+    userProfileStore.clearProfile();
   });
 
   ipcMain.handle("config:get-provider-status", (event) => {

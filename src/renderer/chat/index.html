@@ -48,6 +48,23 @@
               <button id="toggle-pet-lock-button" class="button-light" type="button">锁定桌宠</button>
             </div>
           </section>
+          <section class="content-stack" aria-labelledby="user-profile-settings-title">
+            <h3 id="user-profile-settings-title" class="settings-section-title">本地身份</h3>
+            <p id="user-profile-summary" class="status-box" aria-live="polite">尚未设置本地昵称。</p>
+            <label class="field-label">
+              昵称
+              <input id="settings-user-display-name" name="userDisplayName" type="text" maxlength="32" autocomplete="nickname" />
+            </label>
+            <label class="field-label">
+              希望被称呼为
+              <input id="settings-user-preferred-name" name="userPreferredName" type="text" maxlength="32" autocomplete="off" placeholder="可留空" />
+            </label>
+            <p class="selection-note">仅保存在本机，用于让对话知道如何称呼你；不会保存手机号、邮箱或密码。</p>
+            <div class="settings-actions">
+              <button id="save-user-profile-button" class="button-light" type="button">保存本地身份</button>
+              <button id="clear-user-profile-button" class="button-danger" type="button">清除本地身份</button>
+            </div>
+          </section>
           <section class="content-stack" aria-labelledby="shortcut-title">
             <h3 id="shortcut-title" class="settings-section-title">快捷键</h3>
             <div id="shortcut-list" class="shortcut-list content-stack" aria-live="polite"></div>
@@ -118,6 +135,21 @@
         </form>
       </section>
       <section id="chat-page" class="chat-page">
+        <section id="user-welcome-panel" class="user-welcome-panel content-stack" aria-label="本地身份入口">
+          <p class="selection-note">先给她一个本地称呼，之后就可以直接开始聊天。</p>
+          <label class="field-label">
+            昵称
+            <input id="welcome-user-display-name" type="text" maxlength="32" autocomplete="nickname" placeholder="例如：小林" />
+          </label>
+          <label class="field-label">
+            希望被称呼为
+            <input id="welcome-user-preferred-name" type="text" maxlength="32" autocomplete="off" placeholder="可留空" />
+          </label>
+          <div class="settings-actions">
+            <button id="welcome-save-user-profile-button" class="button" type="button">进入聊天</button>
+          </div>
+          <p id="user-welcome-feedback" class="status-box" hidden aria-live="polite"></p>
+        </section>
         <div id="dialogue-mode-controls" class="mode-controls" aria-label="对话模式"></div>
         <p id="chat-session-note" class="selection-note" aria-live="polite">新会话将仅在本地保存；发送时只包含当前消息。</p>
         <section id="memory-draft-panel" class="memory-draft-panel content-stack" hidden aria-label="保存事实卡">
