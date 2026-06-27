@@ -2,28 +2,39 @@ import type { ChatMessage } from "../../../shared/chat";
 import type { MemoryInjection } from "../../../shared/chat-memory";
 import type { DialogueStyleContext } from "../../../shared/dialogue-style";
 import type { UserProfilePromptContext } from "../../../shared/user-profile";
-import { createDefaultDialogueStyleContext, createDefaultPersonaPrompt, createDialogueStylePrompt } from "./dialogue-style";
+import {
+  createDefaultDialogueStyleContext,
+  createDefaultPersonaPrompt,
+  createDialogueStylePrompt,
+  createLocalSmallModelDialogueStylePrompt,
+  createLocalSmallModelPersonaPrompt
+} from "./dialogue-style";
 
 export type OpenAICompatibleMessage = {
   role: "system" | "user" | "assistant";
   content: string;
 };
 
+export type PromptTemplateProfile = "cloud-chat" | "local-small-model";
+
 const SYSTEM_PROMPT = "你是一个低打扰的桌面伙伴。回复要自然、简短，优先使用中文。不要输出 JSON。";
+const LOCAL_SMALL_MODEL_SYSTEM_PROMPT = "你是桌面伙伴。用中文，短句，不输出 JSON。";
 
 export function mapChatMessagesToOpenAICompatible(
   messages: ChatMessage[],
   memoryContext?: MemoryInjection,
   dialogueStyleContext: DialogueStyleContext = createDefaultDialogueStyleContext(),
-  userProfileContext?: UserProfilePromptContext
+  userProfileContext?: UserProfilePromptContext,
+  promptTemplateProfile: PromptTemplateProfile = "cloud-chat"
 ): OpenAICompatibleMessage[] {
-  const personaMessage = createPersonaMessage();
-  const dialogueStyleMessage = createDialogueStyleMessage(dialogueStyleContext);
+  const systemMessage = createSystemMessage(promptTemplateProfile);
+  const personaMessage = createPersonaMessage(promptTemplateProfile);
+  const dialogueStyleMessage = createDialogueStyleMessage(dialogueStyleContext, promptTemplateProfile);
   const userProfileMessage = createUserProfileMessage(userProfileContext);
   const memoryMessage = createMemoryMessage(memoryContext);
 
   return [
-    { role: "system", content: SYSTEM_PROMPT },
+    systemMessage,
     personaMessage,
     dialogueStyleMessage,
     ...(userProfileMessage ? [userProfileMessage] : []),
@@ -35,10 +46,17 @@ export function mapChatMessagesToOpenAICompatible(
   ];
 }
 
-function createPersonaMessage(): OpenAICompatibleMessage {
+function createSystemMessage(profile: PromptTemplateProfile): OpenAICompatibleMessage {
   return {
     role: "system",
-    content: createDefaultPersonaPrompt()
+    content: profile === "local-small-model" ? LOCAL_SMALL_MODEL_SYSTEM_PROMPT : SYSTEM_PROMPT
+  };
+}
+
+function createPersonaMessage(profile: PromptTemplateProfile): OpenAICompatibleMessage {
+  return {
+    role: "system",
+    content: profile === "local-small-model" ? createLocalSmallModelPersonaPrompt() : createDefaultPersonaPrompt()
   };
 }
 
@@ -53,10 +71,15 @@ function createUserProfileMessage(context?: UserProfilePromptContext): OpenAICom
   };
 }
 
-function createDialogueStyleMessage(context: DialogueStyleContext): OpenAICompatibleMessage {
+function createDialogueStyleMessage(
+  context: DialogueStyleContext,
+  profile: PromptTemplateProfile
+): OpenAICompatibleMessage {
   return {
     role: "system",
-    content: createDialogueStylePrompt(context)
+    content: profile === "local-small-model"
+      ? createLocalSmallModelDialogueStylePrompt(context)
+      : createDialogueStylePrompt(context)
   };
 }
 

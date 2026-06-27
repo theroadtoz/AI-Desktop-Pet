@@ -1,7 +1,11 @@
 import type { ChatProvider, ChatProviderResult, ChatRequest } from "../../../shared/chat-provider";
 import type { ProviderId } from "../../../shared/provider-config";
 import type { TelemetryPayload } from "../telemetry";
-import { mapChatMessagesToOpenAICompatible, getLatestUserMessage } from "./chat-message-mapper";
+import {
+  mapChatMessagesToOpenAICompatible,
+  getLatestUserMessage,
+  type PromptTemplateProfile
+} from "./chat-message-mapper";
 import { classifyEmotion } from "./emotion-classifier";
 
 type ProviderErrorType =
@@ -37,6 +41,7 @@ export function createOpenAICompatibleProvider(
   const baseURL = new URL(options.baseURL);
   const baseURLHost = baseURL.host;
   const providerId = options.providerId ?? "openai-compatible";
+  const promptTemplateProfile = getPromptTemplateProfile(providerId);
 
   return {
     id: providerId,
@@ -48,6 +53,7 @@ export function createOpenAICompatibleProvider(
         providerId,
         model: options.model,
         baseURLHost,
+        promptTemplateProfile,
         messageCount: request.messages.length
       });
 
@@ -75,6 +81,7 @@ export function createOpenAICompatibleProvider(
           providerId,
           model: options.model,
           baseURLHost,
+          promptTemplateProfile,
           messageCount: request.messages.length,
           replyLength: replyText.length,
           durationMs: Date.now() - startedAt
@@ -90,6 +97,7 @@ export function createOpenAICompatibleProvider(
           providerId,
           model: options.model,
           baseURLHost,
+          promptTemplateProfile,
           messageCount: request.messages.length,
           replyLength: replyText.length,
           durationMs: Date.now() - startedAt,
@@ -130,7 +138,8 @@ async function streamChatCompletions(input: {
           input.request.messages,
           input.request.memoryContext,
           input.request.dialogueStyleContext,
-          input.request.userProfileContext
+          input.request.userProfileContext,
+          getPromptTemplateProfile(input.options.providerId ?? "openai-compatible")
         ),
         temperature: input.options.temperature,
         max_tokens: input.options.maxTokens,
@@ -162,6 +171,10 @@ async function streamChatCompletions(input: {
     clearTimeout(timeoutId);
     input.signal.removeEventListener("abort", abort);
   }
+}
+
+function getPromptTemplateProfile(providerId: Extract<ProviderId, "openai-compatible" | "local-openai-compatible">): PromptTemplateProfile {
+  return providerId === "local-openai-compatible" ? "local-small-model" : "cloud-chat";
 }
 
 export function createChatCompletionsURL(baseURL: string): URL {

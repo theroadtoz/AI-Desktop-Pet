@@ -90,12 +90,64 @@ test("local OpenAI-compatible provider streams SSE and keeps main-process mappin
     assert.equal(authorization, "Bearer ollama-local-placeholder");
     assert.equal(body.model, "qwen3:1.7b");
     assert.equal(body.stream, true);
-    assert.ok(body.messages?.some((message) => message.content?.includes("当前模式：工作")));
+    assert.equal(body.messages?.[0]?.content, "你是桌面伙伴。用中文，短句，不输出 JSON。");
+    assert.match(body.messages?.[1]?.content ?? "", /现代老魔女/);
+    assert.match(body.messages?.[2]?.content ?? "", /模式：工作=给下一步/);
+    assert.ok(systemLength(body.messages ?? []) < 240);
     assert.ok(body.messages?.some((message) => message.content?.includes("用户喜欢被叫测试者")));
     assert.equal(deltaText, "你好，本地模型在。");
     assert.equal(result.text, "你好，本地模型在。");
     assert.ok(result.emotion.length > 0);
     assert.ok(result.intensity.length > 0);
+  } finally {
+    await close(server);
+  }
+});
+
+test("cloud OpenAI-compatible provider keeps cloud prompt template", async () => {
+  let requestBody: unknown = null;
+
+  const server = createServer(async (request: IncomingMessage, response: ServerResponse) => {
+    requestBody = JSON.parse(await readRequestBody(request));
+    response.writeHead(200, { "Content-Type": "text/event-stream" });
+    response.end(`data: ${JSON.stringify({ choices: [{ delta: { content: "云端模板在。" } }] })}\n\ndata: [DONE]\n\n`);
+  });
+
+  try {
+    await listen(server);
+    const address = server.address();
+    assert.equal(typeof address, "object");
+    assert.ok(address);
+
+    const provider = createOpenAICompatibleProvider({
+      providerId: "openai-compatible",
+      baseURL: `http://127.0.0.1:${address.port}`,
+      model: "deepseek-v4-flash",
+      apiKey: "test-cloud-key",
+      temperature: 0.7,
+      maxTokens: 240,
+      timeoutMs: 60000
+    });
+
+    await provider.streamReply({
+      requestVersion: 1,
+      conversationId: "cloud-provider-test",
+      messages: [{ id: crypto.randomUUID(), role: "user", content: "说一句中文短回复" }],
+      dialogueStyleContext: { modeId: "reading", styleId: "gentle-desktop-companion-v1" }
+    }, {
+      signal: new AbortController().signal,
+      onDelta() {}
+    });
+
+    const body = requestBody as {
+      messages?: Array<{ role?: string; content?: string }>;
+    };
+
+    assert.match(body.messages?.[0]?.content ?? "", /低打扰的桌面伙伴/);
+    assert.match(body.messages?.[1]?.content ?? "", /掌握现代科技/);
+    assert.match(body.messages?.[1]?.content ?? "", /学识渊博/);
+    assert.match(body.messages?.[2]?.content ?? "", /当前模式：读书/);
+    assert.ok(systemLength(body.messages ?? []) > 240);
   } finally {
     await close(server);
   }
@@ -134,4 +186,10 @@ function close(server: ReturnType<typeof createServer>): Promise<void> {
       resolve();
     });
   });
+}
+
+function systemLength(messages: Array<{ role?: string; content?: string }>): number {
+  return messages
+    .filter((message) => message.role === "system")
+    .reduce((total, message) => total + (message.content?.length ?? 0), 0);
 }
