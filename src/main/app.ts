@@ -80,6 +80,11 @@ import { createChatWindow, focusChatInput, showChatWindow } from "./windows/chat
 import { createPetWindow } from "./windows/pet-window";
 import { restorePetWindowOnTop } from "./windows/topmost-policy";
 import { DEFAULT_SHORTCUT_PREFERENCES, getScaleWheelModifierAccelerator, type ShortcutPreferences } from "../shared/shortcut-preferences";
+import {
+  parsePetRendererTelemetryEvent,
+  sanitizePetTelemetryEvent,
+  type PetTelemetryEventType
+} from "../shared/pet-telemetry-contract";
 
 let petWindow: BrowserWindow | null = null;
 let chatWindow: BrowserWindow | null = null;
@@ -118,20 +123,6 @@ if (!app.isPackaged && userDataPathOverride && isAbsolute(userDataPathOverride))
   app.setPath("userData", userDataPathOverride);
 }
 
-const RENDERER_TELEMETRY_TYPES = new Set([
-  "pet_performance_sample",
-  "webgl_context_lost",
-  "webgl_context_restored",
-  "recovery_started",
-  "recovery_succeeded",
-  "recovery_failed",
-  "pet_interaction_action_started",
-  "pet_interaction_action_finished",
-  "pet_interaction_action_skipped",
-  "pet_window_motion_feedback",
-  "pet_presentation_intent_applied"
-]);
-
 protocol.registerSchemesAsPrivileged([
   {
     scheme: "pet-model",
@@ -164,7 +155,10 @@ app.on("child-process-gone", (_event, details) => {
     type: details.type,
     reason: details.reason
   };
-  logTelemetry("child_process_gone", payload);
+  logPetTelemetry({
+    type: "child_process_gone",
+    payload
+  });
 
   if (details.type.toLowerCase().includes("gpu")) {
     console.warn("[app] GPU child process gone", payload);
@@ -206,10 +200,13 @@ function createRecoverablePetWindow(): BrowserWindow {
       reason: details.reason,
       exitCode: details.exitCode
     });
-    logTelemetry("renderer_process_gone", {
-      window: "pet",
-      reason: details.reason,
-      exitCode: details.exitCode
+    logPetTelemetry({
+      type: "renderer_process_gone",
+      payload: {
+        window: "pet",
+        reason: details.reason,
+        exitCode: details.exitCode
+      }
     });
 
     if (petWindow !== nextPetWindow || !canRecoverPetRenderer()) {
@@ -271,6 +268,11 @@ function logTelemetry(type: string, payload: TelemetryPayload = {}): void {
   telemetry?.logEvent(type, payload);
 }
 
+function logPetTelemetry(event: { type: PetTelemetryEventType; payload?: unknown }): void {
+  const safeEvent = sanitizePetTelemetryEvent(event);
+  logTelemetry(safeEvent.type, safeEvent.payload);
+}
+
 function createPointerControllerForWindow(window: BrowserWindow): PointerController {
   return createPointerController(window, {
     getMotionGuards: () => ({
@@ -278,15 +280,18 @@ function createPointerControllerForWindow(window: BrowserWindow): PointerControl
       isChatInteractionActive
     }),
     onWindowMotionCandidate: (candidate) => {
-      logTelemetry("pet_window_motion_detected", {
-        eventType: candidate.eventType,
-        reason: candidate.reason,
-        directionChanges: candidate.directionChanges,
-        distancePx: candidate.distancePx,
-        durationMs: candidate.durationMs,
-        cooldownState: candidate.cooldownState,
-        isLocked: candidate.isLocked,
-        isDragging: candidate.isDragging
+      logPetTelemetry({
+        type: "pet_window_motion_detected",
+        payload: {
+          eventType: candidate.eventType,
+          reason: candidate.reason,
+          directionChanges: candidate.directionChanges,
+          distancePx: candidate.distancePx,
+          durationMs: candidate.durationMs,
+          cooldownState: candidate.cooldownState,
+          isLocked: candidate.isLocked,
+          isDragging: candidate.isDragging
+        }
       });
       if (candidate.eventType === "window_shake_candidate" && !window.isDestroyed()) {
         window.webContents.send("pet:window-motion-feedback", {
@@ -555,25 +560,25 @@ function readNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
-function readBoolean(value: unknown): boolean | undefined {
-  return typeof value === "boolean" ? value : undefined;
-}
-
 function sanitizeRenderHealth(state: RenderHealth): TelemetryPayload {
-  return {
-    renderer: state.renderer,
-    framesPerSecond: readNumber(state.framesPerSecond),
-    isContextLost: readBoolean(state.isContextLost),
-    canvasWidth: readNumber(state.canvasWidth),
-    canvasHeight: readNumber(state.canvasHeight),
-    nonTransparentPixels: readNumber(state.nonTransparentPixels),
-    opaqueBlackPixels: readNumber(state.opaqueBlackPixels),
-    firstFrameMs: readNumber(state.firstFrameMs),
-    renderStartMs: readNumber(state.renderStartMs),
-    recoveryCount: readNumber(state.recoveryCount),
-    rendererTimestamp: readNumber(state.timestamp),
-    message: typeof state.message === "string" ? state.message : undefined
-  };
+  const safeEvent = sanitizePetTelemetryEvent({
+    type: "pet_health",
+    payload: {
+      renderer: state.renderer,
+      framesPerSecond: state.framesPerSecond,
+      isContextLost: state.isContextLost,
+      canvasWidth: state.canvasWidth,
+      canvasHeight: state.canvasHeight,
+      nonTransparentPixels: state.nonTransparentPixels,
+      opaqueBlackPixels: state.opaqueBlackPixels,
+      firstFrameMs: state.firstFrameMs,
+      renderStartMs: state.renderStartMs,
+      recoveryCount: state.recoveryCount,
+      rendererTimestamp: state.timestamp
+    }
+  });
+
+  return safeEvent.payload ?? {};
 }
 
 function sanitizeFirstFrame(info: PetFirstFrameInfo): TelemetryPayload {
@@ -583,26 +588,6 @@ function sanitizeFirstFrame(info: PetFirstFrameInfo): TelemetryPayload {
     renderer: info.renderer,
     recoveryCount: readNumber(info.recoveryCount)
   };
-}
-
-function sanitizeRendererTelemetry(event: PetTelemetryEvent): TelemetryPayload {
-  const safePayload: TelemetryPayload = {};
-  const payload = event.payload ?? {};
-
-  for (const [key, value] of Object.entries(payload)) {
-    if (
-      typeof value === "string" ||
-      typeof value === "number" ||
-      typeof value === "boolean" ||
-      value === null
-    ) {
-      safePayload[key] = value;
-    } else if (Array.isArray(value) && value.every((item) => typeof item === "string")) {
-      safePayload[key] = value;
-    }
-  }
-
-  return safePayload;
 }
 
 function isChatSendRequest(value: unknown): value is ChatSendRequest {
@@ -725,10 +710,13 @@ function getChatErrorMessage(errorType: ChatStreamErrorType): string {
 
 function rebuildPetWindow(recoverySource?: string): void {
   if (recoverySource) {
-    logTelemetry("recovery_started", {
-      source: recoverySource,
-      window: "pet",
-      recoveryCount: petRendererRecoveryTimes.length
+    logPetTelemetry({
+      type: "recovery_started",
+      payload: {
+        source: recoverySource,
+        window: "pet",
+        recoveryCount: petRendererRecoveryTimes.length
+      }
     });
   }
 
@@ -749,10 +737,13 @@ function rebuildPetWindow(recoverySource?: string): void {
   });
 
   if (recoverySource) {
-    logTelemetry("recovery_succeeded", {
-      source: recoverySource,
-      window: "pet",
-      recoveryCount: petRendererRecoveryTimes.length
+    logPetTelemetry({
+      type: "recovery_succeeded",
+      payload: {
+        source: recoverySource,
+        window: "pet",
+        recoveryCount: petRendererRecoveryTimes.length
+      }
     });
   }
 }
@@ -1032,31 +1023,28 @@ app.whenReady().then(async () => {
     console.info("[pet] health", state);
   });
 
-  ipcMain.on("pet:telemetry", (event, rendererEvent: PetTelemetryEvent) => {
-    if (
-      !isPetSender(event) ||
-      !rendererEvent ||
-      typeof rendererEvent.type !== "string" ||
-      !RENDERER_TELEMETRY_TYPES.has(rendererEvent.type)
-    ) {
+  ipcMain.on("pet:telemetry", (event, rendererEvent: unknown) => {
+    const petTelemetryEvent = parsePetRendererTelemetryEvent(rendererEvent);
+
+    if (!isPetSender(event) || !petTelemetryEvent) {
       return;
     }
 
-    logTelemetry(rendererEvent.type, sanitizeRendererTelemetry(rendererEvent));
-    const activityEcho = createPetActivityEcho(rendererEvent);
+    logTelemetry(petTelemetryEvent.type, petTelemetryEvent.payload);
+    const activityEcho = createPetActivityEcho(petTelemetryEvent);
 
     if (activityEcho) {
       notifyChatPetActivityEcho(activityEcho);
     }
 
-    if (rendererEvent.type === "webgl_context_lost" || rendererEvent.type === "recovery_failed") {
+    if (petTelemetryEvent.type === "webgl_context_lost" || petTelemetryEvent.type === "recovery_failed") {
       const requestVersion = activeChatRequestVersion;
       transitionPetRole({ type: "renderer:failed" });
       if (requestVersion !== null) {
         chatEngine?.abortActiveStream();
         activeChatRequestVersion = null;
       }
-    } else if (rendererEvent.type === "recovery_succeeded") {
+    } else if (petTelemetryEvent.type === "recovery_succeeded") {
       transitionPetRole({ type: "renderer:recovered" });
     }
   });
@@ -1112,9 +1100,12 @@ app.whenReady().then(async () => {
       petScale: targetScale
     };
     if (isAcceptanceTelemetryEnabled) {
-      logTelemetry("pet_scale_adjusted", {
-        petScale: targetScale,
-        source: "wheel"
+      logPetTelemetry({
+        type: "pet_scale_adjusted",
+        payload: {
+          petScale: targetScale,
+          source: "wheel"
+        }
       });
     }
     petPresentationPersistence?.schedule(currentPetPresentationPreferences);

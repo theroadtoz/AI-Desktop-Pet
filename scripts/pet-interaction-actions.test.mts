@@ -305,15 +305,12 @@ test("pet renderer reads dialogue mode without owning mode writes", async () => 
   assert.match(appSource, /notifyPetDialogueModeChanged\(currentDialogueModeId\)/);
 });
 
-test("renderer telemetry sanitizer keeps safe action policy summary only", async () => {
+test("renderer telemetry sanitizer delegates to the shared pet telemetry contract", async () => {
   const source = await readFile(new URL("../src/main/app.ts", import.meta.url), "utf8");
-  const sanitizerStart = source.indexOf("function sanitizeRendererTelemetry");
-  const nextFunctionStart = source.indexOf("function isChatSendRequest", sanitizerStart);
-  const sanitizer = source.slice(sanitizerStart, nextFunctionStart);
 
-  assert.match(sanitizer, /Array\.isArray\(value\) && value\.every\(\(item\) => typeof item === "string"\)/);
-  assert.match(sanitizer, /safePayload\[key\] = value/);
-  assert.doesNotMatch(sanitizer, /content|message|apiKey|baseURL|request/);
+  assert.match(source, /parsePetRendererTelemetryEvent/);
+  assert.match(source, /sanitizePetTelemetryEvent/);
+  assert.doesNotMatch(source, /function sanitizeRendererTelemetry/);
 });
 
 test("pet startup appearance waits for a visible Live2D frame and only plays once per renderer lifecycle", async () => {

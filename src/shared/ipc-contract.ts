@@ -8,8 +8,11 @@ import type { ProviderConfig, ProviderStatus } from "./provider-config";
 import type { PetPresentationPreferences, PetScaleAdjustmentIntent } from "./pet-presentation";
 import type { PetAccessoryPresetId } from "./pet-accessory";
 import type { PetPresentationIntent } from "./pet-role-state";
+import type { PetTelemetryEvent } from "./pet-telemetry-contract";
 import type { ShortcutActionId, ShortcutPreferenceView, ShortcutUpdateResult } from "./shortcut-preferences";
 import type { UserProfile, UserProfileInput } from "./user-profile";
+
+export type { PetTelemetryEvent } from "./pet-telemetry-contract";
 
 export type PetWindowCommand =
   | { type: "pet:first-frame"; payload?: PetFirstFrameInfo }
@@ -85,11 +88,6 @@ export type PetFirstFrameInfo = {
   renderStartMs: number;
   renderer: "live2d" | "placeholder";
   recoveryCount: number;
-};
-
-export type PetTelemetryEvent = {
-  type: string;
-  payload?: Record<string, unknown>;
 };
 
 export type PetPointerHitState = {
