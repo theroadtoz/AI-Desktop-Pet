@@ -7,27 +7,19 @@
   </head>
   <body>
     <main class="chat-shell">
-      <div class="provider-bar">
-        <section class="partner-status-band" aria-label="伙伴状态带">
-          <p id="partner-status" class="status-box" aria-live="polite">桌面伙伴 · 默认陪伴</p>
-          <p id="provider-status" class="status-box" aria-live="polite">正在读取模型状态...</p>
-          <p id="memory-session-status" class="status-box" aria-live="polite">本次未使用记忆</p>
-        </section>
-        <button id="settings-button" class="button-light icon-button" type="button" aria-label="打开 Provider 设置" title="Provider 设置">⚙</button>
-      </div>
       <nav class="subpage-nav" aria-label="聊天导航">
         <button id="chat-tab" class="subpage-tab is-active" type="button">聊天</button>
         <button id="history-tab" class="subpage-tab" type="button">历史</button>
         <button id="memory-tab" class="subpage-tab" type="button">记忆</button>
       </nav>
-      <section id="settings-panel" class="settings-panel" hidden aria-label="Provider 设置">
+      <section id="settings-panel" class="settings-panel" hidden aria-label="伙伴与对话设置">
         <div class="settings-header">
-          <h2>Provider 设置</h2>
+          <h2>伙伴与对话设置</h2>
           <button id="settings-close-button" class="button-light" type="button">关闭</button>
         </div>
         <form id="settings-form" class="content-stack">
           <section class="content-stack" aria-labelledby="pet-scale-title">
-            <h3 id="pet-scale-title" class="settings-section-title">桌宠显示</h3>
+            <h3 id="pet-scale-title" class="settings-section-title">伙伴外观</h3>
             <label class="field-label">
               桌宠大小
               <input id="pet-scale" name="petScale" type="range" min="0.70" max="1.35" step="0.05" value="1.00" />
@@ -65,13 +57,13 @@
               <button id="clear-user-profile-button" class="button-danger" type="button">清除本地身份</button>
             </div>
           </section>
-          <section class="content-stack" aria-labelledby="shortcut-title">
-            <h3 id="shortcut-title" class="settings-section-title">快捷键</h3>
-            <div id="shortcut-list" class="shortcut-list content-stack" aria-live="polite"></div>
-            <p id="shortcut-status" class="status-box" hidden aria-live="polite"></p>
+          <section class="content-stack" aria-labelledby="dialogue-mode-settings-title">
+            <h3 id="dialogue-mode-settings-title" class="settings-section-title">对话模式</h3>
+            <p id="settings-dialogue-mode-summary" class="status-box" aria-live="polite">当前模式：默认陪伴</p>
+            <p class="selection-note">默认、工作、游戏、读书模式在聊天页状态缎带下切换；切换后会同步到这里。</p>
           </section>
           <section class="content-stack" aria-labelledby="provider-settings-title">
-            <h3 id="provider-settings-title" class="settings-section-title">Provider</h3>
+            <h3 id="provider-settings-title" class="settings-section-title">Provider / 模型</h3>
             <label class="field-label">
               Provider
               <select id="provider-id" name="providerId">
@@ -128,6 +120,11 @@
               </div>
             </div>
           </section>
+          <section class="content-stack" aria-labelledby="shortcut-title">
+            <h3 id="shortcut-title" class="settings-section-title">操作方式</h3>
+            <div id="shortcut-list" class="shortcut-list content-stack" aria-live="polite"></div>
+            <p id="shortcut-status" class="status-box" hidden aria-live="polite"></p>
+          </section>
           <div class="settings-actions">
             <button class="button" type="submit">保存设置</button>
           </div>
@@ -150,6 +147,14 @@
           </div>
           <p id="user-welcome-feedback" class="status-box" hidden aria-live="polite"></p>
         </section>
+        <div class="provider-bar">
+          <section class="partner-status-band" aria-label="魔女状态缎带">
+            <p id="partner-status" class="status-box ribbon-primary" aria-live="polite">桌面伙伴 · 默认陪伴</p>
+            <p id="provider-status" class="status-box ribbon-provider" aria-live="polite">正在读取模型状态...</p>
+            <p id="memory-session-status" class="status-box ribbon-echo" aria-live="polite">本次未使用记忆 · 等待中</p>
+          </section>
+          <button id="settings-button" class="button-light icon-button" type="button" aria-label="打开伙伴与对话设置" title="伙伴与对话设置">⚙</button>
+        </div>
         <div id="dialogue-mode-controls" class="mode-controls" aria-label="对话模式"></div>
         <p id="chat-session-note" class="selection-note" aria-live="polite">新会话将仅在本地保存；发送时只包含当前消息。</p>
         <section id="memory-draft-panel" class="memory-draft-panel content-stack" hidden aria-label="保存事实卡">

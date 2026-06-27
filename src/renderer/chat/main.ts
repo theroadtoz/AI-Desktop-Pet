@@ -54,6 +54,7 @@ const settingsUserDisplayName = document.querySelector<HTMLInputElement>("#setti
 const settingsUserPreferredName = document.querySelector<HTMLInputElement>("#settings-user-preferred-name");
 const saveUserProfileButton = document.querySelector<HTMLButtonElement>("#save-user-profile-button");
 const clearUserProfileButton = document.querySelector<HTMLButtonElement>("#clear-user-profile-button");
+const settingsDialogueModeSummary = document.querySelector<HTMLElement>("#settings-dialogue-mode-summary");
 const shortcutList = document.querySelector<HTMLElement>("#shortcut-list");
 const shortcutStatus = document.querySelector<HTMLElement>("#shortcut-status");
 const chatTab = document.querySelector<HTMLButtonElement>("#chat-tab");
@@ -101,7 +102,7 @@ if (
   !petScaleInput || !petScaleValue || !petAccessorySelect || !petAccessoryStatus || !savePetScaleButton ||
   !savePetAccessoryButton || !petLockStatus || !togglePetLockButton || !userProfileSummary ||
   !settingsUserDisplayName || !settingsUserPreferredName || !saveUserProfileButton || !clearUserProfileButton ||
-  !shortcutList || !shortcutStatus ||
+  !settingsDialogueModeSummary || !shortcutList || !shortcutStatus ||
   !chatTab || !historyTab || !memoryTab || !chatPage || !dialogueModeControls || !historyPage ||
   !memoryPage || !chatSessionNote || !memoryDraftPanel || !memoryDraftTitle || !memoryDraftContent || !memoryDraftTags ||
   !cancelMemoryDraftButton || !saveMemoryDraftButton || !newConversationButton || !clearHistoryButton || !clearHistoryConfirmation ||
@@ -155,6 +156,7 @@ const settingsUserDisplayNameField = settingsUserDisplayName;
 const settingsUserPreferredNameField = settingsUserPreferredName;
 const saveUserProfileAction = saveUserProfileButton;
 const clearUserProfileAction = clearUserProfileButton;
+const settingsDialogueModeSummaryBox = settingsDialogueModeSummary;
 const shortcutListElement = shortcutList;
 const shortcutStatusBox = shortcutStatus;
 const chatTabAction = chatTab;
@@ -228,6 +230,8 @@ let shortcutViews: ShortcutPreferenceView[] = [];
 let dialogueModes: DialogueModeView[] = [];
 let currentDialogueModeId: DialogueModeId = "default";
 let currentUserProfile: UserProfile | null = null;
+let currentMemoryInjectionCount: number | null = null;
+let currentActivityEcho = "等待中";
 let recordingShortcutActionId: ShortcutActionId | null = null;
 let pendingWheelModifierRecordTimeout: number | null = null;
 
@@ -275,6 +279,36 @@ function setProviderStatus(status: ProviderStatus): void {
 function setPartnerStatus(message: string): void {
   partnerStatusBox.textContent = message;
   partnerStatusBox.dataset.state = "ready";
+}
+
+function formatModeLabel(modeId: DialogueModeId): string {
+  const label = DIALOGUE_MODE_LABELS[modeId];
+  return modeId === "default" ? label : `${label}模式`;
+}
+
+function renderPartnerStatus(): void {
+  const modeLabel = formatModeLabel(currentDialogueModeId);
+  const roleLabel = currentUserProfile
+    ? currentUserProfile.preferredName ?? currentUserProfile.displayName
+    : "等待本地身份";
+
+  setPartnerStatus(`桌面伙伴：${roleLabel} · ${modeLabel}`);
+  settingsDialogueModeSummaryBox.textContent = `当前模式：${modeLabel}`;
+  settingsDialogueModeSummaryBox.dataset.state = "ready";
+}
+
+function renderRibbonEcho(): void {
+  const memoryText = currentMemoryInjectionCount && currentMemoryInjectionCount > 0
+    ? `本次使用 ${currentMemoryInjectionCount} 条记忆`
+    : "本次未使用记忆";
+
+  memorySessionStatusBox.textContent = `${memoryText} · ${currentActivityEcho}`;
+  memorySessionStatusBox.dataset.state = currentMemoryInjectionCount && currentMemoryInjectionCount > 0 ? "ready" : "fallback";
+}
+
+function setActivityEcho(message: string): void {
+  currentActivityEcho = message;
+  renderRibbonEcho();
 }
 
 function formatUserProfileSummary(profile: UserProfile | null): string {
@@ -341,13 +375,7 @@ function renderUserProfile(profile: UserProfile | null): void {
   settingsUserPreferredNameField.value = profile?.preferredName ?? "";
   userProfileSummaryBox.textContent = formatUserProfileSummary(profile);
   userProfileSummaryBox.dataset.state = hasProfile ? "ready" : "fallback";
-
-  if (profile) {
-    const label = DIALOGUE_MODE_LABELS[currentDialogueModeId];
-    setPartnerStatus(`${profile.preferredName ?? profile.displayName} · ${label}${currentDialogueModeId === "default" ? "" : "模式"}`);
-  } else {
-    setPartnerStatus("桌面伙伴 · 等待本地身份");
-  }
+  renderPartnerStatus();
 }
 
 async function refreshUserProfile(): Promise<void> {
@@ -406,10 +434,7 @@ async function saveUserProfileFromFields(
 
 function setDialogueMode(modeId: DialogueModeId): void {
   currentDialogueModeId = modeId;
-  const label = DIALOGUE_MODE_LABELS[modeId];
-  setPartnerStatus(currentUserProfile
-    ? `${currentUserProfile.preferredName ?? currentUserProfile.displayName} · ${label}${modeId === "default" ? "" : "模式"}`
-    : `桌面伙伴 · ${label}${modeId === "default" ? "" : "模式"}`);
+  renderPartnerStatus();
 
   for (const button of dialogueModeControlsElement.querySelectorAll<HTMLButtonElement>(".mode-button")) {
     const isActive = button.dataset.modeId === modeId;
@@ -463,10 +488,8 @@ async function setDialogueModeFromUi(modeId: DialogueModeId): Promise<void> {
 }
 
 function setMemorySessionStatus(count: number | null): void {
-  memorySessionStatusBox.textContent = count && count > 0
-    ? `本次使用 ${count} 条记忆`
-    : "本次未使用记忆";
-  memorySessionStatusBox.dataset.state = count && count > 0 ? "ready" : "fallback";
+  currentMemoryInjectionCount = count;
+  renderRibbonEcho();
 }
 
 function appendMessage(message: ChatMessage): HTMLElement {
@@ -939,14 +962,19 @@ function setReplying(isReplying: boolean): void {
     .forEach((control) => {
       control.disabled = isReplying;
     });
+
+  if (isReplying) {
+    setActivityEcho("正在回复");
+  }
 }
 
-function finishReplying(): void {
+function finishReplying(activityEcho = "回复完成"): void {
   activeReplyMessage = null;
   activeReplyElement = null;
   activeRequestVersion = null;
   isReplying = false;
   setReplying(false);
+  setActivityEcho(activityEcho);
   chatInput.focus();
 }
 
@@ -1444,9 +1472,10 @@ window.chatApi?.onReplyError((error) => {
     activeReplyElement.remove();
   }
 
-  setChatSessionNote(error.errorType === "aborted" ? "回复已中断，未保存未完成的助手消息。" : error.message);
+  const wasAborted = error.errorType === "aborted";
+  setChatSessionNote(wasAborted ? "回复已中断，未保存未完成的助手消息。" : error.message);
 
-  finishReplying();
+  finishReplying(wasAborted ? "已中断" : "回复失败");
 });
 
 window.chatApi?.onMemoryInjection((payload) => {
@@ -1496,6 +1525,7 @@ chatForm.addEventListener("submit", (event) => {
   activeReplyElement = replyElement;
   activeRequestVersion = ++latestRequestVersion;
   isReplying = true;
+  setMemorySessionStatus(null);
   setReplying(true);
 
   window.chatApi?.sendMessage({
