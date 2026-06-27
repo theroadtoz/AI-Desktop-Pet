@@ -4,9 +4,14 @@ export type MemoryCard = {
   content: string;
   tags: string[];
   sourceConversationId: string;
+  sourceType: "manual-chat";
+  namespace: string;
+  key: string;
   createdAt: number;
   updatedAt: number;
   enabled: boolean;
+  lastInjectedAt: number | null;
+  injectionCount: number;
 };
 
 export type MemoryCardDraft = {
@@ -27,7 +32,7 @@ export type MemoryInjection = {
   cards: Array<Pick<MemoryCard, "id" | "title" | "content" | "tags">>;
 };
 
-export const MEMORY_STORAGE_VERSION = 1;
+export const MEMORY_STORAGE_VERSION = 2;
 
 export type MemoryStorage = {
   version: typeof MEMORY_STORAGE_VERSION;
@@ -40,6 +45,10 @@ const MAX_TITLE_LENGTH = 80;
 const MAX_CONTENT_LENGTH = 800;
 const MAX_TAG_LENGTH = 24;
 const MAX_TAGS = 8;
+const MAX_NAMESPACE_LENGTH = 32;
+const MAX_KEY_LENGTH = 48;
+const DEFAULT_MEMORY_NAMESPACE = "personal";
+const DEFAULT_MEMORY_SOURCE_TYPE = "manual-chat";
 
 export function isMemoryId(value: unknown): value is string {
   return typeof value === "string" && ID_PATTERN.test(value);
@@ -76,6 +85,26 @@ export function normalizeMemoryTags(value: unknown): string[] | null {
   }
 
   return tags;
+}
+
+function normalizeMemoryNamespace(value: unknown): string | null {
+  const normalized = normalizeMemoryText(value, MAX_NAMESPACE_LENGTH);
+
+  return normalized && /^[a-z0-9][a-z0-9_-]{0,31}$/i.test(normalized)
+    ? normalized.toLowerCase()
+    : null;
+}
+
+function normalizeMemoryKey(value: unknown): string | null {
+  const normalized = normalizeMemoryText(value, MAX_KEY_LENGTH);
+
+  return normalized && /^[a-z0-9][a-z0-9:_-]{0,47}$/i.test(normalized)
+    ? normalized.toLowerCase()
+    : null;
+}
+
+function createDefaultMemoryKey(id: string): string {
+  return `manual-${id.slice(0, 8).toLowerCase()}`;
 }
 
 export function parseMemoryCardDraft(value: unknown): MemoryCardDraft | null {
@@ -147,9 +176,14 @@ export function parseMemoryCardUpdate(value: unknown): MemoryCardUpdate | null {
 }
 
 export function parseMemoryStorage(value: unknown): MemoryStorage | null {
-  const storage = value as Partial<MemoryStorage> | null;
+  const storage = value as (Partial<Omit<MemoryStorage, "version">> & { version?: unknown }) | null;
 
-  if (!storage || storage.version !== MEMORY_STORAGE_VERSION || typeof storage.enabled !== "boolean" || !Array.isArray(storage.cards)) {
+  if (
+    !storage ||
+    (storage.version !== 1 && storage.version !== MEMORY_STORAGE_VERSION) ||
+    typeof storage.enabled !== "boolean" ||
+    !Array.isArray(storage.cards)
+  ) {
     return null;
   }
 
@@ -171,6 +205,19 @@ export function parseMemoryCard(value: unknown): MemoryCard | null {
   const title = normalizeMemoryText(card?.title, MAX_TITLE_LENGTH);
   const content = normalizeMemoryText(card?.content, MAX_CONTENT_LENGTH);
   const tags = normalizeMemoryTags(card?.tags);
+  const namespace = normalizeMemoryNamespace(card?.namespace) ?? DEFAULT_MEMORY_NAMESPACE;
+  const sourceType = card?.sourceType === DEFAULT_MEMORY_SOURCE_TYPE || card?.sourceType === undefined
+    ? DEFAULT_MEMORY_SOURCE_TYPE
+    : null;
+  const key = isMemoryId(card?.id)
+    ? normalizeMemoryKey(card?.key) ?? createDefaultMemoryKey(card.id)
+    : null;
+  const lastInjectedAt = card?.lastInjectedAt === undefined
+    ? null
+    : card.lastInjectedAt;
+  const injectionCount = card?.injectionCount === undefined
+    ? 0
+    : card.injectionCount;
 
   if (
     !card ||
@@ -178,6 +225,9 @@ export function parseMemoryCard(value: unknown): MemoryCard | null {
     !title ||
     !content ||
     !tags ||
+    !sourceType ||
+    !namespace ||
+    !key ||
     !isMemoryId(card.sourceConversationId) ||
     typeof card.createdAt !== "number" ||
     !Number.isSafeInteger(card.createdAt) ||
@@ -185,7 +235,18 @@ export function parseMemoryCard(value: unknown): MemoryCard | null {
     typeof card.updatedAt !== "number" ||
     !Number.isSafeInteger(card.updatedAt) ||
     card.updatedAt < card.createdAt ||
-    typeof card.enabled !== "boolean"
+    typeof card.enabled !== "boolean" ||
+    !(
+      lastInjectedAt === null ||
+      (
+        typeof lastInjectedAt === "number" &&
+        Number.isSafeInteger(lastInjectedAt) &&
+        lastInjectedAt > 0
+      )
+    ) ||
+    typeof injectionCount !== "number" ||
+    !Number.isSafeInteger(injectionCount) ||
+    injectionCount < 0
   ) {
     return null;
   }
@@ -196,8 +257,13 @@ export function parseMemoryCard(value: unknown): MemoryCard | null {
     content,
     tags,
     sourceConversationId: card.sourceConversationId,
+    sourceType,
+    namespace,
+    key,
     createdAt: card.createdAt,
     updatedAt: card.updatedAt,
-    enabled: card.enabled
+    enabled: card.enabled,
+    lastInjectedAt,
+    injectionCount
   };
 }

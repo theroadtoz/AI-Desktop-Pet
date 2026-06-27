@@ -38,7 +38,22 @@ export function createMemoryStore(options: { userDataPath?: string } = {}): Memo
     }
 
     try {
-      return parseMemoryStorage(JSON.parse(readFileSync(memoryPath, "utf8"))) ?? emptyStorage();
+      const rawStorage = JSON.parse(readFileSync(memoryPath, "utf8"));
+      const storage = parseMemoryStorage(rawStorage);
+
+      if (!storage) {
+        return emptyStorage();
+      }
+
+      if (rawStorage?.version !== MEMORY_STORAGE_VERSION) {
+        try {
+          writeStorage(storage);
+        } catch {
+          // Keep compatible reads available even if a migration write cannot be persisted yet.
+        }
+      }
+
+      return storage;
     } catch {
       return emptyStorage();
     }
@@ -86,12 +101,18 @@ export function createMemoryStore(options: { userDataPath?: string } = {}): Memo
       }
 
       const now = Date.now();
+      const id = crypto.randomUUID();
       const card: MemoryCard = {
-        id: crypto.randomUUID(),
+        id,
         ...parsedDraft,
+        sourceType: "manual-chat",
+        namespace: "personal",
+        key: `manual-${id.slice(0, 8).toLowerCase()}`,
         createdAt: now,
         updatedAt: now,
-        enabled: true
+        enabled: true,
+        lastInjectedAt: null,
+        injectionCount: 0
       };
       const storage = readStorage();
       storage.cards.push(card);
@@ -143,11 +164,23 @@ export function createMemoryStore(options: { userDataPath?: string } = {}): Memo
     },
     createInjection() {
       const storage = readStorage();
-      const cards = storage.enabled
-        ? storage.cards
-          .filter((card) => card.enabled)
-          .map(({ id, title, content, tags }) => ({ id, title, content, tags }))
+      const enabledCards = storage.enabled
+        ? storage.cards.filter((card) => card.enabled)
         : [];
+      const cards = enabledCards.map(({ id, title, content, tags }) => ({ id, title, content, tags }));
+
+      if (enabledCards.length > 0) {
+        const now = Date.now();
+        const injectedIds = new Set(enabledCards.map((card) => card.id));
+        storage.cards = storage.cards.map((card) => injectedIds.has(card.id)
+          ? {
+            ...card,
+            lastInjectedAt: now,
+            injectionCount: card.injectionCount + 1
+          }
+          : card);
+        writeStorage(storage);
+      }
 
       return {
         count: cards.length,

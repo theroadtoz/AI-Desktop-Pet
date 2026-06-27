@@ -451,6 +451,22 @@ function normalizeMemoryTags(value: unknown): string[] | null {
   return tags;
 }
 
+function normalizeMemoryNamespace(value: unknown): string | null {
+  const normalized = normalizeMemoryText(value, 32);
+
+  return normalized && /^[a-z0-9][a-z0-9_-]{0,31}$/i.test(normalized)
+    ? normalized.toLowerCase()
+    : null;
+}
+
+function normalizeMemoryKey(value: unknown): string | null {
+  const normalized = normalizeMemoryText(value, 48);
+
+  return normalized && /^[a-z0-9][a-z0-9:_-]{0,47}$/i.test(normalized)
+    ? normalized.toLowerCase()
+    : null;
+}
+
 function parseMemoryCardDraft(value: unknown): MemoryCardDraft | null {
   const draft = value as Partial<MemoryCardDraft> | null;
   const title = normalizeMemoryText(draft?.title, 80);
@@ -524,6 +540,11 @@ function parseMemoryCard(value: unknown): MemoryCard | null {
   const title = normalizeMemoryText(card?.title, 80);
   const content = normalizeMemoryText(card?.content, 800);
   const tags = normalizeMemoryTags(card?.tags);
+  const sourceType = card?.sourceType === "manual-chat" ? card.sourceType : null;
+  const namespace = normalizeMemoryNamespace(card?.namespace);
+  const key = normalizeMemoryKey(card?.key);
+  const lastInjectedAt = card?.lastInjectedAt;
+  const injectionCount = card?.injectionCount;
 
   if (
     !card ||
@@ -531,6 +552,9 @@ function parseMemoryCard(value: unknown): MemoryCard | null {
     !title ||
     !content ||
     !tags ||
+    !sourceType ||
+    !namespace ||
+    !key ||
     !isMemoryId(card.sourceConversationId) ||
     typeof card.createdAt !== "number" ||
     !Number.isSafeInteger(card.createdAt) ||
@@ -538,7 +562,18 @@ function parseMemoryCard(value: unknown): MemoryCard | null {
     typeof card.updatedAt !== "number" ||
     !Number.isSafeInteger(card.updatedAt) ||
     card.updatedAt < card.createdAt ||
-    typeof card.enabled !== "boolean"
+    typeof card.enabled !== "boolean" ||
+    !(
+      lastInjectedAt === null ||
+      (
+        typeof lastInjectedAt === "number" &&
+        Number.isSafeInteger(lastInjectedAt) &&
+        lastInjectedAt > 0
+      )
+    ) ||
+    typeof injectionCount !== "number" ||
+    !Number.isSafeInteger(injectionCount) ||
+    injectionCount < 0
   ) {
     return null;
   }
@@ -549,9 +584,14 @@ function parseMemoryCard(value: unknown): MemoryCard | null {
     content,
     tags,
     sourceConversationId: card.sourceConversationId,
+    sourceType,
+    namespace,
+    key,
     createdAt: card.createdAt,
     updatedAt: card.updatedAt,
-    enabled: card.enabled
+    enabled: card.enabled,
+    lastInjectedAt,
+    injectionCount
   };
 }
 

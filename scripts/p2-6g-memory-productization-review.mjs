@@ -227,8 +227,22 @@ async function startApp() {
   await evaluate(handles.pet.cdp, "window.petApi?.openChat()");
   handles.chat = await connectTarget("renderer/chat/index.html");
   await waitFor(handles.chat.cdp, "document.querySelector('#provider-status')?.textContent.includes('Fake Provider')");
+  await saveWelcomeProfile(handles.chat.cdp);
   await installMemoryProbe(handles.chat.cdp);
   return { child, handles };
+}
+
+async function saveWelcomeProfile(cdp) {
+  const needsProfile = await evaluate(cdp, "document.querySelector('#user-welcome-panel')?.hidden === false");
+
+  if (!needsProfile) {
+    return;
+  }
+
+  await fill(cdp, "#welcome-user-display-name", "P2-6G");
+  await fill(cdp, "#welcome-user-preferred-name", "P2-6G");
+  await click(cdp, "#welcome-save-user-profile-button");
+  await waitFor(cdp, "document.querySelector('#user-welcome-panel')?.hidden === true");
 }
 
 async function installMemoryProbe(cdp) {
@@ -296,6 +310,7 @@ async function uiSnapshot(cdp) {
     (() => ({
       providerStatus: document.querySelector("#provider-status")?.textContent ?? "",
       chatNote: document.querySelector("#chat-session-note")?.textContent ?? "",
+      memorySessionStatus: document.querySelector("#memory-session-status")?.textContent ?? "",
       memoryFeedback: document.querySelector("#memory-feedback")?.textContent ?? "",
       memoryButton: document.querySelector("#enable-memory-button")?.textContent ?? "",
       memoryCards: [...document.querySelectorAll(".memory-card")].map((card) => ({
@@ -383,9 +398,9 @@ async function main() {
     await click(restartedChat, "#chat-tab");
     const enabledEvent = await sendMessage(restartedChat, "P2-6G provider injection enabled check");
     injectionResults.enabledCard = enabledEvent?.count;
-    await waitFor(restartedChat, "document.querySelector('#chat-session-note')?.textContent.includes('本次将使用 1 条已启用记忆')");
+    await waitFor(restartedChat, "document.querySelector('#memory-session-status')?.textContent.includes('本次使用 1 条记忆')");
     checks.enabledInjectionCount = enabledEvent?.count === 1;
-    checks.enabledInjectionUiText = (await uiSnapshot(restartedChat)).chatNote.includes("本次将使用 1 条已启用记忆");
+    checks.enabledInjectionUiText = (await uiSnapshot(restartedChat)).memorySessionStatus.includes("本次使用 1 条记忆");
 
     await click(restartedChat, "#memory-tab");
     await click(restartedChat, ".memory-card .button-light");
@@ -396,7 +411,7 @@ async function main() {
     const disabledEvent = await sendMessage(restartedChat, "P2-6G provider injection disabled-card check");
     injectionResults.disabledCard = disabledEvent?.count;
     checks.disabledInjectionCount = disabledEvent?.count === 0;
-    checks.zeroInjectionUiTextAfterDisable = (await uiSnapshot(restartedChat)).chatNote.includes("本次未使用记忆");
+    checks.zeroInjectionUiTextAfterDisable = (await uiSnapshot(restartedChat)).memorySessionStatus.includes("本次未使用记忆");
 
     await click(restartedChat, "#memory-tab");
     await click(restartedChat, ".memory-card .button-light");
@@ -457,7 +472,7 @@ async function main() {
     const clearedEvent = await sendMessage(afterClearChat, "P2-6G provider injection cleared check");
     injectionResults.clearedMemory = clearedEvent?.count;
     checks.clearedInjectionCount = clearedEvent?.count === 0;
-    checks.zeroInjectionUiTextAfterClear = (await uiSnapshot(afterClearChat)).chatNote.includes("本次未使用记忆");
+    checks.zeroInjectionUiTextAfterClear = (await uiSnapshot(afterClearChat)).memorySessionStatus.includes("本次未使用记忆");
 
     const finalUi = await uiSnapshot(afterClearChat);
     const finalMemory = readMemoryStorage();
@@ -490,6 +505,7 @@ async function main() {
       finalUi: {
         providerStatus: finalUi.providerStatus,
         chatNote: finalUi.chatNote,
+        memorySessionStatus: finalUi.memorySessionStatus,
         memoryFeedback: finalUi.memoryFeedback,
         memoryButton: finalUi.memoryButton,
         memoryCardCount: finalUi.memoryCards.length

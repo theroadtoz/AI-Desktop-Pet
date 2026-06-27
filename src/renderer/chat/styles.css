@@ -546,6 +546,17 @@ body {
   background: #fffdf8;
 }
 
+.memory-card-meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 6px 10px;
+}
+
+.memory-card-meta span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .memory-list {
   min-height: 0;
 }

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -31,10 +31,49 @@ test("memory storage is disabled by default and validates storage versions", () 
     enabled: true
   };
 
-  assert.equal(parseMemoryStorage({ version: 1, enabled: false, cards: [] })?.enabled, false);
-  assert.equal(parseMemoryStorage({ version: 2, enabled: false, cards: [] }), null);
+  assert.equal(parseMemoryStorage({ version: 1, enabled: false, cards: [] })?.version, 2);
+  assert.equal(parseMemoryStorage({ version: 2, enabled: false, cards: [] })?.enabled, false);
+  assert.equal(parseMemoryStorage({ version: 3, enabled: false, cards: [] }), null);
   assert.equal(parseMemoryStorage({ version: 1, enabled: "yes", cards: [] }), null);
   assert.equal(parseMemoryStorage({ version: 1, enabled: true, cards: [{ ...card, enabled: "yes" }] }), null);
+});
+
+test("v1 memory storage migrates to v2 metadata without dropping cards", async () => {
+  const userDataPath = await mkdtemp(join(tmpdir(), "desktop-pet-memory-"));
+
+  try {
+    const memoryDirectory = join(userDataPath, "memory");
+    await mkdir(memoryDirectory, { recursive: true });
+    const now = 1_700_000_000_000;
+    const legacyCard = {
+      id: crypto.randomUUID(),
+      ...createDraft(),
+      createdAt: now,
+      updatedAt: now,
+      enabled: true
+    };
+    const memoryPath = join(memoryDirectory, "facts.json");
+    await writeFile(memoryPath, JSON.stringify({
+      version: 1,
+      enabled: true,
+      cards: [legacyCard]
+    }), "utf8");
+
+    const store = createMemoryStore({ userDataPath });
+    const [card] = store.listCards();
+    assert.equal(card.id, legacyCard.id);
+    assert.equal(card.sourceType, "manual-chat");
+    assert.equal(card.namespace, "personal");
+    assert.equal(card.key, `manual-${legacyCard.id.slice(0, 8).toLowerCase()}`);
+    assert.equal(card.lastInjectedAt, null);
+    assert.equal(card.injectionCount, 0);
+
+    const migrated = JSON.parse(await readFile(memoryPath, "utf8"));
+    assert.equal(migrated.version, 2);
+    assert.equal(migrated.cards.length, 1);
+  } finally {
+    await rm(userDataPath, { recursive: true, force: true });
+  }
 });
 
 test("memory cards require explicit enablement and deletion survives restart", async () => {
@@ -47,15 +86,25 @@ test("memory cards require explicit enablement and deletion survives restart", a
 
     assert.equal(store.setEnabled(true).enabled, true);
     const card = store.createCard(createDraft());
+    assert.equal(card.sourceType, "manual-chat");
+    assert.equal(card.namespace, "personal");
+    assert.equal(card.key, `manual-${card.id.slice(0, 8).toLowerCase()}`);
+    assert.equal(card.lastInjectedAt, null);
+    assert.equal(card.injectionCount, 0);
     assert.equal(store.listCards().length, 1);
     assert.equal(store.createInjection().count, 1);
+    const injectedCard = store.getCard(card.id);
+    assert.equal(injectedCard?.injectionCount, 1);
+    assert.equal(typeof injectedCard?.lastInjectedAt, "number");
 
     assert.equal(store.updateCard(card.id, { enabled: false })?.enabled, false);
     assert.equal(store.createInjection().count, 0);
+    assert.equal(store.getCard(card.id)?.injectionCount, 1);
     assert.equal(store.updateCard(card.id, { enabled: true })?.enabled, true);
     assert.deepEqual(await readdir(join(userDataPath, "memory")), ["facts.json"]);
 
     assert.equal(createMemoryStore({ userDataPath }).createInjection().count, 1);
+    assert.equal(store.getCard(card.id)?.injectionCount, 2);
     assert.equal(store.deleteCard(card.id), true);
     assert.equal(createMemoryStore({ userDataPath }).listCards().length, 0);
 

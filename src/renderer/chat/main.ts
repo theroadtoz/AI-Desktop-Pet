@@ -90,6 +90,7 @@ const clearMemoryConfirmation = document.querySelector<HTMLElement>("#clear-memo
 const cancelClearMemoryButton = document.querySelector<HTMLButtonElement>("#cancel-clear-memory-button");
 const confirmClearMemoryButton = document.querySelector<HTMLButtonElement>("#confirm-clear-memory-button");
 const memoryFeedback = document.querySelector<HTMLElement>("#memory-feedback");
+const memoryNextInjectionStatus = document.querySelector<HTMLElement>("#memory-next-injection-status");
 const memorySearch = document.querySelector<HTMLInputElement>("#memory-search");
 const memoryList = document.querySelector<HTMLElement>("#memory-list");
 const userWelcomePanel = document.querySelector<HTMLElement>("#user-welcome-panel");
@@ -114,7 +115,7 @@ if (
   !cancelMemoryDraftButton || !saveMemoryDraftButton || !newConversationButton || !clearHistoryButton || !clearHistoryConfirmation ||
   !cancelClearHistoryButton || !confirmClearHistoryButton || !historyFeedback || !conversationList || !historyDetail ||
   !enableMemoryButton || !clearMemoryButton || !clearMemoryConfirmation || !cancelClearMemoryButton ||
-  !confirmClearMemoryButton || !memoryFeedback || !memorySearch || !memoryList || !userWelcomePanel ||
+  !confirmClearMemoryButton || !memoryFeedback || !memoryNextInjectionStatus || !memorySearch || !memoryList || !userWelcomePanel ||
   !welcomeUserDisplayName || !welcomeUserPreferredName || !welcomeSaveUserProfileButton || !userWelcomeFeedback
 ) {
   throw new Error("chat elements missing");
@@ -198,6 +199,7 @@ const clearMemoryConfirmationBox = clearMemoryConfirmation;
 const cancelClearMemoryAction = cancelClearMemoryButton;
 const confirmClearMemoryAction = confirmClearMemoryButton;
 const memoryFeedbackBox = memoryFeedback;
+const memoryNextInjectionStatusBox = memoryNextInjectionStatus;
 const memorySearchField = memorySearch;
 const memoryListElement = memoryList;
 const userWelcomePanelBox = userWelcomePanel;
@@ -682,6 +684,18 @@ function setMemoryFeedback(message: string): void {
   memoryFeedbackBox.textContent = message;
 }
 
+function getNextMemoryInjectionCount(): number {
+  return memoryEnabled ? memoryCards.filter((card) => card.enabled).length : 0;
+}
+
+function renderMemoryInjectionPreview(): void {
+  const count = getNextMemoryInjectionCount();
+  memoryNextInjectionStatusBox.textContent = memoryEnabled
+    ? `下次发送会注入 ${count} 条已启用记忆。`
+    : "下次发送会注入 0 条（记忆关闭）。";
+  memoryNextInjectionStatusBox.dataset.state = count > 0 ? "ready" : "fallback";
+}
+
 function parseTagsInput(value: string): string[] {
   return value
     .split(/[,，]/)
@@ -725,6 +739,7 @@ async function refreshMemory(): Promise<void> {
     memoryEnabled = settings.enabled;
     memoryCards = cards;
     enableMemoryAction.textContent = memoryEnabled ? "关闭记忆" : "开启记忆";
+    renderMemoryInjectionPreview();
     renderMemoryList();
     const enabledCount = cards.filter((card) => card.enabled).length;
     setMemoryFeedback(
@@ -774,9 +789,23 @@ function createMemoryCardElement(card: MemoryCard): HTMLElement {
   content.value = card.content;
   const tags = document.createElement("input");
   tags.value = card.tags.join("，");
-  const meta = document.createElement("p");
-  meta.className = "selection-note";
-  meta.textContent = `${card.enabled ? "已启用" : "已停用"} · ${formatHistoryTime(card.updatedAt)}`;
+  const meta = document.createElement("div");
+  meta.className = "memory-card-meta selection-note";
+  const status = document.createElement("span");
+  status.textContent = `状态：${card.enabled ? "已启用" : "已停用"}`;
+  const source = document.createElement("span");
+  source.textContent = "来源：手动从聊天保存";
+  const category = document.createElement("span");
+  category.textContent = `分类：${card.namespace}/${card.key}`;
+  const created = document.createElement("span");
+  created.textContent = `创建：${formatHistoryTime(card.createdAt)}`;
+  const updated = document.createElement("span");
+  updated.textContent = `更新：${formatHistoryTime(card.updatedAt)}`;
+  const injected = document.createElement("span");
+  injected.textContent = card.lastInjectedAt
+    ? `使用：${formatHistoryTime(card.lastInjectedAt)} · ${card.injectionCount} 次`
+    : "使用：从未注入";
+  meta.append(status, source, category, created, updated, injected);
   const actions = document.createElement("div");
   actions.className = "history-detail-actions";
   const saveButton = document.createElement("button");
