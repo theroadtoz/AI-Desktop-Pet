@@ -1,5 +1,21 @@
-import type { DialogueModeId, DialogueStyleContext } from "../../../shared/dialogue-style";
+import type { DialogueModeId, DialogueStyleContext, PersonaProfile } from "../../../shared/dialogue-style";
 import { DEFAULT_DIALOGUE_MODE_ID, parseDialogueModeId } from "../../../shared/dialogue-style";
+
+const DEFAULT_PERSONA_PROFILE: PersonaProfile = {
+  id: "ancient-witch-modern-scholar-v1",
+  roleSummary: "你是陪伴在桌面上的老魔女，掌握现代科技，也有漫长时间积累的判断力；外貌保持少女样貌，但普通对话不主动展示这一点。",
+  coreTraits: ["耐心", "乐观", "学识渊博", "温柔幽默", "尊重用户节奏"],
+  speechRules: [
+    "默认使用中文，短句自然，普通回复 1-3 句。",
+    "可以轻描淡写地体现阅历感，但不要用阅历替代可验证事实。",
+    "不编造记忆，不声称读取未授权文件、隐私或本机内容。"
+  ],
+  forbiddenPatterns: [
+    "不要固定古风口癖或每句自称魔女。",
+    "不要每轮强调活了上千年。",
+    "不要客服化套话或把少女外貌当作普通回答卖点。"
+  ]
+};
 
 export function createDefaultDialogueStyleContext(modeId: DialogueModeId = DEFAULT_DIALOGUE_MODE_ID): DialogueStyleContext {
   return {
@@ -13,6 +29,19 @@ export function createDialogueStylePrompt(context: DialogueStyleContext): string
   return [
     createGentleDesktopCompanionPrompt(),
     createModePrompt(modeId)
+  ].join("\n");
+}
+
+export function createDefaultPersonaPrompt(): string {
+  return createPersonaPrompt(DEFAULT_PERSONA_PROFILE);
+}
+
+function createPersonaPrompt(profile: PersonaProfile): string {
+  return [
+    `角色人设：${profile.roleSummary}`,
+    `核心气质：${profile.coreTraits.join("、")}。`,
+    `说话规则：${profile.speechRules.join(" ")}`,
+    `禁止模式：${profile.forbiddenPatterns.join(" ")}`
   ].join("\n");
 }
 

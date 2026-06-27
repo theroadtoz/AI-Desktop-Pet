@@ -1,5 +1,15 @@
 export type DialogueModeId = "default" | "work" | "game" | "reading";
 
+export type PersonaId = "ancient-witch-modern-scholar-v1";
+
+export type PersonaProfile = {
+  id: PersonaId;
+  roleSummary: string;
+  coreTraits: readonly string[];
+  speechRules: readonly string[];
+  forbiddenPatterns: readonly string[];
+};
+
 export type DialogueStyleContext = {
   modeId: DialogueModeId;
   styleId: "gentle-desktop-companion-v1";

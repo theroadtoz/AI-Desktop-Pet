@@ -87,15 +87,17 @@ test("provider message mapping only includes explicit memory context", () => {
   const withoutMemory = mapChatMessagesToOpenAICompatible(messages);
   assert.equal(withoutMemory[0]?.role, "system");
   assert.equal(withoutMemory[1]?.role, "system");
-  assert.match(withoutMemory[1]?.content ?? "", /低打扰桌面伙伴/);
-  assert.match(withoutMemory[1]?.content ?? "", /默认回复 1-3 句/);
+  assert.match(withoutMemory[1]?.content ?? "", /老魔女|魔女/);
+  assert.equal(withoutMemory[2]?.role, "system");
+  assert.match(withoutMemory[2]?.content ?? "", /低打扰桌面伙伴/);
+  assert.match(withoutMemory[2]?.content ?? "", /默认回复 1-3 句/);
   assert.equal(withoutMemory.some((message) => message.content.includes("用户喜欢被称呼为小夏")), false);
 
   const withMemory = mapChatMessagesToOpenAICompatible(messages, {
     count: 1,
     cards: [{ id: crypto.randomUUID(), title: "称呼", content: "用户喜欢被称呼为小夏。", tags: ["称呼"] }]
   });
-  assert.equal(withMemory[2]?.role, "system");
+  assert.equal(withMemory[3]?.role, "system");
   assert.equal(withMemory.some((message) => message.role === "system" && message.content.includes("用户喜欢被称呼为小夏")), true);
 });
 
@@ -106,8 +108,8 @@ test("dialogue style message does not include memory card content", () => {
     cards: [{ id: crypto.randomUUID(), title: "称呼", content: "用户喜欢被称呼为小夏。", tags: ["称呼"] }]
   });
 
-  assert.equal(mapped[1]?.role, "system");
-  assert.equal(mapped[1]?.content.includes("用户喜欢被称呼为小夏"), false);
+  assert.equal(mapped[2]?.role, "system");
+  assert.equal(mapped[2]?.content.includes("用户喜欢被称呼为小夏"), false);
 });
 
 test("fake provider returns short varied replies with emotion classification", async () => {

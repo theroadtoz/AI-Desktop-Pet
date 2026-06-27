@@ -24,18 +24,42 @@ test("dialogue style mapper creates distinct mode prompts without expanding memo
     modeId: "work",
     styleId: "gentle-desktop-companion-v1"
   });
+  const gameMapped = mapChatMessagesToOpenAICompatible(messages, undefined, {
+    modeId: "game",
+    styleId: "gentle-desktop-companion-v1"
+  });
   const readingMapped = mapChatMessagesToOpenAICompatible(messages, memoryContext, {
     modeId: "reading",
     styleId: "gentle-desktop-companion-v1"
   });
 
-  assert.match(defaultMapped[1]?.content ?? "", /默认陪伴/);
-  assert.match(workMapped[1]?.content ?? "", /当前模式：工作/);
-  assert.match(readingMapped[1]?.content ?? "", /当前模式：读书/);
-  assert.notEqual(defaultMapped[1]?.content, workMapped[1]?.content);
+  assert.match(defaultMapped[2]?.content ?? "", /默认陪伴/);
+  assert.match(workMapped[2]?.content ?? "", /当前模式：工作/);
+  assert.match(gameMapped[2]?.content ?? "", /当前模式：游戏/);
+  assert.match(readingMapped[2]?.content ?? "", /当前模式：读书/);
+  assert.notEqual(defaultMapped[2]?.content, workMapped[2]?.content);
+  assert.notEqual(workMapped[2]?.content, gameMapped[2]?.content);
+  assert.notEqual(gameMapped[2]?.content, readingMapped[2]?.content);
   assert.equal(workMapped.some((message) => message.content.includes("P2-10C-事实卡正文")), false);
-  assert.equal(readingMapped[1]?.content.includes("P2-10C-事实卡正文"), false);
+  assert.equal(readingMapped[2]?.content.includes("P2-10C-事实卡正文"), false);
   assert.equal(readingMapped.some((message) => message.role === "system" && message.content.includes("P2-10C-事实卡正文")), true);
+});
+
+test("provider message mapping inserts persona before dialogue style", () => {
+  const messages = [{ id: crypto.randomUUID(), role: "user" as const, content: "你好" }];
+  const mapped = mapChatMessagesToOpenAICompatible(messages, undefined, {
+    modeId: "default",
+    styleId: "gentle-desktop-companion-v1"
+  });
+
+  assert.match(mapped[0]?.content ?? "", /低打扰的桌面伙伴/);
+  assert.match(mapped[1]?.content ?? "", /现代科技/);
+  assert.match(mapped[1]?.content ?? "", /老魔女|魔女/);
+  assert.match(mapped[1]?.content ?? "", /耐心/);
+  assert.match(mapped[1]?.content ?? "", /乐观/);
+  assert.match(mapped[1]?.content ?? "", /学识渊博/);
+  assert.doesNotMatch(mapped[1]?.content ?? "", /吾|汝|小家伙/);
+  assert.match(mapped[2]?.content ?? "", /当前模式：默认陪伴/);
 });
 
 test("provider message mapping injects only sanitized user profile call name", () => {
@@ -50,6 +74,22 @@ test("provider message mapping injects only sanitized user profile call name", (
   assert.equal(mapped.some((message) => message.role === "system" && message.content === "用户希望被称呼为：夏夏"), true);
   assert.equal(mapped.some((message) => message.content.includes("displayName")), false);
   assert.equal(mapped.some((message) => message.content.includes("completedAt")), false);
+});
+
+test("provider message mapping keeps empty memory out and fact cards only in memory message", () => {
+  const messages = [{ id: crypto.randomUUID(), role: "user" as const, content: "你好" }];
+  const emptyMemoryMapped = mapChatMessagesToOpenAICompatible(messages, { count: 0, cards: [] });
+  const factText = "P2-12B-事实卡正文";
+  const mapped = mapChatMessagesToOpenAICompatible(messages, {
+    count: 1,
+    cards: [{ id: crypto.randomUUID(), title: "偏好", content: factText, tags: ["测试"] }]
+  });
+
+  assert.equal(emptyMemoryMapped.some((message) => message.content.includes("事实卡")), false);
+  assert.equal(mapped[1]?.content.includes(factText), false);
+  assert.equal(mapped[2]?.content.includes(factText), false);
+  assert.equal(mapped.filter((message) => message.content.includes(factText)).length, 1);
+  assert.match(mapped.find((message) => message.content.includes(factText))?.content ?? "", /仅用于当前回复/);
 });
 
 test("fake provider replies vary by dialogue mode and stay short", async () => {

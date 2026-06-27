@@ -2,7 +2,7 @@ import type { ChatMessage } from "../../../shared/chat";
 import type { MemoryInjection } from "../../../shared/chat-memory";
 import type { DialogueStyleContext } from "../../../shared/dialogue-style";
 import type { UserProfilePromptContext } from "../../../shared/user-profile";
-import { createDefaultDialogueStyleContext, createDialogueStylePrompt } from "./dialogue-style";
+import { createDefaultDialogueStyleContext, createDefaultPersonaPrompt, createDialogueStylePrompt } from "./dialogue-style";
 
 export type OpenAICompatibleMessage = {
   role: "system" | "user" | "assistant";
@@ -17,12 +17,14 @@ export function mapChatMessagesToOpenAICompatible(
   dialogueStyleContext: DialogueStyleContext = createDefaultDialogueStyleContext(),
   userProfileContext?: UserProfilePromptContext
 ): OpenAICompatibleMessage[] {
+  const personaMessage = createPersonaMessage();
   const dialogueStyleMessage = createDialogueStyleMessage(dialogueStyleContext);
   const userProfileMessage = createUserProfileMessage(userProfileContext);
   const memoryMessage = createMemoryMessage(memoryContext);
 
   return [
     { role: "system", content: SYSTEM_PROMPT },
+    personaMessage,
     dialogueStyleMessage,
     ...(userProfileMessage ? [userProfileMessage] : []),
     ...(memoryMessage ? [memoryMessage] : []),
@@ -31,6 +33,13 @@ export function mapChatMessagesToOpenAICompatible(
       content: message.content
     }))
   ];
+}
+
+function createPersonaMessage(): OpenAICompatibleMessage {
+  return {
+    role: "system",
+    content: createDefaultPersonaPrompt()
+  };
 }
 
 function createUserProfileMessage(context?: UserProfilePromptContext): OpenAICompatibleMessage | null {
