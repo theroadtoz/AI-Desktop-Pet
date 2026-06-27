@@ -386,6 +386,26 @@ async function waitForTelemetryEvent(predicate, timeoutMs = 6_000) {
   return null;
 }
 
+async function clickPetUntilTelemetry(cdp, randomValue, predicate, options = {}) {
+  const attempts = options.attempts ?? 3;
+  const hitArea = options.hitArea ?? "body";
+  const timeoutMs = options.timeoutMs ?? 2_500;
+  const pauseMs = options.pauseMs ?? 700;
+
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    await clickPet(cdp, randomValue, hitArea);
+    const event = await waitForTelemetryEvent(predicate, timeoutMs);
+
+    if (event) {
+      return event;
+    }
+
+    await sleep(pauseMs);
+  }
+
+  return null;
+}
+
 function findScreenshotResidue(directory) {
   const ignored = new Set([".git", "node_modules", "dist"]);
   const matches = [];
@@ -428,15 +448,14 @@ async function main() {
 
     await setMode(chat, "work");
     checks.workModeVisible = await evaluate(chat, "document.querySelector('#partner-status')?.textContent.includes('工作')");
-    await clickPet(handles.pet.cdp, 0.8);
-    const workAction = await waitForTelemetryEvent((event) => (
+    const workAction = await clickPetUntilTelemetry(handles.pet.cdp, 0.8, (event) => (
       event.type === "pet_interaction_action_started" &&
       event.payload?.reason === "click_body" &&
       event.payload?.modeId === "work" &&
       event.payload?.selectedActionType === "focus" &&
       Array.isArray(event.payload?.candidateActionTypes) &&
       event.payload.candidateActionTypes.includes("focus")
-    ));
+    ), { attempts: 4 });
     checks.workModePetActionCanTriggerFocus = Boolean(workAction);
     await sleep(2_100);
     const workReply = await sendMessage(chat, `${userSentinel} 工作模式回复`);
@@ -444,13 +463,12 @@ async function main() {
 
     await setMode(chat, "game");
     checks.gameModeVisible = await evaluate(chat, "document.querySelector('#partner-status')?.textContent.includes('游戏')");
-    await clickPet(handles.pet.cdp, 0.6);
-    const gameAction = await waitForTelemetryEvent((event) => (
+    const gameAction = await clickPetUntilTelemetry(handles.pet.cdp, 0.6, (event) => (
       event.type === "pet_interaction_action_started" &&
       event.payload?.reason === "click_body" &&
       event.payload?.modeId === "game" &&
       event.payload?.selectedActionType === "playGame"
-    ));
+    ), { attempts: 3 });
     checks.gameModePetActionPrefersPlayGame = Boolean(gameAction);
     await sleep(2_100);
     const gameReply = await sendMessage(chat, "游戏模式回复");
@@ -458,13 +476,12 @@ async function main() {
 
     await setMode(chat, "reading");
     checks.readingModeVisible = await evaluate(chat, "document.querySelector('#partner-status')?.textContent.includes('读书')");
-    await clickPet(handles.pet.cdp, 0.7);
-    const readingAction = await waitForTelemetryEvent((event) => (
+    const readingAction = await clickPetUntilTelemetry(handles.pet.cdp, 0.7, (event) => (
       event.type === "pet_interaction_action_started" &&
       event.payload?.reason === "click_body" &&
       event.payload?.modeId === "reading" &&
       event.payload?.selectedActionType === "reading"
-    ));
+    ), { attempts: 3 });
     checks.readingModePetActionPrefersReading = Boolean(readingAction);
     await sleep(2_300);
     const readingReply = await sendMessage(chat, "读书模式回复");
