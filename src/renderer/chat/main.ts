@@ -1,8 +1,8 @@
 import "./styles.css";
 import type { ChatMessage, ChatRole } from "../../shared/chat";
 import type { Conversation, ConversationSummary } from "../../shared/chat-history";
-import { DIALOGUE_MODE_LABELS, type DialogueModeId, type DialogueModeView } from "../../shared/dialogue-style";
-import { PRESENCE_MODE_LABELS, type PresenceModeId, type PresenceModeView } from "../../shared/presence-mode";
+import type { DialogueModeId, DialogueModeView } from "../../shared/dialogue-style";
+import type { PresenceModeId, PresenceModeView } from "../../shared/presence-mode";
 import type { MemoryCard } from "../../shared/chat-memory";
 import {
   LOCAL_PROVIDER_PRESETS,
@@ -10,7 +10,7 @@ import {
   type ProviderConfig,
   type ProviderStatus
 } from "../../shared/provider-config";
-import type { ProviderHealthCheckRequest, ProviderHealthResult } from "../../shared/provider-health";
+import type { ProviderHealthCheckRequest } from "../../shared/provider-health";
 import {
   DEFAULT_PET_PRESENTATION_PREFERENCES,
   normalizePetScale
@@ -18,6 +18,35 @@ import {
 import { isPetAccessoryPresetId, type PetAccessoryPresetId } from "../../shared/pet-accessory";
 import type { ShortcutActionId, ShortcutPreferenceView } from "../../shared/shortcut-preferences";
 import type { UserProfile } from "../../shared/user-profile";
+import {
+  applyChatTurnDelta,
+  createInitialChatTurnState,
+  finishChatTurn,
+  formatChatTurnFinish,
+  shouldAcceptChatTurnEvent,
+  startChatTurn,
+  type ChatTurnLifecycleEcho,
+  type ChatTurnState
+} from "./chat-turn-state";
+import {
+  ACTIVITY_ECHO_ACTIVE_MS,
+  ACTIVITY_ECHO_DEDUPE_MS,
+  ACTIVITY_ECHO_FADING_MESSAGE,
+  ACTIVITY_ECHO_FADING_MS,
+  ACTIVITY_ECHO_IDLE_MESSAGE,
+  formatCompanionShelf,
+  formatMemoryRibbon,
+  formatModeLabel,
+  formatPartnerStatus,
+  formatPresenceLabel,
+  formatProviderHealthResult,
+  formatProviderStatus,
+  type ActivityEchoState
+} from "./partner-presence-presenter";
+import {
+  createReplyInteractionLockState,
+  type ReplyLockControlId
+} from "./interaction-lock";
 
 const form = document.querySelector<HTMLFormElement>("#chat-form");
 const input = document.querySelector<HTMLInputElement>("#chat-input");
@@ -227,6 +256,27 @@ const welcomeUserDisplayNameField = welcomeUserDisplayName;
 const welcomeUserPreferredNameField = welcomeUserPreferredName;
 const welcomeSaveUserProfileAction = welcomeSaveUserProfileButton;
 const userWelcomeFeedbackBox = userWelcomeFeedback;
+type DisableableChatControl = HTMLButtonElement | HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement;
+const replyLockControlElements: Record<ReplyLockControlId, DisableableChatControl> = {
+  "chat-input": chatInput,
+  "send-button": sendAction,
+  "abort-button": abortAction,
+  "settings-button": settingsAction,
+  "chat-tab": chatTabAction,
+  "history-tab": historyTabAction,
+  "memory-tab": memoryTabAction,
+  "new-conversation-button": newConversationAction,
+  "clear-history-button": clearHistoryAction,
+  "enable-memory-button": enableMemoryAction,
+  "clear-memory-button": clearMemoryAction,
+  "save-memory-draft-button": saveMemoryDraftAction,
+  "save-user-profile-button": saveUserProfileAction,
+  "clear-user-profile-button": clearUserProfileAction,
+  "welcome-save-user-profile-button": welcomeSaveUserProfileAction,
+  "shelf-accessory-button": shelfAccessoryAction,
+  "shelf-scale-button": shelfScaleAction,
+  "shelf-lock-button": shelfLockAction
+};
 const chatHistory: ChatMessage[] = [];
 let conversationId: string = crypto.randomUUID();
 const DEFAULT_API_KEY_REF = "openai-compatible-default";
@@ -248,11 +298,9 @@ const DEFAULT_LOCAL_OPENAI_CONFIG = {
   timeoutMs: 60000
 };
 
+let chatTurnState: ChatTurnState = createInitialChatTurnState();
 let activeReplyMessage: ChatMessage | null = null;
 let activeReplyElement: HTMLElement | null = null;
-let isReplying = false;
-let activeRequestVersion: number | null = null;
-let latestRequestVersion = 0;
 let activePage: "chat" | "history" | "memory" = "chat";
 let selectedHistoryConversation: Conversation | null = null;
 let providerContextEnabled = false;
@@ -269,13 +317,6 @@ let presenceModes: PresenceModeView[] = [];
 let currentPresenceModeId: PresenceModeId = "default";
 let currentUserProfile: UserProfile | null = null;
 let currentMemoryInjectionCount: number | null = null;
-type ActivityEchoState = "idle" | "active" | "fading";
-
-const ACTIVITY_ECHO_IDLE_MESSAGE = "等待中";
-const ACTIVITY_ECHO_FADING_MESSAGE = "安静陪伴中";
-const ACTIVITY_ECHO_ACTIVE_MS = 5_000;
-const ACTIVITY_ECHO_FADING_MS = 4_000;
-const ACTIVITY_ECHO_DEDUPE_MS = 2_500;
 
 let currentActivityEcho = ACTIVITY_ECHO_IDLE_MESSAGE;
 let currentActivityEchoState: ActivityEchoState = "idle";
@@ -286,42 +327,6 @@ let activityEchoActiveTimer: number | null = null;
 let activityEchoIdleTimer: number | null = null;
 let recordingShortcutActionId: ShortcutActionId | null = null;
 let pendingWheelModifierRecordTimeout: number | null = null;
-
-function formatProviderStatus(status: ProviderStatus): string {
-  if (status.isFallback) {
-    if (status.reason === "missing_api_key") {
-      return `本地回退：未配置 API Key${status.model ? ` · ${status.model}` : ""}`;
-    }
-
-    if (status.reason === "invalid_config") {
-      return "本地回退：provider 配置无效";
-    }
-
-    return "本地回退：Fake Provider";
-  }
-
-  if (status.providerId === "openai-compatible") {
-    const parts = [`真实模型：${status.model ?? status.displayName}`];
-
-    if (status.baseURLHost) {
-      parts.push(status.baseURLHost);
-    }
-
-    return parts.join(" · ");
-  }
-
-  if (status.providerId === "local-openai-compatible") {
-    const parts = [`本地模型：${status.model ?? status.displayName}`];
-
-    if (status.baseURLHost) {
-      parts.push(status.baseURLHost);
-    }
-
-    return parts.join(" · ");
-  }
-
-  return "本地模式：Fake Provider";
-}
 
 function setProviderStatus(status: ProviderStatus): void {
   providerStatusBox.textContent = formatProviderStatus(status);
@@ -338,63 +343,23 @@ function setProviderHealthStatus(message: string, state: "ready" | "fallback" = 
   providerHealthStatusBox.dataset.state = state;
 }
 
-function formatProviderHealthResult(result: ProviderHealthResult): string {
-  const host = result.baseURLHost ? ` · ${result.baseURLHost}` : "";
-  const count = typeof result.modelCount === "number" ? ` · 可见模型 ${result.modelCount} 个` : "";
-
-  if (result.status === "ready") {
-    return `连接可用：已找到当前模型${host}${count}`;
-  }
-
-  if (result.status === "model_missing") {
-    return `服务可达，但未找到当前模型${host}${count}`;
-  }
-
-  if (result.status === "incompatible_response") {
-    return `响应格式不兼容，请确认端点支持 OpenAI-compatible /models${host}`;
-  }
-
-  if (result.status === "service_unreachable") {
-    return `服务不可达，请确认服务已启动且 Base URL 正确${host}`;
-  }
-
-  if (result.status === "timeout") {
-    return `连接检查超时，请确认服务状态或调大超时时间${host}`;
-  }
-
-  if (result.status === "missing_api_key") {
-    return "云端 Provider 需要先配置 API Key；本次未发起检查请求。";
-  }
-
-  if (result.status === "cancelled") {
-    return "连接检查已取消。";
-  }
-
-  return "Provider 配置无效，请检查 Base URL、模型和超时时间。";
-}
-
 function setPartnerStatus(message: string): void {
   partnerStatusBox.textContent = message;
   partnerStatusBox.dataset.state = "ready";
 }
 
-function formatModeLabel(modeId: DialogueModeId): string {
-  const label = DIALOGUE_MODE_LABELS[modeId];
-  return modeId === "default" ? label : `${label}模式`;
-}
-
-function formatPresenceLabel(modeId: PresenceModeId): string {
-  return PRESENCE_MODE_LABELS[modeId];
-}
-
 function renderPartnerStatus(): void {
   const modeLabel = formatModeLabel(currentDialogueModeId);
   const presenceLabel = formatPresenceLabel(currentPresenceModeId);
-  const roleLabel = currentUserProfile
+  const userProfileLabel = currentUserProfile
     ? currentUserProfile.preferredName ?? currentUserProfile.displayName
-    : "等待本地身份";
+    : null;
 
-  setPartnerStatus(`桌面伙伴：${roleLabel} · ${modeLabel} · 存在：${presenceLabel}`);
+  setPartnerStatus(formatPartnerStatus({
+    userProfileLabel,
+    dialogueModeId: currentDialogueModeId,
+    presenceModeId: currentPresenceModeId
+  }));
   settingsDialogueModeSummaryBox.textContent = `当前模式：${modeLabel}`;
   settingsDialogueModeSummaryBox.dataset.state = "ready";
   settingsPresenceModeSummaryBox.textContent = `当前存在：${presenceLabel}`;
@@ -402,19 +367,20 @@ function renderPartnerStatus(): void {
 }
 
 function renderRibbonEcho(): void {
-  const memoryText = currentMemoryInjectionCount && currentMemoryInjectionCount > 0
-    ? `本次使用 ${currentMemoryInjectionCount} 条记忆`
-    : "本次未使用记忆";
+  const ribbon = formatMemoryRibbon({
+    memoryInjectionCount: currentMemoryInjectionCount,
+    ribbonEcho: currentRibbonEcho
+  });
 
-  memorySessionStatusBox.textContent = `${memoryText} · ${currentRibbonEcho}`;
-  memorySessionStatusBox.dataset.state = currentMemoryInjectionCount && currentMemoryInjectionCount > 0 ? "ready" : "fallback";
+  memorySessionStatusBox.textContent = ribbon.text;
+  memorySessionStatusBox.dataset.state = ribbon.state;
 }
 
 function renderActivityEcho(message: string, state: ActivityEchoState): void {
   currentActivityEcho = message;
   currentActivityEchoState = state;
 
-  if (!isReplying) {
+  if (!chatTurnState.isReplying) {
     currentRibbonEcho = message;
   }
 
@@ -473,13 +439,21 @@ function setChatLifecycleEcho(message: string): void {
 
 function renderCompanionControlShelf(): void {
   const hasProfile = Boolean(currentUserProfile);
+  const shelf = formatCompanionShelf({
+    accessoryLabel: getPetAccessoryLabel(currentPetAccessoryPresetId),
+    petScale: currentPetScale,
+    isPetLocked,
+    activityEcho: currentActivityEcho,
+    activityEchoState: currentActivityEchoState
+  });
+
   companionControlShelfBox.hidden = !hasProfile;
-  shelfAccessoryAction.textContent = `配件：${getPetAccessoryLabel(currentPetAccessoryPresetId)}`;
-  shelfScaleAction.textContent = `大小：${Math.round(currentPetScale * 100)}%`;
-  shelfLockAction.textContent = `锁定：${isPetLocked ? "已锁定" : "未锁定"}`;
-  shelfLockAction.dataset.state = isPetLocked ? "ready" : "fallback";
-  shelfActionEchoBox.textContent = `最近动作：${currentActivityEcho}`;
-  shelfActionEchoBox.dataset.state = currentActivityEchoState;
+  shelfAccessoryAction.textContent = shelf.accessoryText;
+  shelfScaleAction.textContent = shelf.scaleText;
+  shelfLockAction.textContent = shelf.lockText;
+  shelfLockAction.dataset.state = shelf.lockState;
+  shelfActionEchoBox.textContent = shelf.actionEchoText;
+  shelfActionEchoBox.dataset.state = shelf.actionEchoState;
 }
 
 function formatUserProfileSummary(profile: UserProfile | null): string {
@@ -571,7 +545,7 @@ async function saveUserProfileFromFields(
   preferredNameField: HTMLInputElement,
   source: "welcome" | "settings"
 ): Promise<void> {
-  if (!window.userProfileApi || isReplying) {
+  if (!window.userProfileApi || chatTurnState.isReplying) {
     return;
   }
 
@@ -638,7 +612,7 @@ function renderDialogueModes(modes: DialogueModeView[]): void {
     button.type = "button";
     button.dataset.modeId = mode.id;
     button.textContent = mode.label;
-    button.disabled = isReplying;
+    button.disabled = chatTurnState.isReplying;
     button.setAttribute("aria-pressed", String(mode.id === currentDialogueModeId));
     button.addEventListener("click", () => {
       void setDialogueModeFromUi(mode.id);
@@ -663,7 +637,7 @@ async function refreshDialogueMode(): Promise<void> {
 }
 
 async function setDialogueModeFromUi(modeId: DialogueModeId): Promise<void> {
-  if (!window.dialogueModeApi || isReplying || modeId === currentDialogueModeId) {
+  if (!window.dialogueModeApi || chatTurnState.isReplying || modeId === currentDialogueModeId) {
     return;
   }
 
@@ -684,7 +658,7 @@ function renderPresenceModes(modes: PresenceModeView[]): void {
     button.dataset.modeId = mode.id;
     button.textContent = mode.label;
     button.title = mode.description;
-    button.disabled = isReplying;
+    button.disabled = chatTurnState.isReplying;
     button.setAttribute("aria-pressed", String(mode.id === currentPresenceModeId));
     button.addEventListener("click", () => {
       void setPresenceModeFromUi(mode.id);
@@ -709,7 +683,7 @@ async function refreshPresenceMode(): Promise<void> {
 }
 
 async function setPresenceModeFromUi(modeId: PresenceModeId): Promise<void> {
-  if (!window.presenceModeApi || isReplying || modeId === currentPresenceModeId) {
+  if (!window.presenceModeApi || chatTurnState.isReplying || modeId === currentPresenceModeId) {
     return;
   }
 
@@ -840,7 +814,7 @@ function parseTagsInput(value: string): string[] {
 }
 
 function openMemoryDraft(message: ChatMessage): void {
-  if (isReplying) {
+  if (chatTurnState.isReplying) {
     return;
   }
 
@@ -1156,7 +1130,7 @@ async function selectHistoryConversation(id: string): Promise<void> {
 }
 
 function restoreSelectedHistory(includeProviderContext: boolean): void {
-  if (!selectedHistoryConversation || isReplying) {
+  if (!selectedHistoryConversation || chatTurnState.isReplying) {
     return;
   }
 
@@ -1174,7 +1148,7 @@ function restoreSelectedHistory(includeProviderContext: boolean): void {
 }
 
 function startNewConversation(): void {
-  if (isReplying) {
+  if (chatTurnState.isReplying) {
     return;
   }
 
@@ -1210,59 +1184,46 @@ async function deleteSelectedHistoryConversation(): Promise<void> {
 }
 
 function setReplying(isReplying: boolean): void {
-  chatInput.disabled = isReplying;
-  sendAction.disabled = isReplying;
-  abortAction.disabled = !isReplying;
-  settingsAction.disabled = isReplying;
-  chatTabAction.disabled = isReplying;
-  historyTabAction.disabled = isReplying;
-  memoryTabAction.disabled = isReplying;
-  newConversationAction.disabled = isReplying;
-  clearHistoryAction.disabled = isReplying;
-  enableMemoryAction.disabled = isReplying;
-  clearMemoryAction.disabled = isReplying;
-  saveMemoryDraftAction.disabled = isReplying;
-  saveUserProfileAction.disabled = isReplying;
-  clearUserProfileAction.disabled = isReplying;
-  welcomeSaveUserProfileAction.disabled = isReplying;
-  shelfAccessoryAction.disabled = isReplying;
-  shelfScaleAction.disabled = isReplying;
-  shelfLockAction.disabled = isReplying;
+  const lockState = createReplyInteractionLockState(isReplying);
+
+  for (const controlState of lockState.controls) {
+    replyLockControlElements[controlState.controlId].disabled = controlState.disabled;
+  }
+
   dialogueModeControlsElement.querySelectorAll<HTMLButtonElement>(".mode-button").forEach((control) => {
-    control.disabled = isReplying;
+    control.disabled = lockState.groupsDisabled;
   });
   presenceModeControlsElement.querySelectorAll<HTMLButtonElement>(".mode-button").forEach((control) => {
-    control.disabled = isReplying;
+    control.disabled = lockState.groupsDisabled;
   });
   historyDetailElement.querySelectorAll<HTMLButtonElement>("button").forEach((control) => {
-    control.disabled = isReplying;
+    control.disabled = lockState.groupsDisabled;
   });
   providerSettingsForm.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>("input, select, button")
     .forEach((control) => {
-      control.disabled = isReplying;
+      control.disabled = lockState.groupsDisabled;
     });
 
   if (isReplying) {
     setChatLifecycleEcho("正在回复");
-    setChatSessionNote("正在等待她回复；可以随时中断本次生成。", "ready");
+    const note = formatChatTurnFinish("正在回复");
+    setChatSessionNote(note.sessionNote, note.sessionNoteState);
   }
 }
 
-function finishReplying(activityEcho = "回复完成"): void {
+function finishReplying(requestVersion: number, activityEcho: ChatTurnLifecycleEcho = "回复完成"): void {
+  const result = finishChatTurn(chatTurnState, requestVersion, activityEcho);
+
+  if (!result.accepted) {
+    return;
+  }
+
+  chatTurnState = result.state;
   activeReplyMessage = null;
   activeReplyElement = null;
-  activeRequestVersion = null;
-  isReplying = false;
   setReplying(false);
-  setChatLifecycleEcho(activityEcho);
-  setChatSessionNote(
-    activityEcho === "回复完成"
-      ? "回复完成；下一条仍只发送当前输入。"
-      : activityEcho === "回复失败"
-        ? "回复失败；请检查连接或稍后重试。"
-        : "回复已中断，未保存未完成的助手消息。",
-    activityEcho === "回复完成" ? "ready" : activityEcho === "回复失败" ? "error" : "fallback"
-  );
+  setChatLifecycleEcho(result.lifecycleEcho);
+  setChatSessionNote(result.sessionNote, result.sessionNoteState);
   chatInput.focus();
 }
 
@@ -1681,7 +1642,7 @@ async function refreshApiKeyStatus(): Promise<void> {
 }
 
 async function openSettings(): Promise<void> {
-  if (isReplying || !window.configApi) {
+  if (chatTurnState.isReplying || !window.configApi) {
     return;
   }
 
@@ -1845,26 +1806,29 @@ function buildProviderHealthRequest(): ProviderHealthCheckRequest | null {
 }
 
 window.chatApi?.onReplyDelta((delta) => {
-  if (!activeReplyMessage || !activeReplyElement || delta.requestVersion !== activeRequestVersion) {
+  const result = applyChatTurnDelta(chatTurnState, delta.requestVersion, delta.text);
+
+  if (!result.accepted || !activeReplyMessage || !activeReplyElement) {
     return;
   }
 
-  activeReplyMessage.content += delta.text;
+  chatTurnState = result.state;
+  activeReplyMessage.content = result.content;
   const content = activeReplyElement.querySelector<HTMLElement>(".message-content") ?? activeReplyElement;
   content.textContent = activeReplyMessage.content;
   messageList.scrollTop = messageList.scrollHeight;
 });
 
 window.chatApi?.onReplyDone((reply) => {
-  if (reply.requestVersion !== activeRequestVersion) {
+  if (!shouldAcceptChatTurnEvent(chatTurnState, reply.requestVersion)) {
     return;
   }
 
-  finishReplying();
+  finishReplying(reply.requestVersion);
 });
 
 window.chatApi?.onReplyError((error) => {
-  if (error.requestVersion !== activeRequestVersion) {
+  if (!shouldAcceptChatTurnEvent(chatTurnState, error.requestVersion)) {
     return;
   }
 
@@ -1879,11 +1843,11 @@ window.chatApi?.onReplyError((error) => {
   }
 
   const wasAborted = error.errorType === "aborted";
-  finishReplying(wasAborted ? "已中断" : "回复失败");
+  finishReplying(error.requestVersion, wasAborted ? "已中断" : "回复失败");
 });
 
 window.chatApi?.onMemoryInjection((payload) => {
-  if (payload.requestVersion !== activeRequestVersion) {
+  if (!shouldAcceptChatTurnEvent(chatTurnState, payload.requestVersion)) {
     return;
   }
 
@@ -1909,7 +1873,7 @@ window.presenceModeApi?.onModeChanged((modeId) => {
 chatForm.addEventListener("submit", (event) => {
   event.preventDefault();
 
-  if (isReplying || !currentUserProfile) {
+  if (chatTurnState.isReplying || !currentUserProfile) {
     if (!currentUserProfile) {
       setUserWelcomeFeedback("请先设置本地昵称后再开始聊天。");
       welcomeUserDisplayNameField.focus();
@@ -1933,15 +1897,16 @@ chatForm.addEventListener("submit", (event) => {
   const replyElement = appendMessage(replyMessage);
 
   chatInput.value = "";
+  const startedTurn = startChatTurn(chatTurnState, replyMessage.id);
+
+  chatTurnState = startedTurn.state;
   activeReplyMessage = replyMessage;
   activeReplyElement = replyElement;
-  activeRequestVersion = ++latestRequestVersion;
-  isReplying = true;
   setMemorySessionStatus(null);
   setReplying(true);
 
   window.chatApi?.sendMessage({
-    requestVersion: activeRequestVersion,
+    requestVersion: startedTurn.requestVersion,
     conversationId,
     messages: requestMessages
   });
@@ -1968,7 +1933,7 @@ settingsAction.addEventListener("click", () => {
 });
 
 shelfAccessoryAction.addEventListener("click", () => {
-  if (isReplying || !window.petPresentationApi) {
+  if (chatTurnState.isReplying || !window.petPresentationApi) {
     return;
   }
 
@@ -1989,7 +1954,7 @@ shelfScaleAction.addEventListener("click", () => {
 });
 
 shelfLockAction.addEventListener("click", () => {
-  if (isReplying || !window.petPresentationApi) {
+  if (chatTurnState.isReplying || !window.petPresentationApi) {
     return;
   }
 
@@ -2010,7 +1975,7 @@ saveUserProfileAction.addEventListener("click", () => {
 });
 
 clearUserProfileAction.addEventListener("click", () => {
-  if (!window.userProfileApi || isReplying) {
+  if (!window.userProfileApi || chatTurnState.isReplying) {
     return;
   }
 
@@ -2048,7 +2013,7 @@ cancelMemoryDraftAction.addEventListener("click", () => {
 });
 
 saveMemoryDraftAction.addEventListener("click", () => {
-  if (!memoryDraftSourceMessage || !window.memoryApi || isReplying) {
+  if (!memoryDraftSourceMessage || !window.memoryApi || chatTurnState.isReplying) {
     return;
   }
 
@@ -2077,7 +2042,7 @@ saveMemoryDraftAction.addEventListener("click", () => {
 });
 
 clearHistoryAction.addEventListener("click", () => {
-  if (!isReplying) {
+  if (!chatTurnState.isReplying) {
     clearHistoryConfirmationBox.hidden = false;
   }
 });
@@ -2087,7 +2052,7 @@ cancelClearHistoryAction.addEventListener("click", () => {
 });
 
 confirmClearHistoryAction.addEventListener("click", () => {
-  if (isReplying || !window.historyApi) {
+  if (chatTurnState.isReplying || !window.historyApi) {
     return;
   }
 
@@ -2106,7 +2071,7 @@ confirmClearHistoryAction.addEventListener("click", () => {
 });
 
 enableMemoryAction.addEventListener("click", () => {
-  if (!window.memoryApi || isReplying) {
+  if (!window.memoryApi || chatTurnState.isReplying) {
     return;
   }
 
@@ -2122,7 +2087,7 @@ enableMemoryAction.addEventListener("click", () => {
 });
 
 clearMemoryAction.addEventListener("click", () => {
-  if (!isReplying) {
+  if (!chatTurnState.isReplying) {
     clearMemoryConfirmationBox.hidden = false;
   }
 });
@@ -2132,7 +2097,7 @@ cancelClearMemoryAction.addEventListener("click", () => {
 });
 
 confirmClearMemoryAction.addEventListener("click", () => {
-  if (!window.memoryApi || isReplying) {
+  if (!window.memoryApi || chatTurnState.isReplying) {
     return;
   }
 
@@ -2238,7 +2203,7 @@ for (const field of [baseURLField, modelField, timeoutField]) {
 }
 
 providerHealthCheckAction.addEventListener("click", () => {
-  if (isReplying || !window.configApi) {
+  if (chatTurnState.isReplying || !window.configApi) {
     return;
   }
 
@@ -2269,7 +2234,7 @@ petScaleField.addEventListener("input", () => {
 });
 
 savePetScaleAction.addEventListener("click", () => {
-  if (isReplying || !window.petPresentationApi) {
+  if (chatTurnState.isReplying || !window.petPresentationApi) {
     return;
   }
 
@@ -2291,7 +2256,7 @@ savePetScaleAction.addEventListener("click", () => {
 });
 
 savePetAccessoryAction.addEventListener("click", () => {
-  if (isReplying || !window.petPresentationApi) {
+  if (chatTurnState.isReplying || !window.petPresentationApi) {
     return;
   }
 
@@ -2313,7 +2278,7 @@ savePetAccessoryAction.addEventListener("click", () => {
 });
 
 togglePetLockAction.addEventListener("click", () => {
-  if (isReplying || !window.petPresentationApi) {
+  if (chatTurnState.isReplying || !window.petPresentationApi) {
     return;
   }
 
@@ -2331,7 +2296,7 @@ togglePetLockAction.addEventListener("click", () => {
 providerSettingsForm.addEventListener("submit", (event) => {
   event.preventDefault();
 
-  if (isReplying || !window.configApi) {
+  if (chatTurnState.isReplying || !window.configApi) {
     return;
   }
 
@@ -2369,7 +2334,7 @@ providerSettingsForm.addEventListener("submit", (event) => {
 });
 
 deleteApiKeyAction.addEventListener("click", () => {
-  if (!isReplying) {
+  if (!chatTurnState.isReplying) {
     deleteKeyConfirmationBox.hidden = false;
   }
 });
@@ -2379,7 +2344,7 @@ cancelDeleteApiKeyAction.addEventListener("click", () => {
 });
 
 confirmDeleteApiKeyAction.addEventListener("click", () => {
-  if (isReplying || !window.configApi) {
+  if (chatTurnState.isReplying || !window.configApi) {
     return;
   }
 
