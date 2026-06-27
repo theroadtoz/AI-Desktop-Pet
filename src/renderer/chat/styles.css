@@ -14,6 +14,7 @@ body {
   flex-direction: column;
   gap: 18px;
   height: 100vh;
+  min-width: 0;
   padding: 18px;
 }
 
@@ -27,7 +28,7 @@ body {
   display: grid;
   flex: 1;
   min-width: 0;
-  grid-template-columns: minmax(130px, 0.8fr) minmax(180px, 1.2fr) minmax(140px, 0.9fr);
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.15fr) minmax(0, 0.95fr);
   gap: 8px;
   padding: 6px;
   border: 1px solid #e7dccb;
@@ -119,6 +120,20 @@ body {
   gap: 10px;
 }
 
+.settings-actions,
+.inline-actions,
+.history-actions,
+.memory-actions {
+  flex-wrap: wrap;
+}
+
+.settings-actions > *,
+.inline-actions > *,
+.history-actions > *,
+.memory-actions > * {
+  min-width: 0;
+}
+
 .settings-header h2 {
   margin: 0;
   font-size: 16px;
@@ -196,6 +211,15 @@ body {
   color: #6b5745;
   font-size: 13px;
   line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.selection-note[data-state="ready"] {
+  color: #48633e;
+}
+
+.selection-note[data-state="error"] {
+  color: #8e3021;
 }
 
 .history-actions {
@@ -310,6 +334,16 @@ body {
   margin-top: 18px;
 }
 
+.settings-panel form > section {
+  padding-top: 14px;
+  border-top: 1px solid #f0e7dc;
+}
+
+.settings-panel form > section:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
 .field-label {
   display: flex;
   flex-direction: column;
@@ -413,6 +447,21 @@ body {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  min-height: 0;
+  padding: 2px 0;
+}
+
+.messages:empty::before {
+  box-sizing: border-box;
+  width: min(100%, 28rem);
+  padding: 12px;
+  border: 1px dashed #e7dccb;
+  border-radius: 8px;
+  background: #fffaf0;
+  color: #806b56;
+  content: "还没有消息；先说一句，她会从这里接住。";
+  font-size: 13px;
+  line-height: 1.5;
 }
 
 .memory-draft-panel,
@@ -506,10 +555,28 @@ body {
   padding: 10px 12px;
   border-radius: 12px;
   line-height: 1.5;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.message-role {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  opacity: 0.72;
 }
 
 .message-content {
   display: block;
+  min-height: 1.5em;
+  white-space: pre-wrap;
+}
+
+.message-pet .message-content:empty::after {
+  color: #806b56;
+  content: "正在整理回复...";
+  font-style: italic;
 }
 
 .message-actions {
@@ -536,12 +603,13 @@ body {
 }
 
 .composer {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) auto auto;
   gap: 10px;
+  align-items: center;
 }
 
 .composer input {
-  flex: 1;
   min-width: 0;
   padding: 10px 12px;
   border: 1px solid #d7c8b6;
@@ -559,6 +627,11 @@ body {
   cursor: pointer;
   white-space: normal;
   font: inherit;
+}
+
+.composer .button,
+.composer .button-light {
+  white-space: nowrap;
 }
 
 .button {
@@ -607,6 +680,10 @@ textarea:disabled {
 }
 
 @media (max-width: 480px) {
+  .chat-shell {
+    padding: 14px;
+  }
+
   .provider-bar {
     align-items: flex-start;
     flex-direction: column;
@@ -647,16 +724,20 @@ textarea:disabled {
   }
 
   .composer {
-    flex-wrap: wrap;
+    grid-template-columns: 1fr 1fr;
   }
 
   .composer input {
-    flex-basis: 100%;
+    grid-column: 1 / -1;
   }
 
   .composer .button,
   .composer .button-light {
-    flex: 1;
-    min-width: 110px;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .message {
+    max-width: 92%;
   }
 }

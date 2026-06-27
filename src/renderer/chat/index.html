@@ -156,7 +156,7 @@
           <button id="settings-button" class="button-light icon-button" type="button" aria-label="打开伙伴与对话设置" title="伙伴与对话设置">⚙</button>
         </div>
         <div id="dialogue-mode-controls" class="mode-controls" aria-label="对话模式"></div>
-        <p id="chat-session-note" class="selection-note" aria-live="polite">新会话将仅在本地保存；发送时只包含当前消息。</p>
+        <p id="chat-session-note" class="selection-note" data-state="fallback" aria-live="polite">新会话将仅在本地保存；发送时只包含当前消息。</p>
         <section id="memory-draft-panel" class="memory-draft-panel content-stack" hidden aria-label="保存事实卡">
           <p class="selection-note">确认后才会保存到本机记忆；可随时在记忆页停用或删除。</p>
           <label class="field-label">
@@ -178,7 +178,7 @@
         </section>
         <section id="messages" class="messages" aria-live="polite"></section>
         <form id="chat-form" class="composer">
-          <input id="chat-input" type="text" autocomplete="off" placeholder="和她说点什么..." />
+          <input id="chat-input" type="text" autocomplete="off" placeholder="和她说点什么..." aria-label="聊天输入" />
           <button id="send-button" class="button" type="submit">发送</button>
           <button id="abort-button" class="button-light" type="button" disabled>中断</button>
         </form>

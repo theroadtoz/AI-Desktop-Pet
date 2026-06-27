@@ -420,7 +420,7 @@ async function saveUserProfileFromFields(
     if (source === "settings") {
       setSettingsFeedback("本地身份已保存。", "ready");
     } else {
-      setChatSessionNote("本地身份已设置；之后只会把清洗后的称呼加入当前回复。");
+      setChatSessionNote("本地身份已设置；之后只会把清洗后的称呼加入当前回复。", "ready");
       chatInput.focus();
     }
   } catch {
@@ -483,7 +483,7 @@ async function setDialogueModeFromUi(modeId: DialogueModeId): Promise<void> {
   try {
     setDialogueMode(await window.dialogueModeApi.setMode(modeId));
   } catch {
-    setChatSessionNote("无法切换对话模式，请稍后重试。");
+    setChatSessionNote("无法切换对话模式，请稍后重试。", "error");
   }
 }
 
@@ -492,14 +492,21 @@ function setMemorySessionStatus(count: number | null): void {
   renderRibbonEcho();
 }
 
+function formatMessageRoleLabel(role: ChatRole): string {
+  return role === "user" ? "你" : "真央";
+}
+
 function appendMessage(message: ChatMessage): HTMLElement {
   const item = document.createElement("p");
   const authorClass = message.role === "user" ? "user" : "pet";
   item.className = `message message-${authorClass}`;
+  const role = document.createElement("span");
+  role.className = "message-role";
+  role.textContent = formatMessageRoleLabel(message.role);
   const content = document.createElement("span");
   content.className = "message-content";
   content.textContent = message.content;
-  item.append(content);
+  item.append(role, content);
 
   if (message.role === "user") {
     const actions = document.createElement("span");
@@ -528,8 +535,9 @@ function createMessage(role: ChatRole, content: string): ChatMessage {
   };
 }
 
-function setChatSessionNote(message: string): void {
+function setChatSessionNote(message: string, state: "ready" | "fallback" | "error" = "fallback"): void {
   chatSessionNoteBox.textContent = message;
+  chatSessionNoteBox.dataset.state = state;
 }
 
 function setHistoryFeedback(message: string): void {
@@ -898,7 +906,8 @@ function restoreSelectedHistory(includeProviderContext: boolean): void {
   setChatSessionNote(
     includeProviderContext
       ? "已明确继续：下一条消息将携带当前会话上下文发送给当前 Provider。"
-      : "已仅在本地打开历史：下一条消息只发送当前消息，不会自动发送历史内容。"
+      : "已仅在本地打开历史：下一条消息只发送当前消息，不会自动发送历史内容。",
+    "ready"
   );
   setActivePage("chat");
 }
@@ -912,7 +921,7 @@ function startNewConversation(): void {
   chatHistory.splice(0, chatHistory.length);
   providerContextEnabled = false;
   renderCurrentConversation();
-  setChatSessionNote("已新建本地会话；发送时只包含当前消息。");
+  setChatSessionNote("已新建本地会话；发送时只包含当前消息。", "ready");
   setMemorySessionStatus(null);
   setActivePage("chat");
 }
@@ -965,6 +974,7 @@ function setReplying(isReplying: boolean): void {
 
   if (isReplying) {
     setActivityEcho("正在回复");
+    setChatSessionNote("正在等待她回复；可以随时中断本次生成。", "ready");
   }
 }
 
@@ -975,6 +985,14 @@ function finishReplying(activityEcho = "回复完成"): void {
   isReplying = false;
   setReplying(false);
   setActivityEcho(activityEcho);
+  setChatSessionNote(
+    activityEcho === "回复完成"
+      ? "回复完成；下一条仍只发送当前输入。"
+      : activityEcho === "回复失败"
+        ? "回复失败；请检查连接或稍后重试。"
+        : "回复已中断，未保存未完成的助手消息。",
+    activityEcho === "回复完成" ? "ready" : activityEcho === "回复失败" ? "error" : "fallback"
+  );
   chatInput.focus();
 }
 
@@ -1473,8 +1491,6 @@ window.chatApi?.onReplyError((error) => {
   }
 
   const wasAborted = error.errorType === "aborted";
-  setChatSessionNote(wasAborted ? "回复已中断，未保存未完成的助手消息。" : error.message);
-
   finishReplying(wasAborted ? "已中断" : "回复失败");
 });
 
@@ -1611,7 +1627,7 @@ saveMemoryDraftAction.addEventListener("click", () => {
       const settings = await window.memoryApi?.getSettings();
 
       if (!settings?.enabled) {
-        setChatSessionNote("记忆未开启；请先在记忆页显式开启后再保存事实卡。");
+        setChatSessionNote("记忆未开启；请先在记忆页显式开启后再保存事实卡。", "fallback");
         return;
       }
 
@@ -1622,10 +1638,10 @@ saveMemoryDraftAction.addEventListener("click", () => {
         sourceConversationId: conversationId
       });
       closeMemoryDraft();
-      setChatSessionNote("事实卡已保存到本机记忆。");
+      setChatSessionNote("事实卡已保存到本机记忆。", "ready");
       await refreshMemory();
     } catch {
-      setChatSessionNote("无法保存事实卡，请检查标题和正文。");
+      setChatSessionNote("无法保存事实卡，请检查标题和正文。", "error");
     }
   })();
 });
