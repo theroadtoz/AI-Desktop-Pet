@@ -146,7 +146,8 @@ async function streamChatCompletions(input: {
           input.request.memoryContext,
           input.request.dialogueStyleContext,
           input.request.userProfileContext,
-          getPromptTemplateProfile(input.options.providerId ?? "openai-compatible")
+          getPromptTemplateProfile(input.options.providerId ?? "openai-compatible"),
+          input.request.runtimeContext
         ),
         temperature: input.options.temperature,
         max_tokens: input.options.maxTokens,

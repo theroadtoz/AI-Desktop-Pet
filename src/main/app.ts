@@ -10,6 +10,7 @@ import {
 } from "electron";
 import { release as getOsRelease } from "node:os";
 import { isAbsolute } from "node:path";
+import type { ChatRuntimeContext } from "../shared/chat-provider";
 import type {
   ConfigApiKeyRequest,
   ConfigSetApiKeyRequest,
@@ -1311,6 +1312,7 @@ app.whenReady().then(async () => {
       styleId: "gentle-desktop-companion-v1" as const
     };
     const userProfileContext = createUserProfilePromptContext(userProfileStore?.getProfile() ?? null);
+    const runtimeContext = createChatRuntimeContext();
     event.sender.send("chat:memory-injection", {
       requestVersion: request.requestVersion,
       count: memoryContext.count
@@ -1326,6 +1328,7 @@ app.whenReady().then(async () => {
       ...request,
       memoryContext,
       dialogueStyleContext,
+      runtimeContext,
       ...(userProfileContext ? { userProfileContext } : {})
     }, {
       onDelta(delta) {
@@ -1777,6 +1780,45 @@ app.whenReady().then(async () => {
     return shortcutRegistry.resetShortcut(actionId);
   });
 });
+
+function createChatRuntimeContext(now = new Date()): ChatRuntimeContext {
+  const locale = app.getLocale() || Intl.DateTimeFormat().resolvedOptions().locale || "zh-CN";
+  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+
+  return {
+    isoTime: now.toISOString(),
+    localDate: formatLocalDate(now, locale, timezone),
+    localTime: formatLocalTime(now, locale, timezone),
+    weekday: formatLocalWeekday(now, locale, timezone),
+    timezone,
+    locale
+  };
+}
+
+function formatLocalDate(value: Date, locale: string, timezone: string): string {
+  return new Intl.DateTimeFormat(locale, {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).format(value);
+}
+
+function formatLocalTime(value: Date, locale: string, timezone: string): string {
+  return new Intl.DateTimeFormat(locale, {
+    timeZone: timezone,
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false
+  }).format(value);
+}
+
+function formatLocalWeekday(value: Date, locale: string, timezone: string): string {
+  return new Intl.DateTimeFormat(locale, {
+    timeZone: timezone,
+    weekday: "long"
+  }).format(value);
+}
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {

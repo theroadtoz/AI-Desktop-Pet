@@ -7,6 +7,15 @@ import type { UserProfilePromptContext } from "./user-profile";
 
 export type ChatProviderId = ProviderId;
 
+export type ChatRuntimeContext = {
+  isoTime: string;
+  localDate: string;
+  localTime: string;
+  weekday: string;
+  timezone: string;
+  locale: string;
+};
+
 export type ChatRequest = {
   requestVersion: number;
   conversationId: string;
@@ -14,6 +23,7 @@ export type ChatRequest = {
   memoryContext?: MemoryInjection;
   dialogueStyleContext?: DialogueStyleContext;
   userProfileContext?: UserProfilePromptContext;
+  runtimeContext?: ChatRuntimeContext;
 };
 
 export type ChatStreamDelta = {

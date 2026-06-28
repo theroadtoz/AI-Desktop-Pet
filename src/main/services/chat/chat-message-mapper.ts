@@ -1,4 +1,5 @@
 import type { ChatMessage } from "../../../shared/chat";
+import type { ChatRuntimeContext } from "../../../shared/chat-provider";
 import type { MemoryInjection } from "../../../shared/chat-memory";
 import type { DialogueStyleContext } from "../../../shared/dialogue-style";
 import type { UserProfilePromptContext } from "../../../shared/user-profile";
@@ -25,11 +26,13 @@ export function mapChatMessagesToOpenAICompatible(
   memoryContext?: MemoryInjection,
   dialogueStyleContext: DialogueStyleContext = createDefaultDialogueStyleContext(),
   userProfileContext?: UserProfilePromptContext,
-  promptTemplateProfile: PromptTemplateProfile = "cloud-chat"
+  promptTemplateProfile: PromptTemplateProfile = "cloud-chat",
+  runtimeContext?: ChatRuntimeContext
 ): OpenAICompatibleMessage[] {
   const systemMessage = createSystemMessage(promptTemplateProfile);
   const personaMessage = createPersonaMessage(promptTemplateProfile);
   const dialogueStyleMessage = createDialogueStyleMessage(dialogueStyleContext, promptTemplateProfile);
+  const runtimeMessage = createRuntimeContextMessage(runtimeContext);
   const userProfileMessage = createUserProfileMessage(userProfileContext);
   const memoryMessage = createMemoryMessage(memoryContext);
 
@@ -37,6 +40,7 @@ export function mapChatMessagesToOpenAICompatible(
     systemMessage,
     personaMessage,
     dialogueStyleMessage,
+    ...(runtimeMessage ? [runtimeMessage] : []),
     ...(userProfileMessage ? [userProfileMessage] : []),
     ...(memoryMessage ? [memoryMessage] : []),
     ...messages.map((message) => ({
@@ -44,6 +48,26 @@ export function mapChatMessagesToOpenAICompatible(
       content: message.content
     }))
   ];
+}
+
+function createRuntimeContextMessage(context?: ChatRuntimeContext): OpenAICompatibleMessage | null {
+  if (!context) {
+    return null;
+  }
+
+  return {
+    role: "system",
+    content: [
+      "运行时上下文：以下本机日期时间仅用于回答用户询问当前日期、当前时间或星期的问题。",
+      `ISO=${context.isoTime}`,
+      `本地日期=${context.localDate}`,
+      `本地时间=${context.localTime}`,
+      `weekday=${context.weekday}`,
+      `timezone=${context.timezone}`,
+      `locale=${context.locale}`,
+      "新闻、价格、天气、版本等实时外部事实仍需查证；不要把本机时间当作联网事实。"
+    ].join("\n")
+  };
 }
 
 function createSystemMessage(profile: PromptTemplateProfile): OpenAICompatibleMessage {

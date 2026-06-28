@@ -74,8 +74,13 @@ export function createFakeChatProvider(): ChatProvider {
 function createFakeReply(request: ChatRequest): ChatProviderResult {
   const latestUserMessage = getLatestUserMessage(request.messages);
   const classification = classifyEmotion({ latestUserMessage });
+  const commonSenseReply = createCurrentTimeOrCommonSenseReply(request, latestUserMessage, classification);
   const relevanceReply = createRelevanceReply(request, latestUserMessage, classification);
   const qualityReply = createQualityReply(request, latestUserMessage, classification);
+
+  if (commonSenseReply) {
+    return commonSenseReply;
+  }
 
   if (relevanceReply) {
     return relevanceReply;
@@ -95,6 +100,53 @@ function createFakeReply(request: ChatRequest): ChatProviderResult {
     text: `${prefix}${variants[variantIndex] ?? REPLIES[classification.emotion]}`,
     ...classification
   };
+}
+
+function createCurrentTimeOrCommonSenseReply(
+  request: ChatRequest,
+  latestUserMessage: string,
+  classification: ReturnType<typeof classifyEmotion>
+): ChatProviderResult | null {
+  if (asksCurrentTime(latestUserMessage)) {
+    return {
+      text: request.runtimeContext
+        ? `现在本地时间是 ${request.runtimeContext.localTime}（${request.runtimeContext.timezone}）。`
+        : "我这里没有系统时间上下文，不能确认当前时间。",
+      ...classification
+    };
+  }
+
+  if (asksCurrentDate(latestUserMessage)) {
+    return {
+      text: request.runtimeContext
+        ? `今天是 ${request.runtimeContext.localDate}，${request.runtimeContext.weekday}。`
+        : "我这里没有系统时间上下文，不能确认当前日期。",
+      ...classification
+    };
+  }
+
+  if (asksSimpleAddition(latestUserMessage)) {
+    return {
+      text: "2+3=5。",
+      ...classification
+    };
+  }
+
+  if (asksMonthsInYear(latestUserMessage)) {
+    return {
+      text: "一年有 12 个月。",
+      ...classification
+    };
+  }
+
+  if (asksWaterBoilingPoint(latestUserMessage)) {
+    return {
+      text: "标准大气压下，水的沸点通常是 100°C。",
+      ...classification
+    };
+  }
+
+  return null;
 }
 
 function createQualityReply(
@@ -198,6 +250,26 @@ function createRelevanceReply(
 
 function asksForDetail(message: string): boolean {
   return /详细|展开|讲讲|说明|说细/.test(message);
+}
+
+function asksCurrentTime(message: string): boolean {
+  return /(现在|当前|本机|系统|此刻|今天).*(几点|时间)|几点了|当前时间|现在时间/.test(message);
+}
+
+function asksCurrentDate(message: string): boolean {
+  return /(今天|现在|当前|本机|系统).*(日期|几号|星期|礼拜|哪天)|今天几号|今天星期几|当前日期|现在日期/.test(message);
+}
+
+function asksSimpleAddition(message: string): boolean {
+  return /2\s*[+＋加]\s*3|二\s*加\s*三/.test(message);
+}
+
+function asksMonthsInYear(message: string): boolean {
+  return /一年.*(几|多少).*个月|一年.*月份数|一年有多少月/.test(message);
+}
+
+function asksWaterBoilingPoint(message: string): boolean {
+  return /(标准大气压|一个大气压).*(水).*(沸点|烧开|沸腾)|水.*(标准大气压|一个大气压).*(沸点|烧开|沸腾)/.test(message);
 }
 
 function asksForUncertainFact(message: string): boolean {
