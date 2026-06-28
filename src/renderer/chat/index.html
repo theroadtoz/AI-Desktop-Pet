@@ -188,9 +188,9 @@
             <label class="field-label">
               Provider
               <select id="provider-id" name="providerId">
-                <option value="fake">Fake</option>
-                <option value="openai-compatible">OpenAI-compatible</option>
-                <option value="local-openai-compatible">Ollama 本地模型</option>
+                <option value="local-openai-compatible">Ollama 本地模型（推荐）</option>
+                <option value="openai-compatible">OpenAI-compatible（显式外部模型）</option>
+                <option value="fake">Fake（开发回退）</option>
               </select>
             </label>
             <label class="field-label">
@@ -201,7 +201,7 @@
               <label id="local-provider-preset-field" class="field-label" hidden>
                 本地运行时
                 <select id="local-provider-preset" name="localPresetId">
-                  <option value="ollama">Ollama · http://localhost:11434/v1</option>
+                  <option value="ollama">Ollama 推荐 · http://localhost:11434/v1</option>
                   <option value="lm-studio">LM Studio · http://localhost:1234/v1</option>
                   <option value="custom-local">自定义 OpenAI-compatible 端点</option>
                 </select>
@@ -228,7 +228,7 @@
                   <input id="provider-timeout" name="timeoutMs" type="number" min="1" step="1" required />
                 </label>
               </div>
-              <p id="local-provider-note" class="selection-note" hidden>本地服务不会要求 API Key；连接检查只访问你填写的本地 OpenAI-compatible 端点。真实本地模型通过需要你已启动服务并准备模型。</p>
+              <p id="local-provider-note" class="selection-note" hidden>推荐本地默认：Ollama、http://localhost:11434/v1、qwen3.5:2b-q4_K_M。本地服务不会要求 API Key；如果未安装或未启动 Ollama，连接检查会显示未就绪。缺模型时请手动运行 ollama pull qwen3.5:2b-q4_K_M。</p>
               <div class="inline-actions">
                 <button id="provider-health-check-button" class="button-light" type="button">检查连接</button>
               </div>

@@ -29,18 +29,18 @@ const PRESENCE_MODE_LABELS: Readonly<Record<PresenceModeId, string>> = {
 export function formatProviderStatus(status: ProviderStatus): string {
   if (status.isFallback) {
     if (status.reason === "missing_api_key") {
-      return `本地回退：未配置 API Key${status.model ? ` · ${status.model}` : ""}`;
+      return `开发回退：未配置 API Key${status.model ? ` · ${status.model}` : ""}`;
     }
 
     if (status.reason === "invalid_config") {
-      return "本地回退：provider 配置无效";
+      return "开发回退：provider 配置无效";
     }
 
-    return "本地回退：Fake Provider";
+    return "开发回退：Fake Provider";
   }
 
   if (status.providerId === "openai-compatible") {
-    const parts = [`真实模型：${status.model ?? status.displayName}`];
+    const parts = [`外部模型：${status.model ?? status.displayName}`];
 
     if (status.baseURLHost) {
       parts.push(status.baseURLHost);
@@ -59,7 +59,7 @@ export function formatProviderStatus(status: ProviderStatus): string {
     return parts.join(" · ");
   }
 
-  return "本地模式：Fake Provider";
+  return "开发模式：Fake Provider";
 }
 
 export function formatProviderHealthResult(result: ProviderHealthResult): string {
@@ -71,6 +71,10 @@ export function formatProviderHealthResult(result: ProviderHealthResult): string
   }
 
   if (result.status === "model_missing") {
+    if (result.providerId === "local-openai-compatible" && result.localPresetId === "ollama") {
+      return `Ollama 可达，但未找到 ${result.model}；请手动运行 ollama pull ${result.model} 后再检查${host}${count}`;
+    }
+
     return `服务可达，但未找到当前模型${host}${count}`;
   }
 
@@ -79,6 +83,10 @@ export function formatProviderHealthResult(result: ProviderHealthResult): string
   }
 
   if (result.status === "service_unreachable") {
+    if (result.providerId === "local-openai-compatible" && result.localPresetId === "ollama") {
+      return `Ollama 不可达：请确认已安装并启动 Ollama，且 Base URL 指向 http://localhost:11434/v1${host}`;
+    }
+
     return `服务不可达，请确认服务已启动且 Base URL 正确${host}`;
   }
 

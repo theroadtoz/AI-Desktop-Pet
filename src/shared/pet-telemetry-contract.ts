@@ -114,10 +114,19 @@ const PET_INTERACTION_ACTION_TYPES = [
   "appearance",
   "headPat",
   "greeting",
+  "listen",
+  "softSmile",
+  "lookAway",
   "thinking",
+  "replyThinking",
   "playGame",
+  "gameReady",
   "reading",
-  "focus"
+  "readingIdle",
+  "focus",
+  "workFocus",
+  "doze",
+  "edgeGlance"
 ] as const;
 
 const DIALOGUE_MODE_IDS = ["default", "work", "game", "reading"] as const;

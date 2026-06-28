@@ -67,6 +67,7 @@ import {
   createProviderConfigStore,
   createProviderTelemetryPayload,
   DEFAULT_PROVIDER_CONFIG,
+  FAKE_PROVIDER_CONFIG,
   type ProviderConfigStore
 } from "./services/config/provider-config-store";
 import { createSecureKeyStore, type SecureKeyStore } from "./services/config/secure-key-store";
@@ -754,7 +755,7 @@ function getChatErrorMessage(errorType: ChatStreamErrorType): string {
   }
 
   if (errorType === "model_missing") {
-    return "模型服务可达，但找不到当前模型，请检查模型名称。";
+    return `模型服务可达，但找不到当前模型；若使用推荐本地模型，请手动拉取 ${DEFAULT_PROVIDER_CONFIG.model} 后再试。`;
   }
 
   if (errorType === "incompatible_response") {
@@ -762,7 +763,7 @@ function getChatErrorMessage(errorType: ChatStreamErrorType): string {
   }
 
   if (errorType === "network_error") {
-    return "连接失败，请检查网络、baseURL；若使用本地模型，请确认 Ollama 已启动且模型已拉取。";
+    return "连接失败，请检查网络、baseURL；若使用推荐本地模型，请确认 Ollama 已安装并启动。";
   }
 
   return "回复失败，请稍后再试。";
@@ -922,7 +923,7 @@ app.whenReady().then(async () => {
     if (!baseURLHost) {
       return {
         providerId: "fake",
-        displayName: DEFAULT_PROVIDER_CONFIG.displayName,
+        displayName: FAKE_PROVIDER_CONFIG.displayName,
         model: config.model,
         hasApiKey: keyConfigured,
         isFallback: true,
@@ -933,7 +934,7 @@ app.whenReady().then(async () => {
     if (!isLocalProvider && !keyConfigured) {
       return {
         providerId: "fake",
-        displayName: DEFAULT_PROVIDER_CONFIG.displayName,
+        displayName: FAKE_PROVIDER_CONFIG.displayName,
         model: config.model,
         baseURLHost,
         hasApiKey: false,

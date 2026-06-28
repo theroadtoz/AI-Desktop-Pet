@@ -73,6 +73,7 @@ export type InteractionActionPlayerOptions = {
   boostInteraction(durationMs?: number): void;
   pauseLook(): void;
   resumeLook(): void;
+  setLookTarget(x: number, y: number): void;
   resetLookTarget(): void;
   applyTemporaryPartOpacities(partIds: readonly string[]): void;
   restoreTemporaryPartOpacities(): void;
@@ -94,6 +95,7 @@ export function createInteractionActionPlayer({
   boostInteraction,
   pauseLook,
   resumeLook,
+  setLookTarget,
   resetLookTarget,
   applyTemporaryPartOpacities,
   restoreTemporaryPartOpacities,
@@ -177,7 +179,13 @@ export function createInteractionActionPlayer({
       } : {})
     });
     boostInteraction(action.durationMs + 250);
-    pauseLook();
+    if (action.lookTarget) {
+      resumeLook();
+      setLookTarget(action.lookTarget.x, action.lookTarget.y);
+    } else {
+      pauseLook();
+      resetLookTarget();
+    }
     applyTemporaryPartOpacities(action.accessoryPartIds ?? []);
 
     if (action.expressionName) {

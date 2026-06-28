@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ProviderConfig } from "../../../shared/provider-config";
-import { DEFAULT_PROVIDER_CONFIG } from "./provider-config-store";
+import { DEFAULT_PROVIDER_CONFIG, FAKE_PROVIDER_CONFIG } from "./provider-config-store";
 
 export type EnvProviderConfig = {
   providerConfig: ProviderConfig;
@@ -28,7 +28,22 @@ export function readEnvProviderConfig(options: {
 
   if (provider === "fake") {
     return {
-      providerConfig: DEFAULT_PROVIDER_CONFIG,
+      providerConfig: FAKE_PROVIDER_CONFIG,
+      apiKey: null,
+      apiKeyRef: null
+    };
+  }
+
+  if (provider === "local-openai-compatible") {
+    return {
+      providerConfig: {
+        ...DEFAULT_PROVIDER_CONFIG,
+        baseURL: readNonEmpty(env.AI_DESKTOP_PET_BASE_URL) ?? DEFAULT_PROVIDER_CONFIG.baseURL,
+        model: readNonEmpty(env.AI_DESKTOP_PET_MODEL) ?? DEFAULT_PROVIDER_CONFIG.model,
+        temperature: readNumber(env.AI_DESKTOP_PET_TEMPERATURE, DEFAULT_PROVIDER_CONFIG.temperature),
+        maxTokens: readInteger(env.AI_DESKTOP_PET_MAX_TOKENS, DEFAULT_PROVIDER_CONFIG.maxTokens),
+        timeoutMs: readInteger(env.AI_DESKTOP_PET_TIMEOUT_MS, DEFAULT_PROVIDER_CONFIG.timeoutMs)
+      },
       apiKey: null,
       apiKeyRef: null
     };
@@ -118,4 +133,3 @@ function readInteger(value: unknown, fallback: number): number {
   const parsed = readNumber(value, fallback);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
-

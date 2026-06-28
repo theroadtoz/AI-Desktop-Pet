@@ -221,7 +221,9 @@ async function main() {
       event.payload?.presenceModeId === "quiet" &&
       Array.isArray(event.payload?.candidateActionTypes) &&
       !event.payload.candidateActionTypes.includes("playGame") &&
-      !event.payload.candidateActionTypes.includes("reading")
+      !event.payload.candidateActionTypes.includes("gameReady") &&
+      !event.payload.candidateActionTypes.includes("reading") &&
+      !event.payload.candidateActionTypes.includes("readingIdle")
     ));
     observations.quietCandidateActionTypes = quietAction?.payload?.candidateActionTypes ?? [];
     checks.quietFiltersStrongActions = Boolean(quietAction);
@@ -234,9 +236,14 @@ async function main() {
       event.payload?.presenceModeId === "sleep" &&
       Array.isArray(event.payload?.candidateActionTypes) &&
       !event.payload.candidateActionTypes.includes("playGame") &&
+      !event.payload.candidateActionTypes.includes("gameReady") &&
       !event.payload.candidateActionTypes.includes("reading") &&
+      !event.payload.candidateActionTypes.includes("readingIdle") &&
       event.payload.candidateActionTypes.includes("thinking") &&
-      event.payload.candidateActionTypes.includes("focus")
+      event.payload.candidateActionTypes.includes("replyThinking") &&
+      event.payload.candidateActionTypes.includes("focus") &&
+      event.payload.candidateActionTypes.includes("workFocus") &&
+      event.payload.candidateActionTypes.includes("doze")
     ));
     observations.sleepCandidateActionTypes = sleepAction?.payload?.candidateActionTypes ?? [];
     checks.sleepFiltersStrongActions = Boolean(sleepAction);

@@ -15,38 +15,57 @@ test("provider status keeps fake, cloud, local, and fallback wording", () => {
     providerId: "fake",
     displayName: "Fake Provider",
     isFallback: false
-  }), "本地模式：Fake Provider");
+  }), "开发模式：Fake Provider");
   assert.equal(formatProviderStatus({
     providerId: "openai-compatible",
     displayName: "DeepSeek",
     model: "deepseek-v4-flash",
     baseURLHost: "api.deepseek.com",
     isFallback: false
-  }), "真实模型：deepseek-v4-flash · api.deepseek.com");
+  }), "外部模型：deepseek-v4-flash · api.deepseek.com");
   assert.equal(formatProviderStatus({
     providerId: "local-openai-compatible",
     displayName: "Ollama 本地模型",
-    model: "qwen3:1.7b",
+    model: "qwen3.5:2b-q4_K_M",
     baseURLHost: "localhost:11434",
     isFallback: false
-  }), "本地模型：qwen3:1.7b · localhost:11434");
+  }), "本地模型：qwen3.5:2b-q4_K_M · localhost:11434");
   assert.equal(formatProviderStatus({
     providerId: "fake",
     displayName: "Fake Provider",
     model: "deepseek-v4-flash",
     isFallback: true,
     reason: "missing_api_key"
-  }), "本地回退：未配置 API Key · deepseek-v4-flash");
+  }), "开发回退：未配置 API Key · deepseek-v4-flash");
 });
 
 test("provider health result wording stays stable", () => {
   assert.equal(formatProviderHealthResult({
+    providerId: "local-openai-compatible",
     status: "ready",
+    model: "qwen3.5:2b-q4_K_M",
     baseURLHost: "localhost:11434",
     modelCount: 2
   }), "连接可用：已找到当前模型 · localhost:11434 · 可见模型 2 个");
   assert.equal(formatProviderHealthResult({
-    status: "missing_api_key"
+    providerId: "local-openai-compatible",
+    status: "model_missing",
+    model: "qwen3.5:2b-q4_K_M",
+    baseURLHost: "localhost:11434",
+    localPresetId: "ollama",
+    modelCount: 1
+  }), "Ollama 可达，但未找到 qwen3.5:2b-q4_K_M；请手动运行 ollama pull qwen3.5:2b-q4_K_M 后再检查 · localhost:11434 · 可见模型 1 个");
+  assert.equal(formatProviderHealthResult({
+    providerId: "local-openai-compatible",
+    status: "service_unreachable",
+    model: "qwen3.5:2b-q4_K_M",
+    baseURLHost: "localhost:11434",
+    localPresetId: "ollama"
+  }), "Ollama 不可达：请确认已安装并启动 Ollama，且 Base URL 指向 http://localhost:11434/v1 · localhost:11434");
+  assert.equal(formatProviderHealthResult({
+    providerId: "openai-compatible",
+    status: "missing_api_key",
+    model: "deepseek-v4-flash"
   }), "云端 Provider 需要先配置 API Key；本次未发起检查请求。");
 });
 

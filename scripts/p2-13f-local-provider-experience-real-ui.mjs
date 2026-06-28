@@ -25,6 +25,7 @@ const context = createRealUiRunContext({
 });
 const { runParentDir, runDir, appDataDir, resultPath, port } = context;
 const readyModel = "p2-13f-ready-model";
+const recommendedOllamaModel = "qwen3.5:2b-q4_K_M";
 const forbiddenTexts = [
   "sk-",
   "provider request body",
@@ -164,6 +165,7 @@ async function main() {
     snapshots.ollama = await safeProviderSnapshot(chat);
     checks.ollamaPresetFillsBaseURL = snapshots.ollama.presetId === "ollama" &&
       snapshots.ollama.baseURL === "http://localhost:11434/v1";
+    checks.ollamaPresetFillsRecommendedModel = snapshots.ollama.model === recommendedOllamaModel;
 
     await setSelect(chat, "#local-provider-preset", "lm-studio");
     snapshots.lmStudio = await safeProviderSnapshot(chat);
@@ -213,7 +215,8 @@ async function main() {
       snapshots: {
         ollama: {
           presetId: snapshots.ollama.presetId,
-          baseURLMatches: snapshots.ollama.baseURL === "http://localhost:11434/v1"
+          baseURLMatches: snapshots.ollama.baseURL === "http://localhost:11434/v1",
+          modelMatches: snapshots.ollama.model === recommendedOllamaModel
         },
         lmStudio: {
           presetId: snapshots.lmStudio.presetId,

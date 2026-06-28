@@ -1,13 +1,17 @@
 import { app } from "electron";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import type { LocalProviderPresetId, ProviderConfig } from "../../../shared/provider-config";
+import {
+  FAKE_PROVIDER_CONFIG,
+  RECOMMENDED_LOCAL_PROVIDER_CONFIG,
+  type LocalOpenAICompatibleConfig,
+  type LocalProviderPresetId,
+  type ProviderConfig
+} from "../../../shared/provider-config";
 import type { TelemetryPayload } from "../telemetry";
 
-export const DEFAULT_PROVIDER_CONFIG: ProviderConfig = {
-  providerId: "fake",
-  displayName: "Fake Provider"
-};
+export const DEFAULT_PROVIDER_CONFIG: LocalOpenAICompatibleConfig = RECOMMENDED_LOCAL_PROVIDER_CONFIG;
+export { FAKE_PROVIDER_CONFIG };
 
 type ConfigSource = "file" | "default";
 

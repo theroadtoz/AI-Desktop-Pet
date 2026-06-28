@@ -288,10 +288,19 @@ async function main() {
   const actions = [
     { type: "headPat", random: 0.2, hitArea: "head", durationMs: PET_INTERACTION_ACTION_CATALOG.headPat.defaultDurationMs, captureDelayMs: 650 },
     { type: "greeting", random: 0.05, hitArea: "body", durationMs: PET_INTERACTION_ACTION_CATALOG.greeting.defaultDurationMs, captureDelayMs: 650 },
-    { type: "thinking", random: 0.55, hitArea: "body", durationMs: PET_INTERACTION_ACTION_CATALOG.thinking.defaultDurationMs, captureDelayMs: 750 },
-    { type: "playGame", random: 0.8, hitArea: "body", durationMs: PET_INTERACTION_ACTION_CATALOG.playGame.defaultDurationMs, captureDelayMs: 700 },
-    { type: "reading", random: 0.9, hitArea: "body", durationMs: PET_INTERACTION_ACTION_CATALOG.reading.defaultDurationMs, captureDelayMs: 800 },
-    { type: "focus", random: 0.98, hitArea: "body", durationMs: PET_INTERACTION_ACTION_CATALOG.focus.defaultDurationMs, captureDelayMs: 700 }
+    { type: "listen", random: 0.2, hitArea: "body", durationMs: PET_INTERACTION_ACTION_CATALOG.listen.defaultDurationMs, captureDelayMs: 600 },
+    { type: "softSmile", random: 0.35, hitArea: "body", durationMs: PET_INTERACTION_ACTION_CATALOG.softSmile.defaultDurationMs, captureDelayMs: 600 },
+    { type: "lookAway", random: 0.43, hitArea: "body", durationMs: PET_INTERACTION_ACTION_CATALOG.lookAway.defaultDurationMs, captureDelayMs: 600 },
+    { type: "thinking", random: 0.5, hitArea: "body", durationMs: PET_INTERACTION_ACTION_CATALOG.thinking.defaultDurationMs, captureDelayMs: 750 },
+    { type: "replyThinking", random: 0.6, hitArea: "body", durationMs: PET_INTERACTION_ACTION_CATALOG.replyThinking.defaultDurationMs, captureDelayMs: 600 },
+    { type: "playGame", random: 0.69, hitArea: "body", durationMs: PET_INTERACTION_ACTION_CATALOG.playGame.defaultDurationMs, captureDelayMs: 700 },
+    { type: "gameReady", random: 0.73, hitArea: "body", durationMs: PET_INTERACTION_ACTION_CATALOG.gameReady.defaultDurationMs, captureDelayMs: 650 },
+    { type: "reading", random: 0.77, hitArea: "body", durationMs: PET_INTERACTION_ACTION_CATALOG.reading.defaultDurationMs, captureDelayMs: 800 },
+    { type: "readingIdle", random: 0.82, hitArea: "body", durationMs: PET_INTERACTION_ACTION_CATALOG.readingIdle.defaultDurationMs, captureDelayMs: 700 },
+    { type: "focus", random: 0.87, hitArea: "body", durationMs: PET_INTERACTION_ACTION_CATALOG.focus.defaultDurationMs, captureDelayMs: 700 },
+    { type: "workFocus", random: 0.91, hitArea: "body", durationMs: PET_INTERACTION_ACTION_CATALOG.workFocus.defaultDurationMs, captureDelayMs: 650 },
+    { type: "doze", random: 0.95, hitArea: "body", durationMs: PET_INTERACTION_ACTION_CATALOG.doze.defaultDurationMs, captureDelayMs: 650 },
+    { type: "edgeGlance", random: 0.98, hitArea: "body", durationMs: PET_INTERACTION_ACTION_CATALOG.edgeGlance.defaultDurationMs, captureDelayMs: 600 }
   ];
   let headBurstSummary = null;
   let bodyBurstSummary = null;
@@ -354,21 +363,21 @@ async function main() {
 
     log("repeat:playGame");
     for (let index = 0; index < 5; index += 1) {
-      await clickPet(pet.cdp, 0.8);
+      await clickPet(pet.cdp, 0.69);
       await sleep(1_950);
     }
     await screenshot(pet.cdp, "playGame-repeat-after.png");
 
     log("repeat:reading");
     for (let index = 0; index < 5; index += 1) {
-      await clickPet(pet.cdp, 0.94);
+      await clickPet(pet.cdp, 0.77);
       await sleep(2_150);
     }
     await screenshot(pet.cdp, "reading-repeat-after.png");
 
     log("mixed:20");
     const bodyBurstStartIndex = readTelemetryEvents().events.length;
-    const mixed = [0.05, 0.2, 0.55, 0.8, 0.9, 0.98, 0.05, 0.55, 0.8, 0.9, 0.05, 0.55, 0.2, 0.05, 0.8, 0.98, 0.55, 0.2, 0.05, 0.9];
+    const mixed = [0.05, 0.2, 0.35, 0.43, 0.5, 0.6, 0.69, 0.73, 0.77, 0.82, 0.87, 0.91, 0.95, 0.98, 0.05, 0.5, 0.69, 0.77, 0.2, 0.91];
     for (const value of mixed) {
       await clickPet(pet.cdp, value);
       await sleep(160);

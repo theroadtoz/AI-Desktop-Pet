@@ -220,6 +220,33 @@ export function auditWitchActionCapabilities(repositoryRoot = REPOSITORY_ROOT): 
       implementationRecommendation: "优先试 gestureMic/手部参数作为打招呼降级；若视觉像拿麦克风而非挥手，退回 happy + 身体轻摆。",
       risk: "当前没有明确挥手 motion，gestureMic 需要视觉验收确认语义。"
     }),
+    actionEntry("listen", "expression-parameter-composition", {
+      nativeMotions: [],
+      expressions: [],
+      parameters: [...faceParameters, ...bodyParameters].slice(0, 8),
+      parts: [],
+      hitAreas: bodyHitArea,
+      implementationRecommendation: "使用视线/头部小幅抬起和 neutral 微表情表现倾听，不绑定新 motion。",
+      risk: "只有参数层反馈，动作差异依赖真实 UI 截图和 telemetry 复核。"
+    }),
+    actionEntry("softSmile", "expression-parameter-composition", {
+      nativeMotions: [],
+      expressions: [expressionReference("happy", manifest, modelDirectory, repositoryRoot)],
+      parameters: faceParameters.slice(0, 8),
+      parts: [],
+      hitAreas: bodyHitArea,
+      implementationRecommendation: "使用 happy 微表情参数做轻微开心，避免高强度强调表情常态化。",
+      risk: "如果 happy 资产过强，运行时应保留微表情降级而不是强表情。"
+    }),
+    actionEntry("lookAway", "expression-parameter-composition", {
+      nativeMotions: [],
+      expressions: [],
+      parameters: [...faceParameters, ...bodyParameters].slice(0, 8),
+      parts: [],
+      hitAreas: bodyHitArea,
+      implementationRecommendation: "使用短时 look target 偏移表现移开视线，结束后回正。",
+      risk: "没有独立害羞/走神 motion，不能承诺复杂姿态。"
+    }),
     actionEntry("thinking", "expression-parameter-composition", {
       nativeMotions: [],
       expressions: [expressionReference("dark", manifest, modelDirectory, repositoryRoot)],
@@ -228,6 +255,15 @@ export function auditWitchActionCapabilities(repositoryRoot = REPOSITORY_ROOT): 
       hitAreas: bodyHitArea,
       implementationRecommendation: "使用 dark/confused 微表情 + 低频视线游移；眼镜只能作为可选增强。",
       risk: "dark 的语义之前已标记需视觉复核，不能直接等同思考。"
+    }),
+    actionEntry("replyThinking", "expression-parameter-composition", {
+      nativeMotions: [],
+      expressions: [expressionReference("dark", manifest, modelDirectory, repositoryRoot)],
+      parameters: [...faceParameters, ...bodyParameters].slice(0, 8),
+      parts: [],
+      hitAreas: bodyHitArea,
+      implementationRecommendation: "复用低强度 confused 参数和短视线偏移，作为比 thinking 更短、更安静的思考变体。",
+      risk: "暂不绑定聊天生成生命周期，只作为白名单语义动作可被本地权重选中。"
     }),
     actionEntry("playGame", "accessory-enhanced", {
       nativeMotions: [],
@@ -238,6 +274,15 @@ export function auditWitchActionCapabilities(repositoryRoot = REPOSITORY_ROOT): 
       implementationRecommendation: "使用 gestureGame + 手柄相关部件做玩游戏动作候选，动作结束必须恢复原状态。",
       risk: "手柄部件存在，但当前运行时还没有部件显隐状态管理。"
     }),
+    actionEntry("gameReady", "accessory-enhanced", {
+      nativeMotions: [],
+      expressions: [expressionReference("gestureGame", manifest, modelDirectory, repositoryRoot)],
+      parameters: bodyParameters.slice(0, 8),
+      parts: gameParts,
+      hitAreas: bodyHitArea,
+      implementationRecommendation: "复用 gestureGame/手柄部件做短促准备动作，并受强配件 cooldown 保护。",
+      risk: "没有单独准备动作 motion，只能作为 playGame 的轻量变体。"
+    }),
     actionEntry("reading", "accessory-enhanced", {
       nativeMotions: [],
       expressions: [expressionReference("glasses", manifest, modelDirectory, repositoryRoot)],
@@ -247,6 +292,15 @@ export function auditWitchActionCapabilities(repositoryRoot = REPOSITORY_ROOT): 
       implementationRecommendation: "V1 可用 glasses 表达式/眼镜部件 + 安静 neutral 表现；书本资产未发现。",
       risk: "未发现书本相关 part/expression，不能承诺完整看书语义。"
     }),
+    actionEntry("readingIdle", "accessory-enhanced", {
+      nativeMotions: [],
+      expressions: [expressionReference("glasses", manifest, modelDirectory, repositoryRoot)],
+      parameters: faceParameters.slice(0, 8),
+      parts: glassesParts,
+      hitAreas: bodyHitArea,
+      implementationRecommendation: "复用 glasses 和低幅视线下移，作为读书模式的安静 idle 变体。",
+      risk: "仍没有翻页/书本资产，必须记录为眼镜加注视的降级实现。"
+    }),
     actionEntry("focus", "expression-parameter-composition", {
       nativeMotions: [],
       expressions: [],
@@ -255,6 +309,33 @@ export function auditWitchActionCapabilities(repositoryRoot = REPOSITORY_ROOT): 
       hitAreas: bodyHitArea,
       implementationRecommendation: "Use a neutral low-amplitude parameter composition only; do not bind expression, part, or native motion.",
       risk: "No native focus motion or prop is available, so the visual difference may be weak and must stay documented as a fallback."
+    }),
+    actionEntry("workFocus", "expression-parameter-composition", {
+      nativeMotions: [],
+      expressions: [],
+      parameters: [...faceParameters, ...bodyParameters].slice(0, 8),
+      parts: [],
+      hitAreas: bodyHitArea,
+      implementationRecommendation: "复用 focus 的 neutral 低幅表现，并加入短时视线稳定目标，作为工作模式偏好的专注变体。",
+      risk: "与 focus 共享资产能力，视觉差异需要保持克制并靠权重区分。"
+    }),
+    actionEntry("doze", "expression-parameter-composition", {
+      nativeMotions: [],
+      expressions: [],
+      parameters: faceParameters.slice(0, 8),
+      parts: [],
+      hitAreas: bodyHitArea,
+      implementationRecommendation: "使用低打扰 neutral + 视线下移表现小憩，不使用未验证闭眼 motion。",
+      risk: "当前无睡眠 motion 或闭眼专用资产，只能作为低幅参数降级。"
+    }),
+    actionEntry("edgeGlance", "expression-parameter-composition", {
+      nativeMotions: [],
+      expressions: [],
+      parameters: [...faceParameters, ...bodyParameters].slice(0, 8),
+      parts: [],
+      hitAreas: bodyHitArea,
+      implementationRecommendation: "使用短时 look target 横向偏移表现看回屏幕内侧；首版只进入白名单动作池。",
+      risk: "尚未绑定窗口靠边检测，不能宣称已实现边缘触发。"
     })
   ];
 

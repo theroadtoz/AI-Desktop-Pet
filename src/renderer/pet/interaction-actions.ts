@@ -6,13 +6,27 @@ export const PET_INTERACTION_ACTION_TYPES = [
   "appearance",
   "headPat",
   "greeting",
+  "listen",
+  "softSmile",
+  "lookAway",
   "thinking",
+  "replyThinking",
   "playGame",
+  "gameReady",
   "reading",
-  "focus"
+  "readingIdle",
+  "focus",
+  "workFocus",
+  "doze",
+  "edgeGlance"
 ] as const;
 
 export type PetInteractionActionType = typeof PET_INTERACTION_ACTION_TYPES[number];
+
+export type PetInteractionLookTarget = {
+  x: number;
+  y: number;
+};
 
 export type PetInteractionAction = {
   type: PetInteractionActionType;
@@ -21,6 +35,7 @@ export type PetInteractionAction = {
   presentation: EmotionPresentation;
   expressionName?: string;
   accessoryPartIds?: readonly string[];
+  lookTarget?: PetInteractionLookTarget;
 };
 
 type TimeoutHandle = ReturnType<typeof setTimeout>;
@@ -42,7 +57,12 @@ export const PET_INTERACTION_HEAD_PAT_COOLDOWN_MS = 1_200;
 export const PET_INTERACTION_STRONG_ACTION_COOLDOWN_MS = 4_500;
 export const PET_WINDOW_SHAKE_LIGHT_FEEDBACK_COOLDOWN_MS = 10_000;
 
-const STRONG_INTERACTION_ACTION_TYPES = new Set<PetInteractionActionType>(["playGame", "reading"]);
+const STRONG_INTERACTION_ACTION_TYPES = new Set<PetInteractionActionType>([
+  "playGame",
+  "gameReady",
+  "reading",
+  "readingIdle"
+]);
 
 export type InteractionActionCooldownSkipReason =
   | "active_action"
@@ -83,37 +103,103 @@ export const PET_INTERACTION_ACTIONS: readonly PetInteractionAction[] = [
   },
   {
     type: "greeting",
-    weight: 4,
+    weight: 3,
     durationMs: 1_400,
     presentation: { emotion: "happy", intensity: "medium", mode: "micro" }
   },
   {
-    type: "thinking",
+    type: "listen",
     weight: 3,
+    durationMs: 1_350,
+    presentation: { emotion: "neutral", intensity: "low", mode: "neutral" },
+    lookTarget: { x: 0, y: 0.18 }
+  },
+  {
+    type: "softSmile",
+    weight: 2,
+    durationMs: 1_300,
+    presentation: { emotion: "happy", intensity: "low", mode: "micro" }
+  },
+  {
+    type: "lookAway",
+    weight: 1,
+    durationMs: 1_300,
+    presentation: { emotion: "neutral", intensity: "low", mode: "neutral" },
+    lookTarget: { x: -0.45, y: 0.02 }
+  },
+  {
+    type: "thinking",
+    weight: 2,
     durationMs: 1_800,
     presentation: { emotion: "confused", intensity: "medium", mode: "micro" }
   },
   {
+    type: "replyThinking",
+    weight: 2,
+    durationMs: 1_250,
+    presentation: { emotion: "confused", intensity: "low", mode: "micro" },
+    lookTarget: { x: 0.18, y: 0.08 }
+  },
+  {
     type: "playGame",
-    weight: 1,
+    weight: 0.8,
     durationMs: 1_700,
     presentation: { emotion: "surprised", intensity: "medium", mode: "micro" },
     expressionName: "gestureGame",
     accessoryPartIds: ["Part17", "Part21"]
   },
   {
+    type: "gameReady",
+    weight: 0.8,
+    durationMs: 1_500,
+    presentation: { emotion: "happy", intensity: "medium", mode: "micro" },
+    expressionName: "gestureGame",
+    accessoryPartIds: ["Part17", "Part21"],
+    lookTarget: { x: 0.12, y: 0.05 }
+  },
+  {
     type: "reading",
-    weight: 1,
+    weight: 0.8,
     durationMs: 1_900,
     presentation: { emotion: "neutral", intensity: "low", mode: "neutral" },
     expressionName: "glasses",
     accessoryPartIds: ["Part53"]
   },
   {
+    type: "readingIdle",
+    weight: 1,
+    durationMs: 1_600,
+    presentation: { emotion: "neutral", intensity: "low", mode: "neutral" },
+    expressionName: "glasses",
+    accessoryPartIds: ["Part53"],
+    lookTarget: { x: 0, y: -0.12 }
+  },
+  {
     type: "focus",
-    weight: 0.5,
+    weight: 0.8,
     durationMs: 1_700,
     presentation: { emotion: "neutral", intensity: "low", mode: "neutral" }
+  },
+  {
+    type: "workFocus",
+    weight: 1,
+    durationMs: 1_600,
+    presentation: { emotion: "neutral", intensity: "low", mode: "neutral" },
+    lookTarget: { x: 0.05, y: 0.1 }
+  },
+  {
+    type: "doze",
+    weight: 0.4,
+    durationMs: 1_450,
+    presentation: { emotion: "neutral", intensity: "low", mode: "neutral" },
+    lookTarget: { x: 0, y: -0.22 }
+  },
+  {
+    type: "edgeGlance",
+    weight: 0.8,
+    durationMs: 1_250,
+    presentation: { emotion: "neutral", intensity: "low", mode: "neutral" },
+    lookTarget: { x: 0.38, y: 0.02 }
   }
 ];
 
@@ -123,32 +209,68 @@ export const PET_RANDOM_INTERACTION_ACTIONS: readonly PetInteractionAction[] = P
 
 const MODE_RANDOM_INTERACTION_ACTION_WEIGHTS: Readonly<Record<DialogueModeId, Readonly<Partial<Record<PetInteractionActionType, number>>>>> = {
   default: {
-    greeting: 4,
-    thinking: 3,
-    playGame: 1,
-    reading: 1,
-    focus: 0.5
+    greeting: 3,
+    listen: 3,
+    softSmile: 2,
+    lookAway: 1,
+    thinking: 2,
+    replyThinking: 2,
+    playGame: 0.8,
+    gameReady: 0.8,
+    reading: 0.8,
+    readingIdle: 1,
+    focus: 0.8,
+    workFocus: 1,
+    doze: 0.4,
+    edgeGlance: 0.8
   },
   work: {
-    greeting: 2,
-    thinking: 4,
-    playGame: 0.5,
-    reading: 1,
-    focus: 3
+    greeting: 1.5,
+    listen: 3,
+    softSmile: 1,
+    lookAway: 0.8,
+    thinking: 3,
+    replyThinking: 3.5,
+    playGame: 0.2,
+    gameReady: 0.2,
+    reading: 0.8,
+    readingIdle: 1.2,
+    focus: 2.5,
+    workFocus: 4,
+    doze: 0.2,
+    edgeGlance: 0.6
   },
   game: {
-    greeting: 3,
+    greeting: 2,
+    listen: 1.5,
+    softSmile: 2,
+    lookAway: 0.8,
     thinking: 1,
-    playGame: 4,
-    reading: 0.5,
-    focus: 0
+    replyThinking: 0.8,
+    playGame: 3,
+    gameReady: 4,
+    reading: 0.2,
+    readingIdle: 0.3,
+    focus: 0,
+    workFocus: 0,
+    doze: 0,
+    edgeGlance: 0.5
   },
   reading: {
-    greeting: 2,
-    thinking: 2,
-    playGame: 0.5,
-    reading: 4,
-    focus: 1
+    greeting: 1.2,
+    listen: 2,
+    softSmile: 1.2,
+    lookAway: 0.8,
+    thinking: 1.5,
+    replyThinking: 1.8,
+    playGame: 0.2,
+    gameReady: 0.2,
+    reading: 3,
+    readingIdle: 4,
+    focus: 1.5,
+    workFocus: 1.2,
+    doze: 0.3,
+    edgeGlance: 0.5
   }
 };
 
@@ -171,11 +293,19 @@ export function getPresenceFilteredPetInteractionActions(
 
   if (presenceModeId === "focus") {
     return actions.map((action) => {
-      if (action.type === "playGame") {
+      if (action.type === "playGame" || action.type === "gameReady") {
         return { ...action, weight: 0 };
       }
 
-      if (action.type === "reading" || action.type === "focus" || action.type === "thinking") {
+      if (
+        action.type === "reading" ||
+        action.type === "readingIdle" ||
+        action.type === "focus" ||
+        action.type === "workFocus" ||
+        action.type === "thinking" ||
+        action.type === "replyThinking" ||
+        action.type === "listen"
+      ) {
         return { ...action, weight: Math.max(action.weight, 1) };
       }
 
@@ -184,14 +314,29 @@ export function getPresenceFilteredPetInteractionActions(
   }
 
   const allowedTypes = presenceModeId === "quiet"
-    ? new Set<PetInteractionActionType>(["greeting", "thinking", "focus"])
-    : new Set<PetInteractionActionType>(["thinking", "focus"]);
+    ? new Set<PetInteractionActionType>([
+      "greeting",
+      "listen",
+      "softSmile",
+      "lookAway",
+      "thinking",
+      "replyThinking",
+      "focus",
+      "workFocus",
+      "doze",
+      "edgeGlance"
+    ])
+    : new Set<PetInteractionActionType>(["thinking", "replyThinking", "focus", "workFocus", "doze"]);
 
   return actions
     .filter((action) => allowedTypes.has(action.type))
     .map((action) => ({
       ...action,
-      weight: action.type === "focus" || action.type === "thinking"
+      weight: action.type === "focus" ||
+        action.type === "workFocus" ||
+        action.type === "thinking" ||
+        action.type === "replyThinking" ||
+        action.type === "doze"
         ? Math.max(action.weight, 1)
         : action.weight
     }));

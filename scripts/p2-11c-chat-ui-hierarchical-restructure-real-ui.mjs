@@ -400,7 +400,7 @@ async function main() {
         const localShowsModelOnly = openaiFields.hidden === false && security.hidden === true;
         provider.value = "fake";
         provider.dispatchEvent(new Event("change", { bubbles: true }));
-        return options === "fake|openai-compatible|local-openai-compatible" &&
+        return options === "local-openai-compatible|openai-compatible|fake" &&
           cloudShowsFields &&
           localShowsModelOnly &&
           openaiFields.hidden === true;

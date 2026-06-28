@@ -55,7 +55,7 @@ test("local OpenAI-compatible provider streams SSE and keeps main-process mappin
     const provider = createOpenAICompatibleProvider({
       providerId: "local-openai-compatible",
       baseURL: `http://127.0.0.1:${address.port}/v1`,
-      model: "qwen3:1.7b",
+      model: "qwen3.5:2b-q4_K_M",
       apiKey: "ollama-local-placeholder",
       temperature: 0.7,
       maxTokens: 240,
@@ -88,7 +88,7 @@ test("local OpenAI-compatible provider streams SSE and keeps main-process mappin
     assert.equal(provider.id, "local-openai-compatible");
     assert.equal(requestedURL, "/v1/chat/completions");
     assert.equal(authorization, "Bearer ollama-local-placeholder");
-    assert.equal(body.model, "qwen3:1.7b");
+    assert.equal(body.model, "qwen3.5:2b-q4_K_M");
     assert.equal(body.stream, true);
     assert.equal(body.messages?.[0]?.content, "你是桌面伙伴。用中文，短句，不输出 JSON。");
     assert.match(body.messages?.[1]?.content ?? "", /现代老魔女/);
@@ -187,7 +187,7 @@ test("OpenAI-compatible provider classifies missing model and incompatible strea
       createOpenAICompatibleProvider({
         providerId: "local-openai-compatible",
         baseURL: localBaseURL(incompatibleServer),
-        model: "qwen3:1.7b",
+        model: "qwen3.5:2b-q4_K_M",
         apiKey: "local-placeholder",
         temperature: 0.7,
         maxTokens: 240,
@@ -218,7 +218,7 @@ test("OpenAI-compatible provider classifies timeout", async () => {
       createOpenAICompatibleProvider({
         providerId: "local-openai-compatible",
         baseURL: localBaseURL(server),
-        model: "qwen3:1.7b",
+        model: "qwen3.5:2b-q4_K_M",
         apiKey: "local-placeholder",
         temperature: 0.7,
         maxTokens: 240,

@@ -297,6 +297,9 @@ const interactionActionPlayer = createInteractionActionPlayer({
   resumeLook: () => {
     live2DModel?.setLookPaused(false);
   },
+  setLookTarget: (x, y) => {
+    live2DModel?.setLookTarget(x, y);
+  },
   resetLookTarget: () => {
     live2DModel?.setLookTarget(0, 0);
   },

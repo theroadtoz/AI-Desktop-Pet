@@ -1,22 +1,47 @@
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
+import { join } from "node:path";
 import test from "node:test";
 
 const require = createRequire(import.meta.url);
 const {
+  DEFAULT_PROVIDER_CONFIG,
+  FAKE_PROVIDER_CONFIG,
   createProviderTelemetryPayload,
   parseProviderConfig
 } = require("../dist/main/services/config/provider-config-store.js") as typeof import("../src/main/services/config/provider-config-store");
 const {
   createChatProviderFromConfig
 } = require("../dist/main/services/chat/provider-factory.js") as typeof import("../src/main/services/chat/provider-factory");
+const {
+  readEnvProviderConfig
+} = require("../dist/main/services/config/env-config.js") as typeof import("../src/main/services/config/env-config");
+
+const emptyEnvCwd = join(process.cwd(), ".tmp-does-not-exist-for-provider-config-tests");
+
+test("default provider config recommends explicit local Ollama path", () => {
+  assert.deepEqual(DEFAULT_PROVIDER_CONFIG, {
+    providerId: "local-openai-compatible",
+    displayName: "Ollama 本地模型",
+    baseURL: "http://localhost:11434/v1",
+    model: "qwen3.5:2b-q4_K_M",
+    localPresetId: "ollama",
+    temperature: 0.7,
+    maxTokens: 240,
+    timeoutMs: 60000
+  });
+  assert.deepEqual(FAKE_PROVIDER_CONFIG, {
+    providerId: "fake",
+    displayName: "Fake Provider"
+  });
+});
 
 test("local OpenAI-compatible provider parser accepts local config without api key", () => {
   const config = parseProviderConfig({
     providerId: "local-openai-compatible",
     displayName: "Ollama 本地模型",
     baseURL: "http://localhost:11434/v1",
-    model: "qwen3:1.7b",
+    model: "qwen3.5:2b-q4_K_M",
     localPresetId: "ollama",
     apiKeyRef: "should-not-be-saved",
     temperature: 0.7,
@@ -28,12 +53,28 @@ test("local OpenAI-compatible provider parser accepts local config without api k
     providerId: "local-openai-compatible",
     displayName: "Ollama 本地模型",
     baseURL: "http://localhost:11434/v1",
-    model: "qwen3:1.7b",
+    model: "qwen3.5:2b-q4_K_M",
     localPresetId: "ollama",
     temperature: 0.7,
     maxTokens: 240,
     timeoutMs: 60000
   });
+});
+
+test("env provider keeps fake explicit and local env uses recommended defaults", () => {
+  const fake = readEnvProviderConfig({
+    cwd: emptyEnvCwd,
+    env: { AI_DESKTOP_PET_PROVIDER: "fake" }
+  });
+  const local = readEnvProviderConfig({
+    cwd: emptyEnvCwd,
+    env: { AI_DESKTOP_PET_PROVIDER: "local-openai-compatible" }
+  });
+
+  assert.deepEqual(fake?.providerConfig, FAKE_PROVIDER_CONFIG);
+  assert.equal(fake?.apiKey, null);
+  assert.deepEqual(local?.providerConfig, DEFAULT_PROVIDER_CONFIG);
+  assert.equal(local?.apiKey, null);
 });
 
 test("local provider telemetry records preset and host without key material", () => {
@@ -60,7 +101,7 @@ test("local OpenAI-compatible provider parser rejects invalid local config", () 
     providerId: "local-openai-compatible",
     displayName: "Ollama 本地模型",
     baseURL: "",
-    model: "qwen3:1.7b",
+    model: "qwen3.5:2b-q4_K_M",
     temperature: 0.7,
     maxTokens: 240,
     timeoutMs: 60000
@@ -70,7 +111,7 @@ test("local OpenAI-compatible provider parser rejects invalid local config", () 
     providerId: "local-openai-compatible",
     displayName: "Ollama 本地模型",
     baseURL: "http://localhost:11434/v1",
-    model: "qwen3:1.7b",
+    model: "qwen3.5:2b-q4_K_M",
     temperature: 0.7,
     maxTokens: 0,
     timeoutMs: 60000
@@ -83,7 +124,7 @@ test("provider factory does not require real api key for local provider", () => 
       providerId: "local-openai-compatible",
       displayName: "Ollama 本地模型",
       baseURL: "http://localhost:11434/v1",
-      model: "qwen3:1.7b",
+      model: "qwen3.5:2b-q4_K_M",
       temperature: 0.7,
       maxTokens: 240,
       timeoutMs: 60000

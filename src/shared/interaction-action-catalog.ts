@@ -44,6 +44,36 @@ export const PET_INTERACTION_ACTION_CATALOG = {
     headOnly: false,
     defaultDurationMs: 1_400
   },
+  listen: {
+    actionType: "listen",
+    safeEchoMessage: "刚刚倾听",
+    supportLevel: "parameter-composition",
+    bodyPoolEligible: true,
+    strongAccessory: false,
+    startupOnly: false,
+    headOnly: false,
+    defaultDurationMs: 1_350
+  },
+  softSmile: {
+    actionType: "softSmile",
+    safeEchoMessage: "刚刚微笑",
+    supportLevel: "parameter-composition",
+    bodyPoolEligible: true,
+    strongAccessory: false,
+    startupOnly: false,
+    headOnly: false,
+    defaultDurationMs: 1_300
+  },
+  lookAway: {
+    actionType: "lookAway",
+    safeEchoMessage: "刚刚移开视线",
+    supportLevel: "parameter-composition",
+    bodyPoolEligible: true,
+    strongAccessory: false,
+    startupOnly: false,
+    headOnly: false,
+    defaultDurationMs: 1_300
+  },
   thinking: {
     actionType: "thinking",
     safeEchoMessage: "刚刚思考",
@@ -53,6 +83,16 @@ export const PET_INTERACTION_ACTION_CATALOG = {
     startupOnly: false,
     headOnly: false,
     defaultDurationMs: 1_800
+  },
+  replyThinking: {
+    actionType: "replyThinking",
+    safeEchoMessage: "刚刚轻声思考",
+    supportLevel: "parameter-composition",
+    bodyPoolEligible: true,
+    strongAccessory: false,
+    startupOnly: false,
+    headOnly: false,
+    defaultDurationMs: 1_250
   },
   playGame: {
     actionType: "playGame",
@@ -64,6 +104,16 @@ export const PET_INTERACTION_ACTION_CATALOG = {
     headOnly: false,
     defaultDurationMs: 1_700
   },
+  gameReady: {
+    actionType: "gameReady",
+    safeEchoMessage: "刚刚准备游戏",
+    supportLevel: "accessory-enhanced",
+    bodyPoolEligible: true,
+    strongAccessory: true,
+    startupOnly: false,
+    headOnly: false,
+    defaultDurationMs: 1_500
+  },
   reading: {
     actionType: "reading",
     safeEchoMessage: "刚刚读书",
@@ -74,6 +124,16 @@ export const PET_INTERACTION_ACTION_CATALOG = {
     headOnly: false,
     defaultDurationMs: 1_900
   },
+  readingIdle: {
+    actionType: "readingIdle",
+    safeEchoMessage: "刚刚安静读书",
+    supportLevel: "accessory-enhanced",
+    bodyPoolEligible: true,
+    strongAccessory: true,
+    startupOnly: false,
+    headOnly: false,
+    defaultDurationMs: 1_600
+  },
   focus: {
     actionType: "focus",
     safeEchoMessage: "刚刚专注",
@@ -83,6 +143,36 @@ export const PET_INTERACTION_ACTION_CATALOG = {
     startupOnly: false,
     headOnly: false,
     defaultDurationMs: 1_700
+  },
+  workFocus: {
+    actionType: "workFocus",
+    safeEchoMessage: "刚刚进入专注",
+    supportLevel: "parameter-composition",
+    bodyPoolEligible: true,
+    strongAccessory: false,
+    startupOnly: false,
+    headOnly: false,
+    defaultDurationMs: 1_600
+  },
+  doze: {
+    actionType: "doze",
+    safeEchoMessage: "刚刚小憩",
+    supportLevel: "parameter-composition",
+    bodyPoolEligible: true,
+    strongAccessory: false,
+    startupOnly: false,
+    headOnly: false,
+    defaultDurationMs: 1_450
+  },
+  edgeGlance: {
+    actionType: "edgeGlance",
+    safeEchoMessage: "刚刚看向屏幕内侧",
+    supportLevel: "parameter-composition",
+    bodyPoolEligible: true,
+    strongAccessory: false,
+    startupOnly: false,
+    headOnly: false,
+    defaultDurationMs: 1_250
   }
 } as const satisfies Record<string, PetInteractionActionSemantic>;
 

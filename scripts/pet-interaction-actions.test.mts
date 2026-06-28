@@ -79,6 +79,9 @@ function createFakeInteractionActionPlayer() {
     resumeLook: () => {
       calls.push("resumeLook");
     },
+    setLookTarget: (x, y) => {
+      calls.push(`setLookTarget:${x}:${y}`);
+    },
     resetLookTarget: () => {
       calls.push("resetLookTarget");
     },
@@ -147,13 +150,30 @@ test("pet interaction action catalog covers manifest semantics and safe echoes",
 test("pet interaction action catalog owns body pool eligibility and strong accessory markers", () => {
   assert.deepEqual(
     [...PET_BODY_POOL_ACTION_TYPES].sort(),
-    ["focus", "greeting", "playGame", "reading", "thinking"].sort()
+    [
+      "doze",
+      "edgeGlance",
+      "focus",
+      "gameReady",
+      "greeting",
+      "listen",
+      "lookAway",
+      "playGame",
+      "reading",
+      "readingIdle",
+      "replyThinking",
+      "softSmile",
+      "thinking",
+      "workFocus"
+    ].sort()
   );
   assert.equal(PET_INTERACTION_ACTION_CATALOG.appearance.bodyPoolEligible, false);
   assert.equal(PET_INTERACTION_ACTION_CATALOG.headPat.bodyPoolEligible, false);
-  assert.deepEqual([...PET_STRONG_ACCESSORY_ACTION_TYPES].sort(), ["playGame", "reading"].sort());
+  assert.deepEqual([...PET_STRONG_ACCESSORY_ACTION_TYPES].sort(), ["gameReady", "playGame", "reading", "readingIdle"].sort());
+  assert.equal(PET_INTERACTION_ACTION_CATALOG.gameReady.strongAccessory, true);
   assert.equal(PET_INTERACTION_ACTION_CATALOG.playGame.strongAccessory, true);
   assert.equal(PET_INTERACTION_ACTION_CATALOG.reading.strongAccessory, true);
+  assert.equal(PET_INTERACTION_ACTION_CATALOG.readingIdle.strongAccessory, true);
   assert.equal(PET_INTERACTION_ACTION_CATALOG.greeting.strongAccessory, false);
 });
 
@@ -163,6 +183,11 @@ test("safe echo helpers reject unknown actions and strip window shake payload de
   assert.equal(getPetWindowMotionFeedbackSafeEchoMessage("started"), PET_WINDOW_SHAKE_SAFE_ECHO_MESSAGE);
   assert.equal(PET_WINDOW_SHAKE_SAFE_ECHO_MESSAGE, "刚刚被晃了一下");
   assert.equal(/reason|duration|payload|window_shake_feedback/i.test(PET_WINDOW_SHAKE_SAFE_ECHO_MESSAGE), false);
+  for (const type of PET_INTERACTION_ACTION_TYPES) {
+    const message = getPetInteractionActionSafeEchoMessage(type);
+    assert.equal(typeof message, "string");
+    assert.equal(/payload|partId|reason|duration|selectedActionType|candidateActionTypes/i.test(message ?? ""), false);
+  }
 });
 
 test("main pet activity echo delegates safe messages to the shared catalog helpers", async () => {
@@ -203,27 +228,64 @@ test("pet interaction action manifest includes audited expression and accessory 
   const byType = new Map(PET_INTERACTION_ACTIONS.map((action) => [action.type, action]));
 
   assert.equal(byType.get("greeting")?.expressionName, undefined);
+  assert.equal(byType.get("listen")?.expressionName, undefined);
+  assert.deepEqual(byType.get("listen")?.lookTarget, { x: 0, y: 0.18 });
+  assert.equal(byType.get("softSmile")?.presentation.emotion, "happy");
+  assert.equal(byType.get("lookAway")?.expressionName, undefined);
+  assert.deepEqual(byType.get("lookAway")?.lookTarget, { x: -0.45, y: 0.02 });
   assert.equal(byType.get("thinking")?.expressionName, undefined);
+  assert.equal(byType.get("replyThinking")?.expressionName, undefined);
+  assert.deepEqual(byType.get("replyThinking")?.lookTarget, { x: 0.18, y: 0.08 });
   assert.equal(byType.get("focus")?.expressionName, undefined);
   assert.equal(byType.get("focus")?.accessoryPartIds, undefined);
+  assert.equal(byType.get("workFocus")?.expressionName, undefined);
+  assert.deepEqual(byType.get("workFocus")?.lookTarget, { x: 0.05, y: 0.1 });
+  assert.deepEqual(byType.get("doze")?.lookTarget, { x: 0, y: -0.22 });
+  assert.deepEqual(byType.get("edgeGlance")?.lookTarget, { x: 0.38, y: 0.02 });
   assert.equal(byType.get("reading")?.expressionName, "glasses");
   assert.deepEqual(byType.get("reading")?.accessoryPartIds, ["Part53"]);
+  assert.equal(byType.get("readingIdle")?.expressionName, "glasses");
+  assert.deepEqual(byType.get("readingIdle")?.accessoryPartIds, ["Part53"]);
   assert.equal(byType.get("playGame")?.expressionName, "gestureGame");
   assert.deepEqual(byType.get("playGame")?.accessoryPartIds, ["Part17", "Part21"]);
+  assert.equal(byType.get("gameReady")?.expressionName, "gestureGame");
+  assert.deepEqual(byType.get("gameReady")?.accessoryPartIds, ["Part17", "Part21"]);
 });
 
 test("ordinary random interaction pool excludes startup and head-only actions", () => {
   assert.deepEqual(
     PET_RANDOM_INTERACTION_ACTIONS.map((action) => action.type).sort(),
-    ["focus", "greeting", "playGame", "reading", "thinking"].sort()
+    [
+      "doze",
+      "edgeGlance",
+      "focus",
+      "gameReady",
+      "greeting",
+      "listen",
+      "lookAway",
+      "playGame",
+      "reading",
+      "readingIdle",
+      "replyThinking",
+      "softSmile",
+      "thinking",
+      "workFocus"
+    ].sort()
   );
   assert.equal(selectRandomPetInteractionAction(() => 0).type, "greeting");
-  assert.equal(selectRandomPetInteractionAction(() => 0.4).type, "greeting");
-  assert.equal(selectRandomPetInteractionAction(() => 0.45).type, "thinking");
-  assert.equal(selectRandomPetInteractionAction(() => 0.78).type, "playGame");
-  assert.equal(selectRandomPetInteractionAction(() => 0.89).type, "reading");
-  assert.equal(selectRandomPetInteractionAction(() => 0.95).type, "focus");
-  assert.equal(selectRandomPetInteractionAction(() => 0.999).type, "focus");
+  assert.equal(selectRandomPetInteractionAction(() => 0.2).type, "listen");
+  assert.equal(selectRandomPetInteractionAction(() => 0.35).type, "softSmile");
+  assert.equal(selectRandomPetInteractionAction(() => 0.43).type, "lookAway");
+  assert.equal(selectRandomPetInteractionAction(() => 0.5).type, "thinking");
+  assert.equal(selectRandomPetInteractionAction(() => 0.6).type, "replyThinking");
+  assert.equal(selectRandomPetInteractionAction(() => 0.69).type, "playGame");
+  assert.equal(selectRandomPetInteractionAction(() => 0.73).type, "gameReady");
+  assert.equal(selectRandomPetInteractionAction(() => 0.77).type, "reading");
+  assert.equal(selectRandomPetInteractionAction(() => 0.82).type, "readingIdle");
+  assert.equal(selectRandomPetInteractionAction(() => 0.87).type, "focus");
+  assert.equal(selectRandomPetInteractionAction(() => 0.91).type, "workFocus");
+  assert.equal(selectRandomPetInteractionAction(() => 0.95).type, "doze");
+  assert.equal(selectRandomPetInteractionAction(() => 0.999).type, "edgeGlance");
   assert.equal(getPetInteractionAction("appearance").type, "appearance");
   assert.equal(getPetInteractionAction("headPat").type, "headPat");
 });
@@ -234,32 +296,60 @@ test("dialogue modes adjust ordinary body action weights without changing the de
   }
 
   assert.deepEqual(weightsFor("default"), {
-    greeting: 4,
-    thinking: 3,
-    playGame: 1,
-    reading: 1,
-    focus: 0.5
+    greeting: 3,
+    listen: 3,
+    softSmile: 2,
+    lookAway: 1,
+    thinking: 2,
+    replyThinking: 2,
+    playGame: 0.8,
+    gameReady: 0.8,
+    reading: 0.8,
+    readingIdle: 1,
+    focus: 0.8,
+    workFocus: 1,
+    doze: 0.4,
+    edgeGlance: 0.8
   });
   assert.deepEqual(
     getRandomPetInteractionActionsForMode("default").map((action) => action.type).sort(),
-    ["focus", "greeting", "playGame", "reading", "thinking"].sort()
+    [
+      "doze",
+      "edgeGlance",
+      "focus",
+      "gameReady",
+      "greeting",
+      "listen",
+      "lookAway",
+      "playGame",
+      "reading",
+      "readingIdle",
+      "replyThinking",
+      "softSmile",
+      "thinking",
+      "workFocus"
+    ].sort()
   );
-  assert.equal(weightsFor("game").playGame, 4);
+  assert.equal(weightsFor("game").gameReady, 4);
+  assert.equal(weightsFor("game").playGame, 3);
   assert.equal(weightsFor("game").focus, 0);
-  assert.equal(weightsFor("reading").reading, 4);
-  assert.equal(weightsFor("reading").focus, 1);
-  assert.equal(weightsFor("work").thinking, 4);
-  assert.equal(weightsFor("work").focus, 3);
-  assert.equal(weightsFor("work").playGame, 0.5);
+  assert.equal(weightsFor("game").workFocus, 0);
+  assert.equal(weightsFor("reading").readingIdle, 4);
+  assert.equal(weightsFor("reading").reading, 3);
+  assert.equal(weightsFor("reading").focus, 1.5);
+  assert.equal(weightsFor("work").replyThinking, 3.5);
+  assert.equal(weightsFor("work").workFocus, 4);
+  assert.equal(weightsFor("work").playGame, 0.2);
   assert.equal(getRandomPetInteractionActionsForMode("game").some((action) => action.type === "appearance" || action.type === "headPat"), false);
 });
 
 test("dialogue mode body action selection follows mode weights", () => {
-  assert.equal(selectRandomPetInteractionAction(() => 0.68, getRandomPetInteractionActionsForMode("default")).type, "thinking");
+  assert.equal(selectRandomPetInteractionAction(() => 0.6, getRandomPetInteractionActionsForMode("default")).type, "replyThinking");
   assert.equal(selectRandomPetInteractionAction(() => 0.68, getRandomPetInteractionActionsForMode("game")).type, "playGame");
-  assert.equal(selectRandomPetInteractionAction(() => 0.72, getRandomPetInteractionActionsForMode("reading")).type, "reading");
-  assert.equal(selectRandomPetInteractionAction(() => 0.95, getRandomPetInteractionActionsForMode("reading")).type, "focus");
-  assert.equal(selectRandomPetInteractionAction(() => 0.8, getRandomPetInteractionActionsForMode("work")).type, "focus");
+  assert.equal(selectRandomPetInteractionAction(() => 0.8, getRandomPetInteractionActionsForMode("game")).type, "gameReady");
+  assert.equal(selectRandomPetInteractionAction(() => 0.55, getRandomPetInteractionActionsForMode("reading")).type, "reading");
+  assert.equal(selectRandomPetInteractionAction(() => 0.7, getRandomPetInteractionActionsForMode("reading")).type, "readingIdle");
+  assert.equal(selectRandomPetInteractionAction(() => 0.8, getRandomPetInteractionActionsForMode("work")).type, "workFocus");
   assert.notEqual(selectRandomPetInteractionAction(() => 0.68, getRandomPetInteractionActionsForMode("work")).type, "playGame");
 });
 
@@ -271,14 +361,27 @@ test("presence modes filter ordinary body actions without changing default or he
 
   assert.deepEqual(getPresenceFilteredPetInteractionActions(defaultActions, "default"), defaultActions);
   assert.equal(focusActions.find((action) => action.type === "playGame")?.weight, 0);
-  assert.equal(focusActions.find((action) => action.type === "thinking")?.weight, 3);
+  assert.equal(focusActions.find((action) => action.type === "gameReady")?.weight, 0);
+  assert.equal(focusActions.find((action) => action.type === "thinking")?.weight, 2);
+  assert.equal(focusActions.find((action) => action.type === "workFocus")?.weight, 1);
   assert.deepEqual(
     quietActions.map((action) => action.type).sort(),
-    ["focus", "greeting", "thinking"].sort()
+    [
+      "doze",
+      "edgeGlance",
+      "focus",
+      "greeting",
+      "listen",
+      "lookAway",
+      "replyThinking",
+      "softSmile",
+      "thinking",
+      "workFocus"
+    ].sort()
   );
   assert.deepEqual(
     sleepActions.map((action) => action.type).sort(),
-    ["focus", "thinking"].sort()
+    ["doze", "focus", "replyThinking", "thinking", "workFocus"].sort()
   );
   assert.equal(quietActions.some((action) => isStrongInteractionAction(action.type)), false);
   assert.equal(sleepActions.some((action) => isStrongInteractionAction(action.type)), false);
@@ -334,10 +437,14 @@ test("pet interaction action cooldown rules skip dense or repeated clicks", () =
   const headPat = getPetInteractionAction("headPat");
   const greeting = getPetInteractionAction("greeting");
   const playGame = getPetInteractionAction("playGame");
+  const gameReady = getPetInteractionAction("gameReady");
   const reading = getPetInteractionAction("reading");
+  const readingIdle = getPetInteractionAction("readingIdle");
 
   assert.equal(isStrongInteractionAction("playGame"), true);
+  assert.equal(isStrongInteractionAction("gameReady"), true);
   assert.equal(isStrongInteractionAction("reading"), true);
+  assert.equal(isStrongInteractionAction("readingIdle"), true);
   assert.equal(isStrongInteractionAction("greeting"), false);
   assert.equal(
     getInteractionActionCooldownSkipReason(greeting, 1_000, { activeType: "thinking" }),
@@ -359,7 +466,25 @@ test("pet interaction action cooldown rules skip dense or repeated clicks", () =
     getInteractionActionCooldownSkipReason(playGame, 5_000, {
       strongActionFinishedAtMsByType: {
         playGame: 5_000 - PET_INTERACTION_STRONG_ACTION_COOLDOWN_MS + 1,
-        reading: 5_000 - PET_INTERACTION_STRONG_ACTION_COOLDOWN_MS + 1
+        reading: 5_000 - PET_INTERACTION_STRONG_ACTION_COOLDOWN_MS + 1,
+        gameReady: 5_000 - PET_INTERACTION_STRONG_ACTION_COOLDOWN_MS + 1,
+        readingIdle: 5_000 - PET_INTERACTION_STRONG_ACTION_COOLDOWN_MS + 1
+      }
+    }),
+    "same_action_cooldown"
+  );
+  assert.equal(
+    getInteractionActionCooldownSkipReason(gameReady, 5_000, {
+      strongActionFinishedAtMsByType: {
+        gameReady: 5_000 - PET_INTERACTION_STRONG_ACTION_COOLDOWN_MS + 1
+      }
+    }),
+    "same_action_cooldown"
+  );
+  assert.equal(
+    getInteractionActionCooldownSkipReason(readingIdle, 5_000, {
+      strongActionFinishedAtMsByType: {
+        readingIdle: 5_000 - PET_INTERACTION_STRONG_ACTION_COOLDOWN_MS + 1
       }
     }),
     "same_action_cooldown"
@@ -417,6 +542,7 @@ test("interaction action player owns start, finish, restore, and finished teleme
   assert.deepEqual(harness.calls, [
     `boost:${reading.durationMs + 250}`,
     "pauseLook",
+    "resetLookTarget",
     "temporaryParts:Part53",
     "setExpression:glasses"
   ]);
@@ -439,7 +565,7 @@ test("interaction action player owns start, finish, restore, and finished teleme
   harness.timers[0]?.callback();
 
   assert.equal(harness.player.isActive(), false);
-  assert.deepEqual(harness.calls.slice(4), [
+  assert.deepEqual(harness.calls.slice(5), [
     "restoreParts",
     "clearExpression",
     "resetLookTarget",
@@ -454,6 +580,34 @@ test("interaction action player owns start, finish, restore, and finished teleme
       restoredAccessoryPresetId: "glasses"
     }
   });
+});
+
+test("interaction action player applies manifest look targets and restores them on finish", () => {
+  const harness = createFakeInteractionActionPlayer();
+  const lookAway = getPetInteractionAction("lookAway");
+
+  assert.equal(harness.player.playAction(lookAway, "click_body", {
+    modeId: "default",
+    candidateActionTypes: ["listen", "lookAway", "softSmile"]
+  }), true);
+  assert.deepEqual(harness.calls, [
+    `boost:${lookAway.durationMs + 250}`,
+    "resumeLook",
+    "setLookTarget:-0.45:0.02",
+    "temporaryParts:",
+    "applyPresentation:neutral:none"
+  ]);
+
+  harness.setNow(1_000 + lookAway.durationMs);
+  harness.timers[0]?.callback();
+
+  assert.deepEqual(harness.calls.slice(5), [
+    "restoreParts",
+    "clearExpression",
+    "resetLookTarget",
+    "resumeLook",
+    "applyPresentation:neutral:none"
+  ]);
 });
 
 test("interaction action player prevents stacking and reports active action skips", () => {

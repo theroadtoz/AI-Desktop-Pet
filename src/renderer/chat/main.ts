@@ -6,6 +6,7 @@ import type { PresenceModeId, PresenceModeView } from "../../shared/presence-mod
 import type { MemoryCard } from "../../shared/chat-memory";
 import {
   LOCAL_PROVIDER_PRESETS,
+  RECOMMENDED_LOCAL_PROVIDER_CONFIG,
   type LocalProviderPresetId,
   type ProviderConfig,
   type ProviderStatus
@@ -334,13 +335,13 @@ const DEFAULT_OPENAI_CONFIG = {
   timeoutMs: 60000
 };
 const DEFAULT_LOCAL_OPENAI_CONFIG = {
-  displayName: "Ollama 本地模型",
-  baseURL: "http://localhost:11434/v1",
-  model: "qwen3:1.7b",
-  localPresetId: "ollama" as LocalProviderPresetId,
-  temperature: 0.7,
-  maxTokens: 240,
-  timeoutMs: 60000
+  displayName: RECOMMENDED_LOCAL_PROVIDER_CONFIG.displayName,
+  baseURL: RECOMMENDED_LOCAL_PROVIDER_CONFIG.baseURL,
+  model: RECOMMENDED_LOCAL_PROVIDER_CONFIG.model,
+  localPresetId: RECOMMENDED_LOCAL_PROVIDER_CONFIG.localPresetId,
+  temperature: RECOMMENDED_LOCAL_PROVIDER_CONFIG.temperature,
+  maxTokens: RECOMMENDED_LOCAL_PROVIDER_CONFIG.maxTokens,
+  timeoutMs: RECOMMENDED_LOCAL_PROVIDER_CONFIG.timeoutMs
 };
 
 type SettingsRootPageId = "basic" | "memory" | "history" | "appearance" | "model" | "advanced";

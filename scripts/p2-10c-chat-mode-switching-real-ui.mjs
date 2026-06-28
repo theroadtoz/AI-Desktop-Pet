@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { PET_BODY_POOL_ACTION_TYPES } from "./support/pet-action-semantic-constants.mjs";
 
 const root = resolve(new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"));
 const stamp = new Date().toISOString().replace(/[:.]/g, "-");
@@ -452,9 +453,9 @@ async function main() {
       event.type === "pet_interaction_action_started" &&
       event.payload?.reason === "click_body" &&
       event.payload?.modeId === "work" &&
-      event.payload?.selectedActionType === "focus" &&
+      event.payload?.selectedActionType === "workFocus" &&
       Array.isArray(event.payload?.candidateActionTypes) &&
-      event.payload.candidateActionTypes.includes("focus")
+      event.payload.candidateActionTypes.includes("workFocus")
     ), { attempts: 4 });
     checks.workModePetActionCanTriggerFocus = Boolean(workAction);
     await sleep(2_100);
@@ -480,7 +481,7 @@ async function main() {
       event.type === "pet_interaction_action_started" &&
       event.payload?.reason === "click_body" &&
       event.payload?.modeId === "reading" &&
-      event.payload?.selectedActionType === "reading"
+      ["reading", "readingIdle"].includes(event.payload?.selectedActionType)
     ), { attempts: 3 });
     checks.readingModePetActionPrefersReading = Boolean(readingAction);
     await sleep(2_300);
@@ -533,7 +534,7 @@ async function main() {
       event.payload?.reason === "click_body" &&
       event.payload?.modeId === "default" &&
       Array.isArray(event.payload?.candidateActionTypes) &&
-      ["greeting", "thinking", "playGame", "reading", "focus"].every((type) => event.payload.candidateActionTypes.includes(type)) &&
+      PET_BODY_POOL_ACTION_TYPES.every((type) => event.payload.candidateActionTypes.includes(type)) &&
       !event.payload.candidateActionTypes.includes("appearance") &&
       !event.payload.candidateActionTypes.includes("headPat")
     ));
