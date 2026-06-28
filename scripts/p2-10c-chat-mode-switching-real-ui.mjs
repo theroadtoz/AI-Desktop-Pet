@@ -528,8 +528,7 @@ async function main() {
 
     await setMode(chat, "default");
     checks.defaultModeVisibleAfterSwitch = await evaluate(chat, "document.querySelector('#partner-status')?.textContent.includes('默认陪伴')");
-    await clickPet(handles.pet.cdp, 0.05);
-    const defaultAction = await waitForTelemetryEvent((event) => (
+    const defaultAction = await clickPetUntilTelemetry(handles.pet.cdp, 0.05, (event) => (
       event.type === "pet_interaction_action_started" &&
       event.payload?.reason === "click_body" &&
       event.payload?.modeId === "default" &&
@@ -537,7 +536,7 @@ async function main() {
       PET_BODY_POOL_ACTION_TYPES.every((type) => event.payload.candidateActionTypes.includes(type)) &&
       !event.payload.candidateActionTypes.includes("appearance") &&
       !event.payload.candidateActionTypes.includes("headPat")
-    ));
+    ), { attempts: 4 });
     checks.defaultModePetActionPoolSummary = Boolean(defaultAction);
     await sleep(2_400);
     await clickPet(handles.pet.cdp, 0.2, "head");

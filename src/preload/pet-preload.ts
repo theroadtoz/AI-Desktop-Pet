@@ -29,7 +29,9 @@ const petActionTriggerReasons = [
   "chat_opened",
   "chat_input_focus",
   "chat_reply_waiting",
-  "pet_edge_settled"
+  "pet_edge_settled",
+  "rapid_touch_combo",
+  "chat_reply_sustain"
 ] as const;
 const scaleWheelModifierPattern = /^(Ctrl|Alt|Shift|Meta)(\+(Ctrl|Alt|Shift|Meta))*$/;
 

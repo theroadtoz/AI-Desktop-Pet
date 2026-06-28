@@ -12,6 +12,7 @@ import {
 } from "./cubism-drag-physics";
 import { updateCubismFrame } from "./cubism-frame-pipeline";
 import { CubismLookController } from "./cubism-look";
+import { CubismPoseTargetController, type CubismPoseTarget } from "./cubism-pose-target";
 import { WITCH_MODEL3_URL, type Live2DUpdateSample, type LoadedLive2DModel, type Model3Json } from "./types";
 import { CubismFramework } from "./vendor/framework/live2dcubismframework";
 
@@ -84,6 +85,7 @@ export async function loadWitchLive2DModel(
   ]);
   const expressionController = await createCubismExpressionController();
   let lookController: CubismLookController | null = null;
+  let poseTargetController: CubismPoseTargetController | null = null;
   let breathController: CubismBreathController | null = null;
   let microExpressionController: CubismMicroExpressionController | null = null;
   let dragPhysicsController: DragPhysicsController | null = null;
@@ -101,6 +103,7 @@ export async function loadWitchLive2DModel(
       updateCubismFrame(model, deltaSeconds, {
         applyPhysicsInputs: () => {
           lookController?.update(model, deltaSeconds);
+          poseTargetController?.update(model, deltaSeconds);
           dragPhysicsController?.advance(deltaSeconds);
           dragPhysicsController?.apply(model);
         },
@@ -137,6 +140,7 @@ export async function loadWitchLive2DModel(
   }
 
   lookController = new CubismLookController(userModel.getModel());
+  poseTargetController = new CubismPoseTargetController(userModel.getModel());
   breathController = await createCubismBreathController(userModel.getModel());
   microExpressionController = createCubismMicroExpressionController(userModel.getModel());
 
@@ -238,6 +242,12 @@ export async function loadWitchLive2DModel(
     setLookTarget(x: number, y: number): void {
       lookController?.setTarget(x, y);
     },
+    setTemporaryPoseTarget(target: CubismPoseTarget): void {
+      poseTargetController?.setTarget(target);
+    },
+    resetTemporaryPoseTarget(): void {
+      poseTargetController?.reset();
+    },
     setLookPaused(paused: boolean): void {
       lookController?.setPaused(paused);
     },
@@ -252,6 +262,7 @@ export async function loadWitchLive2DModel(
     },
     release(): void {
       restoreTemporaryPartOpacities();
+      poseTargetController?.reset();
       expressionController.release();
       microExpressionController?.release();
       microExpressionController = null;

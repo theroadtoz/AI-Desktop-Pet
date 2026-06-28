@@ -12,7 +12,9 @@ export const PET_ACTION_TRIGGER_REASONS = [
   "chat_opened",
   "chat_input_focus",
   "chat_reply_waiting",
-  "pet_edge_settled"
+  "pet_edge_settled",
+  "rapid_touch_combo",
+  "chat_reply_sustain"
 ] as const;
 
 export type PetActionTriggerReason = typeof PET_ACTION_TRIGGER_REASONS[number];
@@ -20,7 +22,9 @@ export type PetActionTriggerReason = typeof PET_ACTION_TRIGGER_REASONS[number];
 export type PetActionTriggerActionType =
   | "listen"
   | "replyThinking"
-  | "edgeGlance";
+  | "edgeGlance"
+  | "flusteredGlance"
+  | "replySustain";
 
 export type PetActionTrigger = {
   reason: PetActionTriggerReason;
@@ -30,7 +34,9 @@ export const PET_ACTION_TRIGGER_ACTION_BY_REASON: Readonly<Record<PetActionTrigg
   chat_opened: "listen",
   chat_input_focus: "listen",
   chat_reply_waiting: "replyThinking",
-  pet_edge_settled: "edgeGlance"
+  pet_edge_settled: "edgeGlance",
+  rapid_touch_combo: "flusteredGlance",
+  chat_reply_sustain: "replySustain"
 };
 
 export const PET_EDGE_SETTLED_THRESHOLD_PX = 72;

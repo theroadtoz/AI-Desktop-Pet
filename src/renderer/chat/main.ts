@@ -12,6 +12,7 @@ import {
   type ProviderStatus
 } from "../../shared/provider-config";
 import type { ProviderHealthCheckRequest } from "../../shared/provider-health";
+import { polishAssistantDisplayText } from "../../shared/reply-text-polish";
 import {
   DEFAULT_PET_PRESENTATION_PREFERENCES,
   normalizePetScale
@@ -773,6 +774,12 @@ function formatMessageRoleLabel(role: ChatRole): string {
   return role === "user" ? "你" : "真央";
 }
 
+function getVisibleMessageContent(message: ChatMessage): string {
+  return message.role === "assistant"
+    ? polishAssistantDisplayText(message.content)
+    : message.content;
+}
+
 function appendMessage(message: ChatMessage): HTMLElement {
   const item = document.createElement("p");
   const authorClass = message.role === "user" ? "user" : "pet";
@@ -782,7 +789,7 @@ function appendMessage(message: ChatMessage): HTMLElement {
   role.textContent = formatMessageRoleLabel(message.role);
   const content = document.createElement("span");
   content.className = "message-content";
-  content.textContent = message.content;
+  content.textContent = getVisibleMessageContent(message);
   item.append(role, content);
 
   messageList.append(item);
@@ -2041,7 +2048,7 @@ window.chatApi?.onReplyDelta((delta) => {
   chatTurnState = result.state;
   activeReplyMessage.content = result.content;
   const content = activeReplyElement.querySelector<HTMLElement>(".message-content") ?? activeReplyElement;
-  content.textContent = activeReplyMessage.content;
+  content.textContent = polishAssistantDisplayText(activeReplyMessage.content);
   messageList.scrollTop = messageList.scrollHeight;
 });
 

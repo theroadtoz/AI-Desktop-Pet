@@ -127,6 +127,7 @@ let currentPresenceModeId: PresenceModeId = "default";
 let performanceHeartbeat: NodeJS.Timeout | null = null;
 let isPetLocked = false;
 let initialEdgeGlanceTimer: NodeJS.Timeout | null = null;
+let chatReplySustainTimer: NodeJS.Timeout | null = null;
 
 const PET_RENDERER_RECOVERY_WINDOW_MS = 60_000;
 const DEFAULT_API_KEY_REF = "openai-compatible-default";
@@ -135,6 +136,8 @@ const PET_WINDOW_TITLE = "Desktop Pet";
 const PET_ACTION_TRIGGER_THROTTLE_MS = 700;
 const PET_INITIAL_EDGE_GLANCE_DELAY_MS = 2_350;
 const PET_DRAG_END_EDGE_GLANCE_DELAY_MS = 100;
+const PET_CHAT_REPLY_SUSTAIN_MIN_CHARS = 42;
+const PET_CHAT_REPLY_SUSTAIN_DELAY_MS = 1_250;
 const isAcceptanceTelemetryEnabled = process.env.AI_DESKTOP_PET_ACCEPTANCE_TELEMETRY === "1";
 let petRendererRecoveryTimes: number[] = [];
 const lastPetActionTriggerAtByReason: Partial<Record<PetActionTriggerReason, number>> = {};
@@ -325,6 +328,26 @@ function isCurrentPetWindowNearEdge(): boolean {
 
 function triggerEdgeGlanceIfPetSettled(): boolean {
   return isCurrentPetWindowNearEdge() && sendPetActionTrigger("pet_edge_settled");
+}
+
+function clearChatReplySustainTimer(): void {
+  if (!chatReplySustainTimer) {
+    return;
+  }
+
+  clearTimeout(chatReplySustainTimer);
+  chatReplySustainTimer = null;
+}
+
+function scheduleChatReplySustainTrigger(): void {
+  if (chatReplySustainTimer) {
+    return;
+  }
+
+  chatReplySustainTimer = setTimeout(() => {
+    chatReplySustainTimer = null;
+    sendPetActionTrigger("chat_reply_sustain");
+  }, PET_CHAT_REPLY_SUSTAIN_DELAY_MS);
 }
 
 function scheduleInitialEdgeGlanceIfNeeded(): void {
@@ -905,6 +928,7 @@ app.whenReady().then(async () => {
       chatEngine?.abortActiveStream();
       transitionPetRole({ type: "request:cancelled", requestVersion: activeChatRequestVersion });
       activeChatRequestVersion = null;
+      clearChatReplySustainTimer();
       settleInterruptedRole();
     }
     transitionPetRole({ type: "chat:closed" });
@@ -1302,6 +1326,7 @@ app.whenReady().then(async () => {
     }
 
     activeChatRequestVersion = request.requestVersion;
+    clearChatReplySustainTimer();
     sendPetActionTrigger("chat_reply_waiting");
     const submittedMessage = request.messages.at(-1);
 
@@ -1396,6 +1421,9 @@ app.whenReady().then(async () => {
         }
 
         replyLength += delta.text.length;
+        if (replyLength >= PET_CHAT_REPLY_SUSTAIN_MIN_CHARS) {
+          scheduleChatReplySustainTrigger();
+        }
         event.sender.send("chat:stream-delta", { ...delta, requestVersion: request.requestVersion });
       }
     }).then((result) => {
@@ -1455,6 +1483,7 @@ app.whenReady().then(async () => {
       if (activeChatRequestVersion === request.requestVersion) {
         activeChatRequestVersion = null;
       }
+      clearChatReplySustainTimer();
 
       logTelemetry(eventType, {
         providerId,
@@ -1488,6 +1517,7 @@ app.whenReady().then(async () => {
     if (chatEngine.abortActiveStream() && activeChatRequestVersion !== null) {
       transitionPetRole({ type: "request:cancelled", requestVersion: activeChatRequestVersion });
       activeChatRequestVersion = null;
+      clearChatReplySustainTimer();
       settleInterruptedRole();
     }
   });

@@ -1,6 +1,7 @@
 import type { CubismUserModel } from "./vendor/framework/model/cubismusermodel";
 import type { EmotionPresentation } from "../../../shared/emotion-presentation";
 import type { PresenceModeId } from "../../../shared/presence-mode";
+import type { CubismPoseTarget } from "./cubism-pose-target";
 
 export type Model3Json = {
   FileReferences?: {
@@ -20,6 +21,8 @@ export type LoadedLive2DModel = {
   applyTemporaryPartOpacities(partIds: readonly string[], opacity: number): void;
   restoreTemporaryPartOpacities(): void;
   setLookTarget(x: number, y: number): void;
+  setTemporaryPoseTarget(target: CubismPoseTarget): void;
+  resetTemporaryPoseTarget(): void;
   setLookPaused(paused: boolean): void;
   startDragPhysics(): void;
   sampleDragPhysics(deltaX: number, deltaY: number, timestampMs: number): void;

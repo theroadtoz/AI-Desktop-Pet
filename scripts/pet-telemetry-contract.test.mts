@@ -135,6 +135,35 @@ test("action trigger telemetry keeps only fixed safe trigger reasons", () => {
       durationMs: 1250
     }
   });
+  const rapidTouchCombo = parsePetRendererTelemetryEvent({
+    type: "pet_interaction_action_started",
+    payload: {
+      type: "flusteredGlance",
+      reason: "rapid_touch_combo",
+      durationMs: 1200,
+      motion: "sentinel",
+      actionPayload: { type: "unsafe" },
+      content: "sentinel"
+    }
+  });
+  const replySustain = parsePetRendererTelemetryEvent({
+    type: "pet_interaction_action_started",
+    payload: {
+      type: "replySustain",
+      reason: "chat_reply_sustain",
+      durationMs: 1100,
+      providerRequestBody: "sentinel",
+      messages: ["sentinel"]
+    }
+  });
+  const unsafeAction = parsePetRendererTelemetryEvent({
+    type: "pet_interaction_action_started",
+    payload: {
+      type: "providerSelectedMotion",
+      reason: "rapid_touch_combo",
+      durationMs: 1200
+    }
+  });
 
   assert.deepEqual(event, {
     type: "pet_interaction_action_started",
@@ -151,8 +180,34 @@ test("action trigger telemetry keeps only fixed safe trigger reasons", () => {
       durationMs: 1250
     }
   });
+  assert.deepEqual(rapidTouchCombo, {
+    type: "pet_interaction_action_started",
+    payload: {
+      type: "flusteredGlance",
+      reason: "rapid_touch_combo",
+      durationMs: 1200
+    }
+  });
+  assert.deepEqual(replySustain, {
+    type: "pet_interaction_action_started",
+    payload: {
+      type: "replySustain",
+      reason: "chat_reply_sustain",
+      durationMs: 1100
+    }
+  });
+  assert.deepEqual(unsafeAction, {
+    type: "pet_interaction_action_started",
+    payload: {
+      reason: "rapid_touch_combo",
+      durationMs: 1200
+    }
+  });
   assertNoForbiddenKeys(event?.payload);
   assertNoForbiddenKeys(unsafeReason?.payload);
+  assertNoForbiddenKeys(rapidTouchCombo?.payload);
+  assertNoForbiddenKeys(replySustain?.payload);
+  assertNoForbiddenKeys(unsafeAction?.payload);
 });
 
 test("performance telemetry keeps presence budget mode only as safe enum", () => {

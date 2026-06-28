@@ -196,6 +196,18 @@ async function waitForTelemetryEvent(predicate, timeoutMs) {
   return null;
 }
 
+async function sendChatText(cdp, text) {
+  await evaluate(cdp, `
+    (() => {
+      const input = document.querySelector("#chat-input");
+      const button = document.querySelector("#send-button");
+      input.value = ${JSON.stringify(text)};
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      button.click();
+    })()
+  `);
+}
+
 async function clickPet(cdp, randomValue, hitArea = "body") {
   await evaluate(cdp, `Math.random = () => ${randomValue}`);
   await evaluate(cdp, `
@@ -290,22 +302,25 @@ async function main() {
     { type: "greeting", random: 0.05, hitArea: "body", durationMs: PET_INTERACTION_ACTION_CATALOG.greeting.defaultDurationMs, captureDelayMs: 650 },
     { type: "listen", random: 0.2, hitArea: "body", durationMs: PET_INTERACTION_ACTION_CATALOG.listen.defaultDurationMs, captureDelayMs: 600 },
     { type: "softSmile", random: 0.35, hitArea: "body", durationMs: PET_INTERACTION_ACTION_CATALOG.softSmile.defaultDurationMs, captureDelayMs: 600 },
-    { type: "lookAway", random: 0.43, hitArea: "body", durationMs: PET_INTERACTION_ACTION_CATALOG.lookAway.defaultDurationMs, captureDelayMs: 600 },
+    { type: "lookAway", random: 0.4, hitArea: "body", durationMs: PET_INTERACTION_ACTION_CATALOG.lookAway.defaultDurationMs, captureDelayMs: 600 },
     { type: "thinking", random: 0.5, hitArea: "body", durationMs: PET_INTERACTION_ACTION_CATALOG.thinking.defaultDurationMs, captureDelayMs: 750 },
     { type: "replyThinking", random: 0.6, hitArea: "body", durationMs: PET_INTERACTION_ACTION_CATALOG.replyThinking.defaultDurationMs, captureDelayMs: 600 },
-    { type: "playGame", random: 0.69, hitArea: "body", durationMs: PET_INTERACTION_ACTION_CATALOG.playGame.defaultDurationMs, captureDelayMs: 700 },
-    { type: "gameReady", random: 0.73, hitArea: "body", durationMs: PET_INTERACTION_ACTION_CATALOG.gameReady.defaultDurationMs, captureDelayMs: 650 },
-    { type: "reading", random: 0.77, hitArea: "body", durationMs: PET_INTERACTION_ACTION_CATALOG.reading.defaultDurationMs, captureDelayMs: 800 },
-    { type: "readingIdle", random: 0.82, hitArea: "body", durationMs: PET_INTERACTION_ACTION_CATALOG.readingIdle.defaultDurationMs, captureDelayMs: 700 },
-    { type: "focus", random: 0.87, hitArea: "body", durationMs: PET_INTERACTION_ACTION_CATALOG.focus.defaultDurationMs, captureDelayMs: 700 },
-    { type: "workFocus", random: 0.91, hitArea: "body", durationMs: PET_INTERACTION_ACTION_CATALOG.workFocus.defaultDurationMs, captureDelayMs: 650 },
-    { type: "doze", random: 0.95, hitArea: "body", durationMs: PET_INTERACTION_ACTION_CATALOG.doze.defaultDurationMs, captureDelayMs: 650 },
-    { type: "edgeGlance", random: 0.98, hitArea: "body", durationMs: PET_INTERACTION_ACTION_CATALOG.edgeGlance.defaultDurationMs, captureDelayMs: 600 }
+    { type: "playGame", random: 0.64, hitArea: "body", durationMs: PET_INTERACTION_ACTION_CATALOG.playGame.defaultDurationMs, captureDelayMs: 700 },
+    { type: "gameReady", random: 0.68, hitArea: "body", durationMs: PET_INTERACTION_ACTION_CATALOG.gameReady.defaultDurationMs, captureDelayMs: 650 },
+    { type: "reading", random: 0.72, hitArea: "body", durationMs: PET_INTERACTION_ACTION_CATALOG.reading.defaultDurationMs, captureDelayMs: 800 },
+    { type: "readingIdle", random: 0.76, hitArea: "body", durationMs: PET_INTERACTION_ACTION_CATALOG.readingIdle.defaultDurationMs, captureDelayMs: 700 },
+    { type: "focus", random: 0.8, hitArea: "body", durationMs: PET_INTERACTION_ACTION_CATALOG.focus.defaultDurationMs, captureDelayMs: 700 },
+    { type: "workFocus", random: 0.84, hitArea: "body", durationMs: PET_INTERACTION_ACTION_CATALOG.workFocus.defaultDurationMs, captureDelayMs: 650 },
+    { type: "doze", random: 0.88, hitArea: "body", durationMs: PET_INTERACTION_ACTION_CATALOG.doze.defaultDurationMs, captureDelayMs: 650 },
+    { type: "edgeGlance", random: 0.91, hitArea: "body", durationMs: PET_INTERACTION_ACTION_CATALOG.edgeGlance.defaultDurationMs, captureDelayMs: 600 },
+    { type: "flusteredGlance", random: 0.945, hitArea: "body", durationMs: PET_INTERACTION_ACTION_CATALOG.flusteredGlance.defaultDurationMs, captureDelayMs: 600 },
+    { type: "replySustain", random: 0.98, hitArea: "body", durationMs: PET_INTERACTION_ACTION_CATALOG.replySustain.defaultDurationMs, captureDelayMs: 600 }
   ];
   let headBurstSummary = null;
   let bodyBurstSummary = null;
   let dragScaleSummary = null;
   let lockSummary = null;
+  let chatReplySustainSummary = null;
   const bodyPoolActionTypes = new Set(PET_BODY_POOL_ACTION_TYPES);
   const strongAccessoryActionTypes = new Set(PET_STRONG_ACCESSORY_ACTION_TYPES);
 
@@ -414,6 +429,15 @@ async function main() {
     chat = await connectTarget("renderer/chat/index.html");
     await sleep(1_000);
     await screenshot(chat.cdp, "chat-open.png");
+    await sleep(1_700);
+    await sendChatText(chat.cdp, "请详细说明一个三步小计划");
+    const chatReplySustainEvent = await waitForTelemetryEvent((event) => (
+      event.type === "pet_interaction_action_started" &&
+      event.payload?.type === "replySustain" &&
+      event.payload?.reason === "chat_reply_sustain"
+    ), 10_000);
+    chatReplySustainSummary = chatReplySustainEvent?.payload ?? null;
+    await sleep(PET_INTERACTION_ACTION_CATALOG.replySustain.defaultDurationMs + 600);
     await screenshot(pet.cdp, "after-regression.png");
     await evaluate(chat.cdp, "document.querySelector('#settings-button')?.click()");
     await sleep(500);
@@ -437,6 +461,9 @@ async function main() {
     ));
     const clickHeadPatStarts = startedActions.filter((event) => (
       event.type === "headPat" && event.reason === "click_head"
+    ));
+    const rapidTouchComboStarts = startedActions.filter((event) => (
+      event.type === "flusteredGlance" && event.reason === "rapid_touch_combo"
     ));
     const bodyActionTypes = new Set(startedActions
       .filter((event) => event.reason === "click_body")
@@ -463,6 +490,16 @@ async function main() {
       ok: (headBurstSummary?.started.length ?? 0) <= 2 &&
         (headBurstSummary?.skipped ?? []).some((event) => event.skipReason === "active_action" || event.skipReason === "head_pat_cooldown"),
       detail: headBurstSummary
+    });
+    checks.push({
+      name: "rapidTouchComboTriggersFlusteredGlance",
+      ok: rapidTouchComboStarts.length >= 1,
+      detail: rapidTouchComboStarts
+    });
+    checks.push({
+      name: "chatReplySustainTriggered",
+      ok: Boolean(chatReplySustainSummary),
+      detail: chatReplySustainSummary
     });
     checks.push({
       name: "bodyBurst20UsesCooldownSkips",
@@ -529,6 +566,7 @@ async function main() {
       bodyBurstSummary,
       dragScaleSummary,
       lockSummary,
+      chatReplySustainSummary,
       checks,
       telemetry: {
         logDirectory: telemetry.logDirectory,

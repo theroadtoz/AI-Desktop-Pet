@@ -173,6 +173,26 @@ export const PET_INTERACTION_ACTION_CATALOG = {
     startupOnly: false,
     headOnly: false,
     defaultDurationMs: 1_250
+  },
+  flusteredGlance: {
+    actionType: "flusteredGlance",
+    safeEchoMessage: "刚刚有点害羞地躲了一下",
+    supportLevel: "parameter-composition",
+    bodyPoolEligible: true,
+    strongAccessory: false,
+    startupOnly: false,
+    headOnly: false,
+    defaultDurationMs: 1_200
+  },
+  replySustain: {
+    actionType: "replySustain",
+    safeEchoMessage: "刚刚安静陪着回复",
+    supportLevel: "parameter-composition",
+    bodyPoolEligible: true,
+    strongAccessory: false,
+    startupOnly: false,
+    headOnly: false,
+    defaultDurationMs: 1_100
   }
 } as const satisfies Record<string, PetInteractionActionSemantic>;
 

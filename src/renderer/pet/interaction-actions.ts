@@ -18,7 +18,9 @@ export const PET_INTERACTION_ACTION_TYPES = [
   "focus",
   "workFocus",
   "doze",
-  "edgeGlance"
+  "edgeGlance",
+  "flusteredGlance",
+  "replySustain"
 ] as const;
 
 export type PetInteractionActionType = typeof PET_INTERACTION_ACTION_TYPES[number];
@@ -26,6 +28,13 @@ export type PetInteractionActionType = typeof PET_INTERACTION_ACTION_TYPES[numbe
 export type PetInteractionLookTarget = {
   x: number;
   y: number;
+};
+
+export type PetInteractionPoseTarget = {
+  bodyAngleX?: number;
+  bodyAngleY?: number;
+  bodyAngleZ?: number;
+  angleZ?: number;
 };
 
 export type PetInteractionAction = {
@@ -36,6 +45,7 @@ export type PetInteractionAction = {
   expressionName?: string;
   accessoryPartIds?: readonly string[];
   lookTarget?: PetInteractionLookTarget;
+  poseTarget?: PetInteractionPoseTarget;
 };
 
 type TimeoutHandle = ReturnType<typeof setTimeout>;
@@ -43,6 +53,11 @@ type TimeoutHandle = ReturnType<typeof setTimeout>;
 export type ClickActionScheduler = {
   schedule(): void;
   cancel(): void;
+};
+
+export type RapidTouchComboDetector = {
+  record(timestampMs: number): boolean;
+  reset(): void;
 };
 
 type ClickActionSchedulerOptions = {
@@ -56,6 +71,8 @@ export const PET_INTERACTION_GLOBAL_COOLDOWN_MS = 450;
 export const PET_INTERACTION_HEAD_PAT_COOLDOWN_MS = 1_200;
 export const PET_INTERACTION_STRONG_ACTION_COOLDOWN_MS = 4_500;
 export const PET_WINDOW_SHAKE_LIGHT_FEEDBACK_COOLDOWN_MS = 10_000;
+export const PET_RAPID_TOUCH_COMBO_WINDOW_MS = 2_500;
+export const PET_RAPID_TOUCH_COMBO_COUNT = 3;
 
 const STRONG_INTERACTION_ACTION_TYPES = new Set<PetInteractionActionType>([
   "playGame",
@@ -199,7 +216,24 @@ export const PET_INTERACTION_ACTIONS: readonly PetInteractionAction[] = [
     weight: 0.8,
     durationMs: 1_250,
     presentation: { emotion: "neutral", intensity: "low", mode: "neutral" },
-    lookTarget: { x: 0.38, y: 0.02 }
+    lookTarget: { x: 0.38, y: 0.02 },
+    poseTarget: { bodyAngleX: 4, bodyAngleZ: -2 }
+  },
+  {
+    type: "flusteredGlance",
+    weight: 0.7,
+    durationMs: 1_200,
+    presentation: { emotion: "surprised", intensity: "low", mode: "micro" },
+    lookTarget: { x: -0.36, y: -0.12 },
+    poseTarget: { bodyAngleX: -5, bodyAngleZ: 3, angleZ: -4 }
+  },
+  {
+    type: "replySustain",
+    weight: 0.7,
+    durationMs: 1_100,
+    presentation: { emotion: "neutral", intensity: "low", mode: "neutral" },
+    lookTarget: { x: 0.08, y: 0.04 },
+    poseTarget: { bodyAngleX: 1.5, bodyAngleZ: -1 }
   }
 ];
 
@@ -222,7 +256,9 @@ const MODE_RANDOM_INTERACTION_ACTION_WEIGHTS: Readonly<Record<DialogueModeId, Re
     focus: 0.8,
     workFocus: 1,
     doze: 0.4,
-    edgeGlance: 0.8
+    edgeGlance: 0.8,
+    flusteredGlance: 0.7,
+    replySustain: 0.7
   },
   work: {
     greeting: 1.5,
@@ -238,7 +274,9 @@ const MODE_RANDOM_INTERACTION_ACTION_WEIGHTS: Readonly<Record<DialogueModeId, Re
     focus: 2.5,
     workFocus: 4,
     doze: 0.2,
-    edgeGlance: 0.6
+    edgeGlance: 0.6,
+    flusteredGlance: 0.4,
+    replySustain: 2.2
   },
   game: {
     greeting: 2,
@@ -254,7 +292,9 @@ const MODE_RANDOM_INTERACTION_ACTION_WEIGHTS: Readonly<Record<DialogueModeId, Re
     focus: 0,
     workFocus: 0,
     doze: 0,
-    edgeGlance: 0.5
+    edgeGlance: 0.5,
+    flusteredGlance: 1.2,
+    replySustain: 0.4
   },
   reading: {
     greeting: 1.2,
@@ -270,7 +310,9 @@ const MODE_RANDOM_INTERACTION_ACTION_WEIGHTS: Readonly<Record<DialogueModeId, Re
     focus: 1.5,
     workFocus: 1.2,
     doze: 0.3,
-    edgeGlance: 0.5
+    edgeGlance: 0.5,
+    flusteredGlance: 0.4,
+    replySustain: 1.2
   }
 };
 
@@ -304,6 +346,7 @@ export function getPresenceFilteredPetInteractionActions(
         action.type === "workFocus" ||
         action.type === "thinking" ||
         action.type === "replyThinking" ||
+        action.type === "replySustain" ||
         action.type === "listen"
       ) {
         return { ...action, weight: Math.max(action.weight, 1) };
@@ -324,9 +367,11 @@ export function getPresenceFilteredPetInteractionActions(
       "focus",
       "workFocus",
       "doze",
-      "edgeGlance"
+      "edgeGlance",
+      "flusteredGlance",
+      "replySustain"
     ])
-    : new Set<PetInteractionActionType>(["thinking", "replyThinking", "focus", "workFocus", "doze"]);
+    : new Set<PetInteractionActionType>(["thinking", "replyThinking", "replySustain", "focus", "workFocus", "doze"]);
 
   return actions
     .filter((action) => allowedTypes.has(action.type))
@@ -336,6 +381,7 @@ export function getPresenceFilteredPetInteractionActions(
         action.type === "workFocus" ||
         action.type === "thinking" ||
         action.type === "replyThinking" ||
+        action.type === "replySustain" ||
         action.type === "doze"
         ? Math.max(action.weight, 1)
         : action.weight
@@ -472,5 +518,36 @@ export function createClickActionScheduler({
       }, delayMs);
     },
     cancel
+  };
+}
+
+export function createRapidTouchComboDetector({
+  windowMs = PET_RAPID_TOUCH_COMBO_WINDOW_MS,
+  count = PET_RAPID_TOUCH_COMBO_COUNT
+}: {
+  windowMs?: number;
+  count?: number;
+} = {}): RapidTouchComboDetector {
+  let timestamps: number[] = [];
+
+  return {
+    record(timestampMs: number): boolean {
+      if (!Number.isFinite(timestampMs)) {
+        return false;
+      }
+
+      timestamps = timestamps.filter((timestamp) => timestampMs - timestamp <= windowMs);
+      timestamps.push(timestampMs);
+
+      if (timestamps.length < count) {
+        return false;
+      }
+
+      timestamps = [];
+      return true;
+    },
+    reset(): void {
+      timestamps = [];
+    }
   };
 }

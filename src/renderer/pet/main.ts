@@ -9,6 +9,7 @@ import { getScreenDragDelta, shouldSuppressScaleWheelDuringDrag, type ScreenPoin
 import { createScaleWheelNormalizer, hasScaleWheelModifiers } from "./scale-wheel";
 import {
   createClickActionScheduler,
+  createRapidTouchComboDetector,
   getInteractionActionCooldownSkipReason,
   getPresenceFilteredPetInteractionActions,
   getRandomPetInteractionActionsForMode,
@@ -303,6 +304,12 @@ const interactionActionPlayer = createInteractionActionPlayer({
   },
   resetLookTarget: () => {
     live2DModel?.setLookTarget(0, 0);
+  },
+  setPoseTarget: (target) => {
+    live2DModel?.setTemporaryPoseTarget(target);
+  },
+  resetPoseTarget: () => {
+    live2DModel?.resetTemporaryPoseTarget();
   },
   applyTemporaryPartOpacities: (partIds) => {
     live2DModel?.applyTemporaryPartOpacities(partIds, 1);
@@ -661,6 +668,7 @@ window.addEventListener("beforeunload", () => {
   removeActionTriggerListener?.();
   removeWindowMotionFeedbackListener?.();
   cancelClickInteractionAction();
+  rapidTouchComboDetector.reset();
   interactionActionPlayer.dispose();
   live2DRenderer?.release();
   live2DRenderer = null;
@@ -844,6 +852,7 @@ const petClickActionScheduler = createClickActionScheduler({
   setTimeoutFn: window.setTimeout.bind(window),
   clearTimeoutFn: window.clearTimeout.bind(window)
 });
+const rapidTouchComboDetector = createRapidTouchComboDetector();
 
 function scheduleClickInteractionAction(hitArea: HitRect["name"]): void {
   pendingClickAction = hitArea === "head"
@@ -958,6 +967,12 @@ canvas.addEventListener("pointerup", (event) => {
   tryReleasePointerCapture(event.pointerId);
 
   if (isHit && !wasDragging && hitArea) {
+    if (currentPresenceModeId !== "sleep" && rapidTouchComboDetector.record(event.timeStamp)) {
+      cancelClickInteractionAction();
+      interactionActionPlayer.playAction(getPetInteractionAction("flusteredGlance"), "rapid_touch_combo");
+      return;
+    }
+
     scheduleClickInteractionAction(hitArea);
   }
 });

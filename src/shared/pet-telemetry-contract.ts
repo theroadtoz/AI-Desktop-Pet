@@ -126,7 +126,9 @@ const PET_INTERACTION_ACTION_TYPES = [
   "focus",
   "workFocus",
   "doze",
-  "edgeGlance"
+  "edgeGlance",
+  "flusteredGlance",
+  "replySustain"
 ] as const;
 
 const DIALOGUE_MODE_IDS = ["default", "work", "game", "reading"] as const;
@@ -140,7 +142,9 @@ const PET_INTERACTION_REASONS = [
   "chat_opened",
   "chat_input_focus",
   "chat_reply_waiting",
-  "pet_edge_settled"
+  "pet_edge_settled",
+  "rapid_touch_combo",
+  "chat_reply_sustain"
 ] as const;
 const PET_INTERACTION_SKIP_REASONS = [
   "active_action",

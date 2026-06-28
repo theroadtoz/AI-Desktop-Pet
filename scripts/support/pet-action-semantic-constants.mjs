@@ -94,6 +94,18 @@ export const PET_INTERACTION_ACTION_CATALOG = {
     bodyPoolEligible: true,
     strongAccessory: false,
     defaultDurationMs: 1_250
+  },
+  flusteredGlance: {
+    safeEchoMessage: "刚刚有点害羞地躲了一下",
+    bodyPoolEligible: true,
+    strongAccessory: false,
+    defaultDurationMs: 1_200
+  },
+  replySustain: {
+    safeEchoMessage: "刚刚安静陪着回复",
+    bodyPoolEligible: true,
+    strongAccessory: false,
+    defaultDurationMs: 1_100
   }
 };
 

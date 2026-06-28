@@ -16,9 +16,9 @@ const REPLIES: Readonly<Record<EmotionTag, string>> = {
 
 const REPLY_VARIANTS: Readonly<Record<EmotionTag, readonly string[]>> = {
   neutral: [
-    "我听到了。先陪你把这件事慢慢理清楚。",
-    "嗯，我在听。我们先抓住最重要的一点。",
-    "可以，我们先不急，把它拆成一小步。"
+    "我在这儿。我们先把最重要的一点抓住。",
+    "嗯，我听着。先把它拆成一小步就好。",
+    "可以，先不急，我陪你把线头理出来。"
   ],
   happy: [
     "听起来很不错，我也跟着开心起来了。",
@@ -233,7 +233,7 @@ function createRelevanceReply(
 
   if (sharesSpecificEmotionalReason(latestUserMessage)) {
     return {
-      text: "评审没过当然会难受。先把被指出的一个具体问题记下来，今晚不急着全盘否定自己。",
+      text: "评审没过当然会难受，我在这儿。先把被指出的一个具体问题记下来，今晚不急着全盘否定自己。",
       ...classification
     };
   }

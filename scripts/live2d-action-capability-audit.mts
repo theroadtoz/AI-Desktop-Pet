@@ -336,6 +336,24 @@ export function auditWitchActionCapabilities(repositoryRoot = REPOSITORY_ROOT): 
       hitAreas: bodyHitArea,
       implementationRecommendation: "使用短时 look target 横向偏移表现看回屏幕内侧；首版只进入白名单动作池。",
       risk: "尚未绑定窗口靠边检测，不能宣称已实现边缘触发。"
+    }),
+    actionEntry("flusteredGlance", "expression-parameter-composition", {
+      nativeMotions: [],
+      expressions: [expressionReference("happy", manifest, modelDirectory, repositoryRoot)],
+      parameters: [...faceParameters, ...bodyParameters].slice(0, 8),
+      parts: [],
+      hitAreas: bodyHitArea,
+      implementationRecommendation: "使用固定 rapid_touch_combo 触发低强度 surprised/happy 微表现，叠加短时侧下方视线和轻微躲闪姿态；不开放任意动作参数。",
+      risk: "没有原生害羞或躲闪 motion，只能作为参数组合降级；连续触摸触发必须继续受 active action 和 cooldown 保护。"
+    }),
+    actionEntry("replySustain", "expression-parameter-composition", {
+      nativeMotions: [],
+      expressions: [],
+      parameters: [...faceParameters, ...bodyParameters].slice(0, 8),
+      parts: [],
+      hitAreas: bodyHitArea,
+      implementationRecommendation: "使用固定 chat_reply_sustain 触发低幅视线/身体姿态目标，表现回复生成中的持续微动作；不从 LLM 或 IPC 接收任意 payload。",
+      risk: "没有长回复等待专用 motion，sleep/quiet 下必须保持低打扰，并依赖运行时过滤避免过度活跃。"
     })
   ];
 

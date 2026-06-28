@@ -21,7 +21,9 @@ export type InteractionActionReason =
   | "chat_opened"
   | "chat_input_focus"
   | "chat_reply_waiting"
-  | "pet_edge_settled";
+  | "pet_edge_settled"
+  | "rapid_touch_combo"
+  | "chat_reply_sustain";
 
 export type InteractionActionStrategy = {
   modeId: DialogueModeId;
@@ -79,6 +81,8 @@ export type InteractionActionPlayerOptions = {
   resumeLook(): void;
   setLookTarget(x: number, y: number): void;
   resetLookTarget(): void;
+  setPoseTarget(target: NonNullable<PetInteractionAction["poseTarget"]>): void;
+  resetPoseTarget(): void;
   applyTemporaryPartOpacities(partIds: readonly string[]): void;
   restoreTemporaryPartOpacities(): void;
   setExpression(expressionName: string): void;
@@ -101,6 +105,8 @@ export function createInteractionActionPlayer({
   resumeLook,
   setLookTarget,
   resetLookTarget,
+  setPoseTarget,
+  resetPoseTarget,
   applyTemporaryPartOpacities,
   restoreTemporaryPartOpacities,
   setExpression,
@@ -125,6 +131,9 @@ export function createInteractionActionPlayer({
     restoreTemporaryPartOpacities();
     clearExpression();
     resetLookTarget();
+    if (action.poseTarget) {
+      resetPoseTarget();
+    }
     resumeLook();
 
     const persistent = getPersistentPresentation();
@@ -189,6 +198,9 @@ export function createInteractionActionPlayer({
     } else {
       pauseLook();
       resetLookTarget();
+    }
+    if (action.poseTarget) {
+      setPoseTarget(action.poseTarget);
     }
     applyTemporaryPartOpacities(action.accessoryPartIds ?? []);
 
