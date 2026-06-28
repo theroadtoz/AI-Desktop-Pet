@@ -58,7 +58,13 @@ test("provider message mapping inserts persona before dialogue style", () => {
   assert.match(mapped[1]?.content ?? "", /耐心/);
   assert.match(mapped[1]?.content ?? "", /乐观/);
   assert.match(mapped[1]?.content ?? "", /学识渊博/);
+  assert.match(mapped[1]?.content ?? "", /桌面场景/);
+  assert.match(mapped[1]?.content ?? "", /隐私边界/);
+  assert.match(mapped[1]?.content ?? "", /记忆边界/);
+  assert.match(mapped[1]?.content ?? "", /受限语义动作白名单/);
+  assert.match(mapped[1]?.content ?? "", /搜索边界/);
   assert.doesNotMatch(mapped[1]?.content ?? "", /吾|汝|小家伙/);
+  assert.doesNotMatch(mapped[1]?.content ?? "", /"action"\s*:/);
   assert.match(mapped[2]?.content ?? "", /当前模式：默认陪伴/);
 });
 
@@ -85,7 +91,7 @@ test("provider message mapping keeps empty memory out and fact cards only in mem
     cards: [{ id: crypto.randomUUID(), title: "偏好", content: factText, tags: ["测试"] }]
   });
 
-  assert.equal(emptyMemoryMapped.some((message) => message.content.includes("事实卡")), false);
+  assert.equal(emptyMemoryMapped.some((message) => message.content.includes("以下是用户明确授权保存在本机的事实卡")), false);
   assert.equal(mapped[1]?.content.includes(factText), false);
   assert.equal(mapped[2]?.content.includes(factText), false);
   assert.equal(mapped.filter((message) => message.content.includes(factText)).length, 1);
