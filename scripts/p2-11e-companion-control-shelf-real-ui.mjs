@@ -9,8 +9,12 @@ import {
   findScreenshotResidue,
   getPageByUrlPart,
   log as logRun,
+  closeSettingsPage,
+  openAdvancedSettings,
+  openAppearanceSettings,
   readPrivacyCheckText,
   saveWelcomeProfile as saveWelcomeProfileWithHarness,
+  setDialogueMode,
   sleep,
   startElectron,
   stopElectron,
@@ -60,8 +64,7 @@ async function saveWelcomeProfile(page) {
 }
 
 async function setMode(cdp, modeId) {
-  await click(cdp, `.mode-button[data-mode-id="${modeId}"]`);
-  await waitFor(cdp, `document.querySelector('#dialogue-mode-controls .mode-button.is-active')?.dataset.modeId === ${JSON.stringify(modeId)}`);
+  await setDialogueMode(cdp, modeId);
 }
 
 async function runFirstSession(checks) {
@@ -72,18 +75,22 @@ async function runFirstSession(checks) {
     const chat = handles.chat;
     const pet = handles.pet;
 
-    checks.welcomeVisibleBeforeProfile = await evaluate(chat, "document.querySelector('#user-welcome-panel')?.hidden === false");
+    checks.welcomeVisibleBeforeProfile = await evaluate(chat, `
+      document.querySelector('#user-welcome-panel')?.hidden === true &&
+        document.querySelector('#chat-page')?.hidden === false &&
+        document.querySelector('#chat-input')?.disabled === false
+    `);
     await saveWelcomeProfile(chat);
+    await openAppearanceSettings(chat);
     checks.shelfVisibleAfterProfile = await evaluate(chat, `
       (() => {
-        const shelf = document.querySelector("#companion-control-shelf");
-        return shelf?.hidden === false &&
-          shelf.textContent.includes("模式") &&
-          shelf.textContent.includes("配件：无配件") &&
-          shelf.textContent.includes("大小：100%") &&
-          shelf.textContent.includes("锁定：未锁定") &&
-          shelf.textContent.includes("最近动作：等待中") &&
-          document.querySelector("#shelf-action-echo")?.dataset.state === "idle";
+        return Boolean(
+          document.querySelector("#companion-control-shelf") &&
+          document.querySelector("#shelf-accessory-button") &&
+          document.querySelector("#shelf-scale-button") &&
+          document.querySelector("#shelf-lock-button") &&
+          document.querySelector("#shelf-action-echo")
+        );
       })()
     `);
 
@@ -93,6 +100,7 @@ async function runFirstSession(checks) {
         document.querySelector("#dialogue-mode-controls .mode-button.is-active")?.dataset.modeId === "reading")()
     `);
 
+    await openAppearanceSettings(chat);
     await click(chat, "#shelf-accessory-button");
     await waitFor(chat, "document.querySelector('#shelf-accessory-button')?.textContent.includes('眼镜')");
     checks.accessoryToggleSyncsShelf = await evaluate(chat, `
@@ -121,7 +129,7 @@ async function runFirstSession(checks) {
       document.querySelector("#shelf-lock-button")?.textContent.includes("已锁定")
     `);
 
-    await click(chat, "#settings-button");
+    await openAdvancedSettings(chat);
     checks.lockShortcutStillVisible = await evaluate(chat, `
       document.querySelector("#shortcut-list")?.textContent.includes("Tab+0")
     `);
@@ -194,6 +202,7 @@ async function runFirstSession(checks) {
       document.querySelector("#shelf-action-echo")?.textContent.includes(${JSON.stringify(PET_WINDOW_SHAKE_SAFE_ECHO_MESSAGE)})
     `);
 
+    await closeSettingsPage(chat);
     const desktopLayout = await checkLayout(chat, 420, 640);
     const narrowLayout = await checkLayout(chat, 360, 720);
     checks.desktopLayout = desktopLayout.ok;

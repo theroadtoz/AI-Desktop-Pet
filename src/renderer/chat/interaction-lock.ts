@@ -1,6 +1,5 @@
 export const REPLY_LOCKED_CONTROL_IDS = [
   "chat-input",
-  "send-button",
   "settings-button",
   "chat-tab",
   "history-tab",

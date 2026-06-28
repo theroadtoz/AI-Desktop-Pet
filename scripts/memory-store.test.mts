@@ -6,7 +6,11 @@ import { join } from "node:path";
 import test from "node:test";
 
 const require = createRequire(import.meta.url);
-const { createMemoryStore } = require("../dist/main/services/chat/memory-store.js") as typeof import("../src/main/services/chat/memory-store");
+const {
+  createMemoryStore,
+  MEMORY_CONTEXT_COMPRESSION_THRESHOLD,
+  MEMORY_INJECTION_BUDGET
+} = require("../dist/main/services/chat/memory-store.js") as typeof import("../src/main/services/chat/memory-store");
 const { parseMemoryStorage } = require("../dist/shared/chat-memory.js") as typeof import("../src/shared/chat-memory");
 const { mapChatMessagesToOpenAICompatible } = require("../dist/main/services/chat/chat-message-mapper.js") as typeof import("../src/main/services/chat/chat-message-mapper");
 const { createFakeChatProvider } = require("../dist/main/services/chat/fake-provider.js") as typeof import("../src/main/services/chat/fake-provider");
@@ -31,14 +35,15 @@ test("memory storage is disabled by default and validates storage versions", () 
     enabled: true
   };
 
-  assert.equal(parseMemoryStorage({ version: 1, enabled: false, cards: [] })?.version, 2);
-  assert.equal(parseMemoryStorage({ version: 2, enabled: false, cards: [] })?.enabled, false);
-  assert.equal(parseMemoryStorage({ version: 3, enabled: false, cards: [] }), null);
+  assert.equal(parseMemoryStorage({ version: 1, enabled: false, cards: [] })?.version, 3);
+  assert.equal(parseMemoryStorage({ version: 2, enabled: false, cards: [] })?.version, 3);
+  assert.equal(parseMemoryStorage({ version: 3, enabled: false, cards: [] })?.enabled, false);
+  assert.equal(parseMemoryStorage({ version: 4, enabled: false, cards: [] }), null);
   assert.equal(parseMemoryStorage({ version: 1, enabled: "yes", cards: [] }), null);
   assert.equal(parseMemoryStorage({ version: 1, enabled: true, cards: [{ ...card, enabled: "yes" }] }), null);
 });
 
-test("v1 memory storage migrates to v2 metadata without dropping cards", async () => {
+test("v1 memory storage migrates to v3 metadata without dropping cards", async () => {
   const userDataPath = await mkdtemp(join(tmpdir(), "desktop-pet-memory-"));
 
   try {
@@ -65,11 +70,18 @@ test("v1 memory storage migrates to v2 metadata without dropping cards", async (
     assert.equal(card.sourceType, "manual-chat");
     assert.equal(card.namespace, "personal");
     assert.equal(card.key, `manual-${legacyCard.id.slice(0, 8).toLowerCase()}`);
+    assert.equal(card.importance, "key");
+    assert.equal(card.category, "manual");
+    assert.equal(card.confidence, 1);
+    assert.equal(card.sourceMessageId, null);
+    assert.equal(card.observedCount, 1);
+    assert.equal(card.lastObservedAt, legacyCard.updatedAt);
+    assert.equal(card.compressionState, "raw");
     assert.equal(card.lastInjectedAt, null);
     assert.equal(card.injectionCount, 0);
 
     const migrated = JSON.parse(await readFile(memoryPath, "utf8"));
-    assert.equal(migrated.version, 2);
+    assert.equal(migrated.version, 3);
     assert.equal(migrated.cards.length, 1);
   } finally {
     await rm(userDataPath, { recursive: true, force: true });
@@ -89,6 +101,13 @@ test("memory cards require explicit enablement and deletion survives restart", a
     assert.equal(card.sourceType, "manual-chat");
     assert.equal(card.namespace, "personal");
     assert.equal(card.key, `manual-${card.id.slice(0, 8).toLowerCase()}`);
+    assert.equal(card.importance, "key");
+    assert.equal(card.category, "manual");
+    assert.equal(card.confidence, 1);
+    assert.equal(card.sourceMessageId, null);
+    assert.equal(card.observedCount, 1);
+    assert.equal(card.lastObservedAt, card.updatedAt);
+    assert.equal(card.compressionState, "raw");
     assert.equal(card.lastInjectedAt, null);
     assert.equal(card.injectionCount, 0);
     assert.equal(store.listCards().length, 1);
@@ -111,6 +130,145 @@ test("memory cards require explicit enablement and deletion survives restart", a
     store.createCard(createDraft());
     store.clearCards();
     assert.equal(createMemoryStore({ userDataPath }).listCards().length, 0);
+  } finally {
+    await rm(userDataPath, { recursive: true, force: true });
+  }
+});
+
+test("auto heuristic memory is gated by the memory switch and skips sensitive messages", async () => {
+  const userDataPath = await mkdtemp(join(tmpdir(), "desktop-pet-memory-"));
+
+  try {
+    const store = createMemoryStore({ userDataPath });
+    const conversationId = crypto.randomUUID();
+    const messageId = crypto.randomUUID();
+    const disabled = store.captureAutoMemoriesFromLatestUserMessage({
+      conversationId,
+      messageId,
+      content: "以后请叫我P214C小夏"
+    });
+    assert.equal(disabled.skippedReason, "disabled");
+    assert.equal(store.listCards().length, 0);
+
+    store.setEnabled(true);
+    const sensitive = store.captureAutoMemoriesFromLatestUserMessage({
+      conversationId,
+      messageId: crypto.randomUUID(),
+      content: "我的 API Key 是 sk-p214c-should-not-be-stored"
+    });
+    assert.equal(sensitive.skippedReason, "sensitive");
+    assert.equal(store.listCards().length, 0);
+  } finally {
+    await rm(userDataPath, { recursive: true, force: true });
+  }
+});
+
+test("auto heuristic memory stores short facts without full user text", async () => {
+  const userDataPath = await mkdtemp(join(tmpdir(), "desktop-pet-memory-"));
+
+  try {
+    const store = createMemoryStore({ userDataPath });
+    const conversationId = crypto.randomUUID();
+    const messageId = crypto.randomUUID();
+    store.setEnabled(true);
+    const summary = store.captureAutoMemoriesFromLatestUserMessage({
+      conversationId,
+      messageId,
+      content: "以后请叫我P214C小夏，这整句话不应该被完整保存"
+    });
+    assert.equal(summary.capturedCount, 1);
+    assert.equal(summary.keyCount, 1);
+    assert.deepEqual(summary.safeCategories, ["addressing"]);
+
+    const [card] = store.listCards();
+    assert.equal(card?.sourceType, "auto-local-heuristic");
+    assert.equal(card?.importance, "key");
+    assert.equal(card?.category, "addressing");
+    assert.equal(card?.sourceMessageId, messageId);
+    assert.equal(card?.observedCount, 1);
+    assert.equal(card?.compressionState, "raw");
+    assert.equal(card?.content.includes("这整句话"), false);
+
+    const rawStorage = await readFile(store.getMemoryPath(), "utf8");
+    assert.equal(rawStorage.includes("这整句话不应该被完整保存"), false);
+  } finally {
+    await rm(userDataPath, { recursive: true, force: true });
+  }
+});
+
+test("auto heuristic memory distinguishes key and general facts", async () => {
+  const userDataPath = await mkdtemp(join(tmpdir(), "desktop-pet-memory-"));
+
+  try {
+    const store = createMemoryStore({ userDataPath });
+    const conversationId = crypto.randomUUID();
+    store.setEnabled(true);
+    store.captureAutoMemoriesFromLatestUserMessage({
+      conversationId,
+      messageId: crypto.randomUUID(),
+      content: "请用简体中文回复我"
+    });
+    store.captureAutoMemoriesFromLatestUserMessage({
+      conversationId,
+      messageId: crypto.randomUUID(),
+      content: "我希望桌宠贴近屏幕右侧"
+    });
+
+    const cards = store.listCards();
+    assert.equal(cards.some((card) => card.importance === "key" && card.category === "language"), true);
+    assert.equal(cards.some((card) => card.importance === "general" && card.category === "pet_presentation"), true);
+  } finally {
+    await rm(userDataPath, { recursive: true, force: true });
+  }
+});
+
+test("auto heuristic memory merges duplicates deterministically", async () => {
+  const userDataPath = await mkdtemp(join(tmpdir(), "desktop-pet-memory-"));
+
+  try {
+    const store = createMemoryStore({ userDataPath });
+    const conversationId = crypto.randomUUID();
+    store.setEnabled(true);
+    store.captureAutoMemoriesFromLatestUserMessage({
+      conversationId,
+      messageId: crypto.randomUUID(),
+      content: "请用简体中文回复我"
+    });
+    const duplicate = store.captureAutoMemoriesFromLatestUserMessage({
+      conversationId,
+      messageId: crypto.randomUUID(),
+      content: "以后请用简体中文回复我"
+    });
+
+    const cards = store.listCards();
+    assert.equal(cards.length, 1);
+    assert.equal(cards[0]?.observedCount, 2);
+    assert.equal(cards[0]?.compressionState, "deduplicated");
+    assert.equal(duplicate.deduplicatedCount, 1);
+  } finally {
+    await rm(userDataPath, { recursive: true, force: true });
+  }
+});
+
+test("memory injection applies deterministic budget sorting when context crosses threshold", async () => {
+  const userDataPath = await mkdtemp(join(tmpdir(), "desktop-pet-memory-"));
+
+  try {
+    const store = createMemoryStore({ userDataPath });
+    store.setEnabled(true);
+    for (let index = 0; index < MEMORY_CONTEXT_COMPRESSION_THRESHOLD + 2; index += 1) {
+      store.createCard({
+        ...createDraft(),
+        title: `P2-14C budget fact ${index}`,
+        content: `P2-14C local budget fact ${index}`,
+        tags: ["budget"],
+        sourceConversationId: crypto.randomUUID()
+      });
+    }
+
+    const injection = store.createInjection();
+    assert.equal(injection.count, MEMORY_INJECTION_BUDGET);
+    assert.equal(store.listCards().some((card) => card.compressionState === "budgeted"), true);
   } finally {
     await rm(userDataPath, { recursive: true, force: true });
   }

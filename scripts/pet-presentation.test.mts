@@ -1,15 +1,26 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  calculateInitialPetBounds,
+  calculatePetVisibleRegion,
   calculateScaledPetBounds,
   canApplyPetScaleAdjustment,
+  clampPetBounds,
   DEFAULT_PET_PRESENTATION_PREFERENCES,
   getAdjustedPetScale,
   normalizePetScale,
+  PET_INITIAL_RIGHT_MARGIN_PX,
   parsePetScaleAdjustmentIntent,
   parsePetPresentationPreferences,
   parseStoredPetPresentationPreferences
 } from "../src/shared/pet-presentation.ts";
+
+function assertApproximatelyEqual(actual: number, expected: number, tolerance = 1): void {
+  assert.ok(
+    Math.abs(actual - expected) <= tolerance,
+    `${actual} should be within ${tolerance}px of ${expected}`
+  );
+}
 
 test("normalizePetScale accepts only the configured range and step", () => {
   assert.equal(normalizePetScale(0.7), 0.7);
@@ -60,16 +71,17 @@ test("scale adjustment is rejected while drag or chat interaction owns the pet",
   }), false);
 });
 
-test("calculateScaledPetBounds preserves the bottom center before clamping", () => {
+test("calculateScaledPetBounds preserves the visible waist center before clamping", () => {
   const bounds = calculateScaledPetBounds(
     { x: 100, y: 200, width: 420, height: 600 },
     0.7,
     { x: 0, y: 0, width: 1920, height: 1080 }
   );
+  const region = calculatePetVisibleRegion(bounds);
 
-  assert.deepEqual(bounds, { x: 163, y: 380, width: 294, height: 420 });
+  assert.deepEqual(bounds, { x: 163, y: 302, width: 294, height: 420 });
   assert.equal(bounds.x + bounds.width / 2, 310);
-  assert.equal(bounds.y + bounds.height, 800);
+  assertApproximatelyEqual(bounds.y + region.waistY, 538.4);
 });
 
 test("calculateScaledPetBounds stays idempotent for repeated application of the same scale", () => {
@@ -85,14 +97,17 @@ test("calculateScaledPetBounds stays idempotent for repeated application of the 
   assert.equal(second.height, first.height);
 });
 
-test("calculateScaledPetBounds keeps the window inside the display work area", () => {
+test("calculateScaledPetBounds allows the visible left and top edges to touch the work area", () => {
   const bounds = calculateScaledPetBounds(
     { x: -80, y: -60, width: 420, height: 600 },
     1.35,
     { x: 0, y: 0, width: 1280, height: 900 }
   );
+  const region = calculatePetVisibleRegion(bounds);
 
-  assert.deepEqual(bounds, { x: 0, y: 0, width: 567, height: 810 });
+  assert.deepEqual(bounds, { x: -56, y: -81, width: 567, height: 810 });
+  assertApproximatelyEqual(bounds.x + region.visibleLeft, 0);
+  assertApproximatelyEqual(bounds.y + region.visibleTop, 0);
 });
 
 test("calculateScaledPetBounds reduces only the rendered scale when the work area is smaller", () => {
@@ -102,7 +117,42 @@ test("calculateScaledPetBounds reduces only the rendered scale when the work are
     { x: 0, y: 0, width: 1280, height: 768 }
   );
 
-  assert.deepEqual(bounds, { x: 41, y: 0, width: 538, height: 768 });
+  assert.deepEqual(bounds, { x: 41, y: 5, width: 538, height: 768 });
+});
+
+test("clampPetBounds lets the visible side edges touch the work area", () => {
+  const workArea = { x: 0, y: 0, width: 1920, height: 1080 };
+  const left = clampPetBounds({ x: -999, y: 100, width: 420, height: 600 }, workArea);
+  const right = clampPetBounds({ x: 9999, y: 100, width: 420, height: 600 }, workArea);
+  const leftRegion = calculatePetVisibleRegion(left);
+  const rightRegion = calculatePetVisibleRegion(right);
+
+  assertApproximatelyEqual(left.x + leftRegion.visibleLeft, workArea.x);
+  assertApproximatelyEqual(right.x + rightRegion.visibleRight, workArea.x + workArea.width);
+});
+
+test("clampPetBounds lets the visible top edge and waist line touch the work area", () => {
+  const workArea = { x: 0, y: 0, width: 1920, height: 1080 };
+  const top = clampPetBounds({ x: 100, y: -999, width: 420, height: 600 }, workArea);
+  const bottom = clampPetBounds({ x: 100, y: 9999, width: 420, height: 600 }, workArea);
+  const topRegion = calculatePetVisibleRegion(top);
+  const bottomRegion = calculatePetVisibleRegion(bottom);
+
+  assertApproximatelyEqual(top.y + topRegion.visibleTop, workArea.y);
+  assertApproximatelyEqual(bottom.y + bottomRegion.waistY, workArea.y + workArea.height);
+});
+
+test("calculateInitialPetBounds places the pet half-body with an approximately 50px right margin", () => {
+  const workArea = { x: 0, y: 0, width: 1920, height: 1080 };
+  const bounds = calculateInitialPetBounds(1, workArea);
+  const region = calculatePetVisibleRegion(bounds);
+
+  assert.deepEqual(bounds, { x: 1492, y: 741, width: 420, height: 600 });
+  assertApproximatelyEqual(
+    workArea.x + workArea.width - (bounds.x + region.visibleRight),
+    PET_INITIAL_RIGHT_MARGIN_PX
+  );
+  assertApproximatelyEqual(bounds.y + region.waistY, workArea.y + workArea.height);
 });
 
 test("parsePetPresentationPreferences rejects missing and invalid scales", () => {

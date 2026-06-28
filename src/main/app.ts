@@ -45,6 +45,7 @@ import type { ProviderConfig, ProviderStatus } from "../shared/provider-config";
 import type { ProviderHealthCheckRequest } from "../shared/provider-health";
 import { createUserProfilePromptContext } from "../shared/user-profile";
 import {
+  calculateInitialPetBounds,
   calculateScaledPetBounds,
   canApplyPetScaleAdjustment,
   clampPetBounds,
@@ -204,7 +205,9 @@ function canRecoverPetRenderer(): boolean {
 
 function createRecoverablePetWindow(): BrowserWindow {
   const nextPetWindow = createPetWindow();
-  applyPetPresentationPreferences(nextPetWindow, getCurrentPetPresentationPreferences());
+  applyPetPresentationPreferences(nextPetWindow, getCurrentPetPresentationPreferences(), {
+    placement: "initial"
+  });
 
   nextPetWindow.webContents.on("render-process-gone", (_event, details) => {
     console.warn("[pet] render process gone", {
@@ -696,8 +699,20 @@ function getCurrentPetPresentationPreferences(): PetPresentationPreferences {
   return currentPetPresentationPreferences;
 }
 
-function applyPetPresentationPreferences(window: BrowserWindow, preferences: PetPresentationPreferences): void {
+function applyPetPresentationPreferences(
+  window: BrowserWindow,
+  preferences: PetPresentationPreferences,
+  options: { placement?: "current" | "initial" } = {}
+): void {
   if (window.isDestroyed()) {
+    return;
+  }
+
+  if (options.placement === "initial") {
+    window.setBounds(calculateInitialPetBounds(preferences.petScale, screen.getPrimaryDisplay().workArea));
+    if (window === petWindow) {
+      pointerController?.syncWindowSize();
+    }
     return;
   }
 
@@ -1236,6 +1251,32 @@ app.whenReady().then(async () => {
           errorType: "failed"
         });
         return;
+      }
+
+      try {
+        const autoMemoryCapture = memoryStoreForRequest.captureAutoMemoriesFromLatestUserMessage({
+          conversationId: request.conversationId,
+          messageId: submittedMessage.id,
+          content: submittedMessage.content
+        });
+        logTelemetry("memory_auto_capture", {
+          enabled: autoMemoryCapture.enabled,
+          skippedReason: autoMemoryCapture.skippedReason,
+          capturedCount: autoMemoryCapture.capturedCount,
+          keyCount: autoMemoryCapture.keyCount,
+          generalCount: autoMemoryCapture.generalCount,
+          mergedCount: autoMemoryCapture.mergedCount,
+          deduplicatedCount: autoMemoryCapture.deduplicatedCount,
+          compressionTriggered: autoMemoryCapture.compressionTriggered,
+          totalCards: autoMemoryCapture.totalCards,
+          injectionBudget: autoMemoryCapture.injectionBudget,
+          safeCategories: autoMemoryCapture.safeCategories
+        });
+      } catch {
+        logTelemetry("memory_auto_capture_failed", {
+          conversationId: request.conversationId,
+          errorType: "failed"
+        });
       }
     } catch {
       transitionPetRole({ type: "request:failed", requestVersion: request.requestVersion });

@@ -9,8 +9,10 @@ import {
   findScreenshotResidue,
   getPageByUrlPart,
   log as logRun,
+  closeSettingsPage,
   readPrivacyCheckText,
   saveWelcomeProfile,
+  setPresenceMode as setPresenceModeInUi,
   sleep,
   startElectron,
   stopElectron,
@@ -50,8 +52,8 @@ async function openChat() {
 }
 
 async function setPresenceMode(chat, modeId) {
-  await click(chat, `#presence-mode-controls .mode-button[data-mode-id="${modeId}"]`);
-  await waitFor(chat, `document.querySelector('#presence-mode-controls .mode-button.is-active')?.dataset.modeId === ${JSON.stringify(modeId)}`);
+  await setPresenceModeInUi(chat, modeId);
+  await closeSettingsPage(chat);
 }
 
 async function readUiPresenceSnapshot(chat) {

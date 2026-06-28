@@ -9,7 +9,7 @@ import {
 
 test("reply lock list includes existing key chat controls", () => {
   assert.ok(REPLY_LOCKED_CONTROL_IDS.includes("chat-input"));
-  assert.ok(REPLY_LOCKED_CONTROL_IDS.includes("send-button"));
+  assert.ok(!REPLY_LOCKED_CONTROL_IDS.includes("send-button"));
   assert.ok(REPLY_LOCKED_CONTROL_IDS.includes("settings-button"));
   assert.ok(REPLY_LOCKED_CONTROL_IDS.includes("history-tab"));
   assert.ok(REPLY_LOCKED_CONTROL_IDS.includes("memory-tab"));
@@ -29,12 +29,12 @@ test("reply lock list includes dynamic control groups", () => {
   ]);
 });
 
-test("replying true disables locked controls and enables abort", () => {
+test("replying true disables locked controls while send stays available for stop state", () => {
   const state = createReplyInteractionLockState(true);
   const controls = new Map(state.controls.map((control) => [control.controlId, control.disabled]));
 
   assert.equal(controls.get("chat-input"), true);
-  assert.equal(controls.get("send-button"), true);
+  assert.equal(controls.has("send-button"), false);
   assert.equal(controls.get("abort-button"), false);
   assert.equal(state.groupsDisabled, true);
 });
@@ -44,7 +44,7 @@ test("replying false unlocks controls and disables abort", () => {
   const controls = new Map(state.controls.map((control) => [control.controlId, control.disabled]));
 
   assert.equal(controls.get("chat-input"), false);
-  assert.equal(controls.get("send-button"), false);
+  assert.equal(controls.has("send-button"), false);
   assert.equal(controls.get("abort-button"), true);
   assert.equal(state.groupsDisabled, false);
 });

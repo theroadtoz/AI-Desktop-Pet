@@ -1,5 +1,6 @@
 import { screen, type BrowserWindow } from "electron";
 import type { PetDragDelta } from "../../shared/ipc-contract";
+import { clampPetBounds } from "../../shared/pet-presentation";
 import {
   createWindowMotionDetector,
   type WindowMotionTelemetryCandidate
@@ -104,14 +105,7 @@ export function createPointerController(
 
   function clampBoundsToWorkArea(bounds: Electron.Rectangle): Electron.Rectangle {
     const workArea = screen.getDisplayMatching(bounds).workArea;
-    const maximumX = Math.max(workArea.x, workArea.x + workArea.width - bounds.width);
-    const maximumY = Math.max(workArea.y, workArea.y + workArea.height - bounds.height);
-
-    return {
-      ...bounds,
-      x: Math.min(Math.max(bounds.x, workArea.x), maximumX),
-      y: Math.min(Math.max(bounds.y, workArea.y), maximumY)
-    };
+    return clampPetBounds(bounds, workArea);
   }
 
   function setPointerHit(nextIsHit: boolean): void {

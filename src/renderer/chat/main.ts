@@ -60,6 +60,24 @@ const settingsButton = document.querySelector<HTMLButtonElement>("#settings-butt
 const settingsPanel = document.querySelector<HTMLElement>("#settings-panel");
 const settingsCloseButton = document.querySelector<HTMLButtonElement>("#settings-close-button");
 const settingsForm = document.querySelector<HTMLFormElement>("#settings-form");
+const settingsBackRow = document.querySelector<HTMLElement>("#settings-back-row");
+const settingsBackButton = document.querySelector<HTMLButtonElement>("#settings-back-button");
+const settingsNestedTitle = document.querySelector<HTMLElement>("#settings-nested-title");
+const settingsBasicTab = document.querySelector<HTMLButtonElement>("#settings-basic-tab");
+const settingsMemoryTab = document.querySelector<HTMLButtonElement>("#settings-memory-tab");
+const settingsHistoryTab = document.querySelector<HTMLButtonElement>("#settings-history-tab");
+const settingsAppearanceTab = document.querySelector<HTMLButtonElement>("#settings-appearance-tab");
+const settingsModelTab = document.querySelector<HTMLButtonElement>("#settings-model-tab");
+const settingsAdvancedTab = document.querySelector<HTMLButtonElement>("#settings-advanced-tab");
+const settingsBasicPage = document.querySelector<HTMLElement>("#settings-basic-page");
+const settingsAppearancePage = document.querySelector<HTMLElement>("#settings-appearance-page");
+const settingsModelPage = document.querySelector<HTMLElement>("#settings-model-page");
+const settingsModelDetailPage = document.querySelector<HTMLElement>("#settings-model-detail-page");
+const settingsModelDetailButton = document.querySelector<HTMLButtonElement>("#settings-model-detail-button");
+const settingsAdvancedPage = document.querySelector<HTMLElement>("#settings-advanced-page");
+const settingsMemoryDetailPage = document.querySelector<HTMLElement>("#settings-memory-detail-page");
+const memoryDetail = document.querySelector<HTMLElement>("#memory-detail");
+const settingsHistoryDetailPage = document.querySelector<HTMLElement>("#settings-history-detail-page");
 const providerIdSelect = document.querySelector<HTMLSelectElement>("#provider-id");
 const displayNameInput = document.querySelector<HTMLInputElement>("#provider-display-name");
 const openAIFields = document.querySelector<HTMLElement>("#openai-fields");
@@ -143,7 +161,11 @@ const userWelcomeFeedback = document.querySelector<HTMLElement>("#user-welcome-f
 
 if (
   !form || !input || !messages || !sendButton || !abortButton || !partnerStatus || !providerStatus ||
-  !memorySessionStatus || !settingsButton || !settingsPanel || !settingsCloseButton || !settingsForm || !providerIdSelect ||
+  !memorySessionStatus || !settingsButton || !settingsPanel || !settingsCloseButton || !settingsForm ||
+  !settingsBackRow || !settingsBackButton || !settingsNestedTitle || !settingsBasicTab || !settingsMemoryTab ||
+  !settingsHistoryTab || !settingsAppearanceTab || !settingsModelTab || !settingsAdvancedTab || !settingsBasicPage ||
+  !settingsAppearancePage || !settingsModelPage || !settingsModelDetailPage || !settingsModelDetailButton ||
+  !settingsAdvancedPage || !settingsMemoryDetailPage || !memoryDetail || !settingsHistoryDetailPage || !providerIdSelect ||
   !displayNameInput || !openAIFields || !baseURLInput || !modelInput || !temperatureInput ||
   !maxTokensInput || !timeoutInput || !localProviderPresetContainer || !localProviderPresetSelect || !localProviderNote ||
   !providerHealthCheckButton || !providerHealthStatus || !apiKeyInput || !apiKeyStatus || !connectionSafeSection || !deleteApiKeyButton ||
@@ -176,6 +198,19 @@ const settingsAction = settingsButton;
 const providerSettingsPanel = settingsPanel;
 const settingsCloseAction = settingsCloseButton;
 const providerSettingsForm = settingsForm;
+const settingsBackRowBox = settingsBackRow;
+const settingsBackAction = settingsBackButton;
+const settingsNestedTitleBox = settingsNestedTitle;
+const settingsRootTabs = {
+  basic: settingsBasicTab,
+  memory: settingsMemoryTab,
+  history: settingsHistoryTab,
+  appearance: settingsAppearanceTab,
+  model: settingsModelTab,
+  advanced: settingsAdvancedTab
+};
+const settingsModelDetailAction = settingsModelDetailButton;
+const memoryDetailElement = memoryDetail;
 const providerIdField = providerIdSelect;
 const displayNameField = displayNameInput;
 const openAIFieldsContainer = openAIFields;
@@ -256,10 +291,20 @@ const welcomeUserDisplayNameField = welcomeUserDisplayName;
 const welcomeUserPreferredNameField = welcomeUserPreferredName;
 const welcomeSaveUserProfileAction = welcomeSaveUserProfileButton;
 const userWelcomeFeedbackBox = userWelcomeFeedback;
+const settingsPages = {
+  basic: settingsBasicPage,
+  memory: memoryPageContainer,
+  history: historyPageContainer,
+  appearance: settingsAppearancePage,
+  model: settingsModelPage,
+  advanced: settingsAdvancedPage,
+  "memory-detail": settingsMemoryDetailPage,
+  "history-detail": settingsHistoryDetailPage,
+  "model-detail": settingsModelDetailPage
+};
 type DisableableChatControl = HTMLButtonElement | HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement;
 const replyLockControlElements: Record<ReplyLockControlId, DisableableChatControl> = {
   "chat-input": chatInput,
-  "send-button": sendAction,
   "abort-button": abortAction,
   "settings-button": settingsAction,
   "chat-tab": chatTabAction,
@@ -298,11 +343,35 @@ const DEFAULT_LOCAL_OPENAI_CONFIG = {
   timeoutMs: 60000
 };
 
+type SettingsRootPageId = "basic" | "memory" | "history" | "appearance" | "model" | "advanced";
+type SettingsNestedPageId = "memory-detail" | "history-detail" | "model-detail";
+type SettingsPageId = SettingsRootPageId | SettingsNestedPageId;
+
+const settingsNestedParents: Record<SettingsNestedPageId, SettingsRootPageId> = {
+  "memory-detail": "memory",
+  "history-detail": "history",
+  "model-detail": "model"
+};
+
+const settingsPageLabels: Record<SettingsPageId, string> = {
+  basic: "基础",
+  memory: "记忆",
+  history: "历史",
+  appearance: "外观",
+  model: "模型",
+  advanced: "高级",
+  "memory-detail": "记忆内容",
+  "history-detail": "历史详情",
+  "model-detail": "模型连接详情"
+};
+
 let chatTurnState: ChatTurnState = createInitialChatTurnState();
 let activeReplyMessage: ChatMessage | null = null;
 let activeReplyElement: HTMLElement | null = null;
 let activePage: "chat" | "history" | "memory" = "chat";
+let activeSettingsPage: SettingsPageId = "basic";
 let selectedHistoryConversation: Conversation | null = null;
+let selectedMemoryCardId: string | null = null;
 let providerContextEnabled = false;
 let memoryCards: MemoryCard[] = [];
 let memoryEnabled = false;
@@ -438,7 +507,6 @@ function setChatLifecycleEcho(message: string): void {
 }
 
 function renderCompanionControlShelf(): void {
-  const hasProfile = Boolean(currentUserProfile);
   const shelf = formatCompanionShelf({
     accessoryLabel: getPetAccessoryLabel(currentPetAccessoryPresetId),
     petScale: currentPetScale,
@@ -447,7 +515,7 @@ function renderCompanionControlShelf(): void {
     activityEchoState: currentActivityEchoState
   });
 
-  companionControlShelfBox.hidden = !hasProfile;
+  companionControlShelfBox.hidden = false;
   shelfAccessoryAction.textContent = shelf.accessoryText;
   shelfScaleAction.textContent = shelf.scaleText;
   shelfLockAction.textContent = shelf.lockText;
@@ -511,12 +579,12 @@ function renderUserProfile(profile: UserProfile | null): void {
   currentUserProfile = profile;
   const hasProfile = Boolean(profile);
 
-  userWelcomePanelBox.hidden = hasProfile;
-  dialogueModeControlsElement.hidden = !hasProfile;
-  presenceModeControlsElement.hidden = !hasProfile;
-  chatSessionNoteBox.hidden = !hasProfile;
-  messageList.hidden = !hasProfile;
-  chatForm.hidden = !hasProfile;
+  userWelcomePanelBox.hidden = true;
+  dialogueModeControlsElement.hidden = false;
+  presenceModeControlsElement.hidden = false;
+  chatSessionNoteBox.hidden = true;
+  messageList.hidden = false;
+  chatForm.hidden = false;
   settingsUserDisplayNameField.value = profile?.displayName ?? "";
   settingsUserPreferredNameField.value = profile?.preferredName ?? "";
   userProfileSummaryBox.textContent = formatUserProfileSummary(profile);
@@ -528,7 +596,7 @@ function renderUserProfile(profile: UserProfile | null): void {
 async function refreshUserProfile(): Promise<void> {
   if (!window.userProfileApi) {
     renderUserProfile(null);
-    setUserWelcomeFeedback("本地身份入口不可用。");
+    setSettingsFeedback("本地身份设置不可用。");
     return;
   }
 
@@ -536,7 +604,7 @@ async function refreshUserProfile(): Promise<void> {
     renderUserProfile(await window.userProfileApi.getUserProfile());
   } catch {
     renderUserProfile(null);
-    setUserWelcomeFeedback("无法读取本地身份，请稍后重试。");
+    setSettingsFeedback("无法读取本地身份，请稍后重试。");
   }
 }
 
@@ -766,25 +834,66 @@ function renderCurrentConversation(): void {
   chatHistory.forEach((message) => appendMessage(message));
 }
 
+function isSettingsRootPage(page: SettingsPageId): page is SettingsRootPageId {
+  return !page.includes("-");
+}
+
+function getSettingsRootForPage(page: SettingsPageId): SettingsRootPageId {
+  return isSettingsRootPage(page) ? page : settingsNestedParents[page];
+}
+
+function renderSettingsNavigation(page: SettingsPageId): void {
+  const activeRoot = getSettingsRootForPage(page);
+
+  for (const [rootPage, tab] of Object.entries(settingsRootTabs) as [SettingsRootPageId, HTMLButtonElement][]) {
+    const isActive = rootPage === activeRoot;
+    tab.classList.toggle("is-active", isActive);
+    tab.setAttribute("aria-pressed", String(isActive));
+  }
+
+  const isNested = !isSettingsRootPage(page);
+  settingsBackRowBox.hidden = !isNested;
+  settingsNestedTitleBox.textContent = isNested ? settingsPageLabels[page] : "";
+}
+
+function setSettingsPage(page: SettingsPageId): void {
+  activeSettingsPage = page;
+
+  for (const [pageId, pageElement] of Object.entries(settingsPages) as [SettingsPageId, HTMLElement][]) {
+    pageElement.hidden = pageId !== page;
+  }
+
+  renderSettingsNavigation(page);
+
+  if (page === "memory") {
+    void refreshMemory();
+  } else if (page === "history") {
+    void refreshHistoryList();
+  } else if (page === "history-detail") {
+    renderHistoryDetail();
+  } else if (page === "memory-detail") {
+    renderMemoryDetail();
+  } else if (page === "model") {
+    void refreshProviderStatus();
+  }
+}
+
 function setActivePage(page: "chat" | "history" | "memory"): void {
   activePage = page;
   const isChatPage = page === "chat";
   const isHistoryPage = page === "history";
   const isMemoryPage = page === "memory";
   chatPageContainer.hidden = !isChatPage;
-  historyPageContainer.hidden = !isHistoryPage;
-  memoryPageContainer.hidden = !isMemoryPage;
   chatTabAction.classList.toggle("is-active", isChatPage);
   historyTabAction.classList.toggle("is-active", isHistoryPage);
   memoryTabAction.classList.toggle("is-active", isMemoryPage);
 
   if (isHistoryPage) {
-    closeSettings();
-    void refreshHistoryList();
+    void openSettings("history");
   } else if (isMemoryPage) {
-    closeSettings();
-    void refreshMemory();
+    void openSettings("memory");
   } else {
+    closeSettings();
     chatInput.focus();
   }
 }
@@ -850,13 +959,14 @@ async function refreshMemory(): Promise<void> {
     enableMemoryAction.textContent = memoryEnabled ? "关闭记忆" : "开启记忆";
     renderMemoryInjectionPreview();
     renderMemoryList();
+    renderMemoryDetail();
     const enabledCount = cards.filter((card) => card.enabled).length;
     setMemoryFeedback(
       memoryEnabled
         ? enabledCount > 0
-          ? `记忆已开启；只有已启用事实卡会临时加入 Provider 请求，当前 ${enabledCount} 条。`
+          ? `记忆已开启；本机会从最新用户消息提取短事实，当前可注入 ${enabledCount} 条。`
           : "记忆已开启；当前没有已启用事实卡，发送时不会加入记忆。"
-        : "记忆默认关闭；只有启用事实卡才会临时加入 Provider 请求。"
+        : "记忆默认关闭；关闭时不会自动生成事实卡。"
     );
   } catch {
     setMemoryFeedback("无法读取本地记忆，请稍后重试。");
@@ -870,7 +980,14 @@ function renderMemoryList(): void {
       return true;
     }
 
-    return [card.title, card.content, card.tags.join(" ")].some((text) => text.toLowerCase().includes(query));
+    return [
+      card.title,
+      card.content,
+      card.tags.join(" "),
+      card.category,
+      card.importance,
+      card.sourceType
+    ].some((text) => text.toLowerCase().includes(query));
   });
 
   memoryListElement.replaceChildren();
@@ -886,6 +1003,55 @@ function renderMemoryList(): void {
   cards.forEach((card) => {
     memoryListElement.append(createMemoryCardElement(card));
   });
+
+  if (selectedMemoryCardId && !cards.some((card) => card.id === selectedMemoryCardId)) {
+    selectedMemoryCardId = null;
+    renderMemoryDetail();
+  }
+}
+
+function getMemorySourceLabel(card: MemoryCard): string {
+  if (card.sourceType === "auto-local-heuristic") {
+    return "本地启发式自动提取";
+  }
+
+  if (card.sourceType === "auto-local-model") {
+    return "本地模型自动提取";
+  }
+
+  return "手动从聊天保存";
+}
+
+function getMemoryImportanceLabel(card: MemoryCard): string {
+  return card.importance === "key" ? "关键" : "一般";
+}
+
+function getMemoryCategoryLabel(card: MemoryCard): string {
+  const labels: Record<string, string> = {
+    addressing: "称呼",
+    language: "语言",
+    interaction: "互动",
+    manual: "手动",
+    pet_presentation: "桌宠显示",
+    project_preference: "项目偏好"
+  };
+
+  return labels[card.category] ?? card.category;
+}
+
+function getMemoryCompressionLabel(card: MemoryCard): string {
+  const labels: Record<MemoryCard["compressionState"], string> = {
+    raw: "原始",
+    merged: "已合并",
+    deduplicated: "已去重",
+    budgeted: "预算排序"
+  };
+
+  return labels[card.compressionState];
+}
+
+function formatMemoryConfidence(card: MemoryCard): string {
+  return `${Math.round(card.confidence * 100)}%`;
 }
 
 function createMemoryCardElement(card: MemoryCard): HTMLElement {
@@ -903,9 +1069,17 @@ function createMemoryCardElement(card: MemoryCard): HTMLElement {
   const status = document.createElement("span");
   status.textContent = `状态：${card.enabled ? "已启用" : "已停用"}`;
   const source = document.createElement("span");
-  source.textContent = "来源：手动从聊天保存";
+  source.textContent = `来源：${getMemorySourceLabel(card)}`;
+  const importance = document.createElement("span");
+  importance.textContent = `重要性：${getMemoryImportanceLabel(card)}`;
   const category = document.createElement("span");
-  category.textContent = `分类：${card.namespace}/${card.key}`;
+  category.textContent = `分类：${getMemoryCategoryLabel(card)}`;
+  const confidence = document.createElement("span");
+  confidence.textContent = `置信度：${formatMemoryConfidence(card)}`;
+  const observed = document.createElement("span");
+  observed.textContent = `观察：${card.observedCount} 次`;
+  const compression = document.createElement("span");
+  compression.textContent = `压缩：${getMemoryCompressionLabel(card)}`;
   const created = document.createElement("span");
   created.textContent = `创建：${formatHistoryTime(card.createdAt)}`;
   const updated = document.createElement("span");
@@ -914,7 +1088,7 @@ function createMemoryCardElement(card: MemoryCard): HTMLElement {
   injected.textContent = card.lastInjectedAt
     ? `使用：${formatHistoryTime(card.lastInjectedAt)} · ${card.injectionCount} 次`
     : "使用：从未注入";
-  meta.append(status, source, category, created, updated, injected);
+  meta.append(status, source, importance, category, confidence, observed, compression, created, updated, injected);
   const actions = document.createElement("div");
   actions.className = "history-detail-actions";
   const saveButton = document.createElement("button");
@@ -935,6 +1109,15 @@ function createMemoryCardElement(card: MemoryCard): HTMLElement {
   toggleButton.addEventListener("click", () => {
     void updateMemoryCard(card.id, { enabled: !card.enabled });
   });
+  const detailButton = document.createElement("button");
+  detailButton.className = "button-light";
+  detailButton.type = "button";
+  detailButton.textContent = "查看内容";
+  detailButton.addEventListener("click", () => {
+    selectedMemoryCardId = card.id;
+    renderMemoryDetail();
+    setSettingsPage("memory-detail");
+  });
   const deleteButton = document.createElement("button");
   deleteButton.className = "button-danger";
   deleteButton.type = "button";
@@ -954,9 +1137,42 @@ function createMemoryCardElement(card: MemoryCard): HTMLElement {
   deleteButton.addEventListener("click", () => {
     confirmation.hidden = false;
   });
-  actions.append(saveButton, toggleButton, deleteButton);
+  actions.append(saveButton, toggleButton, detailButton, deleteButton);
   item.append(title, content, tags, meta, actions, confirmation);
   return item;
+}
+
+function renderMemoryDetail(): void {
+  memoryDetailElement.replaceChildren();
+  const card = memoryCards.find((item) => item.id === selectedMemoryCardId) ?? null;
+
+  if (!card) {
+    const note = document.createElement("p");
+    note.className = "selection-note";
+    note.textContent = "在记忆页选择一条事实卡以查看内容。";
+    memoryDetailElement.append(note);
+    return;
+  }
+
+  const title = document.createElement("strong");
+  title.textContent = card.title;
+  const content = document.createElement("p");
+  content.className = "status-box";
+  content.textContent = card.content;
+  const meta = document.createElement("p");
+  meta.className = "selection-note";
+  meta.textContent = [
+    card.enabled ? "已启用" : "已停用",
+    getMemorySourceLabel(card),
+    getMemoryImportanceLabel(card),
+    getMemoryCategoryLabel(card),
+    `置信度 ${formatMemoryConfidence(card)}`,
+    `观察 ${card.observedCount} 次`,
+    `压缩 ${getMemoryCompressionLabel(card)}`,
+    card.tags.length > 0 ? card.tags.join("，") : "无标签",
+    `${formatHistoryTime(card.updatedAt)} 更新`
+  ].join(" · ");
+  memoryDetailElement.append(title, content, meta);
 }
 
 async function updateMemoryCard(id: string, update: Partial<MemoryCard>): Promise<void> {
@@ -1124,6 +1340,7 @@ async function selectHistoryConversation(id: string): Promise<void> {
     selectedHistoryConversation = conversation;
     renderHistoryDetail();
     await refreshHistoryList();
+    setSettingsPage("history-detail");
   } catch {
     setHistoryFeedback("无法打开该会话，请稍后重试。");
   }
@@ -1189,6 +1406,12 @@ function setReplying(isReplying: boolean): void {
   for (const controlState of lockState.controls) {
     replyLockControlElements[controlState.controlId].disabled = controlState.disabled;
   }
+
+  sendAction.textContent = isReplying ? "停止" : "发送";
+  sendAction.classList.toggle("button", !isReplying);
+  sendAction.classList.toggle("button-danger", isReplying);
+  sendAction.disabled = false;
+  abortAction.hidden = true;
 
   dialogueModeControlsElement.querySelectorAll<HTMLButtonElement>(".mode-button").forEach((control) => {
     control.disabled = lockState.groupsDisabled;
@@ -1641,20 +1864,35 @@ async function refreshApiKeyStatus(): Promise<void> {
   }
 }
 
-async function openSettings(): Promise<void> {
-  if (chatTurnState.isReplying || !window.configApi) {
+async function openSettings(page: SettingsPageId = "basic"): Promise<void> {
+  if (chatTurnState.isReplying) {
     return;
   }
 
   clearSettingsFeedback();
   deleteKeyConfirmationBox.hidden = true;
   providerSettingsPanel.hidden = false;
+  chatPageContainer.hidden = true;
+  setSettingsPage(page);
   window.chatApi?.setInteractionActive(true);
 
   try {
-    const config = await window.configApi.getProvider();
-    fillProviderForm(config);
-    await Promise.all([refreshApiKeyStatus(), refreshPetPresentationPreferences(), refreshPetLockState(), refreshShortcuts(), refreshUserProfile()]);
+    if (window.configApi) {
+      const config = await window.configApi.getProvider();
+      fillProviderForm(config);
+      await refreshApiKeyStatus();
+    } else {
+      setProviderHealthStatus("Provider 设置不可用。", "fallback");
+    }
+
+    await Promise.allSettled([
+      refreshPetPresentationPreferences(),
+      refreshPetLockState(),
+      refreshShortcuts(),
+      refreshUserProfile(),
+      refreshMemory(),
+      refreshHistoryList()
+    ]);
   } catch {
     setSettingsFeedback("无法读取当前设置，请稍后重试。");
   }
@@ -1662,6 +1900,7 @@ async function openSettings(): Promise<void> {
 
 function closeSettings(): void {
   providerSettingsPanel.hidden = true;
+  chatPageContainer.hidden = false;
   deleteKeyConfirmationBox.hidden = true;
   apiKeyField.value = "";
   recordingShortcutActionId = null;
@@ -1873,11 +2112,8 @@ window.presenceModeApi?.onModeChanged((modeId) => {
 chatForm.addEventListener("submit", (event) => {
   event.preventDefault();
 
-  if (chatTurnState.isReplying || !currentUserProfile) {
-    if (!currentUserProfile) {
-      setUserWelcomeFeedback("请先设置本地昵称后再开始聊天。");
-      welcomeUserDisplayNameField.focus();
-    }
+  if (chatTurnState.isReplying) {
+    window.chatApi?.abortReply();
     return;
   }
 
@@ -1929,7 +2165,7 @@ abortAction.addEventListener("click", () => {
 });
 
 settingsAction.addEventListener("click", () => {
-  void openSettings();
+  void openSettings("basic");
 });
 
 shelfAccessoryAction.addEventListener("click", () => {
@@ -1948,7 +2184,7 @@ shelfAccessoryAction.addEventListener("click", () => {
 });
 
 shelfScaleAction.addEventListener("click", () => {
-  void openSettings().then(() => {
+  void openSettings("appearance").then(() => {
     petScaleField.focus();
   });
 });
@@ -1986,10 +2222,24 @@ clearUserProfileAction.addEventListener("click", () => {
     welcomeUserPreferredNameField.value = "";
     renderUserProfile(null);
     setSettingsFeedback("本地身份已清除。", "ready");
-    welcomeUserDisplayNameField.focus();
+    settingsUserDisplayNameField.focus();
   }).catch(() => {
     setSettingsFeedback("无法清除本地身份，请稍后重试。", "fallback");
   });
+});
+
+settingsBackAction.addEventListener("click", () => {
+  setSettingsPage(getSettingsRootForPage(activeSettingsPage));
+});
+
+for (const [page, tab] of Object.entries(settingsRootTabs) as [SettingsRootPageId, HTMLButtonElement][]) {
+  tab.addEventListener("click", () => {
+    setSettingsPage(page);
+  });
+}
+
+settingsModelDetailAction.addEventListener("click", () => {
+  setSettingsPage("model-detail");
 });
 
 chatTabAction.addEventListener("click", () => {
@@ -2368,11 +2618,7 @@ confirmDeleteApiKeyAction.addEventListener("click", () => {
 });
 
 window.addEventListener("chat:focus-input", () => {
-  if (currentUserProfile) {
-    chatInput.focus();
-  } else {
-    welcomeUserDisplayNameField.focus();
-  }
+  chatInput.focus();
 });
 
 window.chatApi?.focusInput();

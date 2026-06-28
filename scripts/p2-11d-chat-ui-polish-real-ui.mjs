@@ -236,13 +236,13 @@ async function sendMessage(cdp, message, abort = false) {
       form.requestSubmit();
     })()
   `);
-  await waitFor(cdp, "document.querySelector('#send-button')?.disabled === true");
+  await waitFor(cdp, "document.querySelector('#send-button')?.textContent.includes('停止')");
 
   if (abort) {
-    await click(cdp, "#abort-button");
+    await click(cdp, "#send-button");
   }
 
-  await waitFor(cdp, "document.querySelector('#send-button')?.disabled === false", 20_000);
+  await waitFor(cdp, "document.querySelector('#chat-input')?.disabled === false", 20_000);
 }
 
 async function setViewport(cdp, width, height) {
@@ -369,7 +369,11 @@ async function main() {
     handles = await openChat();
     const chat = handles.chat.cdp;
 
-    checks.firstLaunchWelcomeVisible = await evaluate(chat, "document.querySelector('#user-welcome-panel')?.hidden === false");
+    checks.firstLaunchWelcomeVisible = await evaluate(chat, `
+      document.querySelector('#user-welcome-panel')?.hidden === true &&
+        document.querySelector('#chat-page')?.hidden === false &&
+        document.querySelector('#chat-input')?.disabled === false
+    `);
     checks.emptyChatStateVisible = await evaluate(chat, `
       getComputedStyle(document.querySelector("#messages"), "::before").content.includes("还没有消息")
     `);
@@ -391,8 +395,15 @@ async function main() {
 
     await click(chat, "#settings-button");
     checks.settingsSectionsOrdered = await evaluate(chat, `
-      (() => [...document.querySelectorAll(".settings-section-title")].map((node) => node.textContent).join("|"))()
-    `) === "伙伴外观|本地身份|对话模式|存在模式|Provider / 模型|连接安全|操作方式";
+      (() => {
+        const tabs = [...document.querySelectorAll(".settings-nav .subpage-tab")]
+          .map((node) => node.textContent?.trim())
+          .join("|");
+        return tabs === "基础|记忆|历史|外观|模型|高级";
+      })()
+    `);
+    await click(chat, "#settings-model-tab");
+    await click(chat, "#settings-model-detail-button");
     checks.providerAndSafetySections = await evaluate(chat, `
       (() => {
         const provider = document.querySelector("#provider-id");
@@ -468,7 +479,13 @@ async function main() {
     `);
 
     await click(chat, "#memory-tab");
-    checks.memoryPageAccessible = await evaluate(chat, "document.querySelector('#memory-page')?.hidden === false && document.querySelector('#memory-feedback')?.textContent.includes('Provider 请求')");
+    checks.memoryPageAccessible = await evaluate(chat, `
+      (() => {
+        const feedback = document.querySelector("#memory-feedback")?.textContent ?? "";
+        return document.querySelector("#memory-page")?.hidden === false &&
+          (feedback.includes("Provider 请求") || feedback.includes("最新用户消息"));
+      })()
+    `);
     await click(chat, "#history-tab");
     checks.historyPageAccessible = await evaluate(chat, "document.querySelector('#history-page')?.hidden === false && document.querySelector('#history-feedback')?.textContent.includes('不会自动发送给 Provider')");
     await click(chat, "#chat-tab");

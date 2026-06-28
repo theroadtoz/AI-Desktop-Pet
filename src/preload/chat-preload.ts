@@ -557,6 +557,42 @@ function normalizeMemoryKey(value: unknown): string | null {
     : null;
 }
 
+function normalizeMemoryCategory(value: unknown): string | null {
+  const normalized = normalizeMemoryText(value, 32);
+
+  return normalized && /^[a-z0-9][a-z0-9_-]{0,31}$/i.test(normalized)
+    ? normalized.toLowerCase()
+    : null;
+}
+
+function parseMemorySourceType(value: unknown): MemoryCard["sourceType"] | null {
+  return value === "manual-chat" || value === "auto-local-heuristic" || value === "auto-local-model"
+    ? value
+    : null;
+}
+
+function parseMemoryImportance(value: unknown): MemoryCard["importance"] | null {
+  return value === "key" || value === "general" ? value : null;
+}
+
+function parseMemoryCompressionState(value: unknown): MemoryCard["compressionState"] | null {
+  return value === "raw" || value === "merged" || value === "deduplicated" || value === "budgeted"
+    ? value
+    : null;
+}
+
+function parseMemoryConfidence(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 1) {
+    return null;
+  }
+
+  return Math.round(value * 100) / 100;
+}
+
+function parsePositiveInteger(value: unknown): number | null {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : null;
+}
+
 function parseMemoryCardDraft(value: unknown): MemoryCardDraft | null {
   const draft = value as Partial<MemoryCardDraft> | null;
   const title = normalizeMemoryText(draft?.title, 80);
@@ -630,9 +666,16 @@ function parseMemoryCard(value: unknown): MemoryCard | null {
   const title = normalizeMemoryText(card?.title, 80);
   const content = normalizeMemoryText(card?.content, 800);
   const tags = normalizeMemoryTags(card?.tags);
-  const sourceType = card?.sourceType === "manual-chat" ? card.sourceType : null;
+  const sourceType = parseMemorySourceType(card?.sourceType);
   const namespace = normalizeMemoryNamespace(card?.namespace);
   const key = normalizeMemoryKey(card?.key);
+  const importance = parseMemoryImportance(card?.importance);
+  const category = normalizeMemoryCategory(card?.category);
+  const confidence = parseMemoryConfidence(card?.confidence);
+  const sourceMessageId = card?.sourceMessageId;
+  const observedCount = parsePositiveInteger(card?.observedCount);
+  const lastObservedAt = parsePositiveInteger(card?.lastObservedAt);
+  const compressionState = parseMemoryCompressionState(card?.compressionState);
   const lastInjectedAt = card?.lastInjectedAt;
   const injectionCount = card?.injectionCount;
 
@@ -645,6 +688,10 @@ function parseMemoryCard(value: unknown): MemoryCard | null {
     !sourceType ||
     !namespace ||
     !key ||
+    !importance ||
+    !category ||
+    confidence === null ||
+    !(sourceMessageId === null || isMemoryId(sourceMessageId)) ||
     !isMemoryId(card.sourceConversationId) ||
     typeof card.createdAt !== "number" ||
     !Number.isSafeInteger(card.createdAt) ||
@@ -652,6 +699,10 @@ function parseMemoryCard(value: unknown): MemoryCard | null {
     typeof card.updatedAt !== "number" ||
     !Number.isSafeInteger(card.updatedAt) ||
     card.updatedAt < card.createdAt ||
+    observedCount === null ||
+    lastObservedAt === null ||
+    lastObservedAt < card.createdAt ||
+    !compressionState ||
     typeof card.enabled !== "boolean" ||
     !(
       lastInjectedAt === null ||
@@ -677,6 +728,13 @@ function parseMemoryCard(value: unknown): MemoryCard | null {
     sourceType,
     namespace,
     key,
+    importance,
+    category,
+    confidence,
+    sourceMessageId,
+    observedCount,
+    lastObservedAt,
+    compressionState,
     createdAt: card.createdAt,
     updatedAt: card.updatedAt,
     enabled: card.enabled,

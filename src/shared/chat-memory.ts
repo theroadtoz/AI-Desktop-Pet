@@ -1,12 +1,23 @@
+export type MemoryImportance = "key" | "general";
+export type MemorySourceType = "manual-chat" | "auto-local-heuristic" | "auto-local-model";
+export type MemoryCompressionState = "raw" | "merged" | "deduplicated" | "budgeted";
+
 export type MemoryCard = {
   id: string;
   title: string;
   content: string;
   tags: string[];
   sourceConversationId: string;
-  sourceType: "manual-chat";
+  sourceType: MemorySourceType;
   namespace: string;
   key: string;
+  importance: MemoryImportance;
+  category: string;
+  confidence: number;
+  sourceMessageId: string | null;
+  observedCount: number;
+  lastObservedAt: number;
+  compressionState: MemoryCompressionState;
   createdAt: number;
   updatedAt: number;
   enabled: boolean;
@@ -32,7 +43,7 @@ export type MemoryInjection = {
   cards: Array<Pick<MemoryCard, "id" | "title" | "content" | "tags">>;
 };
 
-export const MEMORY_STORAGE_VERSION = 2;
+export const MEMORY_STORAGE_VERSION = 3;
 
 export type MemoryStorage = {
   version: typeof MEMORY_STORAGE_VERSION;
@@ -47,8 +58,18 @@ const MAX_TAG_LENGTH = 24;
 const MAX_TAGS = 8;
 const MAX_NAMESPACE_LENGTH = 32;
 const MAX_KEY_LENGTH = 48;
+const MAX_CATEGORY_LENGTH = 32;
 const DEFAULT_MEMORY_NAMESPACE = "personal";
 const DEFAULT_MEMORY_SOURCE_TYPE = "manual-chat";
+const DEFAULT_MEMORY_IMPORTANCE: MemoryImportance = "key";
+const DEFAULT_MEMORY_CATEGORY = "manual";
+const DEFAULT_MEMORY_CONFIDENCE = 1;
+const DEFAULT_MEMORY_OBSERVED_COUNT = 1;
+const DEFAULT_MEMORY_COMPRESSION_STATE: MemoryCompressionState = "raw";
+
+const memorySourceTypes = ["manual-chat", "auto-local-heuristic", "auto-local-model"] as const;
+const memoryImportanceValues = ["key", "general"] as const;
+const memoryCompressionStates = ["raw", "merged", "deduplicated", "budgeted"] as const;
 
 export function isMemoryId(value: unknown): value is string {
   return typeof value === "string" && ID_PATTERN.test(value);
@@ -101,6 +122,38 @@ function normalizeMemoryKey(value: unknown): string | null {
   return normalized && /^[a-z0-9][a-z0-9:_-]{0,47}$/i.test(normalized)
     ? normalized.toLowerCase()
     : null;
+}
+
+function normalizeMemoryCategory(value: unknown): string | null {
+  const normalized = normalizeMemoryText(value, MAX_CATEGORY_LENGTH);
+
+  return normalized && /^[a-z0-9][a-z0-9_-]{0,31}$/i.test(normalized)
+    ? normalized.toLowerCase()
+    : null;
+}
+
+function parseMemorySourceType(value: unknown): MemorySourceType | null {
+  return memorySourceTypes.includes(value as MemorySourceType) ? value as MemorySourceType : null;
+}
+
+function parseMemoryImportance(value: unknown): MemoryImportance | null {
+  return memoryImportanceValues.includes(value as MemoryImportance) ? value as MemoryImportance : null;
+}
+
+function parseMemoryCompressionState(value: unknown): MemoryCompressionState | null {
+  return memoryCompressionStates.includes(value as MemoryCompressionState) ? value as MemoryCompressionState : null;
+}
+
+function parseMemoryConfidence(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 1) {
+    return null;
+  }
+
+  return Math.round(value * 100) / 100;
+}
+
+function parsePositiveInteger(value: unknown): number | null {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : null;
 }
 
 function createDefaultMemoryKey(id: string): string {
@@ -180,7 +233,7 @@ export function parseMemoryStorage(value: unknown): MemoryStorage | null {
 
   if (
     !storage ||
-    (storage.version !== 1 && storage.version !== MEMORY_STORAGE_VERSION) ||
+    (storage.version !== 1 && storage.version !== 2 && storage.version !== MEMORY_STORAGE_VERSION) ||
     typeof storage.enabled !== "boolean" ||
     !Array.isArray(storage.cards)
   ) {
@@ -206,12 +259,29 @@ export function parseMemoryCard(value: unknown): MemoryCard | null {
   const content = normalizeMemoryText(card?.content, MAX_CONTENT_LENGTH);
   const tags = normalizeMemoryTags(card?.tags);
   const namespace = normalizeMemoryNamespace(card?.namespace) ?? DEFAULT_MEMORY_NAMESPACE;
-  const sourceType = card?.sourceType === DEFAULT_MEMORY_SOURCE_TYPE || card?.sourceType === undefined
-    ? DEFAULT_MEMORY_SOURCE_TYPE
-    : null;
+  const sourceType = parseMemorySourceType(card?.sourceType) ?? (
+    card?.sourceType === undefined ? DEFAULT_MEMORY_SOURCE_TYPE : null
+  );
   const key = isMemoryId(card?.id)
     ? normalizeMemoryKey(card?.key) ?? createDefaultMemoryKey(card.id)
     : null;
+  const importance = parseMemoryImportance(card?.importance) ?? DEFAULT_MEMORY_IMPORTANCE;
+  const category = normalizeMemoryCategory(card?.category) ?? DEFAULT_MEMORY_CATEGORY;
+  const confidence = card?.confidence === undefined
+    ? DEFAULT_MEMORY_CONFIDENCE
+    : parseMemoryConfidence(card.confidence);
+  const sourceMessageId = card?.sourceMessageId === undefined
+    ? null
+    : card.sourceMessageId;
+  const observedCount = card?.observedCount === undefined
+    ? DEFAULT_MEMORY_OBSERVED_COUNT
+    : card.observedCount;
+  const lastObservedAt = card?.lastObservedAt === undefined
+    ? card?.updatedAt
+    : card.lastObservedAt;
+  const parsedObservedCount = parsePositiveInteger(observedCount);
+  const parsedLastObservedAt = parsePositiveInteger(lastObservedAt);
+  const compressionState = parseMemoryCompressionState(card?.compressionState) ?? DEFAULT_MEMORY_COMPRESSION_STATE;
   const lastInjectedAt = card?.lastInjectedAt === undefined
     ? null
     : card.lastInjectedAt;
@@ -228,6 +298,10 @@ export function parseMemoryCard(value: unknown): MemoryCard | null {
     !sourceType ||
     !namespace ||
     !key ||
+    !importance ||
+    !category ||
+    confidence === null ||
+    !(sourceMessageId === null || isMemoryId(sourceMessageId)) ||
     !isMemoryId(card.sourceConversationId) ||
     typeof card.createdAt !== "number" ||
     !Number.isSafeInteger(card.createdAt) ||
@@ -235,6 +309,9 @@ export function parseMemoryCard(value: unknown): MemoryCard | null {
     typeof card.updatedAt !== "number" ||
     !Number.isSafeInteger(card.updatedAt) ||
     card.updatedAt < card.createdAt ||
+    parsedObservedCount === null ||
+    parsedLastObservedAt === null ||
+    parsedLastObservedAt < card.createdAt ||
     typeof card.enabled !== "boolean" ||
     !(
       lastInjectedAt === null ||
@@ -260,6 +337,13 @@ export function parseMemoryCard(value: unknown): MemoryCard | null {
     sourceType,
     namespace,
     key,
+    importance,
+    category,
+    confidence,
+    sourceMessageId,
+    observedCount: parsedObservedCount,
+    lastObservedAt: parsedLastObservedAt,
+    compressionState,
     createdAt: card.createdAt,
     updatedAt: card.updatedAt,
     enabled: card.enabled,

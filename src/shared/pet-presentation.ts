@@ -12,6 +12,9 @@ export const PET_WINDOW_BASE_HEIGHT = 600;
 export const PET_SCALE_MIN = 0.7;
 export const PET_SCALE_MAX = 1.35;
 export const PET_SCALE_STEP = 0.05;
+export const PET_VISIBLE_INSET_RATIO = 0.1;
+export const PET_WAIST_RATIO = 0.58;
+export const PET_INITIAL_RIGHT_MARGIN_PX = 50;
 
 export type PetPresentationPreferences = {
   petScale: number;
@@ -27,6 +30,14 @@ export type PetWindowBounds = {
   y: number;
   width: number;
   height: number;
+};
+
+export type PetVisibleRegion = {
+  visibleLeft: number;
+  visibleRight: number;
+  visibleTop: number;
+  visibleBottom: number;
+  waistY: number;
 };
 
 export const DEFAULT_PET_PRESENTATION_PREFERENCES: PetPresentationPreferences = {
@@ -112,30 +123,77 @@ export function calculateScaledPetBounds(
   scale: number,
   workArea: PetWindowBounds
 ): PetWindowBounds {
+  const { width, height } = calculatePetWindowSize(scale, workArea);
+  const currentRegion = calculatePetVisibleRegion(bounds);
+  const nextRegion = calculatePetVisibleRegion({ width, height });
+  const currentCenterX = bounds.x + bounds.width / 2;
+  const currentWaistY = bounds.y + currentRegion.waistY;
+  const y = Math.round(currentWaistY - nextRegion.waistY);
+
+  return clampPetBounds({ x: Math.round(currentCenterX - width / 2), y, width, height }, workArea);
+}
+
+export function calculateInitialPetBounds(scale: number, workArea: PetWindowBounds): PetWindowBounds {
+  const { width, height } = calculatePetWindowSize(scale, workArea);
+  const visibleRegion = calculatePetVisibleRegion({ width, height });
+  const x = workArea.x + workArea.width - PET_INITIAL_RIGHT_MARGIN_PX - visibleRegion.visibleRight;
+  const y = workArea.y + workArea.height - visibleRegion.waistY;
+
+  return clampPetBounds({ x, y, width, height }, workArea);
+}
+
+export function clampPetBounds(bounds: PetWindowBounds, workArea: PetWindowBounds): PetWindowBounds {
+  const visibleRegion = calculatePetVisibleRegion(bounds);
+
+  return {
+    x: clampToRange(
+      bounds.x,
+      workArea.x - visibleRegion.visibleLeft,
+      workArea.x + workArea.width - visibleRegion.visibleRight
+    ),
+    y: clampToRange(
+      bounds.y,
+      workArea.y - visibleRegion.visibleTop,
+      workArea.y + workArea.height - visibleRegion.waistY
+    ),
+    width: bounds.width,
+    height: bounds.height
+  };
+}
+
+export function calculatePetVisibleRegion(bounds: Pick<PetWindowBounds, "width" | "height">): PetVisibleRegion {
+  const visibleLeft = bounds.width * PET_VISIBLE_INSET_RATIO;
+  const visibleRight = bounds.width * (1 - PET_VISIBLE_INSET_RATIO);
+  const visibleTop = bounds.height * PET_VISIBLE_INSET_RATIO;
+  const visibleBottom = bounds.height * (1 - PET_VISIBLE_INSET_RATIO);
+
+  return {
+    visibleLeft,
+    visibleRight,
+    visibleTop,
+    visibleBottom,
+    waistY: visibleTop + (visibleBottom - visibleTop) * PET_WAIST_RATIO
+  };
+}
+
+function calculatePetWindowSize(scale: number, workArea: PetWindowBounds): Pick<PetWindowBounds, "width" | "height"> {
   const normalizedScale = normalizePetScale(scale) ?? DEFAULT_PET_PRESENTATION_PREFERENCES.petScale;
   const visibleScale = Math.min(
     normalizedScale,
     workArea.width / PET_WINDOW_BASE_WIDTH,
     workArea.height / PET_WINDOW_BASE_HEIGHT
   );
-  const width = Math.min(workArea.width, Math.round(PET_WINDOW_BASE_WIDTH * visibleScale));
-  const height = Math.min(workArea.height, Math.round(PET_WINDOW_BASE_HEIGHT * visibleScale));
-  const x = Math.round(bounds.x + (bounds.width - width) / 2);
-  const y = bounds.y + bounds.height - height;
 
-  return clampPetBounds({ x, y, width, height }, workArea);
-}
-
-export function clampPetBounds(bounds: PetWindowBounds, workArea: PetWindowBounds): PetWindowBounds {
   return {
-    x: clampToWorkArea(bounds.x, bounds.width, workArea.x, workArea.width),
-    y: clampToWorkArea(bounds.y, bounds.height, workArea.y, workArea.height),
-    width: bounds.width,
-    height: bounds.height
+    width: Math.min(workArea.width, Math.round(PET_WINDOW_BASE_WIDTH * visibleScale)),
+    height: Math.min(workArea.height, Math.round(PET_WINDOW_BASE_HEIGHT * visibleScale))
   };
 }
 
-function clampToWorkArea(position: number, size: number, workAreaPosition: number, workAreaSize: number): number {
-  const maximumPosition = Math.max(workAreaPosition, workAreaPosition + workAreaSize - size);
-  return Math.min(Math.max(position, workAreaPosition), maximumPosition);
+function clampToRange(position: number, minimumPosition: number, maximumPosition: number): number {
+  const minimumIntegerPosition = Math.ceil(minimumPosition);
+  const maximumIntegerPosition = Math.max(minimumIntegerPosition, Math.floor(maximumPosition));
+  const roundedPosition = Math.round(position);
+
+  return Math.min(Math.max(roundedPosition, minimumIntegerPosition), maximumIntegerPosition);
 }

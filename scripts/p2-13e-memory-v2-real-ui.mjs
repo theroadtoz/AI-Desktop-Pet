@@ -6,6 +6,8 @@ import {
   createRealUiRunContext,
   evaluate,
   log,
+  openChatPage,
+  openMemorySettings,
   readPrivacyCheckText,
   saveWelcomeProfile,
   sleep,
@@ -104,7 +106,7 @@ async function sendMessage(page, message) {
   const before = await evaluate(page, "window.__p213eMemoryEvents.length");
   await typeText(page, "#chat-input", message);
   await click(page, "#send-button");
-  await waitFor(page, "document.querySelector('#send-button')?.disabled === false", { timeoutMs: 15_000 });
+  await waitFor(page, "document.querySelector('#chat-input')?.disabled === false", { timeoutMs: 15_000 });
   await waitFor(page, `window.__p213eMemoryEvents.length > ${before}`, { timeoutMs: 5_000 });
   const events = await evaluate(page, "window.__p213eMemoryEvents");
   return events.at(-1);
@@ -167,7 +169,7 @@ async function main() {
   try {
     const { chat } = await startApp();
 
-    await click(chat, "#memory-tab");
+    await openMemorySettings(chat);
     await waitFor(chat, "document.querySelector('#memory-page')?.hidden === false");
     await waitFor(chat, "document.querySelectorAll('.memory-card').length === 1");
     let snapshot = await safeMemorySnapshot(chat);
@@ -203,13 +205,13 @@ async function main() {
     snapshot = await safeMemorySnapshot(chat);
     checks.enabledNextInjectionOne = snapshot.nextStatus.includes("注入 1 条") && snapshot.nextStatusState === "ready";
 
-    await click(chat, "#chat-tab");
+    await openChatPage(chat);
     const enabledEvent = await sendMessage(chat, "P2-13E enabled injection check");
     injectionResults.enabled = enabledEvent?.count ?? null;
     const injectedCard = readMemoryStorage().storage?.cards?.[0];
     checks.injectionCountUpdated = enabledEvent?.count === 1 && injectedCard?.injectionCount === 1 && typeof injectedCard?.lastInjectedAt === "number";
 
-    await click(chat, "#memory-tab");
+    await openMemorySettings(chat);
     await waitFor(chat, "document.querySelector('.memory-card-meta')?.textContent.includes('1 次')");
     checks.usageMetadataVisibleAfterSend = true;
 
@@ -218,12 +220,12 @@ async function main() {
     snapshot = await safeMemorySnapshot(chat);
     checks.disabledNextInjectionZero = snapshot.nextStatus.includes("注入 0 条") && snapshot.nextStatusState === "fallback";
 
-    await click(chat, "#chat-tab");
+    await openChatPage(chat);
     const disabledEvent = await sendMessage(chat, "P2-13E disabled injection check");
     injectionResults.disabled = disabledEvent?.count ?? null;
     checks.disabledDoesNotIncrement = disabledEvent?.count === 0 && readMemoryStorage().storage?.cards?.[0]?.injectionCount === 1;
 
-    await click(chat, "#memory-tab");
+    await openMemorySettings(chat);
     await click(chat, ".memory-card .button-danger");
     await waitFor(chat, "document.querySelector('.memory-card .delete-confirmation')?.hidden === false");
     await click(chat, ".memory-card .delete-confirmation .button-danger");
@@ -232,7 +234,7 @@ async function main() {
 
     await createCardThroughBridge(chat, "P2-13E clear fact A", forbiddenFactBodies[2], "clear");
     await createCardThroughBridge(chat, "P2-13E clear fact B", forbiddenFactBodies[3], "clear");
-    await click(chat, "#memory-tab");
+    await openMemorySettings(chat);
     await waitFor(chat, "document.querySelectorAll('.memory-card').length === 2");
     await click(chat, "#clear-memory-button");
     await waitFor(chat, "document.querySelector('#clear-memory-confirmation')?.hidden === false");

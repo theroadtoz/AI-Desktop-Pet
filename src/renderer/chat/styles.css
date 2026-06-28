@@ -18,6 +18,10 @@ body {
   padding: 18px;
 }
 
+.legacy-page-nav[hidden] {
+  display: none;
+}
+
 .provider-bar {
   display: flex;
   align-items: center;
@@ -64,6 +68,7 @@ body {
 }
 
 .subpage-tab {
+  flex: 0 0 auto;
   padding: 8px 12px;
   border: 0;
   border-bottom: 2px solid transparent;
@@ -71,6 +76,7 @@ body {
   color: #6b5745;
   cursor: pointer;
   font: inherit;
+  white-space: nowrap;
 }
 
 .subpage-tab:hover:not(:disabled) {
@@ -103,17 +109,28 @@ body {
 
 .settings-panel {
   box-sizing: border-box;
-  max-height: 52vh;
+  display: flex;
+  flex: 1;
+  min-height: 0;
   overflow: auto;
+  flex-direction: column;
+  gap: 18px;
   padding: 14px;
   border: 1px solid #e7dccb;
   border-radius: 8px;
   background: #fffaf0;
 }
 
+.settings-panel[hidden],
+.settings-page[hidden],
+.settings-back-row[hidden] {
+  display: none;
+}
+
 .settings-header,
 .settings-actions,
-.inline-actions {
+.inline-actions,
+.settings-back-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -139,6 +156,19 @@ body {
   font-size: 16px;
 }
 
+.settings-nav {
+  flex: 0 0 auto;
+  overflow-x: auto;
+}
+
+.settings-back-row {
+  justify-content: flex-start;
+}
+
+.settings-back-row .selection-note {
+  min-width: 0;
+}
+
 .settings-section-title {
   margin: 0;
   color: #2a2118;
@@ -157,11 +187,29 @@ body {
 }
 
 .chat-page {
+  position: relative;
   display: flex;
   flex: 1;
   min-height: 0;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
+}
+
+.chat-page[hidden] {
+  display: none;
+}
+
+.chat-settings-entry {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  right: 0;
+  opacity: 0.62;
+}
+
+.chat-settings-entry:hover,
+.chat-settings-entry:focus-visible {
+  opacity: 1;
 }
 
 .mode-controls {
@@ -399,15 +447,17 @@ body {
 }
 
 .settings-panel .content-stack {
-  margin-top: 18px;
+  margin-top: 0;
 }
 
-.settings-panel form > section {
+.settings-page > section,
+.settings-page > .content-stack {
   padding-top: 14px;
   border-top: 1px solid #f0e7dc;
 }
 
-.settings-panel form > section:first-child {
+.settings-page > section:first-child,
+.settings-page > .content-stack:first-child {
   padding-top: 0;
   border-top: 0;
 }
@@ -516,7 +566,7 @@ body {
   flex-direction: column;
   gap: 12px;
   min-height: 0;
-  padding: 2px 0;
+  padding: 4px 0 2px;
 }
 
 .messages:empty::before {
@@ -683,7 +733,7 @@ body {
 
 .composer {
   display: grid;
-  grid-template-columns: minmax(120px, 1fr) auto auto;
+  grid-template-columns: minmax(120px, 1fr) auto;
   gap: 10px;
   align-items: center;
 }
@@ -706,6 +756,10 @@ body {
   cursor: pointer;
   white-space: normal;
   font: inherit;
+}
+
+.composer .button-danger {
+  white-space: nowrap;
 }
 
 .composer .button,
@@ -817,16 +871,14 @@ textarea:disabled {
   }
 
   .composer {
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: 1fr auto;
   }
 
   .composer input {
-    grid-column: 1 / -1;
+    grid-column: auto;
   }
 
-  .composer .button,
-  .composer .button-light {
-    width: 100%;
+  .composer .button {
     min-width: 0;
   }
 

@@ -9,6 +9,7 @@ import {
   findScreenshotResidue,
   getPageByUrlPart,
   log as logRun,
+  openModelSettings,
   readPrivacyCheckText,
   saveWelcomeProfile,
   sleep,
@@ -157,8 +158,7 @@ async function main() {
 
   try {
     const { chat } = await openChat();
-    await click(chat, "#settings-button");
-    await waitFor(chat, "document.querySelector('#settings-panel')?.hidden === false");
+    await openModelSettings(chat);
 
     await setSelect(chat, "#provider-id", "local-openai-compatible");
     snapshots.ollama = await safeProviderSnapshot(chat);

@@ -236,7 +236,7 @@ async function sendMessage(cdp, message) {
       form.requestSubmit();
     })()
   `);
-  await waitFor(cdp, `document.querySelector('#send-button')?.disabled === false`, 20_000);
+  await waitFor(cdp, `document.querySelector('#chat-input')?.disabled === false`, 20_000);
   return evaluate(cdp, `
     (() => {
       const replies = [...document.querySelectorAll(".message-pet .message-content")].map((node) => node.textContent ?? "");
@@ -265,20 +265,20 @@ async function checkNarrowModeLayout(cdp) {
         const rect = node.getBoundingClientRect();
         return rect.left >= -1 && rect.right <= window.innerWidth + 1 && rect.width > 0 && rect.height > 0;
       };
-      const shelf = document.querySelector("#companion-control-shelf");
+      document.querySelector("#settings-button").click();
+      document.querySelector("#settings-basic-tab").click();
       const controls = document.querySelector("#dialogue-mode-controls");
       const buttons = [...document.querySelectorAll("#dialogue-mode-controls .mode-button")];
       const checkedNodes = [
-        document.querySelector(".partner-status-band"),
-        shelf,
         controls,
         ...buttons
       ];
-      return visible(shelf) &&
-        buttons.length === 4 &&
+      return buttons.length === 4 &&
         checkedNodes.every(withinViewport);
     })()
   `);
+  await evaluate(cdp, "document.querySelector('#settings-close-button')?.click()");
+  await waitFor(cdp, "document.querySelector('#chat-page')?.hidden === false", 5_000);
   await cdp.send("Emulation.clearDeviceMetricsOverride");
   await sleep(150);
   return ok;

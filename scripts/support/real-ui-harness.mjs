@@ -244,15 +244,159 @@ export async function typeText(page, selector, text) {
   await sleep(150);
 }
 
+export const chatUiSelectors = {
+  chat: {
+    page: "#chat-page",
+    messages: "#messages",
+    input: "#chat-input",
+    send: "#send-button",
+    settings: "#settings-button"
+  },
+  settings: {
+    panel: "#settings-panel",
+    close: "#settings-close-button",
+    basicTab: "#settings-basic-tab",
+    memoryTab: "#settings-memory-tab",
+    historyTab: "#settings-history-tab",
+    appearanceTab: "#settings-appearance-tab",
+    modelTab: "#settings-model-tab",
+    advancedTab: "#settings-advanced-tab",
+    basicPage: "#settings-basic-page",
+    memoryPage: "#memory-page",
+    historyPage: "#history-page",
+    appearancePage: "#settings-appearance-page",
+    modelPage: "#settings-model-page",
+    advancedPage: "#settings-advanced-page",
+    memoryDetailPage: "#settings-memory-detail-page",
+    historyDetailPage: "#settings-history-detail-page",
+    modelDetailPage: "#settings-model-detail-page",
+    modelDetailButton: "#settings-model-detail-button"
+  },
+  profile: {
+    displayName: "#settings-user-display-name",
+    preferredName: "#settings-user-preferred-name",
+    save: "#save-user-profile-button",
+    summary: "#user-profile-summary"
+  },
+  modes: {
+    dialogueControls: "#dialogue-mode-controls",
+    presenceControls: "#presence-mode-controls"
+  },
+  model: {
+    providerId: "#provider-id",
+    localPreset: "#local-provider-preset",
+    baseURL: "#provider-base-url",
+    model: "#provider-model",
+    healthCheck: "#provider-health-check-button",
+    healthStatus: "#provider-health-status"
+  }
+};
+
+const settingsTabByPage = {
+  basic: chatUiSelectors.settings.basicTab,
+  memory: chatUiSelectors.settings.memoryTab,
+  history: chatUiSelectors.settings.historyTab,
+  appearance: chatUiSelectors.settings.appearanceTab,
+  model: chatUiSelectors.settings.modelTab,
+  advanced: chatUiSelectors.settings.advancedTab
+};
+
+const settingsPageByPage = {
+  basic: chatUiSelectors.settings.basicPage,
+  memory: chatUiSelectors.settings.memoryPage,
+  history: chatUiSelectors.settings.historyPage,
+  appearance: chatUiSelectors.settings.appearancePage,
+  model: chatUiSelectors.settings.modelPage,
+  advanced: chatUiSelectors.settings.advancedPage
+};
+
+export async function openSettingsPage(page, settingsPage = "basic") {
+  const tab = settingsTabByPage[settingsPage];
+  const pageSelector = settingsPageByPage[settingsPage];
+
+  if (!tab || !pageSelector) {
+    throw new Error(`Unknown settings page: ${settingsPage}`);
+  }
+
+  const isOpen = await evaluate(page, `document.querySelector(${JSON.stringify(chatUiSelectors.settings.panel)})?.hidden === false`);
+  if (!isOpen) {
+    await click(page, chatUiSelectors.chat.settings);
+  }
+
+  await waitFor(page, `document.querySelector(${JSON.stringify(chatUiSelectors.settings.panel)})?.hidden === false`);
+  await click(page, tab);
+  await waitFor(page, `document.querySelector(${JSON.stringify(pageSelector)})?.hidden === false`);
+}
+
+export async function openModelSettings(page, options = {}) {
+  await openSettingsPage(page, "model");
+
+  if (options.detail !== false) {
+    await click(page, chatUiSelectors.settings.modelDetailButton);
+    await waitFor(page, `document.querySelector(${JSON.stringify(chatUiSelectors.settings.modelDetailPage)})?.hidden === false`);
+  }
+}
+
+export async function openMemorySettings(page, options = {}) {
+  await openSettingsPage(page, "memory");
+
+  if (options.detail === true) {
+    await waitFor(page, "document.querySelector('.memory-card .button-light')");
+    await evaluate(page, `
+      (() => {
+        const button = [...document.querySelectorAll(".memory-card .button-light")]
+          .find((item) => item.textContent?.includes("查看内容"));
+        if (!button) throw new Error("Missing memory detail button");
+        button.click();
+      })()
+    `);
+    await waitFor(page, `document.querySelector(${JSON.stringify(chatUiSelectors.settings.memoryDetailPage)})?.hidden === false`);
+  }
+}
+
+export async function openHistorySettings(page) {
+  await openSettingsPage(page, "history");
+}
+
+export async function openAppearanceSettings(page) {
+  await openSettingsPage(page, "appearance");
+}
+
+export async function openAdvancedSettings(page) {
+  await openSettingsPage(page, "advanced");
+}
+
+export async function closeSettingsPage(page) {
+  const isOpen = await evaluate(page, `document.querySelector(${JSON.stringify(chatUiSelectors.settings.panel)})?.hidden === false`);
+  if (isOpen) {
+    await click(page, chatUiSelectors.settings.close);
+  }
+  await waitFor(page, `document.querySelector(${JSON.stringify(chatUiSelectors.chat.page)})?.hidden === false`);
+}
+
+export async function openChatPage(page) {
+  await closeSettingsPage(page);
+}
+
+export async function setDialogueMode(page, modeId) {
+  await openSettingsPage(page, "basic");
+  await click(page, `${chatUiSelectors.modes.dialogueControls} .mode-button[data-mode-id="${modeId}"]`);
+  await waitFor(page, `document.querySelector('${chatUiSelectors.modes.dialogueControls} .mode-button.is-active')?.dataset.modeId === ${JSON.stringify(modeId)}`);
+}
+
+export async function setPresenceMode(page, modeId) {
+  await openSettingsPage(page, "basic");
+  await click(page, `${chatUiSelectors.modes.presenceControls} .mode-button[data-mode-id="${modeId}"]`);
+  await waitFor(page, `document.querySelector('${chatUiSelectors.modes.presenceControls} .mode-button.is-active')?.dataset.modeId === ${JSON.stringify(modeId)}`);
+}
+
 export async function saveWelcomeProfile(page, profile) {
-  await evaluate(page, `
-    (() => {
-      document.querySelector("#welcome-user-display-name").value = ${JSON.stringify(profile.displayName)};
-      document.querySelector("#welcome-user-preferred-name").value = ${JSON.stringify(profile.preferredName)};
-      document.querySelector("#welcome-save-user-profile-button").click();
-    })()
-  `);
-  await waitFor(page, "document.querySelector('#user-welcome-panel')?.hidden === true");
+  await openSettingsPage(page, "basic");
+  await typeText(page, chatUiSelectors.profile.displayName, profile.displayName);
+  await typeText(page, chatUiSelectors.profile.preferredName, profile.preferredName ?? "");
+  await click(page, chatUiSelectors.profile.save);
+  await waitFor(page, `document.querySelector(${JSON.stringify(chatUiSelectors.profile.summary)})?.textContent.includes(${JSON.stringify(profile.displayName)})`);
+  await closeSettingsPage(page);
 }
 
 async function setViewport(page, width, height) {
@@ -268,14 +412,10 @@ async function setViewport(page, width, height) {
 export async function checkLayout(page, width, height, options = {}) {
   const selectors = options.selectors ?? [
     ".chat-shell",
-    ".partner-status-band",
-    "#companion-control-shelf",
-    "#dialogue-mode-controls",
-    "#chat-session-note",
     "#messages",
     "#chat-form"
   ];
-  const controlSelector = options.controlSelector ?? "#companion-control-shelf button, #chat-form button, #chat-form input";
+  const controlSelector = options.controlSelector ?? "#chat-form button, #chat-form input";
 
   await setViewport(page, width, height);
   const result = await evaluate(page, `

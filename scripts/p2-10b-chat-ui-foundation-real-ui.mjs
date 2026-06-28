@@ -208,17 +208,19 @@ async function sendMessage(cdp, message) {
       input.dispatchEvent(new Event("input", { bubbles: true }));
       form.requestSubmit();
       return {
-        sendDisabled: document.querySelector("#send-button")?.disabled === true,
-        abortEnabled: document.querySelector("#abort-button")?.disabled === false
+        sendShowsStop: document.querySelector("#send-button")?.textContent.includes("停止") &&
+          document.querySelector("#send-button")?.disabled === false,
+        abortHidden: document.querySelector("#abort-button")?.hidden === true
       };
     })()
   `);
   await waitFor(cdp, `window.__p210bMemoryEvents.length > ${before}`, 5_000);
-  await waitFor(cdp, "document.querySelector('#send-button')?.disabled === false", 20_000);
+  await waitFor(cdp, "document.querySelector('#chat-input')?.disabled === false", 20_000);
   const events = await evaluate(cdp, "window.__p210bMemoryEvents");
   const finalButtonState = await evaluate(cdp, `({
-    sendEnabled: document.querySelector("#send-button")?.disabled === false,
-    abortDisabled: document.querySelector("#abort-button")?.disabled === true
+    sendRestored: document.querySelector("#send-button")?.textContent.includes("发送") &&
+      document.querySelector("#send-button")?.disabled === false,
+    abortHidden: document.querySelector("#abort-button")?.hidden === true
   })`);
   return { event: events.at(-1), buttonState, finalButtonState };
 }
@@ -244,9 +246,9 @@ async function uiSnapshot(cdp) {
       providerStatus: document.querySelector("#provider-status")?.textContent ?? "",
       memoryStatus: document.querySelector("#memory-session-status")?.textContent ?? "",
       chatNote: document.querySelector("#chat-session-note")?.textContent ?? "",
-      settingsTitles: [...document.querySelectorAll(".settings-section-title")].map((node) => node.textContent?.trim()),
+      settingsTabs: [...document.querySelectorAll(".settings-nav .subpage-tab")].map((node) => node.textContent?.trim()),
       connectionHidden: document.querySelector("#connection-safe-section")?.hidden === true,
-      activeTab: document.querySelector(".subpage-tab.is-active")?.textContent ?? "",
+      activeTab: document.querySelector(".settings-nav .subpage-tab.is-active")?.textContent ?? "",
       chatHidden: document.querySelector("#chat-page")?.hidden === true,
       historyHidden: document.querySelector("#history-page")?.hidden === true,
       memoryHidden: document.querySelector("#memory-page")?.hidden === true,
@@ -346,13 +348,15 @@ async function main() {
     let snapshot = await uiSnapshot(chat);
     checks.partnerStatusBandExists = snapshot.partnerStatus.includes("桌面伙伴") && snapshot.partnerStatus.includes("默认陪伴");
     checks.fakeProviderVisible = snapshot.providerStatus.includes("Fake Provider");
-    checks.initialMemoryStatus = snapshot.memoryStatus === "本次未使用记忆";
+    checks.initialMemoryStatus = snapshot.memoryStatus.includes("本次未使用记忆");
     checks.chatSessionNoteStillVisible = snapshot.chatNote.includes("新会话") && snapshot.chatNote.includes("本地保存");
 
     await click(chat, "#settings-button");
     snapshot = await uiSnapshot(chat);
-    checks.settingsGroupsPresent = ["桌宠显示", "快捷键", "Provider", "连接安全"].every((title) => snapshot.settingsTitles.includes(title));
+    checks.settingsGroupsPresent = ["基础", "记忆", "历史", "外观", "模型", "高级"].every((title) => snapshot.settingsTabs.includes(title));
     checks.connectionSafetyHiddenForFake = snapshot.connectionHidden === true;
+    await click(chat, "#settings-model-tab");
+    await click(chat, "#settings-model-detail-button");
     await evaluate(chat, `
       (() => {
         const provider = document.querySelector("#provider-id");
@@ -378,12 +382,12 @@ async function main() {
     const zeroSend = await sendMessage(chat, `${userSentinel}，检查 0 条记忆。`);
     snapshot = await uiSnapshot(chat);
     checks.zeroMemoryCount = zeroSend.event?.count === 0;
-    checks.zeroMemoryStatusText = snapshot.memoryStatus === "本次未使用记忆";
+    checks.zeroMemoryStatusText = snapshot.memoryStatus.includes("本次未使用记忆");
     checks.memoryStatusDoesNotOverwriteSessionNote = !snapshot.chatNote.includes("本次未使用记忆");
-    checks.sendAndAbortButtonState = zeroSend.buttonState.sendDisabled &&
-      zeroSend.buttonState.abortEnabled &&
-      zeroSend.finalButtonState.sendEnabled &&
-      zeroSend.finalButtonState.abortDisabled;
+    checks.sendAndAbortButtonState = zeroSend.buttonState.sendShowsStop &&
+      zeroSend.buttonState.abortHidden &&
+      zeroSend.finalButtonState.sendRestored &&
+      zeroSend.finalButtonState.abortHidden;
 
     const oneCount = await evaluate(chat, `
       (async () => {
@@ -401,7 +405,7 @@ async function main() {
     const oneSend = await sendMessage(chat, "检查 1 条记忆状态带。");
     snapshot = await uiSnapshot(chat);
     checks.oneMemoryCount = oneSend.event?.count === 1;
-    checks.oneMemoryStatusText = snapshot.memoryStatus === "本次使用 1 条记忆";
+    checks.oneMemoryStatusText = snapshot.memoryStatus.includes("本次使用 1 条记忆");
     checks.memoryStatusHidesFactContent = !snapshot.memoryStatus.includes(memorySentinel) && !snapshot.chatNote.includes(memorySentinel);
 
     checks.narrowStatusBand = await checkNarrowStatusBand(chat);

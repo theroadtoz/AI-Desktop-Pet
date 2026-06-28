@@ -7,18 +7,148 @@
   </head>
   <body>
     <main class="chat-shell">
-      <nav class="subpage-nav" aria-label="聊天导航">
+      <nav class="legacy-page-nav" hidden aria-label="兼容导航">
         <button id="chat-tab" class="subpage-tab is-active" type="button">聊天</button>
         <button id="history-tab" class="subpage-tab" type="button">历史</button>
         <button id="memory-tab" class="subpage-tab" type="button">记忆</button>
       </nav>
-      <section id="settings-panel" class="settings-panel" hidden aria-label="伙伴与对话设置">
+      <section id="chat-page" class="chat-page">
+        <button id="settings-button" class="button-light icon-button chat-settings-entry" type="button" aria-label="打开伙伴设置" title="伙伴设置">⚙</button>
+        <section id="user-welcome-panel" class="user-welcome-panel content-stack" hidden aria-label="本地身份入口">
+          <p class="selection-note">本地身份已移入设置基础页。</p>
+          <label class="field-label">
+            昵称
+            <input id="welcome-user-display-name" type="text" maxlength="32" autocomplete="nickname" placeholder="例如：小林" />
+          </label>
+          <label class="field-label">
+            希望被称呼为
+            <input id="welcome-user-preferred-name" type="text" maxlength="32" autocomplete="off" placeholder="可留空" />
+          </label>
+          <div class="settings-actions">
+            <button id="welcome-save-user-profile-button" class="button" type="button">保存本地身份</button>
+          </div>
+          <p id="user-welcome-feedback" class="status-box" hidden aria-live="polite"></p>
+        </section>
+        <section id="messages" class="messages" aria-live="polite"></section>
+        <p id="chat-session-note" class="selection-note" data-state="fallback" hidden aria-live="polite">新会话将仅在本地保存；发送时只包含当前消息。</p>
+        <section id="memory-draft-panel" class="memory-draft-panel content-stack" hidden aria-label="保存事实卡">
+          <p class="selection-note">确认后才会保存到本机记忆；可随时在设置的记忆页停用或删除。</p>
+          <label class="field-label">
+            标题
+            <input id="memory-draft-title" type="text" maxlength="80" />
+          </label>
+          <label class="field-label">
+            正文
+            <textarea id="memory-draft-content" maxlength="800"></textarea>
+          </label>
+          <label class="field-label">
+            标签
+            <input id="memory-draft-tags" type="text" placeholder="用逗号分隔，可留空" />
+          </label>
+          <div class="settings-actions">
+            <button id="cancel-memory-draft-button" class="button-light" type="button">取消</button>
+            <button id="save-memory-draft-button" class="button" type="button">保存事实卡</button>
+          </div>
+        </section>
+        <form id="chat-form" class="composer">
+          <input id="chat-input" type="text" autocomplete="off" placeholder="和她说点什么..." aria-label="聊天输入" />
+          <button id="send-button" class="button" type="submit">发送</button>
+          <button id="abort-button" class="button-light" type="button" hidden disabled>中断</button>
+        </form>
+      </section>
+      <section id="settings-panel" class="settings-panel" hidden aria-label="伙伴设置">
         <div class="settings-header">
-          <h2>伙伴与对话设置</h2>
+          <h2>伙伴设置</h2>
           <button id="settings-close-button" class="button-light" type="button">关闭</button>
         </div>
+        <nav class="subpage-nav settings-nav" aria-label="设置分类">
+          <button id="settings-basic-tab" class="subpage-tab is-active" type="button" data-settings-page="basic">基础</button>
+          <button id="settings-memory-tab" class="subpage-tab" type="button" data-settings-page="memory">记忆</button>
+          <button id="settings-history-tab" class="subpage-tab" type="button" data-settings-page="history">历史</button>
+          <button id="settings-appearance-tab" class="subpage-tab" type="button" data-settings-page="appearance">外观</button>
+          <button id="settings-model-tab" class="subpage-tab" type="button" data-settings-page="model">模型</button>
+          <button id="settings-advanced-tab" class="subpage-tab" type="button" data-settings-page="advanced">高级</button>
+        </nav>
+        <div id="settings-back-row" class="settings-back-row" hidden>
+          <button id="settings-back-button" class="button-light" type="button">返回</button>
+          <p id="settings-nested-title" class="selection-note" aria-live="polite"></p>
+        </div>
         <form id="settings-form" class="content-stack">
-          <section class="content-stack" aria-labelledby="pet-scale-title">
+          <section id="settings-basic-page" class="settings-page content-stack" aria-labelledby="user-profile-settings-title">
+            <h3 id="user-profile-settings-title" class="settings-section-title">本地身份</h3>
+            <p id="user-profile-summary" class="status-box" aria-live="polite">尚未设置本地昵称。</p>
+            <label class="field-label">
+              昵称
+              <input id="settings-user-display-name" name="userDisplayName" type="text" maxlength="32" autocomplete="nickname" />
+            </label>
+            <label class="field-label">
+              希望被称呼为
+              <input id="settings-user-preferred-name" name="userPreferredName" type="text" maxlength="32" autocomplete="off" placeholder="可留空" />
+            </label>
+            <p class="selection-note">仅保存在本机，用于让对话知道如何称呼你；不会保存手机号、邮箱或密码。</p>
+            <div class="settings-actions">
+              <button id="save-user-profile-button" class="button-light" type="button">保存本地身份</button>
+              <button id="clear-user-profile-button" class="button-danger" type="button">清除本地身份</button>
+            </div>
+            <section class="content-stack" aria-labelledby="dialogue-mode-settings-title">
+              <h3 id="dialogue-mode-settings-title" class="settings-section-title">对话模式</h3>
+              <p id="settings-dialogue-mode-summary" class="status-box" aria-live="polite">当前模式：默认陪伴</p>
+              <div id="dialogue-mode-controls" class="mode-controls" aria-label="对话模式"></div>
+            </section>
+            <section class="content-stack" aria-labelledby="presence-mode-settings-title">
+              <h3 id="presence-mode-settings-title" class="settings-section-title">存在模式</h3>
+              <p id="settings-presence-mode-summary" class="status-box" aria-live="polite">当前存在：默认陪伴</p>
+              <div id="presence-mode-controls" class="mode-controls" aria-label="存在模式"></div>
+              <p class="selection-note">存在模式影响她在桌面上的低打扰程度、待机预算和普通身体动作；不改变对话风格。</p>
+            </section>
+          </section>
+          <section id="memory-page" class="settings-page memory-page content-stack" hidden aria-label="本地记忆">
+            <div class="memory-actions">
+              <button id="enable-memory-button" class="button" type="button">开启记忆</button>
+              <button id="clear-memory-button" class="button-danger" type="button">清空全部记忆</button>
+            </div>
+            <p id="memory-feedback" class="selection-note" aria-live="polite">记忆默认关闭；开启后才会在本机提取短事实，已启用事实卡才会临时加入 Provider 请求。</p>
+            <p id="memory-next-injection-status" class="status-box" data-state="fallback" aria-live="polite">下次发送会注入 0 条。</p>
+            <p id="memory-session-status" class="status-box ribbon-echo" aria-live="polite">本次未使用记忆 · 等待中</p>
+            <div id="clear-memory-confirmation" class="status-box delete-confirmation" hidden>
+              <span>清空后无法恢复，是否继续？</span>
+              <span class="inline-actions">
+                <button id="cancel-clear-memory-button" class="button-light" type="button">取消</button>
+                <button id="confirm-clear-memory-button" class="button-danger" type="button">确认清空</button>
+              </span>
+            </div>
+            <label class="field-label">
+              搜索记忆
+              <input id="memory-search" type="search" placeholder="标题、正文或标签" />
+            </label>
+            <div id="memory-list" class="memory-list content-stack"></div>
+          </section>
+          <section id="settings-memory-detail-page" class="settings-page settings-nested-page content-stack" hidden aria-label="记忆内容详情">
+            <section id="memory-detail" class="content-stack" aria-live="polite">
+              <p class="selection-note">在记忆页选择一条事实卡以查看内容。</p>
+            </section>
+          </section>
+          <section id="history-page" class="settings-page history-page content-stack" hidden aria-label="本地聊天历史">
+            <div class="history-actions">
+              <button id="new-conversation-button" class="button" type="button">新建会话</button>
+              <button id="clear-history-button" class="button-danger" type="button">清空全部历史</button>
+            </div>
+            <p id="history-feedback" class="selection-note" aria-live="polite">历史仅保存在本机；打开查看不会自动发送给 Provider。</p>
+            <div id="clear-history-confirmation" class="status-box delete-confirmation" hidden>
+              <span>清空后无法恢复，是否继续？</span>
+              <span class="inline-actions">
+                <button id="cancel-clear-history-button" class="button-light" type="button">取消</button>
+                <button id="confirm-clear-history-button" class="button-danger" type="button">确认清空</button>
+              </span>
+            </div>
+            <ol id="conversation-list" class="conversation-list" aria-label="会话列表"></ol>
+          </section>
+          <section id="settings-history-detail-page" class="settings-page settings-nested-page content-stack" hidden aria-label="历史详情">
+            <section id="history-detail" class="history-detail content-stack" aria-live="polite">
+              <p class="selection-note">选择一段历史以查看内容。</p>
+            </section>
+          </section>
+          <section id="settings-appearance-page" class="settings-page content-stack" hidden aria-labelledby="pet-scale-title">
             <h3 id="pet-scale-title" class="settings-section-title">伙伴外观</h3>
             <label class="field-label">
               桌宠大小
@@ -39,36 +169,22 @@
               <button id="save-pet-accessory-button" class="button-light" type="button">保存角色配件</button>
               <button id="toggle-pet-lock-button" class="button-light" type="button">锁定桌宠</button>
             </div>
+            <section id="companion-control-shelf" class="companion-control-shelf" aria-label="伙伴控制架">
+              <button id="shelf-accessory-button" class="button-light shelf-button" type="button">配件：无配件</button>
+              <button id="shelf-scale-button" class="button-light shelf-button" type="button">大小：100%</button>
+              <button id="shelf-lock-button" class="button-light shelf-button" type="button">锁定：未锁定</button>
+              <p id="shelf-action-echo" class="status-box shelf-echo" data-state="idle" aria-live="polite">最近动作：等待中</p>
+            </section>
           </section>
-          <section class="content-stack" aria-labelledby="user-profile-settings-title">
-            <h3 id="user-profile-settings-title" class="settings-section-title">本地身份</h3>
-            <p id="user-profile-summary" class="status-box" aria-live="polite">尚未设置本地昵称。</p>
-            <label class="field-label">
-              昵称
-              <input id="settings-user-display-name" name="userDisplayName" type="text" maxlength="32" autocomplete="nickname" />
-            </label>
-            <label class="field-label">
-              希望被称呼为
-              <input id="settings-user-preferred-name" name="userPreferredName" type="text" maxlength="32" autocomplete="off" placeholder="可留空" />
-            </label>
-            <p class="selection-note">仅保存在本机，用于让对话知道如何称呼你；不会保存手机号、邮箱或密码。</p>
-            <div class="settings-actions">
-              <button id="save-user-profile-button" class="button-light" type="button">保存本地身份</button>
-              <button id="clear-user-profile-button" class="button-danger" type="button">清除本地身份</button>
-            </div>
-          </section>
-          <section class="content-stack" aria-labelledby="dialogue-mode-settings-title">
-            <h3 id="dialogue-mode-settings-title" class="settings-section-title">对话模式</h3>
-            <p id="settings-dialogue-mode-summary" class="status-box" aria-live="polite">当前模式：默认陪伴</p>
-            <p class="selection-note">默认、工作、游戏、读书模式在聊天页状态缎带下切换；切换后会同步到这里。</p>
-          </section>
-          <section class="content-stack" aria-labelledby="presence-mode-settings-title">
-            <h3 id="presence-mode-settings-title" class="settings-section-title">存在模式</h3>
-            <p id="settings-presence-mode-summary" class="status-box" aria-live="polite">当前存在：默认陪伴</p>
-            <p class="selection-note">存在模式影响她在桌面上的低打扰程度、待机预算和普通身体动作；不改变对话风格。</p>
-          </section>
-          <section class="content-stack" aria-labelledby="provider-settings-title">
+          <section id="settings-model-page" class="settings-page content-stack" hidden aria-labelledby="provider-settings-title">
             <h3 id="provider-settings-title" class="settings-section-title">Provider / 模型</h3>
+            <section class="partner-status-band" aria-label="魔女状态缎带">
+              <p id="partner-status" class="status-box ribbon-primary" aria-live="polite">桌面伙伴 · 默认陪伴</p>
+              <p id="provider-status" class="status-box ribbon-provider" aria-live="polite">正在读取模型状态...</p>
+            </section>
+            <button id="settings-model-detail-button" class="button-light" type="button">查看连接详情</button>
+          </section>
+          <section id="settings-model-detail-page" class="settings-page settings-nested-page content-stack" hidden aria-label="模型连接详情">
             <label class="field-label">
               Provider
               <select id="provider-id" name="providerId">
@@ -118,8 +234,7 @@
               </div>
               <p id="provider-health-status" class="status-box" aria-live="polite">连接检查尚未运行。</p>
             </div>
-          </section>
-          <section id="connection-safe-section" class="content-stack" aria-labelledby="connection-safe-title" hidden>
+            <section id="connection-safe-section" class="content-stack" aria-labelledby="connection-safe-title" hidden>
             <h3 id="connection-safe-title" class="settings-section-title">连接安全</h3>
             <div class="api-key-section">
               <span id="api-key-status" class="status-box" aria-live="polite">API Key：未配置</span>
@@ -136,122 +251,22 @@
                 </span>
               </div>
             </div>
+            </section>
+            <div class="settings-actions">
+              <button class="button" type="submit">保存设置</button>
+            </div>
           </section>
-          <section class="content-stack" aria-labelledby="shortcut-title">
+          <section id="settings-advanced-page" class="settings-page content-stack" hidden aria-labelledby="shortcut-title">
             <h3 id="shortcut-title" class="settings-section-title">操作方式</h3>
             <div id="shortcut-list" class="shortcut-list content-stack" aria-live="polite"></div>
             <p id="shortcut-status" class="status-box" hidden aria-live="polite"></p>
+            <section class="content-stack" aria-labelledby="advanced-diagnostics-title">
+              <h3 id="advanced-diagnostics-title" class="settings-section-title">高级诊断</h3>
+              <p class="status-box" data-state="fallback">诊断只显示安全摘要；完整 prompt、Provider 请求正文、API Key 和事实卡正文不会在这里展示。</p>
+            </section>
           </section>
-          <div class="settings-actions">
-            <button class="button" type="submit">保存设置</button>
-          </div>
           <p id="settings-feedback" class="status-box" hidden aria-live="polite"></p>
         </form>
-      </section>
-      <section id="chat-page" class="chat-page">
-        <section id="user-welcome-panel" class="user-welcome-panel content-stack" aria-label="本地身份入口">
-          <p class="selection-note">先给她一个本地称呼，之后就可以直接开始聊天。</p>
-          <label class="field-label">
-            昵称
-            <input id="welcome-user-display-name" type="text" maxlength="32" autocomplete="nickname" placeholder="例如：小林" />
-          </label>
-          <label class="field-label">
-            希望被称呼为
-            <input id="welcome-user-preferred-name" type="text" maxlength="32" autocomplete="off" placeholder="可留空" />
-          </label>
-          <div class="settings-actions">
-            <button id="welcome-save-user-profile-button" class="button" type="button">进入聊天</button>
-          </div>
-          <p id="user-welcome-feedback" class="status-box" hidden aria-live="polite"></p>
-        </section>
-        <div class="provider-bar">
-          <section class="partner-status-band" aria-label="魔女状态缎带">
-            <p id="partner-status" class="status-box ribbon-primary" aria-live="polite">桌面伙伴 · 默认陪伴</p>
-            <p id="provider-status" class="status-box ribbon-provider" aria-live="polite">正在读取模型状态...</p>
-            <p id="memory-session-status" class="status-box ribbon-echo" aria-live="polite">本次未使用记忆 · 等待中</p>
-          </section>
-          <button id="settings-button" class="button-light icon-button" type="button" aria-label="打开伙伴与对话设置" title="伙伴与对话设置">⚙</button>
-        </div>
-        <section id="companion-control-shelf" class="companion-control-shelf" hidden aria-label="伙伴控制架">
-          <div class="shelf-mode-group">
-            <span class="shelf-label">模式</span>
-            <div id="dialogue-mode-controls" class="mode-controls" aria-label="对话模式"></div>
-          </div>
-          <div class="shelf-mode-group">
-            <span class="shelf-label">存在</span>
-            <div id="presence-mode-controls" class="mode-controls" aria-label="存在模式"></div>
-          </div>
-          <button id="shelf-accessory-button" class="button-light shelf-button" type="button">配件：无配件</button>
-          <button id="shelf-scale-button" class="button-light shelf-button" type="button">大小：100%</button>
-          <button id="shelf-lock-button" class="button-light shelf-button" type="button">锁定：未锁定</button>
-          <p id="shelf-action-echo" class="status-box shelf-echo" data-state="idle" aria-live="polite">最近动作：等待中</p>
-        </section>
-        <p id="chat-session-note" class="selection-note" data-state="fallback" aria-live="polite">新会话将仅在本地保存；发送时只包含当前消息。</p>
-        <section id="memory-draft-panel" class="memory-draft-panel content-stack" hidden aria-label="保存事实卡">
-          <p class="selection-note">确认后才会保存到本机记忆；可随时在记忆页停用或删除。</p>
-          <label class="field-label">
-            标题
-            <input id="memory-draft-title" type="text" maxlength="80" />
-          </label>
-          <label class="field-label">
-            正文
-            <textarea id="memory-draft-content" maxlength="800"></textarea>
-          </label>
-          <label class="field-label">
-            标签
-            <input id="memory-draft-tags" type="text" placeholder="用逗号分隔，可留空" />
-          </label>
-          <div class="settings-actions">
-            <button id="cancel-memory-draft-button" class="button-light" type="button">取消</button>
-            <button id="save-memory-draft-button" class="button" type="button">保存事实卡</button>
-          </div>
-        </section>
-        <section id="messages" class="messages" aria-live="polite"></section>
-        <form id="chat-form" class="composer">
-          <input id="chat-input" type="text" autocomplete="off" placeholder="和她说点什么..." aria-label="聊天输入" />
-          <button id="send-button" class="button" type="submit">发送</button>
-          <button id="abort-button" class="button-light" type="button" disabled>中断</button>
-        </form>
-      </section>
-      <section id="history-page" class="history-page content-stack" hidden aria-label="本地聊天历史">
-        <div class="history-actions">
-          <button id="new-conversation-button" class="button" type="button">新建会话</button>
-          <button id="clear-history-button" class="button-danger" type="button">清空全部历史</button>
-        </div>
-        <p id="history-feedback" class="selection-note" aria-live="polite">历史仅保存在本机；打开查看不会自动发送给 Provider。</p>
-        <div id="clear-history-confirmation" class="status-box delete-confirmation" hidden>
-          <span>清空后无法恢复，是否继续？</span>
-          <span class="inline-actions">
-            <button id="cancel-clear-history-button" class="button-light" type="button">取消</button>
-            <button id="confirm-clear-history-button" class="button-danger" type="button">确认清空</button>
-          </span>
-        </div>
-        <div class="history-layout">
-          <ol id="conversation-list" class="conversation-list" aria-label="会话列表"></ol>
-          <section id="history-detail" class="history-detail content-stack" aria-live="polite">
-            <p class="selection-note">选择一段历史以查看内容。</p>
-          </section>
-        </div>
-      </section>
-      <section id="memory-page" class="memory-page content-stack" hidden aria-label="本地记忆">
-        <div class="memory-actions">
-          <button id="enable-memory-button" class="button" type="button">开启记忆</button>
-          <button id="clear-memory-button" class="button-danger" type="button">清空全部记忆</button>
-        </div>
-        <p id="memory-feedback" class="selection-note" aria-live="polite">记忆默认关闭；只有启用事实卡才会临时加入 Provider 请求。</p>
-        <p id="memory-next-injection-status" class="status-box" data-state="fallback" aria-live="polite">下次发送会注入 0 条。</p>
-        <div id="clear-memory-confirmation" class="status-box delete-confirmation" hidden>
-          <span>清空后无法恢复，是否继续？</span>
-          <span class="inline-actions">
-            <button id="cancel-clear-memory-button" class="button-light" type="button">取消</button>
-            <button id="confirm-clear-memory-button" class="button-danger" type="button">确认清空</button>
-          </span>
-        </div>
-        <label class="field-label">
-          搜索记忆
-          <input id="memory-search" type="search" placeholder="标题、正文或标签" />
-        </label>
-        <div id="memory-list" class="memory-list content-stack"></div>
       </section>
     </main>
     <script type="module" src="./main.ts"></script>
