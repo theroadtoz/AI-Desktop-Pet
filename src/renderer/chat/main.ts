@@ -806,6 +806,7 @@ function createMessage(role: ChatRole, content: string): ChatMessage {
 }
 
 function setChatSessionNote(message: string, state: "ready" | "fallback" | "error" = "fallback"): void {
+  chatSessionNoteBox.hidden = false;
   chatSessionNoteBox.textContent = message;
   chatSessionNoteBox.dataset.state = state;
 }
@@ -2078,7 +2079,7 @@ window.chatApi?.onReplyError((error) => {
   const wasAborted = error.errorType === "aborted";
   finishReplying(error.requestVersion, wasAborted ? "已中断" : "回复失败");
   setChatSessionNote(
-    error.message || (wasAborted ? "已中断。" : "回复失败；请检查连接或稍后重试。"),
+    error.message || (wasAborted ? "这次先停下了，未完成的回复不会保存。" : "她暂时没连上模型，请检查连接或稍后重试。"),
     wasAborted ? "fallback" : "error"
   );
 });

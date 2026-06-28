@@ -168,7 +168,7 @@ async function runFirstSession(checks) {
       (() => {
         const echo = document.querySelector("#shelf-action-echo");
         const text = echo?.textContent ?? "";
-        return text === ${JSON.stringify(`最近动作：${HEAD_PAT_SAFE_ECHO_MESSAGE}`)} &&
+        return text === ${JSON.stringify(`小动作：${HEAD_PAT_SAFE_ECHO_MESSAGE}`)} &&
           echo?.dataset.state === "active" &&
           !text.includes("p2_11e_duplicate_acceptance") &&
           !text.includes("durationMs");
@@ -184,7 +184,7 @@ async function runFirstSession(checks) {
     `);
     await waitFor(chat, "document.querySelector('#shelf-action-echo')?.dataset.state === 'idle'", 6_000);
     checks.actionEchoReturnsToIdle = await evaluate(chat, `
-      document.querySelector("#shelf-action-echo")?.textContent === "最近动作：等待中"
+      document.querySelector("#shelf-action-echo")?.textContent === "小动作：安静待机"
     `);
 
     await evaluate(pet, `

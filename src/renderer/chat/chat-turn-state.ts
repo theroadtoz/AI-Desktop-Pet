@@ -117,27 +117,27 @@ export function formatChatTurnFinish(lifecycleEcho: ChatTurnLifecycleEcho): {
 } {
   if (lifecycleEcho === "回复完成") {
     return {
-      sessionNote: "回复完成；下一条仍只发送当前输入。",
+      sessionNote: "她说完了，可以继续聊。",
       sessionNoteState: "ready"
     };
   }
 
   if (lifecycleEcho === "回复失败") {
     return {
-      sessionNote: "回复失败；请检查连接或稍后重试。",
+      sessionNote: "她暂时没连上模型，请检查连接或稍后重试。",
       sessionNoteState: "error"
     };
   }
 
   if (lifecycleEcho === "已中断") {
     return {
-      sessionNote: "回复已中断，未保存未完成的助手消息。",
+      sessionNote: "这次先停下了，未完成的回复不会保存。",
       sessionNoteState: "fallback"
     };
   }
 
   return {
-    sessionNote: "正在等待她回复；可以随时中断本次生成。",
+    sessionNote: "她正在整理回答，可随时停下。",
     sessionNoteState: "ready"
   };
 }

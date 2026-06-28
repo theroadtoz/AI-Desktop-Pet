@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  ACTIVITY_ECHO_IDLE_MESSAGE,
   formatCompanionShelf,
   formatMemoryRibbon,
   formatModeLabel,
@@ -93,16 +94,20 @@ test("partner status combines profile, dialogue mode, and presence mode", () => 
 });
 
 test("memory ribbon handles 0, 1, and many memory counts", () => {
-  assert.deepEqual(formatMemoryRibbon({ memoryInjectionCount: null, ribbonEcho: "等待中" }), {
-    text: "本次未使用记忆 · 等待中",
+  assert.deepEqual(formatMemoryRibbon({ memoryInjectionCount: null, ribbonEcho: ACTIVITY_ECHO_IDLE_MESSAGE }), {
+    text: "这轮没有带入记忆 · 她安静待机",
     state: "fallback"
   });
   assert.deepEqual(formatMemoryRibbon({ memoryInjectionCount: 1, ribbonEcho: "正在回复" }), {
-    text: "本次使用 1 条记忆 · 正在回复",
+    text: "她带上了 1 条已允许的记忆 · 正在想",
     state: "ready"
   });
   assert.deepEqual(formatMemoryRibbon({ memoryInjectionCount: 3, ribbonEcho: "回复完成" }), {
-    text: "本次使用 3 条记忆 · 回复完成",
+    text: "她带上了 3 条已允许的记忆 · 刚说完",
+    state: "ready"
+  });
+  assert.deepEqual(formatMemoryRibbon({ memoryInjectionCount: 2, ribbonEcho: "已中断" }), {
+    text: "她带上了 2 条已允许的记忆 · 这次先停下",
     state: "ready"
   });
 });
@@ -119,7 +124,7 @@ test("companion shelf presenter keeps action echo and lock wording", () => {
     scaleText: "大小：115%",
     lockText: "锁定：已锁定",
     lockState: "ready",
-    actionEchoText: "最近动作：轻轻挥手",
+    actionEchoText: "小动作：轻轻挥手",
     actionEchoState: "active"
   });
 });

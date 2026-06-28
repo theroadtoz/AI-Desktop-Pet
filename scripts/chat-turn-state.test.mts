@@ -48,21 +48,21 @@ test("chat turn finish clears active state and returns lifecycle copy", () => {
   assert.equal(finished.state.isReplying, false);
   assert.equal(finished.state.activeRequestVersion, null);
   assert.equal(finished.lifecycleEcho, "回复完成");
-  assert.equal(finished.sessionNote, "回复完成；下一条仍只发送当前输入。");
+  assert.equal(finished.sessionNote, "她说完了，可以继续聊。");
   assert.equal(finished.sessionNoteState, "ready");
 });
 
-test("chat turn error and abort notes keep existing UI wording", () => {
+test("chat turn error and abort notes use companion status wording", () => {
   assert.deepEqual(formatChatTurnFinish("回复失败"), {
-    sessionNote: "回复失败；请检查连接或稍后重试。",
+    sessionNote: "她暂时没连上模型，请检查连接或稍后重试。",
     sessionNoteState: "error"
   });
   assert.deepEqual(formatChatTurnFinish("已中断"), {
-    sessionNote: "回复已中断，未保存未完成的助手消息。",
+    sessionNote: "这次先停下了，未完成的回复不会保存。",
     sessionNoteState: "fallback"
   });
   assert.deepEqual(formatChatTurnFinish("正在回复"), {
-    sessionNote: "正在等待她回复；可以随时中断本次生成。",
+    sessionNote: "她正在整理回答，可随时停下。",
     sessionNoteState: "ready"
   });
 });

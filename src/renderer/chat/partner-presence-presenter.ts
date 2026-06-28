@@ -6,7 +6,7 @@ import type { ProviderStatus } from "../../shared/provider-config";
 export type StatusDatasetState = "ready" | "fallback" | "error";
 export type ActivityEchoState = "idle" | "active" | "fading";
 
-export const ACTIVITY_ECHO_IDLE_MESSAGE = "等待中";
+export const ACTIVITY_ECHO_IDLE_MESSAGE = "安静待机";
 export const ACTIVITY_ECHO_FADING_MESSAGE = "安静陪伴中";
 export const ACTIVITY_ECHO_ACTIVE_MS = 5_000;
 export const ACTIVITY_ECHO_FADING_MS = 4_000;
@@ -134,14 +134,43 @@ export function formatMemoryRibbon(input: {
   state: StatusDatasetState;
 } {
   const usedMemory = Boolean(input.memoryInjectionCount && input.memoryInjectionCount > 0);
+  const companionState = formatCompanionStateEcho(input.ribbonEcho);
   const memoryText = usedMemory
-    ? `本次使用 ${input.memoryInjectionCount} 条记忆`
-    : "本次未使用记忆";
+    ? `她带上了 ${input.memoryInjectionCount} 条已允许的记忆`
+    : "这轮没有带入记忆";
 
   return {
-    text: `${memoryText} · ${input.ribbonEcho}`,
+    text: `${memoryText} · ${companionState}`,
     state: usedMemory ? "ready" : "fallback"
   };
+}
+
+function formatCompanionStateEcho(echo: string): string {
+  if (echo === ACTIVITY_ECHO_IDLE_MESSAGE) {
+    return "她安静待机";
+  }
+
+  if (echo === ACTIVITY_ECHO_FADING_MESSAGE) {
+    return "她安静陪伴中";
+  }
+
+  if (echo === "正在回复") {
+    return "正在想";
+  }
+
+  if (echo === "回复完成") {
+    return "刚说完";
+  }
+
+  if (echo === "回复失败") {
+    return "暂时没连上模型";
+  }
+
+  if (echo === "已中断") {
+    return "这次先停下";
+  }
+
+  return echo;
 }
 
 export function formatCompanionShelf(input: {
@@ -163,7 +192,7 @@ export function formatCompanionShelf(input: {
     scaleText: `大小：${Math.round(input.petScale * 100)}%`,
     lockText: `锁定：${input.isPetLocked ? "已锁定" : "未锁定"}`,
     lockState: input.isPetLocked ? "ready" : "fallback",
-    actionEchoText: `最近动作：${input.activityEcho}`,
+    actionEchoText: `小动作：${input.activityEcho}`,
     actionEchoState: input.activityEchoState
   };
 }

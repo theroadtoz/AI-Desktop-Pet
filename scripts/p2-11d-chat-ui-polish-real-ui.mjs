@@ -446,15 +446,40 @@ async function main() {
     `);
 
     await sendMessage(chat, userSentinel);
+    await waitFor(chat, `
+      (() => {
+        const noteElement = document.querySelector("#chat-session-note");
+        const note = noteElement?.textContent ?? "";
+        const memory = document.querySelector("#memory-session-status")?.textContent ?? "";
+        return noteElement?.hidden === false &&
+          note.includes("她说完了，可以继续聊") &&
+          memory.includes("她带上了 1 条已允许的记忆");
+      })()
+    `);
     checks.sendingAndCompleteStates = await evaluate(chat, `
       (() => {
-        const note = document.querySelector("#chat-session-note")?.textContent ?? "";
+        const noteElement = document.querySelector("#chat-session-note");
+        const note = noteElement?.textContent ?? "";
         const memory = document.querySelector("#memory-session-status")?.textContent ?? "";
         const messages = [...document.querySelectorAll(".message")];
-        return note.includes("回复完成") &&
-          memory.includes("本次使用 1 条记忆") &&
+        return noteElement?.hidden === false &&
+          note.includes("她说完了，可以继续聊") &&
+          memory.includes("她带上了 1 条已允许的记忆") &&
           messages.some((node) => node.classList.contains("message-user")) &&
           messages.some((node) => node.classList.contains("message-pet"));
+      })()
+    `);
+    checks.lowNoiseStatusLanguage = await evaluate(chat, `
+      (() => {
+        const statusText = [
+          document.querySelector("#chat-session-note")?.textContent ?? "",
+          document.querySelector("#memory-session-status")?.textContent ?? ""
+        ].join("\\n");
+        return statusText.includes("她") &&
+          !statusText.includes("本次使用") &&
+          !statusText.includes("本次未使用") &&
+          !statusText.includes("下一条仍只发送") &&
+          !statusText.includes("未保存未完成的助手消息");
       })()
     `);
     checks.ribbonHidesPrivateContent = await evaluate(chat, `
@@ -474,7 +499,7 @@ async function main() {
     checks.abortOrCompleteState = await evaluate(chat, `
       (() => {
         const note = document.querySelector("#chat-session-note")?.textContent ?? "";
-        return note.includes("回复已中断") || note.includes("回复完成");
+        return note.includes("这次先停下了") || note.includes("她说完了");
       })()
     `);
 
