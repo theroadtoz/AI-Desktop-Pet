@@ -738,7 +738,7 @@ function applyPetPresentationPreferences(
 
 function getChatErrorMessage(errorType: ChatStreamErrorType): string {
   if (errorType === "aborted") {
-    return "已中断。";
+    return "回复已中断，未保存未完成的助手消息。";
   }
 
   if (errorType === "busy") {
