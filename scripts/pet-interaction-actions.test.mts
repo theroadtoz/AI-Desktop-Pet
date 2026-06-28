@@ -38,6 +38,10 @@ import {
   PET_STRONG_ACCESSORY_ACTION_TYPES as SCRIPT_STRONG_ACCESSORY_ACTION_TYPES,
   PET_WINDOW_SHAKE_SAFE_ECHO_MESSAGE as SCRIPT_WINDOW_SHAKE_SAFE_ECHO_MESSAGE
 } from "./support/pet-action-semantic-constants.mjs";
+import {
+  PET_ACTION_TRIGGER_REASONS,
+  getPetActionTriggerActionType
+} from "../src/shared/pet-action-trigger.ts";
 import type { EmotionPresentation } from "../src/shared/emotion-presentation.ts";
 import type { PetAccessoryPresetId } from "../src/shared/pet-accessory.ts";
 
@@ -187,6 +191,31 @@ test("safe echo helpers reject unknown actions and strip window shake payload de
     const message = getPetInteractionActionSafeEchoMessage(type);
     assert.equal(typeof message, "string");
     assert.equal(/payload|partId|reason|duration|selectedActionType|candidateActionTypes/i.test(message ?? ""), false);
+  }
+});
+
+test("action trigger reasons map to fixed actions and emit safe started telemetry", () => {
+  const expected = {
+    chat_opened: "listen",
+    chat_input_focus: "listen",
+    chat_reply_waiting: "replyThinking",
+    pet_edge_settled: "edgeGlance"
+  } as const;
+
+  for (const reason of PET_ACTION_TRIGGER_REASONS) {
+    const harness = createFakeInteractionActionPlayer();
+    const actionType = getPetActionTriggerActionType(reason);
+
+    assert.equal(actionType, expected[reason]);
+    assert.equal(harness.player.playAction(getPetInteractionAction(actionType), reason), true);
+    assert.deepEqual(harness.telemetry.at(0), {
+      type: "pet_interaction_action_started",
+      payload: {
+        type: actionType,
+        reason,
+        durationMs: getPetInteractionAction(actionType).durationMs
+      }
+    });
   }
 });
 

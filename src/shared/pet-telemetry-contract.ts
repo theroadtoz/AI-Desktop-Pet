@@ -136,7 +136,11 @@ const PET_INTERACTION_REASONS = [
   "startup_first_visible_frame",
   "click_head",
   "click_body",
-  "window_shake_feedback"
+  "window_shake_feedback",
+  "chat_opened",
+  "chat_input_focus",
+  "chat_reply_waiting",
+  "pet_edge_settled"
 ] as const;
 const PET_INTERACTION_SKIP_REASONS = [
   "active_action",

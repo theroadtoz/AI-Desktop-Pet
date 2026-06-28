@@ -13,6 +13,7 @@ import type { PetPresentationIntent } from "./pet-role-state";
 import type { PetTelemetryEvent } from "./pet-telemetry-contract";
 import type { ShortcutActionId, ShortcutPreferenceView, ShortcutUpdateResult } from "./shortcut-preferences";
 import type { UserProfile, UserProfileInput } from "./user-profile";
+import type { PetActionTrigger } from "./pet-action-trigger";
 
 export type { PetTelemetryEvent } from "./pet-telemetry-contract";
 
@@ -22,6 +23,7 @@ export type PetWindowCommand =
   | { type: "pet:telemetry"; payload: PetTelemetryEvent }
   | { type: "pet:pointer-hit-change"; payload: PetPointerHitState }
   | { type: "pet:apply-presentation"; payload: PetPresentationIntent }
+  | { type: "pet:action-trigger"; payload: PetActionTrigger }
   | { type: "pet:window-motion-feedback"; payload: PetWindowMotionFeedback }
   | { type: "presenceMode:changed"; payload: PresenceModeId }
   | { type: "pet:inject-webgl-context-loss" }
@@ -127,6 +129,7 @@ export type PetApi = {
   setPointerHit(isHit: boolean): void;
   presentationReady(): void;
   onPresentationIntent(handler: (intent: PetPresentationIntent) => void): () => void;
+  onActionTrigger(handler: (trigger: PetActionTrigger) => void): () => void;
   onInjectWebGLContextLoss(handler: () => void): () => void;
   onWindowMotionFeedback(handler: (feedback: PetWindowMotionFeedback) => void): () => void;
   openChat(): void;

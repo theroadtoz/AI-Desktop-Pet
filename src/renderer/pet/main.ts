@@ -30,6 +30,7 @@ import {
   type EmotionPresentation
 } from "../../shared/emotion-presentation";
 import type { PetPresentationIntent } from "../../shared/pet-role-state";
+import { getPetActionTriggerActionType } from "../../shared/pet-action-trigger";
 import { getPetAccessoryPreset, type PetAccessoryPresetId } from "../../shared/pet-accessory";
 
 const foundCanvas = document.querySelector<HTMLCanvasElement>("#pet-canvas");
@@ -609,6 +610,12 @@ const removePresenceModeChangedListener = window.petApi?.onPresenceModeChanged((
   currentPresenceModeId = modeId;
   live2DRenderer?.setPresenceMode(modeId);
 }) ?? null;
+const removeActionTriggerListener = window.petApi?.onActionTrigger((trigger) => {
+  interactionActionPlayer.playAction(
+    getPetInteractionAction(getPetActionTriggerActionType(trigger.reason)),
+    trigger.reason
+  );
+}) ?? null;
 const removeWindowMotionFeedbackListener = window.petApi?.onWindowMotionFeedback((feedback) => {
   if (feedback.type === "shake_light_feedback") {
     interactionActionPlayer.playWindowShakeLightFeedback();
@@ -651,6 +658,7 @@ window.addEventListener("beforeunload", () => {
   removeInjectWebGLContextLossListener?.();
   removeDialogueModeChangedListener?.();
   removePresenceModeChangedListener?.();
+  removeActionTriggerListener?.();
   removeWindowMotionFeedbackListener?.();
   cancelClickInteractionAction();
   interactionActionPlayer.dispose();

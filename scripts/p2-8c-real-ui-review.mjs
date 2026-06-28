@@ -484,8 +484,10 @@ async function main() {
         .map((event) => event.payload)
     });
     checks.push({
-      name: "dragAndScaleDoNotTriggerActions",
-      ok: (dragScaleSummary?.started.length ?? 0) === 0,
+      name: "dragAndScaleOnlyTriggersSafeEdgeGlance",
+      ok: (dragScaleSummary?.started ?? []).every((event) => (
+        event.type === "edgeGlance" && event.reason === "pet_edge_settled"
+      )),
       detail: dragScaleSummary
     });
     checks.push({

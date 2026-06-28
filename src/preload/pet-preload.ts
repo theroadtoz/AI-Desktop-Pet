@@ -6,6 +6,7 @@ import type {
   PetDragDelta,
   PetFirstFrameInfo
 } from "../shared/ipc-contract";
+import type { PetActionTrigger, PetActionTriggerReason } from "../shared/pet-action-trigger";
 import type { DialogueModeId } from "../shared/dialogue-style";
 import type { PresenceModeId } from "../shared/presence-mode";
 import type { PetPresentationIntent, PetRoleState } from "../shared/pet-role-state";
@@ -24,6 +25,12 @@ const emotionIntensities = ["low", "medium", "high"] as const;
 const petAccessoryPresetIds = ["none", "glasses"] as const;
 const dialogueModeIds = ["default", "work", "game", "reading"] as const;
 const presenceModeIds = ["default", "focus", "quiet", "sleep"] as const;
+const petActionTriggerReasons = [
+  "chat_opened",
+  "chat_input_focus",
+  "chat_reply_waiting",
+  "pet_edge_settled"
+] as const;
 const scaleWheelModifierPattern = /^(Ctrl|Alt|Shift|Meta)(\+(Ctrl|Alt|Shift|Meta))*$/;
 
 function isRequestVersion(value: number): boolean {
@@ -109,6 +116,17 @@ function isPetWindowMotionFeedback(value: unknown): value is PetWindowMotionFeed
   );
 }
 
+function parsePetActionTrigger(value: unknown): PetActionTrigger | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+
+  const reason = (value as Partial<PetActionTrigger>).reason;
+  return typeof reason === "string" && petActionTriggerReasons.includes(reason as PetActionTriggerReason)
+    ? { reason }
+    : null;
+}
+
 const api: PetApi = {
   reportFirstFrame(info: PetFirstFrameInfo) {
     ipcRenderer.send("pet:first-frame", info);
@@ -136,6 +154,20 @@ const api: PetApi = {
 
     return () => {
       ipcRenderer.removeListener("pet:apply-presentation", listener);
+    };
+  },
+  onActionTrigger(handler) {
+    const listener = (_event: Electron.IpcRendererEvent, value: unknown): void => {
+      const trigger = parsePetActionTrigger(value);
+      if (trigger) {
+        handler(trigger);
+      }
+    };
+
+    ipcRenderer.on("pet:action-trigger", listener);
+
+    return () => {
+      ipcRenderer.removeListener("pet:action-trigger", listener);
     };
   },
   onInjectWebGLContextLoss(handler: () => void) {

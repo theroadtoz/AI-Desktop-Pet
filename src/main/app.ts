@@ -56,6 +56,10 @@ import {
   parsePetScaleAdjustmentIntent,
   type PetPresentationPreferences
 } from "../shared/pet-presentation";
+import {
+  isPetNearWorkAreaEdge,
+  type PetActionTriggerReason
+} from "../shared/pet-action-trigger";
 import { ChatEngineBusyError, createChatEngine, type ChatEngine } from "./services/chat/chat-engine";
 import { createHistoryStore, type HistoryStore } from "./services/chat/history-store";
 import { createMemoryStore, type MemoryStore } from "./services/chat/memory-store";
@@ -122,13 +126,18 @@ let currentDialogueModeId: DialogueModeId = "default";
 let currentPresenceModeId: PresenceModeId = "default";
 let performanceHeartbeat: NodeJS.Timeout | null = null;
 let isPetLocked = false;
+let initialEdgeGlanceTimer: NodeJS.Timeout | null = null;
 
 const PET_RENDERER_RECOVERY_WINDOW_MS = 60_000;
 const DEFAULT_API_KEY_REF = "openai-compatible-default";
 const PET_RENDERER_MAX_RECOVERIES = 3;
 const PET_WINDOW_TITLE = "Desktop Pet";
+const PET_ACTION_TRIGGER_THROTTLE_MS = 700;
+const PET_INITIAL_EDGE_GLANCE_DELAY_MS = 2_350;
+const PET_DRAG_END_EDGE_GLANCE_DELAY_MS = 100;
 const isAcceptanceTelemetryEnabled = process.env.AI_DESKTOP_PET_ACCEPTANCE_TELEMETRY === "1";
 let petRendererRecoveryTimes: number[] = [];
+const lastPetActionTriggerAtByReason: Partial<Record<PetActionTriggerReason, number>> = {};
 
 const userDataPathOverride = process.env.AI_DESKTOP_PET_USER_DATA_PATH;
 
@@ -286,6 +295,47 @@ function logTelemetry(type: string, payload: TelemetryPayload = {}): void {
 function logPetTelemetry(event: { type: PetTelemetryEventType; payload?: unknown }): void {
   const safeEvent = sanitizePetTelemetryEvent(event);
   logTelemetry(safeEvent.type, safeEvent.payload);
+}
+
+function sendPetActionTrigger(reason: PetActionTriggerReason): boolean {
+  if (!petWindow || petWindow.isDestroyed()) {
+    return false;
+  }
+
+  const now = Date.now();
+  const lastTriggeredAt = lastPetActionTriggerAtByReason[reason] ?? 0;
+  if (now - lastTriggeredAt < PET_ACTION_TRIGGER_THROTTLE_MS) {
+    return false;
+  }
+
+  lastPetActionTriggerAtByReason[reason] = now;
+  petWindow.webContents.send("pet:action-trigger", { reason });
+  return true;
+}
+
+function isCurrentPetWindowNearEdge(): boolean {
+  if (!petWindow || petWindow.isDestroyed()) {
+    return false;
+  }
+
+  const bounds = petWindow.getBounds();
+  const workArea = screen.getDisplayMatching(bounds).workArea;
+  return isPetNearWorkAreaEdge(bounds, workArea);
+}
+
+function triggerEdgeGlanceIfPetSettled(): boolean {
+  return isCurrentPetWindowNearEdge() && sendPetActionTrigger("pet_edge_settled");
+}
+
+function scheduleInitialEdgeGlanceIfNeeded(): void {
+  if (initialEdgeGlanceTimer) {
+    clearTimeout(initialEdgeGlanceTimer);
+  }
+
+  initialEdgeGlanceTimer = setTimeout(() => {
+    initialEdgeGlanceTimer = null;
+    triggerEdgeGlanceIfPetSettled();
+  }, PET_INITIAL_EDGE_GLANCE_DELAY_MS);
 }
 
 function createPointerControllerForWindow(window: BrowserWindow): PointerController {
@@ -894,6 +944,7 @@ app.whenReady().then(async () => {
     showChatWindow(chatWindow);
     focusChatInput(chatWindow);
     transitionPetRole({ type: "chat:opened" });
+    sendPetActionTrigger("chat_opened");
     logWindowSnapshot("chat_opened");
   }
 
@@ -1098,6 +1149,9 @@ app.whenReady().then(async () => {
 
     pointerController?.endDrag();
     logAcceptanceWindowSnapshot("pet_drag_end");
+    setTimeout(() => {
+      triggerEdgeGlanceIfPetSettled();
+    }, PET_DRAG_END_EDGE_GLANCE_DELAY_MS);
   });
 
   ipcMain.on("pet:first-frame", (event, info: PetFirstFrameInfo) => {
@@ -1107,6 +1161,7 @@ app.whenReady().then(async () => {
 
     logTelemetry("first_frame", sanitizeFirstFrame(info));
     console.info("[pet] first frame reported");
+    scheduleInitialEdgeGlanceIfNeeded();
   });
 
   ipcMain.on("pet:health", (event, state: RenderHealth) => {
@@ -1167,6 +1222,9 @@ app.whenReady().then(async () => {
 
     isChatInteractionActive = isActive;
     transitionPetRole({ type: "chat:interaction", active: isActive });
+    if (isActive) {
+      sendPetActionTrigger("chat_input_focus");
+    }
   });
 
   ipcMain.on("pet:adjust-scale", (event, value: unknown) => {
@@ -1244,6 +1302,7 @@ app.whenReady().then(async () => {
     }
 
     activeChatRequestVersion = request.requestVersion;
+    sendPetActionTrigger("chat_reply_waiting");
     const submittedMessage = request.messages.at(-1);
 
     if (!submittedMessage) {

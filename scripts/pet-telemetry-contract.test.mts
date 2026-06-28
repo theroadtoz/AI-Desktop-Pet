@@ -114,6 +114,47 @@ test("pet interaction action started keeps only safe action summary fields", () 
   assertNoForbiddenKeys(event?.payload);
 });
 
+test("action trigger telemetry keeps only fixed safe trigger reasons", () => {
+  const event = parsePetRendererTelemetryEvent({
+    type: "pet_interaction_action_started",
+    payload: {
+      type: "edgeGlance",
+      reason: "pet_edge_settled",
+      durationMs: 1250,
+      bounds: { x: 1, y: 2, width: 3, height: 4 },
+      windowBounds: [{ x: 1, y: 2, width: 3, height: 4 }],
+      content: "sentinel",
+      request: { body: "sentinel" }
+    }
+  });
+  const unsafeReason = parsePetRendererTelemetryEvent({
+    type: "pet_interaction_action_started",
+    payload: {
+      type: "replyThinking",
+      reason: "provider_payload_selected_action",
+      durationMs: 1250
+    }
+  });
+
+  assert.deepEqual(event, {
+    type: "pet_interaction_action_started",
+    payload: {
+      type: "edgeGlance",
+      reason: "pet_edge_settled",
+      durationMs: 1250
+    }
+  });
+  assert.deepEqual(unsafeReason, {
+    type: "pet_interaction_action_started",
+    payload: {
+      type: "replyThinking",
+      durationMs: 1250
+    }
+  });
+  assertNoForbiddenKeys(event?.payload);
+  assertNoForbiddenKeys(unsafeReason?.payload);
+});
+
 test("performance telemetry keeps presence budget mode only as safe enum", () => {
   const event = parsePetRendererTelemetryEvent({
     type: "pet_performance_sample",
