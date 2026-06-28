@@ -18,6 +18,9 @@ const forbiddenTelemetryTexts = [
   "provider request body",
   "AI_DESKTOP_PET_API_KEY"
 ];
+const zeroMemoryStatusText = "这轮没有带入记忆";
+const oneMemoryStatusText = "她带上了 1 条已允许的记忆";
+const legacyMemoryStatusTexts = ["本次未使用记忆", "本次使用 1 条记忆"];
 
 mkdirSync(runDir, { recursive: true });
 
@@ -348,7 +351,7 @@ async function main() {
     let snapshot = await uiSnapshot(chat);
     checks.partnerStatusBandExists = snapshot.partnerStatus.includes("桌面伙伴") && snapshot.partnerStatus.includes("默认陪伴");
     checks.fakeProviderVisible = snapshot.providerStatus.includes("Fake Provider");
-    checks.initialMemoryStatus = snapshot.memoryStatus.includes("本次未使用记忆");
+    checks.initialMemoryStatus = snapshot.memoryStatus.includes(zeroMemoryStatusText);
     checks.chatSessionNoteStillVisible = snapshot.chatNote.includes("新会话") && snapshot.chatNote.includes("本地保存");
 
     await click(chat, "#settings-button");
@@ -376,14 +379,14 @@ async function main() {
     await click(chat, "#memory-tab");
     snapshot = await uiSnapshot(chat);
     checks.memoryTabSwitches = snapshot.activeTab === "记忆" && snapshot.chatHidden && !snapshot.memoryHidden;
-    checks.memoryCopyClear = snapshot.memoryFeedback.includes("只有启用事实卡") && snapshot.memoryFeedback.includes("Provider 请求");
+    checks.memoryCopyClear = snapshot.memoryFeedback.includes("记忆默认关闭") && snapshot.memoryFeedback.includes("不会自动生成事实卡");
 
     await click(chat, "#chat-tab");
     const zeroSend = await sendMessage(chat, `${userSentinel}，检查 0 条记忆。`);
     snapshot = await uiSnapshot(chat);
     checks.zeroMemoryCount = zeroSend.event?.count === 0;
-    checks.zeroMemoryStatusText = snapshot.memoryStatus.includes("本次未使用记忆");
-    checks.memoryStatusDoesNotOverwriteSessionNote = !snapshot.chatNote.includes("本次未使用记忆");
+    checks.zeroMemoryStatusText = snapshot.memoryStatus.includes(zeroMemoryStatusText);
+    checks.memoryStatusDoesNotOverwriteSessionNote = !snapshot.chatNote.includes(zeroMemoryStatusText);
     checks.sendAndAbortButtonState = zeroSend.buttonState.sendShowsStop &&
       zeroSend.buttonState.abortHidden &&
       zeroSend.finalButtonState.sendRestored &&
@@ -405,8 +408,9 @@ async function main() {
     const oneSend = await sendMessage(chat, "检查 1 条记忆状态带。");
     snapshot = await uiSnapshot(chat);
     checks.oneMemoryCount = oneSend.event?.count === 1;
-    checks.oneMemoryStatusText = snapshot.memoryStatus.includes("本次使用 1 条记忆");
+    checks.oneMemoryStatusText = snapshot.memoryStatus.includes(oneMemoryStatusText);
     checks.memoryStatusHidesFactContent = !snapshot.memoryStatus.includes(memorySentinel) && !snapshot.chatNote.includes(memorySentinel);
+    checks.noLegacyMemoryStatusLanguage = legacyMemoryStatusTexts.every((text) => !snapshot.visibleText.includes(text));
 
     checks.narrowStatusBand = await checkNarrowStatusBand(chat);
     checks.inputFocus = await evaluate(chat, `

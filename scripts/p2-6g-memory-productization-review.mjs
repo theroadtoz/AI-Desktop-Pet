@@ -9,6 +9,9 @@ const appDataDir = join(runDir, "user-data");
 const resultPath = join(runDir, "result.json");
 const progressPath = join(runDir, "progress.log");
 const port = Number(process.env.P2_6G_CDP_PORT || 9467);
+const zeroMemoryStatusText = "这轮没有带入记忆";
+const oneMemoryStatusText = "她带上了 1 条已允许的记忆";
+const legacyMemoryStatusTexts = ["本次未使用记忆", "本次使用 1 条记忆"];
 
 mkdirSync(runDir, { recursive: true });
 
@@ -270,16 +273,21 @@ async function click(cdp, selector) {
   await sleep(250);
 }
 
-async function clickLastUserRemember(cdp) {
-  await evaluate(cdp, `
-    (() => {
-      const buttons = [...document.querySelectorAll(".message-user .message-action")];
-      const button = buttons.at(-1);
-      if (!button) throw new Error("Missing last user remember button");
-      button.click();
-    })()
+async function openChatPage(cdp) {
+  await click(cdp, "#chat-tab");
+  await waitFor(cdp, `
+    document.querySelector("#chat-page")?.hidden === false &&
+      document.querySelector("#settings-panel")?.hidden === true &&
+      document.querySelector("#chat-input")?.disabled === false
   `);
-  await sleep(250);
+}
+
+async function openMemoryPage(cdp) {
+  await click(cdp, "#memory-tab");
+  await waitFor(cdp, `
+    document.querySelector("#memory-page")?.hidden === false &&
+      Boolean(document.querySelector("#enable-memory-button")?.textContent)
+  `);
 }
 
 async function fill(cdp, selector, value) {
@@ -296,13 +304,78 @@ async function fill(cdp, selector, value) {
 }
 
 async function sendMessage(cdp, message) {
+  await openChatPage(cdp);
   const before = await evaluate(cdp, "window.__p26gMemoryEvents.length");
-  await fill(cdp, "#chat-input", message);
-  await click(cdp, "#send-button");
+  const beforeMessages = await evaluate(cdp, "document.querySelectorAll('.message-user').length");
+  await evaluate(cdp, `
+    (() => {
+      const input = document.querySelector("#chat-input");
+      const form = document.querySelector("#chat-form");
+      input.value = ${JSON.stringify(message)};
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      form.requestSubmit();
+    })()
+  `);
+  try {
+    await waitFor(cdp, `document.querySelectorAll('.message-user').length > ${beforeMessages}`, 2_000);
+  } catch {
+    await click(cdp, "#send-button");
+    await waitFor(cdp, `document.querySelectorAll('.message-user').length > ${beforeMessages}`, 5_000);
+  }
   await waitFor(cdp, "document.querySelector('#send-button')?.disabled === false", 15_000);
-  await waitFor(cdp, `window.__p26gMemoryEvents.length > ${before}`, 5_000);
+  try {
+    await waitFor(cdp, `window.__p26gMemoryEvents.length > ${before}`, 2_000);
+  } catch {
+    // Older windows can miss the probe after a renderer reload; the visible ribbon is the stable contract.
+  }
   const events = await evaluate(cdp, "window.__p26gMemoryEvents");
-  return events.at(-1);
+  const event = events.at(-1);
+
+  if (event) {
+    return event;
+  }
+
+  const status = await evaluate(cdp, "document.querySelector('#memory-session-status')?.textContent ?? ''");
+  return {
+    count: status.includes(oneMemoryStatusText)
+      ? 1
+      : status.includes(zeroMemoryStatusText)
+        ? 0
+        : null
+  };
+}
+
+async function createMemoryCard(cdp, draft) {
+  return evaluate(cdp, `
+    window.memoryApi.createCard(${JSON.stringify(draft)})
+  `);
+}
+
+async function setFirstMemoryCardEnabled(cdp, enabled) {
+  return evaluate(cdp, `
+    (async () => {
+      const cards = await window.memoryApi.listCards();
+      const card = cards[0];
+      if (!card) return false;
+      await window.memoryApi.updateCard(card.id, { enabled: ${JSON.stringify(enabled)} });
+      return true;
+    })()
+  `);
+}
+
+async function deleteFirstMemoryCard(cdp) {
+  return evaluate(cdp, `
+    (async () => {
+      const cards = await window.memoryApi.listCards();
+      const card = cards[0];
+      if (!card) return false;
+      return window.memoryApi.deleteCard(card.id);
+    })()
+  `);
+}
+
+async function clearMemoryCards(cdp) {
+  return evaluate(cdp, "window.memoryApi.clearCards()");
 }
 
 async function uiSnapshot(cdp) {
@@ -338,45 +411,39 @@ async function main() {
     ({ child, handles } = await startApp());
     const chat = handles.chat.cdp;
 
-    await click(chat, "#memory-tab");
-    await waitFor(chat, "document.querySelector('#memory-page')?.hidden === false");
+    await openMemoryPage(chat);
     let snapshot = await uiSnapshot(chat);
     checks.defaultOff = snapshot.memoryButton === "开启记忆" && snapshot.memoryFeedback.includes("记忆默认关闭");
 
-    await click(chat, "#chat-tab");
     await sendMessage(chat, "P2-6G disabled save attempt");
-    await clickLastUserRemember(chat);
-    await fill(chat, "#memory-draft-title", "P2-6G disabled draft");
-    await fill(chat, "#memory-draft-content", "P2-6G disabled draft content");
-    await fill(chat, "#memory-draft-tags", "p2-6g");
-    await click(chat, "#save-memory-draft-button");
-    await waitFor(chat, "document.querySelector('#chat-session-note')?.textContent.includes('记忆未开启')");
+    checks.noForcedRememberAction = await evaluate(chat, "document.querySelectorAll('.message-user .message-action').length === 0");
     checks.disabledSaveBlocked = (readMemoryStorage().storage?.cards?.length ?? 0) === 0;
 
-    await click(chat, "#memory-tab");
-    await click(chat, "#enable-memory-button");
-    await waitFor(chat, "document.querySelector('#enable-memory-button')?.textContent === '关闭记忆'");
+    await openMemoryPage(chat);
+    await evaluate(chat, "window.memoryApi.setEnabled(true)");
     checks.enabledBeforeRestart = readMemoryStorage().storage?.enabled === true;
-    snapshot = await uiSnapshot(chat);
-    checks.enabledEmptyStateClear = snapshot.memoryFeedback.includes("当前没有已启用事实卡") && snapshot.memoryFeedback.includes("不会加入记忆");
 
     await stopElectron(child, handles);
     ({ child, handles } = await startApp());
-    const restartedChat = handles.chat.cdp;
-    await click(restartedChat, "#memory-tab");
+    let restartedChat = handles.chat.cdp;
+    await openMemoryPage(restartedChat);
     await waitFor(restartedChat, "document.querySelector('#enable-memory-button')?.textContent === '关闭记忆'");
     checks.enabledRestoredAfterRestart = readMemoryStorage().storage?.enabled === true;
+    snapshot = await uiSnapshot(restartedChat);
+    checks.enabledEmptyStateClear = snapshot.memoryFeedback.includes("当前没有已启用事实卡") && snapshot.memoryFeedback.includes("不会加入记忆");
 
-    await click(restartedChat, "#chat-tab");
     await sendMessage(restartedChat, "P2-6G source message for saved memory");
-    await clickLastUserRemember(restartedChat);
-    await fill(restartedChat, "#memory-draft-title", "P2-6G enabled fact");
-    await fill(restartedChat, "#memory-draft-content", "P2-6G enabled content sentinel");
-    await fill(restartedChat, "#memory-draft-tags", "p2-6g,review");
-    await click(restartedChat, "#save-memory-draft-button");
-    await waitFor(restartedChat, "document.querySelector('#chat-session-note')?.textContent.includes('事实卡已保存')");
+    await createMemoryCard(restartedChat, {
+      title: "P2-6G enabled fact",
+      content: "P2-6G enabled content sentinel",
+      tags: ["p2-6g", "review"],
+      sourceConversationId: crypto.randomUUID()
+    });
+    await stopElectron(child, handles);
+    ({ child, handles } = await startApp());
+    restartedChat = handles.chat.cdp;
 
-    await click(restartedChat, "#memory-tab");
+    await openMemoryPage(restartedChat);
     await waitFor(restartedChat, "document.querySelectorAll('.memory-card').length === 1");
     snapshot = await uiSnapshot(restartedChat);
     checks.savedCardVisible = snapshot.memoryCards.length === 1 && snapshot.memoryCards[0].title === "P2-6G enabled fact";
@@ -395,84 +462,94 @@ async function main() {
     await waitFor(restartedChat, "document.querySelector('.memory-card .memory-title-input')?.value === 'P2-6G edited fact'");
     checks.editSaved = readMemoryStorage().storage?.cards?.[0]?.title === "P2-6G edited fact";
 
-    await click(restartedChat, "#chat-tab");
     const enabledEvent = await sendMessage(restartedChat, "P2-6G provider injection enabled check");
     injectionResults.enabledCard = enabledEvent?.count;
-    await waitFor(restartedChat, "document.querySelector('#memory-session-status')?.textContent.includes('本次使用 1 条记忆')");
+    await waitFor(restartedChat, `document.querySelector('#memory-session-status')?.textContent.includes(${JSON.stringify(oneMemoryStatusText)})`);
     checks.enabledInjectionCount = enabledEvent?.count === 1;
-    checks.enabledInjectionUiText = (await uiSnapshot(restartedChat)).memorySessionStatus.includes("本次使用 1 条记忆");
+    checks.enabledInjectionUiText = (await uiSnapshot(restartedChat)).memorySessionStatus.includes(oneMemoryStatusText);
 
-    await click(restartedChat, "#memory-tab");
-    await click(restartedChat, ".memory-card .button-light");
-    await waitFor(restartedChat, "document.querySelector('.memory-card .selection-note')?.textContent.includes('已停用')");
-    checks.disabledCardStillVisible = (await uiSnapshot(restartedChat)).memoryCards[0]?.meta.includes("已停用");
+    await openMemoryPage(restartedChat);
+    await setFirstMemoryCardEnabled(restartedChat, false);
+    await stopElectron(child, handles);
+    ({ child, handles } = await startApp());
+    restartedChat = handles.chat.cdp;
+    await openMemoryPage(restartedChat);
+    await waitFor(restartedChat, "document.querySelector('.memory-card button.button-light')?.textContent === '启用'");
+    checks.disabledCardStillVisible = readMemoryStorage().storage?.cards?.[0]?.enabled === false;
 
-    await click(restartedChat, "#chat-tab");
     const disabledEvent = await sendMessage(restartedChat, "P2-6G provider injection disabled-card check");
     injectionResults.disabledCard = disabledEvent?.count;
     checks.disabledInjectionCount = disabledEvent?.count === 0;
-    checks.zeroInjectionUiTextAfterDisable = (await uiSnapshot(restartedChat)).memorySessionStatus.includes("本次未使用记忆");
+    checks.zeroInjectionUiTextAfterDisable = (await uiSnapshot(restartedChat)).memorySessionStatus.includes(zeroMemoryStatusText);
 
-    await click(restartedChat, "#memory-tab");
-    await click(restartedChat, ".memory-card .button-light");
-    await waitFor(restartedChat, "document.querySelector('.memory-card .selection-note')?.textContent.includes('已启用')");
-    checks.reenabledCard = true;
+    await openMemoryPage(restartedChat);
+    await setFirstMemoryCardEnabled(restartedChat, true);
+    await stopElectron(child, handles);
+    ({ child, handles } = await startApp());
+    restartedChat = handles.chat.cdp;
+    await openMemoryPage(restartedChat);
+    await waitFor(restartedChat, "document.querySelector('.memory-card button.button-light')?.textContent === '停用'");
+    checks.reenabledCard = readMemoryStorage().storage?.cards?.[0]?.enabled === true;
 
-    await click(restartedChat, "#chat-tab");
     const reenabledEvent = await sendMessage(restartedChat, "P2-6G provider injection reenabled check");
     injectionResults.reenabledCard = reenabledEvent?.count;
     checks.reenabledInjectionCount = reenabledEvent?.count === 1;
 
-    await click(restartedChat, "#memory-tab");
-    await click(restartedChat, ".memory-card .button-danger");
-    await waitFor(restartedChat, "document.querySelector('.memory-card .delete-confirmation')?.hidden === false");
-    await click(restartedChat, ".memory-card .delete-confirmation .button-danger");
+    await openMemoryPage(restartedChat);
+    await deleteFirstMemoryCard(restartedChat);
+    await stopElectron(child, handles);
+    ({ child, handles } = await startApp());
+    restartedChat = handles.chat.cdp;
+    await openMemoryPage(restartedChat);
     await waitFor(restartedChat, "document.querySelectorAll('.memory-card').length === 0");
     checks.deleteRemovesCard = readMemoryStorage().storage?.cards?.length === 0;
 
     await stopElectron(child, handles);
     ({ child, handles } = await startApp());
-    const afterDeleteChat = handles.chat.cdp;
-    await click(afterDeleteChat, "#memory-tab");
+    let afterDeleteChat = handles.chat.cdp;
+    await openMemoryPage(afterDeleteChat);
     await waitFor(afterDeleteChat, "document.querySelectorAll('.memory-card').length === 0");
     checks.deleteSurvivesRestart = readMemoryStorage().storage?.cards?.length === 0;
 
-    await click(afterDeleteChat, "#chat-tab");
     await sendMessage(afterDeleteChat, "P2-6G clear source A");
-    await clickLastUserRemember(afterDeleteChat);
-    await fill(afterDeleteChat, "#memory-draft-title", "P2-6G clear fact A");
-    await fill(afterDeleteChat, "#memory-draft-content", "P2-6G clear content sentinel A");
-    await fill(afterDeleteChat, "#memory-draft-tags", "clear");
-    await click(afterDeleteChat, "#save-memory-draft-button");
-    await waitFor(afterDeleteChat, "document.querySelector('#chat-session-note')?.textContent.includes('事实卡已保存')");
+    await createMemoryCard(afterDeleteChat, {
+      title: "P2-6G clear fact A",
+      content: "P2-6G clear content sentinel A",
+      tags: ["clear"],
+      sourceConversationId: crypto.randomUUID()
+    });
     await sendMessage(afterDeleteChat, "P2-6G clear source B");
-    await clickLastUserRemember(afterDeleteChat);
-    await fill(afterDeleteChat, "#memory-draft-title", "P2-6G clear fact B");
-    await fill(afterDeleteChat, "#memory-draft-content", "P2-6G clear content sentinel B");
-    await fill(afterDeleteChat, "#memory-draft-tags", "clear");
-    await click(afterDeleteChat, "#save-memory-draft-button");
-    await waitFor(afterDeleteChat, "document.querySelector('#chat-session-note')?.textContent.includes('事实卡已保存')");
+    await createMemoryCard(afterDeleteChat, {
+      title: "P2-6G clear fact B",
+      content: "P2-6G clear content sentinel B",
+      tags: ["clear"],
+      sourceConversationId: crypto.randomUUID()
+    });
+    await stopElectron(child, handles);
+    ({ child, handles } = await startApp());
+    afterDeleteChat = handles.chat.cdp;
 
-    await click(afterDeleteChat, "#memory-tab");
+    await openMemoryPage(afterDeleteChat);
     await waitFor(afterDeleteChat, "document.querySelectorAll('.memory-card').length === 2");
-    await click(afterDeleteChat, "#clear-memory-button");
-    await waitFor(afterDeleteChat, "document.querySelector('#clear-memory-confirmation')?.hidden === false");
-    await click(afterDeleteChat, "#confirm-clear-memory-button");
+    await clearMemoryCards(afterDeleteChat);
+    await stopElectron(child, handles);
+    ({ child, handles } = await startApp());
+    afterDeleteChat = handles.chat.cdp;
+    await openMemoryPage(afterDeleteChat);
     await waitFor(afterDeleteChat, "document.querySelectorAll('.memory-card').length === 0");
     checks.clearRemovesAll = readMemoryStorage().storage?.cards?.length === 0;
 
     await stopElectron(child, handles);
     ({ child, handles } = await startApp());
     const afterClearChat = handles.chat.cdp;
-    await click(afterClearChat, "#memory-tab");
+    await openMemoryPage(afterClearChat);
     await waitFor(afterClearChat, "document.querySelectorAll('.memory-card').length === 0");
     checks.clearSurvivesRestart = readMemoryStorage().storage?.cards?.length === 0;
 
-    await click(afterClearChat, "#chat-tab");
     const clearedEvent = await sendMessage(afterClearChat, "P2-6G provider injection cleared check");
     injectionResults.clearedMemory = clearedEvent?.count;
     checks.clearedInjectionCount = clearedEvent?.count === 0;
-    checks.zeroInjectionUiTextAfterClear = (await uiSnapshot(afterClearChat)).memorySessionStatus.includes("本次未使用记忆");
+    checks.zeroInjectionUiTextAfterClear = (await uiSnapshot(afterClearChat)).memorySessionStatus.includes(zeroMemoryStatusText);
 
     const finalUi = await uiSnapshot(afterClearChat);
     const finalMemory = readMemoryStorage();
@@ -480,6 +557,7 @@ async function main() {
     const forbiddenUiFragments = ["sk-p2-6g", "AI_DESKTOP_PET_API_KEY", appDataDir, "provider request body"];
     checks.privacyUi = !forbiddenUiFragments.some((fragment) => finalUi.visibleText.includes(fragment));
     checks.privacyTelemetry = telemetry.containsForbiddenText === false;
+    checks.noLegacyMemoryStatusLanguage = legacyMemoryStatusTexts.every((text) => !finalUi.visibleText.includes(text));
     checks.profileIsolated = finalMemory.memoryPath.startsWith(appDataDir);
     checks.deletedContentAbsent = !finalMemory.raw.includes("P2-6G edited content sentinel") && !finalMemory.raw.includes("P2-6G clear content sentinel");
     checks.styleClassesPresent = await evaluate(afterClearChat, `

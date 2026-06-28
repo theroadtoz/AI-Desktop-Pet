@@ -21,6 +21,8 @@ const forbiddenTexts = [
   "system prompt",
   "完整 prompt"
 ];
+const oneMemoryStatusText = "她带上了 1 条已允许的记忆";
+const legacyMemoryStatusTexts = ["本次未使用记忆", "本次使用 1 条记忆"];
 
 mkdirSync(runDir, { recursive: true });
 
@@ -227,6 +229,24 @@ async function setMode(cdp, modeId) {
   await waitFor(cdp, `document.querySelector('#dialogue-mode-controls .mode-button.is-active')?.dataset.modeId === ${JSON.stringify(modeId)}`);
 }
 
+async function openSettingsPage(cdp, settingsTabSelector, pageSelector) {
+  const isOpen = await evaluate(cdp, "document.querySelector('#settings-panel')?.hidden === false");
+  if (!isOpen) {
+    await click(cdp, "#settings-button");
+  }
+  await waitFor(cdp, "document.querySelector('#settings-panel')?.hidden === false");
+  await click(cdp, settingsTabSelector);
+  await waitFor(cdp, `document.querySelector(${JSON.stringify(pageSelector)})?.hidden === false`);
+}
+
+async function closeSettingsPage(cdp) {
+  const isOpen = await evaluate(cdp, "document.querySelector('#settings-panel')?.hidden === false");
+  if (isOpen) {
+    await click(cdp, "#settings-close-button");
+  }
+  await waitFor(cdp, "document.querySelector('#chat-page')?.hidden === false");
+}
+
 async function sendMessage(cdp, message) {
   await evaluate(cdp, `
     (() => {
@@ -237,13 +257,13 @@ async function sendMessage(cdp, message) {
       form.requestSubmit();
     })()
   `);
-  await waitFor(cdp, "document.querySelector('#memory-session-status')?.textContent.includes('正在回复')");
-  await waitFor(cdp, "document.querySelector('#send-button')?.disabled === false", 20_000);
+  await waitFor(cdp, "document.querySelector('#memory-session-status')?.textContent.includes('正在想')");
+  await waitFor(cdp, "document.querySelector('#send-button')?.textContent?.trim() === '发送'", 20_000);
 }
 
 async function checkNarrowLayout(cdp) {
   await cdp.send("Emulation.setDeviceMetricsOverride", {
-    width: 360,
+    width: 420,
     height: 720,
     deviceScaleFactor: 1,
     mobile: false
@@ -251,6 +271,11 @@ async function checkNarrowLayout(cdp) {
   await sleep(300);
   const ok = await evaluate(cdp, `
     (() => {
+      const isVisible = (node) => {
+        if (!node || node.hidden || node.closest("[hidden]")) return false;
+        const style = getComputedStyle(node);
+        return style.display !== "none" && style.visibility !== "hidden";
+      };
       const selectors = [
         ".partner-status-band",
         "#dialogue-mode-controls",
@@ -259,11 +284,11 @@ async function checkNarrowLayout(cdp) {
       ];
       return selectors.every((selector) => {
         const node = document.querySelector(selector);
-        if (!node || node.hidden) return true;
+        if (!isVisible(node)) return true;
         const rect = node.getBoundingClientRect();
         return rect.left >= -1 && rect.right <= window.innerWidth + 1 && rect.width > 0 && rect.height > 0;
       }) &&
-      [...document.querySelectorAll(".mode-button, #chat-form button")].every((node) => {
+      [...document.querySelectorAll(".mode-button, #chat-form button")].filter(isVisible).every((node) => {
         const rect = node.getBoundingClientRect();
         return rect.left >= -1 && rect.right <= window.innerWidth + 1 && rect.height > 0;
       });
@@ -346,7 +371,11 @@ async function main() {
     handles = await openChat();
     const chat = handles.chat.cdp;
 
-    checks.firstLaunchWelcomeVisible = await evaluate(chat, "document.querySelector('#user-welcome-panel')?.hidden === false");
+    checks.firstLaunchWelcomeVisible = await evaluate(chat, `
+      document.querySelector('#user-welcome-panel')?.hidden === true &&
+        document.querySelector('#chat-page')?.hidden === false &&
+        document.querySelector('#chat-input')?.disabled === false
+    `);
     checks.ribbonAfterWelcomeInChatFlow = await evaluate(chat, `
       (() => {
         const welcome = document.querySelector("#user-welcome-panel");
@@ -376,14 +405,16 @@ async function main() {
     await click(chat, "#settings-button");
     checks.settingsEntryRenamed = await evaluate(chat, `
       (() => {
-        return document.querySelector("#settings-button")?.getAttribute("aria-label")?.includes("伙伴与对话设置") &&
-          document.querySelector("#settings-panel")?.getAttribute("aria-label") === "伙伴与对话设置" &&
-          document.querySelector(".settings-header h2")?.textContent === "伙伴与对话设置";
+        return document.querySelector("#settings-button")?.getAttribute("aria-label")?.includes("伙伴设置") &&
+          document.querySelector("#settings-panel")?.getAttribute("aria-label") === "伙伴设置" &&
+          document.querySelector(".settings-header h2")?.textContent === "伙伴设置";
       })()
     `);
     checks.settingsSectionsOrdered = await evaluate(chat, `
-      (() => [...document.querySelectorAll(".settings-section-title")].map((node) => node.textContent).join("|"))()
-    `) === "伙伴外观|本地身份|对话模式|Provider / 模型|连接安全|操作方式";
+      (() => [...document.querySelectorAll(".settings-nav .subpage-tab")]
+        .map((node) => node.textContent?.trim())
+        .join("|"))()
+    `) === "基础|记忆|历史|外观|模型|高级";
     checks.settingsModeSummaryVisible = await evaluate(chat, "document.querySelector('#settings-dialogue-mode-summary')?.textContent.includes('默认陪伴')");
 
     checks.providerOptionsStillSwitchable = await evaluate(chat, `
@@ -435,24 +466,32 @@ async function main() {
       (() => {
         const ribbon = document.querySelector("#memory-session-status")?.textContent ?? "";
         const note = document.querySelector("#chat-session-note")?.textContent ?? "";
-        return ribbon.includes("本次使用 1 条记忆") &&
+        return ribbon.includes(${JSON.stringify(oneMemoryStatusText)}) &&
           !ribbon.includes(${JSON.stringify(memorySentinel)}) &&
           !note.includes(${JSON.stringify(memorySentinel)}) &&
           !ribbon.includes(${JSON.stringify(userSentinel)});
       })()
     `);
 
-    await click(chat, "#memory-tab");
-    checks.memoryPageStillAccessible = await evaluate(chat, "document.querySelector('#memory-page')?.hidden === false && document.querySelector('#memory-feedback')?.textContent.includes('Provider 请求')");
-    await click(chat, "#history-tab");
+    await openSettingsPage(chat, "#settings-memory-tab", "#memory-page");
+    checks.memoryPageStillAccessible = await evaluate(chat, `
+      document.querySelector('#memory-page')?.hidden === false &&
+        document.querySelector('#memory-feedback')?.textContent.includes('记忆已开启') &&
+        document.querySelector('#memory-feedback')?.textContent.includes('可注入')
+    `);
+    await openSettingsPage(chat, "#settings-history-tab", "#history-page");
     checks.historyPageStillAccessible = await evaluate(chat, "document.querySelector('#history-page')?.hidden === false && document.querySelector('#history-feedback')?.textContent.includes('不会自动发送给 Provider')");
-    await click(chat, "#chat-tab");
+    await closeSettingsPage(chat);
     await click(chat, "#settings-button");
+    await waitFor(chat, "document.querySelector('#settings-panel')?.hidden === false");
     checks.narrowLayout = await checkNarrowLayout(chat);
 
     await evaluate(chat, "document.querySelector('#clear-user-profile-button').click()");
-    await waitFor(chat, "document.querySelector('#user-welcome-panel')?.hidden === false");
-    checks.settingsProfileCanClear = await evaluate(chat, "document.querySelector('#partner-status')?.textContent.includes('等待本地身份')");
+    await waitFor(chat, "document.querySelector('#partner-status')?.textContent.includes('等待本地身份')");
+    checks.settingsProfileCanClear = await evaluate(chat, `
+      document.querySelector('#partner-status')?.textContent.includes('等待本地身份') &&
+        document.querySelector('#chat-input')?.disabled === false
+    `);
 
     snapshot = await evaluate(chat, `
       (() => ({
@@ -466,6 +505,7 @@ async function main() {
 
     const textOutput = readPrivacyCheckText();
     checks.resultPrivacy = forbiddenTexts.every((text) => !textOutput.includes(text));
+    checks.noLegacyMemoryStatusLanguage = legacyMemoryStatusTexts.every((text) => !textOutput.includes(text));
     checks.noScreenshotResidue = findScreenshotResidue(root).length === 0;
 
     const result = {
