@@ -785,20 +785,6 @@ function appendMessage(message: ChatMessage): HTMLElement {
   content.textContent = message.content;
   item.append(role, content);
 
-  if (message.role === "user") {
-    const actions = document.createElement("span");
-    actions.className = "message-actions";
-    const rememberButton = document.createElement("button");
-    rememberButton.className = "button-light message-action";
-    rememberButton.type = "button";
-    rememberButton.textContent = "记住这点";
-    rememberButton.addEventListener("click", () => {
-      openMemoryDraft(message);
-    });
-    actions.append(rememberButton);
-    item.append(actions);
-  }
-
   messageList.append(item);
   messageList.scrollTop = messageList.scrollHeight;
   return item;
@@ -2084,6 +2070,10 @@ window.chatApi?.onReplyError((error) => {
 
   const wasAborted = error.errorType === "aborted";
   finishReplying(error.requestVersion, wasAborted ? "已中断" : "回复失败");
+  setChatSessionNote(
+    error.message || (wasAborted ? "已中断。" : "回复失败；请检查连接或稍后重试。"),
+    wasAborted ? "fallback" : "error"
+  );
 });
 
 window.chatApi?.onMemoryInjection((payload) => {

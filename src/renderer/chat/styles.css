@@ -708,17 +708,6 @@ body {
   font-style: italic;
 }
 
-.message-actions {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: 8px;
-}
-
-.message-action {
-  padding: 6px 10px;
-  font-size: 12px;
-}
-
 .message-user {
   align-self: flex-end;
   background: #654321;

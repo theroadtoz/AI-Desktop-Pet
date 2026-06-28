@@ -67,7 +67,6 @@ import {
   createProviderConfigStore,
   createProviderTelemetryPayload,
   DEFAULT_PROVIDER_CONFIG,
-  FAKE_PROVIDER_CONFIG,
   type ProviderConfigStore
 } from "./services/config/provider-config-store";
 import { createSecureKeyStore, type SecureKeyStore } from "./services/config/secure-key-store";
@@ -664,6 +663,14 @@ function getChatErrorType(error: unknown): ChatStreamErrorType {
   }
 
   if (error instanceof Error) {
+    if (error.name === "provider_missing_api_key") {
+      return "missing_api_key";
+    }
+
+    if (error.name === "provider_invalid_config") {
+      return "invalid_config";
+    }
+
     if (error.name === "provider_auth_failed") {
       return "auth_failed";
     }
@@ -736,6 +743,14 @@ function getChatErrorMessage(errorType: ChatStreamErrorType): string {
 
   if (errorType === "busy") {
     return "回复仍在生成中。";
+  }
+
+  if (errorType === "missing_api_key") {
+    return "当前不会调用真实模型：请先配置 API Key，或切换到本地 Ollama。";
+  }
+
+  if (errorType === "invalid_config") {
+    return "当前不会调用真实模型：Provider 配置无效，请检查模型设置。";
   }
 
   if (errorType === "auth_failed") {
@@ -922,8 +937,8 @@ app.whenReady().then(async () => {
 
     if (!baseURLHost) {
       return {
-        providerId: "fake",
-        displayName: FAKE_PROVIDER_CONFIG.displayName,
+        providerId: config.providerId,
+        displayName: config.displayName,
         model: config.model,
         hasApiKey: keyConfigured,
         isFallback: true,
@@ -933,8 +948,8 @@ app.whenReady().then(async () => {
 
     if (!isLocalProvider && !keyConfigured) {
       return {
-        providerId: "fake",
-        displayName: FAKE_PROVIDER_CONFIG.displayName,
+        providerId: config.providerId,
+        displayName: config.displayName,
         model: config.model,
         baseURLHost,
         hasApiKey: false,

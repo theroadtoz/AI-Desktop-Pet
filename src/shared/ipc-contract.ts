@@ -47,6 +47,8 @@ export type ChatStreamDonePayload = ChatProviderResult & { requestVersion: numbe
 export type ChatStreamErrorType =
   | "aborted"
   | "busy"
+  | "missing_api_key"
+  | "invalid_config"
   | "auth_failed"
   | "rate_limited"
   | "server_error"

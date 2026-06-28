@@ -29,14 +29,14 @@ const PRESENCE_MODE_LABELS: Readonly<Record<PresenceModeId, string>> = {
 export function formatProviderStatus(status: ProviderStatus): string {
   if (status.isFallback) {
     if (status.reason === "missing_api_key") {
-      return `开发回退：未配置 API Key${status.model ? ` · ${status.model}` : ""}`;
+      return `模型未就绪：未配置 API Key，当前不会调用真实模型${status.model ? ` · ${status.model}` : ""}`;
     }
 
     if (status.reason === "invalid_config") {
-      return "开发回退：provider 配置无效";
+      return "模型未就绪：Provider 配置无效，当前不会调用真实模型";
     }
 
-    return "开发回退：Fake Provider";
+    return "模型未就绪：当前不会调用真实模型";
   }
 
   if (status.providerId === "openai-compatible") {
@@ -59,7 +59,7 @@ export function formatProviderStatus(status: ProviderStatus): string {
     return parts.join(" · ");
   }
 
-  return "开发模式：Fake Provider";
+  return "开发模式：Fake Provider（不会调用真实模型）";
 }
 
 export function formatProviderHealthResult(result: ProviderHealthResult): string {

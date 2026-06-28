@@ -15,7 +15,7 @@ test("provider status keeps fake, cloud, local, and fallback wording", () => {
     providerId: "fake",
     displayName: "Fake Provider",
     isFallback: false
-  }), "开发模式：Fake Provider");
+  }), "开发模式：Fake Provider（不会调用真实模型）");
   assert.equal(formatProviderStatus({
     providerId: "openai-compatible",
     displayName: "DeepSeek",
@@ -31,12 +31,19 @@ test("provider status keeps fake, cloud, local, and fallback wording", () => {
     isFallback: false
   }), "本地模型：qwen3.5:2b-q4_K_M · localhost:11434");
   assert.equal(formatProviderStatus({
-    providerId: "fake",
-    displayName: "Fake Provider",
+    providerId: "openai-compatible",
+    displayName: "DeepSeek",
     model: "deepseek-v4-flash",
     isFallback: true,
     reason: "missing_api_key"
-  }), "开发回退：未配置 API Key · deepseek-v4-flash");
+  }), "模型未就绪：未配置 API Key，当前不会调用真实模型 · deepseek-v4-flash");
+  assert.equal(formatProviderStatus({
+    providerId: "local-openai-compatible",
+    displayName: "Ollama 本地模型",
+    model: "qwen3.5:2b-q4_K_M",
+    isFallback: true,
+    reason: "invalid_config"
+  }), "模型未就绪：Provider 配置无效，当前不会调用真实模型");
 });
 
 test("provider health result wording stays stable", () => {

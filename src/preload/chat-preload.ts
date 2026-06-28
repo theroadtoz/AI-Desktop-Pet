@@ -48,6 +48,8 @@ const presenceModeViews: readonly PresenceModeView[] = [
 const chatStreamErrorTypes = [
   "aborted",
   "busy",
+  "missing_api_key",
+  "invalid_config",
   "auth_failed",
   "rate_limited",
   "server_error",

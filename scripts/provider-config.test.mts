@@ -18,6 +18,15 @@ const {
 } = require("../dist/main/services/config/env-config.js") as typeof import("../src/main/services/config/env-config");
 
 const emptyEnvCwd = join(process.cwd(), ".tmp-does-not-exist-for-provider-config-tests");
+const minimalChatRequest = {
+  requestVersion: 1,
+  conversationId: "00000000-0000-4000-8000-000000000001",
+  messages: [{
+    id: "00000000-0000-4000-8000-000000000002",
+    role: "user" as const,
+    content: "你好"
+  }]
+};
 
 test("default provider config recommends explicit local Ollama path", () => {
   assert.deepEqual(DEFAULT_PROVIDER_CONFIG, {
@@ -137,7 +146,7 @@ test("provider factory does not require real api key for local provider", () => 
   assert.equal(provider.id, "local-openai-compatible");
 });
 
-test("provider factory keeps fake and cloud provider fallback behavior", () => {
+test("provider factory keeps explicit fake but blocks unavailable real providers", async () => {
   const fakeProvider = createChatProviderFromConfig({
     config: { providerId: "fake", displayName: "Fake Provider" },
     getApiKey() {
@@ -159,6 +168,20 @@ test("provider factory keeps fake and cloud provider fallback behavior", () => {
       return null;
     }
   });
+  const invalidLocalProvider = createChatProviderFromConfig({
+    config: {
+      providerId: "local-openai-compatible",
+      displayName: "Ollama 本地模型",
+      baseURL: "not a url",
+      model: "qwen3.5:2b-q4_K_M",
+      temperature: 0.7,
+      maxTokens: 240,
+      timeoutMs: 60000
+    },
+    getApiKey() {
+      throw new Error("local provider must not request a stored key");
+    }
+  });
   const cloudProvider = createChatProviderFromConfig({
     config: {
       providerId: "openai-compatible",
@@ -176,6 +199,21 @@ test("provider factory keeps fake and cloud provider fallback behavior", () => {
   });
 
   assert.equal(fakeProvider.id, "fake");
-  assert.equal(missingKeyProvider.id, "fake");
+  assert.equal(missingKeyProvider.id, "openai-compatible");
+  assert.equal(invalidLocalProvider.id, "local-openai-compatible");
   assert.equal(cloudProvider.id, "openai-compatible");
+  await assert.rejects(
+    missingKeyProvider.streamReply(minimalChatRequest, {
+      signal: new AbortController().signal,
+      onDelta() {}
+    }),
+    { name: "provider_missing_api_key" }
+  );
+  await assert.rejects(
+    invalidLocalProvider.streamReply(minimalChatRequest, {
+      signal: new AbortController().signal,
+      onDelta() {}
+    }),
+    { name: "provider_invalid_config" }
+  );
 });
