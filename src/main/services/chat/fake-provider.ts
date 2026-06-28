@@ -74,7 +74,12 @@ export function createFakeChatProvider(): ChatProvider {
 function createFakeReply(request: ChatRequest): ChatProviderResult {
   const latestUserMessage = getLatestUserMessage(request.messages);
   const classification = classifyEmotion({ latestUserMessage });
+  const relevanceReply = createRelevanceReply(request, latestUserMessage, classification);
   const qualityReply = createQualityReply(request, latestUserMessage, classification);
+
+  if (relevanceReply) {
+    return relevanceReply;
+  }
 
   if (qualityReply) {
     return qualityReply;
@@ -132,6 +137,65 @@ function createQualityReply(
   return null;
 }
 
+function createRelevanceReply(
+  request: ChatRequest,
+  latestUserMessage: string,
+  classification: ReturnType<typeof classifyEmotion>
+): ChatProviderResult | null {
+  if (asksAboutLocalModelReadiness(latestUserMessage)) {
+    return {
+      text: "本地模型要看设置里的连接状态；如果 Ollama 不可达或模型缺失，我不会用固定陪聊冒充真实模型回复。",
+      ...classification
+    };
+  }
+
+  if (asksFollowUp(latestUserMessage)) {
+    const previousUserMessage = getPreviousUserMessage(request.messages);
+
+    if (/TypeScript|Python|脚本|桌宠/.test(previousUserMessage)) {
+      return {
+        text: "接着刚才的 TypeScript/Python 选择说：桌宠项目里优先 TypeScript，临时脚本再考虑 Python。",
+        ...classification
+      };
+    }
+
+    return {
+      text: "我会接着刚才那个问题说；如果你指的是别的对象，再把关键词补给我就好。",
+      ...classification
+    };
+  }
+
+  if (asksForPetOperation(latestUserMessage)) {
+    return {
+      text: "这属于应用内能力或边界：请在设置里的模型、记忆或动作页确认；未授权或未就绪时我不会假装已经完成。",
+      ...classification
+    };
+  }
+
+  if (hasMultipleIntentions(latestUserMessage)) {
+    return {
+      text: "我听见你有点焦虑，也先给今晚一步：把最卡的那件事列出来，只做一个可检查的小动作。",
+      ...classification
+    };
+  }
+
+  if (sharesSpecificEmotionalReason(latestUserMessage)) {
+    return {
+      text: "评审没过当然会难受。先把被指出的一个具体问题记下来，今晚不急着全盘否定自己。",
+      ...classification
+    };
+  }
+
+  if (asksDirectPlanningQuestion(latestUserMessage)) {
+    return {
+      text: "复盘可以从三行开始：发生了什么、卡在哪里、下一次先改哪一步。",
+      ...classification
+    };
+  }
+
+  return null;
+}
+
 function asksForDetail(message: string): boolean {
   return /详细|展开|讲讲|说明|说细/.test(message);
 }
@@ -146,6 +210,53 @@ function asksForUnknownMemory(message: string): boolean {
 
 function asksForSavedPreference(message: string): boolean {
   return /我喜欢什么|我的偏好|我常用什么|我爱用什么/.test(message);
+}
+
+function asksDirectPlanningQuestion(message: string): boolean {
+  return /怎么复盘|复盘.*从哪|从哪.*复盘|如何复盘/.test(message);
+}
+
+function sharesSpecificEmotionalReason(message: string): boolean {
+  return /(评审|面试|考试|提交|项目).*(没过|失败|被否|砸了|退回)/.test(message) ||
+    /因为.*(难受|失落|沮丧|焦虑)/.test(message);
+}
+
+function asksForPetOperation(message: string): boolean {
+  return /(设置|切到|打开|关闭|记忆|动作|模型|Ollama|本地模型)/.test(message);
+}
+
+function asksFollowUp(message: string): boolean {
+  return /那这个呢|刚才那个|这个呢|那它呢|刚刚那个/.test(message);
+}
+
+function hasMultipleIntentions(message: string): boolean {
+  return /(焦虑|难受|有点慌|烦).*(建议|怎么办|哪一步|帮我)|((建议|怎么办|哪一步|帮我).*(焦虑|难受|有点慌|烦))/.test(message);
+}
+
+function asksAboutLocalModelReadiness(message: string): boolean {
+  return /(本地模型|Ollama|LM Studio).*(没装|未就绪|不可达|缺失|连不上|没启动)/.test(message) ||
+    /固定陪聊.*真实模型|冒充真实模型/.test(message);
+}
+
+function getPreviousUserMessage(messages: readonly ChatMessage[]): string {
+  let foundLatestUserMessage = false;
+
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+
+    if (message?.role !== "user") {
+      continue;
+    }
+
+    if (!foundLatestUserMessage) {
+      foundLatestUserMessage = true;
+      continue;
+    }
+
+    return message.content;
+  }
+
+  return "";
 }
 
 function stableIndex(seed: string, length: number): number {
