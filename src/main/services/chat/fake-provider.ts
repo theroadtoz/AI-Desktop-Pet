@@ -16,9 +16,9 @@ const REPLIES: Readonly<Record<EmotionTag, string>> = {
 
 const REPLY_VARIANTS: Readonly<Record<EmotionTag, readonly string[]>> = {
   neutral: [
-    "我在这儿。我们先把最重要的一点抓住。",
-    "嗯，我听着。先把它拆成一小步就好。",
-    "可以，先不急，我陪你把线头理出来。"
+    "我们先把最重要的一点抓住。",
+    "先把它拆成一小步就好。",
+    "我陪你把线头理出来。"
   ],
   happy: [
     "听起来很不错，我也跟着开心起来了。",
@@ -26,7 +26,7 @@ const REPLY_VARIANTS: Readonly<Record<EmotionTag, readonly string[]>> = {
     "太好了。先把这份顺利稳稳接住。"
   ],
   sad: [
-    "我在这里。难过的时候可以先慢一点说。",
+    "难过的时候可以先慢一点说。",
     "听起来有点沉。你可以先说最难受的那一小块。",
     "先缓一缓也没关系，我会认真听。"
   ],
@@ -36,7 +36,7 @@ const REPLY_VARIANTS: Readonly<Record<EmotionTag, readonly string[]>> = {
     "嗯，这一下信息量不小。你先说，我跟上。"
   ],
   confused: [
-    "我有点没完全理解，我们可以一步一步来。",
+    "这里还没完全清楚，我们可以一步一步来。",
     "这里可能有点绕。我们先把问题说成一句话。",
     "没关系，先从你最不确定的地方开始。"
   ],
@@ -77,6 +77,7 @@ function createFakeReply(request: ChatRequest): ChatProviderResult {
   const commonSenseReply = createCurrentTimeOrCommonSenseReply(request, latestUserMessage, classification);
   const relevanceReply = createRelevanceReply(request, latestUserMessage, classification);
   const qualityReply = createQualityReply(request, latestUserMessage, classification);
+  const dailyCompanionReply = createDailyCompanionReply(latestUserMessage, classification);
 
   if (commonSenseReply) {
     return commonSenseReply;
@@ -90,16 +91,48 @@ function createFakeReply(request: ChatRequest): ChatProviderResult {
     return qualityReply;
   }
 
+  if (dailyCompanionReply) {
+    return dailyCompanionReply;
+  }
+
   const variants = REPLY_VARIANTS[classification.emotion] ?? [REPLIES[classification.emotion]];
-  const variantIndex = stableIndex(`${request.conversationId}:${latestUserMessage.length}`, variants.length);
+  const variantIndex = stableIndex(`${request.conversationId}:${latestUserMessage}`, variants.length);
   const modeId = parseDialogueModeId(request.dialogueStyleContext?.modeId) ?? DEFAULT_DIALOGUE_MODE_ID;
   const prefixes = MODE_PREFIXES[modeId];
-  const prefix = prefixes[stableIndex(`${request.conversationId}:${modeId}:${latestUserMessage.length}`, prefixes.length)] ?? "";
+  const prefix = prefixes[stableIndex(`${request.conversationId}:${modeId}:${latestUserMessage}`, prefixes.length)] ?? "";
 
   return {
     text: `${prefix}${variants[variantIndex] ?? REPLIES[classification.emotion]}`,
     ...classification
   };
+}
+
+function createDailyCompanionReply(
+  latestUserMessage: string,
+  classification: ReturnType<typeof classifyEmotion>
+): ChatProviderResult | null {
+  if (/随便聊|聊两句|闲聊/.test(latestUserMessage)) {
+    return {
+      text: "嗯，我在。可以随便聊两句，先从今天最占心的一件小事开始。",
+      ...classification
+    };
+  }
+
+  if (/茶|咖啡|脑子.*散|有点散/.test(latestUserMessage)) {
+    return {
+      text: "茶先放在手边就好。脑子散的时候，我们只抓一个线头。",
+      ...classification
+    };
+  }
+
+  if (/下午.*空|今天.*空|有点空|没什么事/.test(latestUserMessage)) {
+    return {
+      text: "这个下午可以空一点。先留十分钟，再决定要不要做一小步。",
+      ...classification
+    };
+  }
+
+  return null;
 }
 
 function createCurrentTimeOrCommonSenseReply(
@@ -289,7 +322,7 @@ function asksDirectPlanningQuestion(message: string): boolean {
 }
 
 function sharesSpecificEmotionalReason(message: string): boolean {
-  return /(评审|面试|考试|提交|项目).*(没过|失败|被否|砸了|退回)/.test(message) ||
+  return /(评审|面试|考试|提交|项目).*(没过|失败|被否|砸了|退回|打回|被打回)/.test(message) ||
     /因为.*(难受|失落|沮丧|焦虑)/.test(message);
 }
 

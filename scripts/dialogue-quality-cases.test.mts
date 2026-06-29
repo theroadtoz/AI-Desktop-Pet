@@ -92,6 +92,22 @@ test("quality case: catchphrases do not repeat across ordinary turns", async () 
   assert.equal(new Set(replies.map((reply) => reply.text)).size > 1, true);
 });
 
+test("quality case: ordinary daily replies vary without stacked openings", async () => {
+  const replies = await Promise.all([
+    streamFakeReply("quality-daily-a", "今天就想随便聊两句"),
+    streamFakeReply("quality-daily-b", "我刚泡了杯茶，脑子有点散"),
+    streamFakeReply("quality-daily-c", "这个下午有点空")
+  ]);
+  const combined = replies.map((reply) => reply.text).join("\n");
+
+  assertNoForbiddenPatterns(combined);
+  assert.equal(new Set(replies.map((reply) => reply.text)).size, replies.length);
+  for (const reply of replies) {
+    assert.ok(reply.text.length <= 70);
+    assert.doesNotMatch(reply.text, /^(我听到了。|嗯，我在。)(我在这儿|嗯，我听着|可以，先不急)/);
+  }
+});
+
 test("quality case: persona and style prompts preserve modern witch boundaries", () => {
   const mapped = mapChatMessagesToOpenAICompatible([
     { id: crypto.randomUUID(), role: "user", content: "技术问题怎么排查" }

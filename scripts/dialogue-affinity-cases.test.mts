@@ -72,6 +72,18 @@ test("affinity reply case: emotional reply is warmer while keeping the concrete 
   assertNoForbiddenAffinity(reply.text);
 });
 
+test("affinity reply case: review setback gets a concrete next step", async () => {
+  const reply = await streamFakeReply("affinity-review-setback", [
+    userMessage("今天评审被打回来了，我不知道怎么继续")
+  ]);
+
+  assert.match(reply.text, /评审|打回/);
+  assert.match(reply.text, /继续|下一步|先/);
+  assert.match(reply.text, /具体问题|最小|一处|小步/);
+  assert.ok(reply.text.length <= 90);
+  assertNoForbiddenAffinity(reply.text);
+});
+
 test("affinity reply case: fact, current time, and common sense answers stay direct", async () => {
   const timeReply = await streamFakeReply("affinity-time", [userMessage("现在几点了？")], runtimeContext);
   const dateReply = await streamFakeReply("affinity-date", [userMessage("今天几号？")], runtimeContext);
