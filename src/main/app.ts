@@ -90,6 +90,11 @@ import { registerModelAssetProtocol } from "./services/model-asset-protocol";
 import { createPointerController, type PointerController } from "./services/pointer-controller";
 import { createShortcutRegistry, type ShortcutRegistry } from "./services/shortcut-registry";
 import { createTelemetryService, type TelemetryPayload, type TelemetryService } from "./services/telemetry";
+import {
+  createLlamaCppRuntime,
+  readLlamaCppRuntimeConfigFromEnv,
+  type LlamaCppRuntime
+} from "./services/local-runtime/llama-cpp-runtime";
 import { createChatWindow, focusChatInput, showChatWindow } from "./windows/chat-window";
 import { createPetWindow } from "./windows/pet-window";
 import { restorePetWindowOnTop } from "./windows/topmost-policy";
@@ -117,6 +122,7 @@ let presenceModeStore: PresenceModeStore | null = null;
 let shortcutPreferencesStore: ShortcutPreferencesStore | null = null;
 let userProfileStore: UserProfileStore | null = null;
 let shortcutRegistry: ShortcutRegistry | null = null;
+let llamaCppRuntime: LlamaCppRuntime | null = null;
 let currentPetPresentationPreferences: PetPresentationPreferences = DEFAULT_PET_PRESENTATION_PREFERENCES;
 let isChatInteractionActive = false;
 let petRoleSnapshot: PetRoleSnapshot = INITIAL_PET_ROLE_SNAPSHOT;
@@ -293,6 +299,50 @@ function ensurePetWindow(reason: string): BrowserWindow {
 
 function logTelemetry(type: string, payload: TelemetryPayload = {}): void {
   telemetry?.logEvent(type, payload);
+}
+
+function startLlamaCppRuntimeIfEnabled(): void {
+  const config = readLlamaCppRuntimeConfigFromEnv();
+
+  if (!config.enabled) {
+    return;
+  }
+
+  llamaCppRuntime = createLlamaCppRuntime(config);
+  void llamaCppRuntime.start()
+    .then((summary) => {
+      logTelemetry("llama_cpp_runtime_status", summary);
+    })
+    .catch(() => {
+      logTelemetry("llama_cpp_runtime_status", {
+        runtime: "llama.cpp",
+        enabled: true,
+        status: "error",
+        safeSummaryOnly: true
+      });
+    });
+}
+
+function stopLlamaCppRuntime(): void {
+  const runtime = llamaCppRuntime;
+
+  if (!runtime) {
+    return;
+  }
+
+  llamaCppRuntime = null;
+  void runtime.stop()
+    .then((summary) => {
+      logTelemetry("llama_cpp_runtime_stopped", summary);
+    })
+    .catch(() => {
+      logTelemetry("llama_cpp_runtime_stopped", {
+        runtime: "llama.cpp",
+        enabled: true,
+        status: "error",
+        safeSummaryOnly: true
+      });
+    });
 }
 
 function logPetTelemetry(event: { type: PetTelemetryEventType; payload?: unknown }): void {
@@ -919,6 +969,7 @@ app.whenReady().then(async () => {
   chatEngine = createChatEngine(createProviderFromCurrentConfig());
   logStartupInfo();
   registerModelAssetProtocol();
+  startLlamaCppRuntimeIfEnabled();
 
   ensurePetWindow("startup");
   chatWindow = createChatWindow();
@@ -1916,6 +1967,7 @@ app.on("window-all-closed", () => {
 });
 
 app.on("will-quit", () => {
+  stopLlamaCppRuntime();
   petPresentationPersistence?.flush();
   shortcutRegistry?.unregisterAll();
   shortcutRegistry = null;

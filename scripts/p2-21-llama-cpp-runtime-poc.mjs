@@ -1,52 +1,108 @@
-const providerId = "local-openai-compatible";
-const cli = parseArgs(process.argv.slice(2));
-const runtime = readNonEmpty(cli.runtime) ?? readNonEmpty(process.env.AI_DESKTOP_PET_READINESS_RUNTIME) ?? "ollama";
-const baseURL = readNonEmpty(cli.baseUrl) ?? readNonEmpty(process.env.AI_DESKTOP_PET_READINESS_BASE_URL) ?? "http://localhost:11434/v1";
-const model = readNonEmpty(cli.model) ?? readNonEmpty(process.env.AI_DESKTOP_PET_READINESS_MODEL) ?? "qwen3.5:2b-q4_K_M";
-const modelsTimeoutMs = readInteger(cli.modelsTimeoutMs) ?? readInteger(process.env.AI_DESKTOP_PET_READINESS_MODELS_TIMEOUT_MS) ?? 5_000;
-const chatTimeoutMs = readInteger(cli.chatTimeoutMs) ?? readInteger(process.env.AI_DESKTOP_PET_READINESS_CHAT_TIMEOUT_MS) ?? 60_000;
+import { createRequire } from "node:module";
+
+const require = createRequire(import.meta.url);
+const runtimeName = "llama.cpp";
+const defaultAlias = "ai-desktop-pet-local";
+const modelsTimeoutMs = 5_000;
+const chatTimeoutMs = 60_000;
+let runtimeModule;
+
+try {
+  runtimeModule = require("../dist/main/services/local-runtime/llama-cpp-runtime.js");
+} catch {
+  printSummary({
+    ok: false,
+    status: "script_failed",
+    runtime: runtimeName,
+    reason: "dist_runtime_missing"
+  });
+  process.exit(1);
+}
+
+const {
+  createLlamaCppRuntime,
+  readLlamaCppRuntimeConfigFromEnv
+} = runtimeModule;
 
 async function main() {
   const startedAt = Date.now();
-  const host = readBaseURLHost(baseURL);
-  const modelsCheck = await checkModels();
+  const cli = parseArgs(process.argv.slice(2));
+  const envConfig = readLlamaCppRuntimeConfigFromEnv(process.env);
+  const executablePath = readNonEmpty(cli.exe) ?? envConfig.executablePath;
+  const modelPath = readNonEmpty(cli.model) ?? envConfig.modelPath;
+  const alias = readNonEmpty(cli.alias) ?? envConfig.alias ?? defaultAlias;
+  const host = readNonEmpty(cli.host) ?? envConfig.host;
+  const port = readInteger(cli.port) ?? envConfig.port;
+  const ctxSize = readInteger(cli.ctxSize) ?? envConfig.ctxSize;
+  const runChat = cli.chat === true || process.env.AI_DESKTOP_PET_LLAMA_CPP_POC_CHAT === "1";
 
-  if (modelsCheck.status !== "ready") {
+  if (!executablePath || !modelPath) {
     printSummary({
-      ok: false,
-      status: modelsCheck.status,
-      providerId,
-      runtime,
-      model,
-      baseURLHost: host,
-      durationMs: Date.now() - startedAt,
-      modelsCheckMs: modelsCheck.durationMs,
-      modelCount: modelsCheck.modelCount,
-      reason: modelsCheck.reason
+      ok: true,
+      status: "skipped",
+      reason: "missing_local_paths",
+      runtime: runtimeName,
+      modelAlias: alias,
+      durationMs: Date.now() - startedAt
     });
     return;
   }
 
-  const chatCheck = await checkChat();
+  const runtime = createLlamaCppRuntime({
+    ...envConfig,
+    enabled: true,
+    executablePath,
+    modelPath,
+    ...(host ? { host } : {}),
+    ...(port ? { port } : {}),
+    ...(ctxSize ? { ctxSize } : {}),
+    alias
+  });
+
+  const startSummary = await runtime.start();
+  const baseURL = runtime.getBaseURL();
+  let modelsCheck = null;
+  let chatCheck = null;
+  let stopSummary = null;
+
+  try {
+    if (startSummary.status === "ready" && baseURL) {
+      modelsCheck = await checkModels(baseURL, alias);
+
+      if (modelsCheck.status === "ready" && runChat) {
+        chatCheck = await checkChat(baseURL, alias);
+      }
+    }
+  } finally {
+    stopSummary = await runtime.stop();
+  }
+
+  const status = startSummary.status !== "ready"
+    ? startSummary.status
+    : chatCheck?.status ?? modelsCheck?.status ?? "ready";
 
   printSummary({
-    ok: chatCheck.status === "ready",
-    status: chatCheck.status,
-    providerId,
-    runtime,
-    model,
-    baseURLHost: host,
+    ok: status === "ready",
+    status,
+    runtime: runtimeName,
+    modelAlias: alias,
+    baseURLHost: startSummary.baseURLHost,
     durationMs: Date.now() - startedAt,
-    modelsCheckMs: modelsCheck.durationMs,
-    chatCheckMs: chatCheck.durationMs,
-    modelCount: modelsCheck.modelCount,
-    firstTokenMs: chatCheck.firstTokenMs,
-    replyLength: chatCheck.replyLength,
-    reason: chatCheck.reason
+    startupMs: startSummary.startupMs,
+    healthStatus: startSummary.status,
+    modelsStatus: modelsCheck?.status,
+    modelsCheckMs: modelsCheck?.durationMs,
+    modelCount: modelsCheck?.modelCount,
+    chatStatus: chatCheck?.status,
+    chatCheckMs: chatCheck?.durationMs,
+    firstTokenMs: chatCheck?.firstTokenMs,
+    replyLength: chatCheck?.replyLength,
+    exitCode: stopSummary?.exitCode ?? startSummary.exitCode,
+    reason: startSummary.reason ?? chatCheck?.reason ?? modelsCheck?.reason
   });
 }
 
-async function checkModels() {
+async function checkModels(baseURL, alias) {
   const startedAt = Date.now();
 
   try {
@@ -57,7 +113,7 @@ async function checkModels() {
 
     if (!response.ok) {
       return {
-        status: "not_installed_or_unreachable",
+        status: "service_unreachable",
         durationMs: Date.now() - startedAt,
         reason: `models_http_${response.status}`
       };
@@ -67,27 +123,27 @@ async function checkModels() {
 
     if (!modelIds) {
       return {
-        status: "not_installed_or_unreachable",
+        status: "incompatible_response",
         durationMs: Date.now() - startedAt,
         reason: "models_response_incompatible"
       };
     }
 
     return {
-      status: modelIds.includes(model) ? "ready" : "model_missing",
+      status: modelIds.includes(alias) ? "ready" : "model_missing",
       durationMs: Date.now() - startedAt,
       modelCount: modelIds.length
     };
   } catch (error) {
     return {
-      status: "not_installed_or_unreachable",
+      status: "service_unreachable",
       durationMs: Date.now() - startedAt,
       reason: classifyFetchError(error)
     };
   }
 }
 
-async function checkChat() {
+async function checkChat(baseURL, alias) {
   const startedAt = Date.now();
 
   try {
@@ -97,7 +153,7 @@ async function checkChat() {
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        model,
+        model: alias,
         messages: [{ role: "user", content: "ping" }],
         temperature: 0.2,
         max_tokens: 32,
@@ -115,21 +171,14 @@ async function checkChat() {
 
     const stream = await readSseSummary(response.body, startedAt);
 
-    if (stream.replyLength <= 0) {
-      return {
-        status: "chat_failed",
-        durationMs: Date.now() - startedAt,
-        firstTokenMs: stream.firstTokenMs,
-        replyLength: stream.replyLength,
-        reason: stream.sawEvent ? "empty_chat_stream" : "incompatible_chat_stream"
-      };
-    }
-
     return {
-      status: "ready",
+      status: stream.replyLength > 0 ? "ready" : "chat_failed",
       durationMs: Date.now() - startedAt,
       firstTokenMs: stream.firstTokenMs,
-      replyLength: stream.replyLength
+      replyLength: stream.replyLength,
+      reason: stream.replyLength > 0
+        ? undefined
+        : stream.sawEvent ? "empty_chat_stream" : "incompatible_chat_stream"
     };
   } catch (error) {
     return {
@@ -190,6 +239,44 @@ async function readSseSummary(body, startedAt) {
   }
 }
 
+function parseArgs(args) {
+  const parsed = {};
+
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+
+    if (arg === "--chat") {
+      parsed.chat = true;
+      continue;
+    }
+    if (arg === "--no-chat") {
+      parsed.chat = false;
+      continue;
+    }
+
+    const inline = arg.match(/^--([^=]+)=(.*)$/);
+
+    if (inline) {
+      parsed[toCamelCase(inline[1])] = inline[2];
+      continue;
+    }
+
+    if (arg.startsWith("--")) {
+      const value = args[index + 1];
+      if (value && !value.startsWith("--")) {
+        parsed[toCamelCase(arg.slice(2))] = value;
+        index += 1;
+      }
+    }
+  }
+
+  return parsed;
+}
+
+function toCamelCase(value) {
+  return value.replace(/-([a-z])/g, (_match, letter) => letter.toUpperCase());
+}
+
 function parseModelIds(value) {
   if (!value || typeof value !== "object" || !Array.isArray(value.data)) {
     return null;
@@ -244,14 +331,6 @@ function createChatCompletionsURL(value) {
   return url;
 }
 
-function readBaseURLHost(value) {
-  try {
-    return new URL(value).host;
-  } catch {
-    return undefined;
-  }
-}
-
 function parseJson(value) {
   try {
     return JSON.parse(value);
@@ -266,37 +345,6 @@ function classifyFetchError(error) {
   }
 
   return "network_or_runtime_unreachable";
-}
-
-function parseArgs(args) {
-  const parsed = {};
-
-  for (let index = 0; index < args.length; index += 1) {
-    const arg = args[index];
-    const inline = arg.match(/^--([^=]+)=(.*)$/);
-
-    if (inline) {
-      parsed[toCamelCase(inline[1])] = inline[2];
-      continue;
-    }
-
-    if (!arg.startsWith("--")) {
-      continue;
-    }
-
-    const value = args[index + 1];
-
-    if (value && !value.startsWith("--")) {
-      parsed[toCamelCase(arg.slice(2))] = value;
-      index += 1;
-    }
-  }
-
-  return parsed;
-}
-
-function toCamelCase(value) {
-  return value.replace(/-([a-z])/g, (_match, letter) => letter.toUpperCase());
 }
 
 function readNonEmpty(value) {
@@ -328,11 +376,9 @@ function removeUndefined(value) {
 main().catch((error) => {
   printSummary({
     ok: false,
-    status: "chat_failed",
-    providerId,
-    runtime,
-    model,
-    baseURLHost: readBaseURLHost(baseURL),
+    status: "script_failed",
+    runtime: runtimeName,
     reason: error instanceof Error ? error.name : "unexpected_error"
   });
+  process.exitCode = 1;
 });
