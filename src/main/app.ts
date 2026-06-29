@@ -42,7 +42,7 @@ import {
   type PetRoleEvent,
   type PetRoleSnapshot
 } from "../shared/pet-role-state";
-import type { ProviderConfig, ProviderStatus } from "../shared/provider-config";
+import type { LocalOpenAICompatibleConfig, ProviderConfig, ProviderStatus } from "../shared/provider-config";
 import type { ProviderHealthCheckRequest } from "../shared/provider-health";
 import { createUserProfilePromptContext } from "../shared/user-profile";
 import {
@@ -95,6 +95,7 @@ import {
   readLlamaCppRuntimeConfigFromEnv,
   type LlamaCppRuntime
 } from "./services/local-runtime/llama-cpp-runtime";
+import { createLlamaCppProviderHandoff } from "./services/local-runtime/llama-cpp-provider-handoff";
 import { createChatWindow, focusChatInput, showChatWindow } from "./windows/chat-window";
 import { createPetWindow } from "./windows/pet-window";
 import { restorePetWindowOnTop } from "./windows/topmost-policy";
@@ -113,6 +114,7 @@ let chatEngine: ChatEngine | null = null;
 let providerConfigStore: ProviderConfigStore | null = null;
 let secureKeyStore: SecureKeyStore | null = null;
 let envProviderConfig: EnvProviderConfig | null = null;
+let managedLlamaCppProviderConfig: LocalOpenAICompatibleConfig | null = null;
 let petPresentationStore: PetPresentationStore | null = null;
 let petPresentationPersistence: PetPresentationPersistence | null = null;
 let historyStore: HistoryStore | null = null;
@@ -301,19 +303,44 @@ function logTelemetry(type: string, payload: TelemetryPayload = {}): void {
   telemetry?.logEvent(type, payload);
 }
 
-function startLlamaCppRuntimeIfEnabled(): void {
+function startLlamaCppRuntimeIfEnabled(options: {
+  refreshProvider?: () => void;
+} = {}): void {
   const config = readLlamaCppRuntimeConfigFromEnv();
 
   if (!config.enabled) {
     return;
   }
 
-  llamaCppRuntime = createLlamaCppRuntime(config);
-  void llamaCppRuntime.start()
+  const runtime = createLlamaCppRuntime(config);
+  llamaCppRuntime = runtime;
+  void runtime.start()
     .then((summary) => {
+      if (llamaCppRuntime !== runtime) {
+        return;
+      }
+
       logTelemetry("llama_cpp_runtime_status", summary);
+      const handoff = createLlamaCppProviderHandoff(summary, runtime.getBaseURL());
+
+      if (!handoff) {
+        if (managedLlamaCppProviderConfig) {
+          managedLlamaCppProviderConfig = null;
+          options.refreshProvider?.();
+        }
+        return;
+      }
+
+      managedLlamaCppProviderConfig = handoff.providerConfig;
+      logTelemetry("llama_cpp_provider_handoff", handoff.safeSummary);
+      options.refreshProvider?.();
     })
     .catch(() => {
+      if (llamaCppRuntime === runtime && managedLlamaCppProviderConfig) {
+        managedLlamaCppProviderConfig = null;
+        options.refreshProvider?.();
+      }
+
       logTelemetry("llama_cpp_runtime_status", {
         runtime: "llama.cpp",
         enabled: true,
@@ -331,6 +358,7 @@ function stopLlamaCppRuntime(): void {
   }
 
   llamaCppRuntime = null;
+  managedLlamaCppProviderConfig = null;
   void runtime.stop()
     .then((summary) => {
       logTelemetry("llama_cpp_runtime_stopped", summary);
@@ -969,7 +997,11 @@ app.whenReady().then(async () => {
   chatEngine = createChatEngine(createProviderFromCurrentConfig());
   logStartupInfo();
   registerModelAssetProtocol();
-  startLlamaCppRuntimeIfEnabled();
+  startLlamaCppRuntimeIfEnabled({
+    refreshProvider() {
+      chatEngine?.setProvider(createProviderFromCurrentConfig());
+    }
+  });
 
   ensurePetWindow("startup");
   chatWindow = createChatWindow();
@@ -1042,6 +1074,10 @@ app.whenReady().then(async () => {
         createProviderTelemetryPayload(envProviderConfig.providerConfig, "env")
       );
       return envProviderConfig.providerConfig;
+    }
+
+    if (managedLlamaCppProviderConfig) {
+      return managedLlamaCppProviderConfig;
     }
 
     return providerConfigStore?.getConfig() ?? DEFAULT_PROVIDER_CONFIG;
