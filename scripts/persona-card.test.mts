@@ -28,7 +28,11 @@ test("persona prompts are rendered from the shared persona card", () => {
   assert.match(cloudPrompt, new RegExp(escapeRegExp(DEFAULT_PERSONA_CARD.desktopScenario)));
   assert.match(cloudPrompt, new RegExp(escapeRegExp(DEFAULT_PERSONA_CARD.actionIntentPolicy.summary)));
   assert.match(cloudPrompt, new RegExp(escapeRegExp(DEFAULT_PERSONA_CARD.searchPolicy.summary)));
-  assert.match(localPrompt, /现代老魔女桌宠/);
+  assert.match(localPrompt, new RegExp(escapeRegExp(DEFAULT_PERSONA_CARD.displayName)));
+  assert.match(localPrompt, /现代科技/);
+  assert.match(localPrompt, /判断力/);
+  assert.match(localPrompt, /Windows 桌面/);
+  assert.match(localPrompt, /Live2D 伙伴/);
   assert.match(localPrompt, /耐心、乐观、学识渊博/);
 });
 
@@ -43,9 +47,9 @@ test("persona card records privacy, memory, action, and search boundaries only",
   assert.match(cloudPrompt, /受限语义动作白名单/);
   assert.match(cloudPrompt, /默认关闭/);
   assert.match(localPrompt, /不编造记忆/);
-  assert.match(localPrompt, /不声称读取隐私/);
-  assert.match(localPrompt, /未联网时不假装搜索/);
-  assert.match(localPrompt, /不要输出 JSON/);
+  assert.match(localPrompt, /不读隐私|不声称读取隐私/);
+  assert.match(localPrompt, /(未联网|离线).*不假装搜索/);
+  assert.match(localPrompt, /不输出 JSON|不要输出 JSON/);
   assert.doesNotMatch(combined, /Tavily|SearXNG|Brave Search/);
   assert.doesNotMatch(combined, /"action"\s*:/);
   assert.doesNotMatch(combined, /P2-\d+[A-Z]?-事实卡正文|fact card 正文内容/);

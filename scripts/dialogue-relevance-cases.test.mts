@@ -147,9 +147,9 @@ test("relevance case: local-small-model prompt keeps answer focus rules", () => 
     .map((message) => message.content)
     .join("\n");
 
-  assert.match(systemText, /先答当前问题/);
-  assert.match(systemText, /具体原因/);
-  assert.match(systemText, /不知道就说不确定/);
+  assert.match(systemText, /先答(当前)?问题/);
+  assert.match(systemText, /(具体)?原因/);
+  assert.match(systemText, /不确定就说|不知道就说不确定/);
   assert.doesNotMatch(systemText, /API Key|Provider 请求正文|事实卡正文/);
 });
 

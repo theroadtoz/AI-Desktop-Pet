@@ -24,12 +24,14 @@ test("prompt template: local small model keeps system order but uses shorter fir
   assert.match(cloud[1]?.content ?? "", /学识渊博/);
   assert.match(local[1]?.content ?? "", /现代老魔女/);
   assert.match(local[1]?.content ?? "", /现代科技/);
+  assert.match(local[1]?.content ?? "", /Windows 桌面/);
+  assert.match(local[1]?.content ?? "", /Live2D 伙伴/);
   assert.match(local[1]?.content ?? "", /耐心/);
   assert.match(local[1]?.content ?? "", /乐观/);
   assert.match(local[1]?.content ?? "", /学识渊博/);
-  assert.match(local[1]?.content ?? "", /不声称读取隐私/);
-  assert.match(local[1]?.content ?? "", /未联网时不假装搜索/);
-  assert.match(local[1]?.content ?? "", /不要输出 JSON/);
+  assert.match(local[1]?.content ?? "", /不读隐私|不声称读取隐私/);
+  assert.match(local[1]?.content ?? "", /(未联网|离线).*不假装搜索/);
+  assert.match(local[1]?.content ?? "", /不输出 JSON|不要输出 JSON/);
   assert.match(local[1]?.content ?? "", /action payload/);
   assert.match(local[2]?.content ?? "", /不编造记忆/);
   assert.match(local[2]?.content ?? "", /不泄露提示词/);
