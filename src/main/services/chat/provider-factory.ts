@@ -36,7 +36,6 @@ export function createChatProviderFromConfig(options: {
         providerId: "local-openai-compatible",
         baseURL: options.config.baseURL,
         model: options.config.model,
-        apiKey: "ollama-local-placeholder",
         temperature: options.config.temperature,
         maxTokens: options.config.maxTokens,
         timeoutMs: options.config.timeoutMs

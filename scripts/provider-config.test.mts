@@ -1,12 +1,16 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
 import test from "node:test";
 
 const require = createRequire(import.meta.url);
 const {
   DEFAULT_PROVIDER_CONFIG,
   FAKE_PROVIDER_CONFIG,
+  createProviderConfigStore,
   createProviderTelemetryPayload,
   parseProviderConfig
 } = require("../dist/main/services/config/provider-config-store.js") as typeof import("../src/main/services/config/provider-config-store");
@@ -127,6 +131,86 @@ test("local OpenAI-compatible provider parser rejects invalid local config", () 
   }), null);
 });
 
+test("provider config store migrates legacy DeepSeek default file to local recommendation", () => {
+  const userDataPath = createTempUserDataPath();
+  const events: Array<{ type: string; payload?: Record<string, unknown> }> = [];
+
+  try {
+    writeProviderConfig(userDataPath, {
+      providerId: "openai-compatible",
+      displayName: "DeepSeek",
+      baseURL: "https://api.deepseek.com",
+      model: "deepseek-v4-flash",
+      apiKeyRef: "openai-compatible-default",
+      temperature: 0.7,
+      maxTokens: 1024,
+      timeoutMs: 60000
+    });
+
+    const store = createProviderConfigStore({
+      userDataPath,
+      logTelemetry(type, payload) {
+        events.push({ type, payload });
+      }
+    });
+
+    assert.deepEqual(store.getConfig(), DEFAULT_PROVIDER_CONFIG);
+    assert.equal(store.hasConfig(), true);
+    assert.ok(events.some((event) => (
+      event.type === "provider_config_migrated" &&
+      event.payload?.reason === "legacy_deepseek_default" &&
+      event.payload?.toProviderId === "local-openai-compatible"
+    )));
+  } finally {
+    rmSync(userDataPath, { recursive: true, force: true });
+  }
+});
+
+test("provider config store preserves custom external OpenAI-compatible providers", () => {
+  const userDataPath = createTempUserDataPath();
+  const customConfig = {
+    providerId: "openai-compatible" as const,
+    displayName: "External OpenAI-compatible",
+    baseURL: "https://api.example.com/v1",
+    model: "external-chat-model",
+    apiKeyRef: "custom-external-key",
+    temperature: 0.5,
+    maxTokens: 512,
+    timeoutMs: 30000
+  };
+
+  try {
+    writeProviderConfig(userDataPath, customConfig);
+
+    const store = createProviderConfigStore({ userDataPath });
+
+    assert.deepEqual(store.getConfig(), customConfig);
+  } finally {
+    rmSync(userDataPath, { recursive: true, force: true });
+  }
+});
+
+test("diagnostic script reports local recommendation for empty userData", () => {
+  const userDataPath = createTempUserDataPath();
+
+  try {
+    const result = spawnSync(process.execPath, ["scripts/check-provider-config.js", userDataPath], {
+      cwd: process.cwd(),
+      encoding: "utf8"
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /configFileExists: false/);
+    assert.match(result.stdout, /configSource: default/);
+    assert.match(result.stdout, /providerId: local-openai-compatible/);
+    assert.match(result.stdout, /baseURL: http:\/\/localhost:11434\/v1/);
+    assert.match(result.stdout, /model: qwen3\.5:2b-q4_K_M/);
+    assert.match(result.stdout, /apiKeyExists: false/);
+  } finally {
+    rmSync(userDataPath, { recursive: true, force: true });
+  }
+});
+
 test("provider factory does not require real api key for local provider", () => {
   const provider = createChatProviderFromConfig({
     config: {
@@ -156,9 +240,9 @@ test("provider factory keeps explicit fake but blocks unavailable real providers
   const missingKeyProvider = createChatProviderFromConfig({
     config: {
       providerId: "openai-compatible",
-      displayName: "DeepSeek",
-      baseURL: "https://api.deepseek.com",
-      model: "deepseek-v4-flash",
+      displayName: "External OpenAI-compatible",
+      baseURL: "https://api.example.com/v1",
+      model: "external-chat-model",
       apiKeyRef: "openai-compatible-default",
       temperature: 0.7,
       maxTokens: 1024,
@@ -185,9 +269,9 @@ test("provider factory keeps explicit fake but blocks unavailable real providers
   const cloudProvider = createChatProviderFromConfig({
     config: {
       providerId: "openai-compatible",
-      displayName: "DeepSeek",
-      baseURL: "https://api.deepseek.com",
-      model: "deepseek-v4-flash",
+      displayName: "External OpenAI-compatible",
+      baseURL: "https://api.example.com/v1",
+      model: "external-chat-model",
       apiKeyRef: "openai-compatible-default",
       temperature: 0.7,
       maxTokens: 1024,
@@ -217,3 +301,13 @@ test("provider factory keeps explicit fake but blocks unavailable real providers
     { name: "provider_invalid_config" }
   );
 });
+
+function createTempUserDataPath(): string {
+  return mkdtempSync(join(tmpdir(), "ai-desktop-pet-provider-"));
+}
+
+function writeProviderConfig(userDataPath: string, config: unknown): void {
+  const configDirectory = join(userDataPath, "config");
+  mkdirSync(configDirectory, { recursive: true });
+  writeFileSync(join(configDirectory, "provider-config.json"), `${JSON.stringify(config, null, 2)}\n`, "utf8");
+}

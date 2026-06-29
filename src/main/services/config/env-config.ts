@@ -14,10 +14,11 @@ const DEFAULT_ENV_API_KEY_REF = "openai-compatible-default";
 export function readEnvProviderConfig(options: {
   cwd?: string;
   env?: NodeJS.ProcessEnv;
+  readDotEnvLocal?: boolean;
 } = {}): EnvProviderConfig | null {
   const cwd = options.cwd ?? process.cwd();
   const env = {
-    ...readDotEnvLocal(join(cwd, ".env.local")),
+    ...(options.readDotEnvLocal === true ? readDotEnvLocal(join(cwd, ".env.local")) : {}),
     ...(options.env ?? process.env)
   };
   const provider = env.AI_DESKTOP_PET_PROVIDER;

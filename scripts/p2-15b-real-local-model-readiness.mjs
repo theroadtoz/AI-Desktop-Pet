@@ -93,7 +93,6 @@ async function checkChat() {
     const response = await fetchWithTimeout(createChatCompletionsURL(baseURL), {
       method: "POST",
       headers: {
-        Authorization: "Bearer ollama-local-placeholder",
         "Content-Type": "application/json"
       },
       body: JSON.stringify({

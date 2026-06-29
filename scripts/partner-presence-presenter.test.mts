@@ -19,11 +19,11 @@ test("provider status keeps fake, cloud, local, and fallback wording", () => {
   }), "开发模式：Fake Provider（不会调用真实模型）");
   assert.equal(formatProviderStatus({
     providerId: "openai-compatible",
-    displayName: "DeepSeek",
-    model: "deepseek-v4-flash",
-    baseURLHost: "api.deepseek.com",
+    displayName: "External OpenAI-compatible",
+    model: "external-chat-model",
+    baseURLHost: "api.example.com",
     isFallback: false
-  }), "外部模型：deepseek-v4-flash · api.deepseek.com");
+  }), "外部模型：external-chat-model · api.example.com");
   assert.equal(formatProviderStatus({
     providerId: "local-openai-compatible",
     displayName: "Ollama 本地模型",
@@ -33,11 +33,11 @@ test("provider status keeps fake, cloud, local, and fallback wording", () => {
   }), "本地模型：qwen3.5:2b-q4_K_M · localhost:11434");
   assert.equal(formatProviderStatus({
     providerId: "openai-compatible",
-    displayName: "DeepSeek",
-    model: "deepseek-v4-flash",
+    displayName: "External OpenAI-compatible",
+    model: "external-chat-model",
     isFallback: true,
     reason: "missing_api_key"
-  }), "模型未就绪：未配置 API Key，当前不会调用真实模型 · deepseek-v4-flash");
+  }), "外部模型未就绪：需要配置 API Key 后才会发起请求 · external-chat-model");
   assert.equal(formatProviderStatus({
     providerId: "local-openai-compatible",
     displayName: "Ollama 本地模型",
@@ -73,7 +73,7 @@ test("provider health result wording stays stable", () => {
   assert.equal(formatProviderHealthResult({
     providerId: "openai-compatible",
     status: "missing_api_key",
-    model: "deepseek-v4-flash"
+    model: "external-chat-model"
   }), "云端 Provider 需要先配置 API Key；本次未发起检查请求。");
 });
 

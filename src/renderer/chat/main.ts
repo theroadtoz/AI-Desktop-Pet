@@ -328,9 +328,9 @@ const chatHistory: ChatMessage[] = [];
 let conversationId: string = crypto.randomUUID();
 const DEFAULT_API_KEY_REF = "openai-compatible-default";
 const DEFAULT_OPENAI_CONFIG = {
-  displayName: "DeepSeek",
-  baseURL: "https://api.deepseek.com",
-  model: "deepseek-v4-flash",
+  displayName: "外部 OpenAI-compatible",
+  baseURL: "",
+  model: "",
   temperature: 0.7,
   maxTokens: 1024,
   timeoutMs: 60000

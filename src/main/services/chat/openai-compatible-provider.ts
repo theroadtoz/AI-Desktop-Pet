@@ -23,7 +23,7 @@ export type OpenAICompatibleProviderOptions = {
   providerId?: Extract<ProviderId, "openai-compatible" | "local-openai-compatible">;
   baseURL: string;
   model: string;
-  apiKey: string;
+  apiKey?: string;
   temperature: number;
   maxTokens: number;
   timeoutMs: number;
@@ -133,12 +133,17 @@ async function streamChatCompletions(input: {
   input.signal.addEventListener("abort", abort, { once: true });
 
   try {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json"
+    };
+
+    if (input.options.apiKey) {
+      headers.Authorization = `Bearer ${input.options.apiKey}`;
+    }
+
     const response = await fetch(createChatCompletionsURL(input.options.baseURL), {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${input.options.apiKey}`,
-        "Content-Type": "application/json"
-      },
+      headers,
       body: JSON.stringify({
         model: input.options.model,
         messages: mapChatMessagesToOpenAICompatible(

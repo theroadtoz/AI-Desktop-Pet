@@ -48,12 +48,27 @@ export function createProviderConfigStore(options: {
 
       try {
         const parsed = JSON.parse(readFileSync(configPath, "utf8")) as unknown;
-        const config = parseProviderConfig(parsed);
+        const parsedConfig = parseProviderConfig(parsed);
 
-        if (!config) {
+        if (!parsedConfig) {
           log("provider_config_invalid", { source: "file", errorType: "validation" });
           logLoaded(DEFAULT_PROVIDER_CONFIG, "default");
           return DEFAULT_PROVIDER_CONFIG;
+        }
+
+        const config = migrateLegacyProviderConfig(parsedConfig);
+
+        if (config !== parsedConfig) {
+          log("provider_config_migrated", {
+            source: "file",
+            reason: "legacy_deepseek_default",
+            fromProviderId: parsedConfig.providerId,
+            toProviderId: config.providerId,
+            baseURLHost: parsedConfig.providerId === "fake" ? undefined : readBaseURLHost(parsedConfig.baseURL),
+            modelCategory: parsedConfig.providerId === "fake" ? undefined : "legacy_deepseek_default"
+          });
+          logLoaded(config, "default");
+          return config;
         }
 
         logLoaded(config, "file");
@@ -159,6 +174,23 @@ export function parseProviderConfig(value: unknown): ProviderConfig | null {
   }
 
   return null;
+}
+
+function migrateLegacyProviderConfig(config: ProviderConfig): ProviderConfig {
+  if (isLegacyDeepSeekDefaultConfig(config)) {
+    return DEFAULT_PROVIDER_CONFIG;
+  }
+
+  return config;
+}
+
+function isLegacyDeepSeekDefaultConfig(config: ProviderConfig): boolean {
+  if (config.providerId !== "openai-compatible") {
+    return false;
+  }
+
+  return readBaseURLHost(config.baseURL)?.toLowerCase() === "api.deepseek.com" ||
+    config.model.trim().toLowerCase() === "deepseek-v4-flash";
 }
 
 export function createProviderTelemetryPayload(

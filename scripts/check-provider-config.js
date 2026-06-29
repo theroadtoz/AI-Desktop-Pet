@@ -5,10 +5,17 @@ const userDataPath = path.resolve(process.argv[2] || path.join(process.cwd(), ".
 const configPath = path.join(userDataPath, "config", "provider-config.json");
 const secretsPath = path.join(userDataPath, "secrets", "provider-keys.json");
 
-const defaultConfig = {
-  providerId: "fake",
-  displayName: "Fake Provider"
+const recommendedLocalConfig = {
+  providerId: "local-openai-compatible",
+  displayName: "Ollama 本地模型",
+  baseURL: "http://localhost:11434/v1",
+  model: "qwen3.5:2b-q4_K_M",
+  localPresetId: "ollama",
+  temperature: 0.7,
+  maxTokens: 240,
+  timeoutMs: 60000
 };
+const defaultConfig = recommendedLocalConfig;
 
 const configResult = readConfig(configPath);
 const config = configResult.config;
@@ -38,10 +45,12 @@ function readConfig(filePath) {
     const parsed = JSON.parse(fs.readFileSync(filePath, "utf8"));
 
     if (isProviderConfig(parsed)) {
+      const config = migrateLegacyProviderConfig(parsed);
+
       return {
         exists: true,
-        source: "file",
-        config: parsed
+        source: config === parsed ? "file" : "migrated-default",
+        config
       };
     }
   } catch {
@@ -124,4 +133,29 @@ function isProviderConfig(value) {
   }
 
   return false;
+}
+
+function migrateLegacyProviderConfig(config) {
+  if (isLegacyDeepSeekDefaultConfig(config)) {
+    return defaultConfig;
+  }
+
+  return config;
+}
+
+function isLegacyDeepSeekDefaultConfig(config) {
+  if (config.providerId !== "openai-compatible") {
+    return false;
+  }
+
+  return readBaseURLHost(config.baseURL)?.toLowerCase() === "api.deepseek.com" ||
+    config.model.trim().toLowerCase() === "deepseek-v4-flash";
+}
+
+function readBaseURLHost(baseURL) {
+  try {
+    return new URL(baseURL).host;
+  } catch {
+    return undefined;
+  }
 }

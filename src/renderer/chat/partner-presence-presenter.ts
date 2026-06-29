@@ -29,7 +29,7 @@ const PRESENCE_MODE_LABELS: Readonly<Record<PresenceModeId, string>> = {
 export function formatProviderStatus(status: ProviderStatus): string {
   if (status.isFallback) {
     if (status.reason === "missing_api_key") {
-      return `模型未就绪：未配置 API Key，当前不会调用真实模型${status.model ? ` · ${status.model}` : ""}`;
+      return `外部模型未就绪：需要配置 API Key 后才会发起请求${status.model ? ` · ${status.model}` : ""}`;
     }
 
     if (status.reason === "invalid_config") {

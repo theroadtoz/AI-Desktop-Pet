@@ -22,12 +22,12 @@ test("chat completions URL preserves /v1 base path for local providers", () => {
 
 test("chat completions URL keeps cloud base URL behavior without /v1", () => {
   assert.equal(
-    createChatCompletionsURL("https://api.deepseek.com").toString(),
-    "https://api.deepseek.com/chat/completions"
+    createChatCompletionsURL("https://api.example.com").toString(),
+    "https://api.example.com/chat/completions"
   );
 });
 
-test("local OpenAI-compatible provider streams SSE and keeps main-process mapping", async () => {
+test("local OpenAI-compatible provider streams SSE without Authorization and keeps main-process mapping", async () => {
   let requestedURL = "";
   let requestBody: unknown = null;
   let authorization = "";
@@ -56,7 +56,6 @@ test("local OpenAI-compatible provider streams SSE and keeps main-process mappin
       providerId: "local-openai-compatible",
       baseURL: `http://127.0.0.1:${address.port}/v1`,
       model: "qwen3.5:2b-q4_K_M",
-      apiKey: "ollama-local-placeholder",
       temperature: 0.7,
       maxTokens: 240,
       timeoutMs: 60000
@@ -87,7 +86,7 @@ test("local OpenAI-compatible provider streams SSE and keeps main-process mappin
 
     assert.equal(provider.id, "local-openai-compatible");
     assert.equal(requestedURL, "/v1/chat/completions");
-    assert.equal(authorization, "Bearer ollama-local-placeholder");
+    assert.equal(authorization, "");
     assert.equal(body.model, "qwen3.5:2b-q4_K_M");
     assert.equal(body.stream, true);
     assert.equal(body.messages?.[0]?.content, "你是桌面伙伴。用中文，短句，不输出 JSON。");
@@ -106,8 +105,10 @@ test("local OpenAI-compatible provider streams SSE and keeps main-process mappin
 
 test("cloud OpenAI-compatible provider keeps cloud prompt template", async () => {
   let requestBody: unknown = null;
+  let authorization = "";
 
   const server = createServer(async (request: IncomingMessage, response: ServerResponse) => {
+    authorization = String(request.headers.authorization ?? "");
     requestBody = JSON.parse(await readRequestBody(request));
     response.writeHead(200, { "Content-Type": "text/event-stream" });
     response.end(`data: ${JSON.stringify({ choices: [{ delta: { content: "云端模板在。" } }] })}\n\ndata: [DONE]\n\n`);
@@ -122,7 +123,7 @@ test("cloud OpenAI-compatible provider keeps cloud prompt template", async () =>
     const provider = createOpenAICompatibleProvider({
       providerId: "openai-compatible",
       baseURL: `http://127.0.0.1:${address.port}`,
-      model: "deepseek-v4-flash",
+      model: "external-chat-model",
       apiKey: "test-cloud-key",
       temperature: 0.7,
       maxTokens: 240,
@@ -143,6 +144,7 @@ test("cloud OpenAI-compatible provider keeps cloud prompt template", async () =>
       messages?: Array<{ role?: string; content?: string }>;
     };
 
+    assert.equal(authorization, "Bearer test-cloud-key");
     assert.match(body.messages?.[0]?.content ?? "", /低打扰的桌面伙伴/);
     assert.match(body.messages?.[1]?.content ?? "", /掌握现代科技/);
     assert.match(body.messages?.[1]?.content ?? "", /学识渊博/);
@@ -172,7 +174,6 @@ test("OpenAI-compatible provider classifies missing model and incompatible strea
         providerId: "local-openai-compatible",
         baseURL: localBaseURL(missingModelServer),
         model: "missing-model",
-        apiKey: "local-placeholder",
         temperature: 0.7,
         maxTokens: 240,
         timeoutMs: 500
@@ -188,7 +189,6 @@ test("OpenAI-compatible provider classifies missing model and incompatible strea
         providerId: "local-openai-compatible",
         baseURL: localBaseURL(incompatibleServer),
         model: "qwen3.5:2b-q4_K_M",
-        apiKey: "local-placeholder",
         temperature: 0.7,
         maxTokens: 240,
         timeoutMs: 500
@@ -219,7 +219,6 @@ test("OpenAI-compatible provider classifies timeout", async () => {
         providerId: "local-openai-compatible",
         baseURL: localBaseURL(server),
         model: "qwen3.5:2b-q4_K_M",
-        apiKey: "local-placeholder",
         temperature: 0.7,
         maxTokens: 240,
         timeoutMs: 10
