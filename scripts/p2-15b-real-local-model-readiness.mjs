@@ -2,7 +2,7 @@ const providerId = "local-openai-compatible";
 const cli = parseArgs(process.argv.slice(2));
 const runtime = readNonEmpty(cli.runtime) ?? readNonEmpty(process.env.AI_DESKTOP_PET_READINESS_RUNTIME) ?? "ollama";
 const baseURL = readNonEmpty(cli.baseUrl) ?? readNonEmpty(process.env.AI_DESKTOP_PET_READINESS_BASE_URL) ?? "http://localhost:11434/v1";
-const model = readNonEmpty(cli.model) ?? readNonEmpty(process.env.AI_DESKTOP_PET_READINESS_MODEL) ?? "qwen3.5:2b-q4_K_M";
+const model = readNonEmpty(cli.model) ?? readNonEmpty(process.env.AI_DESKTOP_PET_READINESS_MODEL) ?? "qwen3.5:2b";
 const modelsTimeoutMs = readInteger(cli.modelsTimeoutMs) ?? readInteger(process.env.AI_DESKTOP_PET_READINESS_MODELS_TIMEOUT_MS) ?? 5_000;
 const chatTimeoutMs = readInteger(cli.chatTimeoutMs) ?? readInteger(process.env.AI_DESKTOP_PET_READINESS_CHAT_TIMEOUT_MS) ?? 60_000;
 

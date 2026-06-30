@@ -1,0 +1,197 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import test from "node:test";
+
+import {
+  diagnoseLocalRuntimes
+} from "./p2-20b-local-runtime-diagnostic.mjs";
+
+const testRuntime = {
+  id: "test-runtime",
+  label: "Test runtime",
+  command: "test-runtime",
+  processNames: ["test-runtime.exe"],
+  baseURL: "http://127.0.0.1:1/v1",
+  model: "target-model",
+  nextActions: {
+    commandMissing: "Install runtime.",
+    processMissing: "Start runtime.",
+    tcpUnreachable: "Start the local server.",
+    modelMissing: "Load target model.",
+    chatFailed: "Check chat endpoint."
+  }
+};
+
+test("diagnostic safe-returns not_ready when runtime is unavailable", async () => {
+  const result = await diagnoseLocalRuntimes({
+    runtimes: [testRuntime],
+    env: {},
+    commandExists: async () => false,
+    processExists: async () => false,
+    tcpReachable: async () => false
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.status, "not_ready");
+  assert.equal(result.recommendedRuntime, "ollama");
+  assert.equal(result.runtimes[0].status, "not_installed_or_unreachable");
+  assert.equal(result.runtimes[0].reason, "command_missing");
+  assert.equal(result.runtimes[0].modelsStatus, "skipped");
+  assert.equal(result.runtimes[0].chatStatus, "skipped");
+  assert.equal(result.runtimes[1].id, "llama-cpp-managed");
+  assert.equal(result.runtimes[1].status, "skipped");
+});
+
+test("diagnostic reports model_missing without calling chat", async () => {
+  let chatRequests = 0;
+  const server = createServer((request: IncomingMessage, response: ServerResponse) => {
+    if (request.url === "/v1/models") {
+      response.writeHead(200, { "Content-Type": "application/json" });
+      response.end(JSON.stringify({ data: [{ id: "other-model" }] }));
+      return;
+    }
+
+    chatRequests += 1;
+    response.writeHead(500);
+    response.end();
+  });
+
+  try {
+    await listen(server);
+    const result = await diagnoseLocalRuntimes({
+      runtimes: [{ ...testRuntime, baseURL: localBaseURL(server) }],
+      env: {},
+      commandExists: async () => true,
+      processExists: async () => true,
+      tcpReachable: async () => true
+    });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.runtimes[0].status, "model_missing");
+    assert.equal(result.runtimes[0].modelsStatus, "model_missing");
+    assert.equal(result.runtimes[0].chatStatus, "skipped");
+    assert.equal(result.runtimes[0].modelCount, 1);
+    assert.equal(chatRequests, 0);
+  } finally {
+    await close(server);
+  }
+});
+
+test("diagnostic reports ready for OpenAI-compatible models and streaming chat", async () => {
+  let requestBody = "";
+  const server = createServer(async (request: IncomingMessage, response: ServerResponse) => {
+    if (request.url === "/v1/models") {
+      response.writeHead(200, { "Content-Type": "application/json" });
+      response.end(JSON.stringify({ data: [{ id: "target-model" }] }));
+      return;
+    }
+
+    assert.equal(request.url, "/v1/chat/completions");
+    requestBody = await readRequestBody(request);
+    response.writeHead(200, { "Content-Type": "text/event-stream" });
+    response.write(`data: ${JSON.stringify({ choices: [{ delta: { content: "pong" } }] })}\n\n`);
+    response.end("data: [DONE]\n\n");
+  });
+
+  try {
+    await listen(server);
+    const result = await diagnoseLocalRuntimes({
+      runtimes: [{ ...testRuntime, baseURL: localBaseURL(server) }],
+      env: {},
+      commandExists: async () => true,
+      processExists: async () => true,
+      tcpReachable: async () => true
+    });
+    const output = JSON.stringify(result);
+
+    assert.equal(result.ok, true);
+    assert.equal(result.status, "ready");
+    assert.equal(result.recommendedRuntime, "test-runtime");
+    assert.equal(result.runtimes[0].status, "ready");
+    assert.equal(result.runtimes[0].modelsStatus, "ready");
+    assert.equal(result.runtimes[0].chatStatus, "ready");
+    assert.equal(result.runtimes[0].replyLength, 4);
+    assert.match(requestBody, /"content":"ping"/);
+    assert.doesNotMatch(output, /"content":"ping"/);
+    assert.doesNotMatch(output, /pong/);
+  } finally {
+    await close(server);
+  }
+});
+
+test("diagnostic output omits local paths and sensitive bodies", async () => {
+  const result = await diagnoseLocalRuntimes({
+    runtimes: [testRuntime],
+    env: {
+      AI_DESKTOP_PET_LLAMA_CPP_MANAGED: "1",
+      AI_DESKTOP_PET_LLAMA_CPP_EXE: "C:\\secret\\llama-server.exe",
+      AI_DESKTOP_PET_LLAMA_CPP_MODEL: "D:\\models\\private-model.gguf",
+      AI_DESKTOP_PET_LLAMA_CPP_ALIAS: "safe-alias",
+      AI_DESKTOP_PET_LLAMA_CPP_HOST: "127.0.0.1",
+      AI_DESKTOP_PET_LLAMA_CPP_PORT: "8080"
+    },
+    commandExists: async () => false,
+    processExists: async () => false,
+    tcpReachable: async () => false
+  });
+  const output = JSON.stringify(result);
+
+  assert.equal(result.runtimes[1].status, "env_configured");
+  assert.equal(result.runtimes[1].executableConfigured, true);
+  assert.equal(result.runtimes[1].modelConfigured, true);
+  assert.doesNotMatch(output, /C:\\secret/);
+  assert.doesNotMatch(output, /D:\\models/);
+  assert.doesNotMatch(output, /private-model\.gguf/);
+  assert.doesNotMatch(output, /requestBody|provider request|fact card|API key|\.env\.local/i);
+  assert.doesNotMatch(output, /[A-Z]:\\/);
+});
+
+test("package registers local model diagnostic script and history test", () => {
+  const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+
+  assert.equal(packageJson.scripts["diagnose:local-model"], "node scripts/p2-20b-local-runtime-diagnostic.mjs");
+  assert.match(packageJson.scripts["test:history"], /scripts\/local-runtime-diagnostic\.test\.mts/);
+});
+
+function localBaseURL(server: ReturnType<typeof createServer>): string {
+  const address = server.address();
+  assert.equal(typeof address, "object");
+  assert.ok(address);
+  return `http://127.0.0.1:${address.port}/v1`;
+}
+
+function readRequestBody(request: IncomingMessage): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let body = "";
+    request.setEncoding("utf8");
+    request.on("data", (chunk) => {
+      body += chunk;
+    });
+    request.on("end", () => resolve(body));
+    request.on("error", reject);
+  });
+}
+
+function listen(server: ReturnType<typeof createServer>): Promise<void> {
+  return new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      server.off("error", reject);
+      resolve();
+    });
+  });
+}
+
+function close(server: ReturnType<typeof createServer>): Promise<void> {
+  return new Promise((resolve, reject) => {
+    server.close((error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+
+      resolve();
+    });
+  });
+}

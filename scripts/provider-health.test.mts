@@ -24,7 +24,7 @@ test("provider health detects ready and model_missing responses", async () => {
   const server = createServer((request: IncomingMessage, response: ServerResponse) => {
     assert.equal(request.url, "/v1/models");
     response.writeHead(200, { "Content-Type": "application/json" });
-    response.end(JSON.stringify({ data: [{ id: "qwen3.5:2b-q4_K_M" }, { id: "other-local-model" }] }));
+    response.end(JSON.stringify({ data: [{ id: "qwen3.5:2b" }, { id: "other-local-model" }] }));
   });
 
   try {
@@ -34,7 +34,7 @@ test("provider health detects ready and model_missing responses", async () => {
       request: {
         providerId: "local-openai-compatible",
         baseURL,
-        model: "qwen3.5:2b-q4_K_M",
+        model: "qwen3.5:2b",
         timeoutMs: 500,
         localPresetId: "ollama"
       }
@@ -62,7 +62,7 @@ test("provider health detects ready and model_missing responses", async () => {
 test("provider health detects incompatible responses", async () => {
   const server = createServer((_request: IncomingMessage, response: ServerResponse) => {
     response.writeHead(200, { "Content-Type": "application/json" });
-    response.end(JSON.stringify({ models: ["qwen3.5:2b-q4_K_M"] }));
+    response.end(JSON.stringify({ models: ["qwen3.5:2b"] }));
   });
 
   try {
@@ -71,7 +71,7 @@ test("provider health detects incompatible responses", async () => {
       request: {
         providerId: "local-openai-compatible",
         baseURL: localBaseURL(server),
-        model: "qwen3.5:2b-q4_K_M",
+        model: "qwen3.5:2b",
         timeoutMs: 500,
         localPresetId: "custom-local"
       }
@@ -89,7 +89,7 @@ test("provider health detects service_unreachable", async () => {
     request: {
       providerId: "local-openai-compatible",
       baseURL: `http://127.0.0.1:${port}/v1`,
-      model: "qwen3.5:2b-q4_K_M",
+      model: "qwen3.5:2b",
       timeoutMs: 200,
       localPresetId: "custom-local"
     }
@@ -102,7 +102,7 @@ test("provider health detects timeout and cancellation", async () => {
   const server = createServer((_request: IncomingMessage, response: ServerResponse) => {
     setTimeout(() => {
       response.writeHead(200, { "Content-Type": "application/json" });
-      response.end(JSON.stringify({ data: [{ id: "qwen3.5:2b-q4_K_M" }] }));
+      response.end(JSON.stringify({ data: [{ id: "qwen3.5:2b" }] }));
     }, 100);
   });
 
@@ -113,7 +113,7 @@ test("provider health detects timeout and cancellation", async () => {
       request: {
         providerId: "local-openai-compatible",
         baseURL,
-        model: "qwen3.5:2b-q4_K_M",
+        model: "qwen3.5:2b",
         timeoutMs: 10,
         localPresetId: "ollama"
       }
@@ -123,7 +123,7 @@ test("provider health detects timeout and cancellation", async () => {
       request: {
         providerId: "local-openai-compatible",
         baseURL,
-        model: "qwen3.5:2b-q4_K_M",
+        model: "qwen3.5:2b",
         timeoutMs: 500,
         localPresetId: "ollama"
       },

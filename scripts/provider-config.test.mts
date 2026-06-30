@@ -37,7 +37,7 @@ test("default provider config recommends explicit local Ollama path", () => {
     providerId: "local-openai-compatible",
     displayName: "Ollama 本地模型",
     baseURL: "http://localhost:11434/v1",
-    model: "qwen3.5:2b-q4_K_M",
+    model: "qwen3.5:2b",
     localPresetId: "ollama",
     temperature: 0.7,
     maxTokens: 240,
@@ -54,7 +54,7 @@ test("local OpenAI-compatible provider parser accepts local config without api k
     providerId: "local-openai-compatible",
     displayName: "Ollama 本地模型",
     baseURL: "http://localhost:11434/v1",
-    model: "qwen3.5:2b-q4_K_M",
+    model: "qwen3.5:2b",
     localPresetId: "ollama",
     apiKeyRef: "should-not-be-saved",
     temperature: 0.7,
@@ -66,7 +66,7 @@ test("local OpenAI-compatible provider parser accepts local config without api k
     providerId: "local-openai-compatible",
     displayName: "Ollama 本地模型",
     baseURL: "http://localhost:11434/v1",
-    model: "qwen3.5:2b-q4_K_M",
+    model: "qwen3.5:2b",
     localPresetId: "ollama",
     temperature: 0.7,
     maxTokens: 240,
@@ -114,7 +114,7 @@ test("local OpenAI-compatible provider parser rejects invalid local config", () 
     providerId: "local-openai-compatible",
     displayName: "Ollama 本地模型",
     baseURL: "",
-    model: "qwen3.5:2b-q4_K_M",
+    model: "qwen3.5:2b",
     temperature: 0.7,
     maxTokens: 240,
     timeoutMs: 60000
@@ -124,7 +124,7 @@ test("local OpenAI-compatible provider parser rejects invalid local config", () 
     providerId: "local-openai-compatible",
     displayName: "Ollama 本地模型",
     baseURL: "http://localhost:11434/v1",
-    model: "qwen3.5:2b-q4_K_M",
+    model: "qwen3.5:2b",
     temperature: 0.7,
     maxTokens: 0,
     timeoutMs: 60000
@@ -204,7 +204,7 @@ test("diagnostic script reports local recommendation for empty userData", () => 
     assert.match(result.stdout, /configSource: default/);
     assert.match(result.stdout, /providerId: local-openai-compatible/);
     assert.match(result.stdout, /baseURL: http:\/\/localhost:11434\/v1/);
-    assert.match(result.stdout, /model: qwen3\.5:2b-q4_K_M/);
+    assert.match(result.stdout, /model: qwen3\.5:2b/);
     assert.match(result.stdout, /apiKeyExists: false/);
   } finally {
     rmSync(userDataPath, { recursive: true, force: true });
@@ -217,7 +217,7 @@ test("provider factory does not require real api key for local provider", () => 
       providerId: "local-openai-compatible",
       displayName: "Ollama 本地模型",
       baseURL: "http://localhost:11434/v1",
-      model: "qwen3.5:2b-q4_K_M",
+      model: "qwen3.5:2b",
       temperature: 0.7,
       maxTokens: 240,
       timeoutMs: 60000
@@ -257,7 +257,7 @@ test("provider factory keeps explicit fake but blocks unavailable real providers
       providerId: "local-openai-compatible",
       displayName: "Ollama 本地模型",
       baseURL: "not a url",
-      model: "qwen3.5:2b-q4_K_M",
+      model: "qwen3.5:2b",
       temperature: 0.7,
       maxTokens: 240,
       timeoutMs: 60000
