@@ -8,7 +8,7 @@ import type {
 } from "../../../shared/local-model-diagnostic";
 
 const execFileAsync = promisify(execFile);
-const defaultModel = "qwen3.5:2b";
+const defaultModel = "qwen2.5:3b-instruct";
 const defaultAlias = "ai-desktop-pet-local";
 
 type RuntimeNextActions = {

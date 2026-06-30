@@ -247,7 +247,7 @@ test("safe diagnostic parser rejects renderer-unsafe fields", () => {
       label: "Ollama",
       status: "not_installed_or_unreachable",
       baseURLHost: "localhost:11434",
-      model: "qwen3.5:2b",
+      model: "qwen2.5:3b-instruct",
       commandFound: false,
       processFound: false,
       tcpReachable: false,

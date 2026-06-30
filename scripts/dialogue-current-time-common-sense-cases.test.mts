@@ -94,7 +94,7 @@ test("real provider unreachable still does not fall back to fake", async () => {
       providerId: "local-openai-compatible",
       displayName: "Ollama 本地模型",
       baseURL: "http://localhost:11434/v1",
-      model: "qwen3.5:2b",
+      model: "qwen2.5:3b-instruct",
       localPresetId: "ollama",
       temperature: 0.7,
       maxTokens: 240,

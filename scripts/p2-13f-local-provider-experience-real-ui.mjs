@@ -25,7 +25,7 @@ const context = createRealUiRunContext({
 });
 const { runParentDir, runDir, appDataDir, resultPath, port } = context;
 const readyModel = "p2-13f-ready-model";
-const recommendedOllamaModel = "qwen3.5:2b";
+const recommendedOllamaModel = "qwen2.5:3b-instruct";
 const forbiddenTexts = [
   "sk-",
   "provider request body",

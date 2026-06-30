@@ -27,10 +27,10 @@ test("provider status keeps fake, cloud, local, and fallback wording", () => {
   assert.equal(formatProviderStatus({
     providerId: "local-openai-compatible",
     displayName: "Ollama 本地模型",
-    model: "qwen3.5:2b",
+    model: "qwen2.5:3b-instruct",
     baseURLHost: "localhost:11434",
     isFallback: false
-  }), "本地模型：qwen3.5:2b · localhost:11434");
+  }), "本地模型：qwen2.5:3b-instruct · localhost:11434");
   assert.equal(formatProviderStatus({
     providerId: "openai-compatible",
     displayName: "External OpenAI-compatible",
@@ -41,7 +41,7 @@ test("provider status keeps fake, cloud, local, and fallback wording", () => {
   assert.equal(formatProviderStatus({
     providerId: "local-openai-compatible",
     displayName: "Ollama 本地模型",
-    model: "qwen3.5:2b",
+    model: "qwen2.5:3b-instruct",
     isFallback: true,
     reason: "invalid_config"
   }), "模型未就绪：Provider 配置无效，当前不会调用真实模型");
@@ -51,22 +51,22 @@ test("provider health result wording stays stable", () => {
   assert.equal(formatProviderHealthResult({
     providerId: "local-openai-compatible",
     status: "ready",
-    model: "qwen3.5:2b",
+    model: "qwen2.5:3b-instruct",
     baseURLHost: "localhost:11434",
     modelCount: 2
   }), "连接可用：已找到当前模型 · localhost:11434 · 可见模型 2 个");
   assert.equal(formatProviderHealthResult({
     providerId: "local-openai-compatible",
     status: "model_missing",
-    model: "qwen3.5:2b",
+    model: "qwen2.5:3b-instruct",
     baseURLHost: "localhost:11434",
     localPresetId: "ollama",
     modelCount: 1
-  }), "Ollama 可达，但未找到 qwen3.5:2b；请手动运行 ollama pull qwen3.5:2b 后再检查 · localhost:11434 · 可见模型 1 个");
+  }), "Ollama 可达，但未找到 qwen2.5:3b-instruct；请手动运行 ollama pull qwen2.5:3b-instruct 后再检查 · localhost:11434 · 可见模型 1 个");
   assert.equal(formatProviderHealthResult({
     providerId: "local-openai-compatible",
     status: "service_unreachable",
-    model: "qwen3.5:2b",
+    model: "qwen2.5:3b-instruct",
     baseURLHost: "localhost:11434",
     localPresetId: "ollama"
   }), "Ollama 不可达：请确认已安装并启动 Ollama，且 Base URL 指向 http://localhost:11434/v1 · localhost:11434");
