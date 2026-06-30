@@ -2,6 +2,7 @@ import type { ChatMessage } from "../../../shared/chat";
 import type { ChatProvider, ChatProviderResult, ChatRequest } from "../../../shared/chat-provider";
 import { DEFAULT_DIALOGUE_MODE_ID, parseDialogueModeId, type DialogueModeId } from "../../../shared/dialogue-style";
 import type { EmotionTag } from "../../../shared/emotion";
+import { DEFAULT_PERSONA_CARD, getPersonaDialogueAnchor } from "../../../shared/persona-card";
 import { getLatestUserMessage } from "./chat-message-mapper";
 import { classifyEmotion } from "./emotion-classifier";
 
@@ -54,6 +55,11 @@ const MODE_PREFIXES: Readonly<Record<DialogueModeId, readonly string[]>> = {
   reading: ["慢慢看。", "我们安静地理一遍。"]
 };
 
+const PERSONA_ANCHOR = getPersonaDialogueAnchor(DEFAULT_PERSONA_CARD);
+const PERSONA_IDENTITY_REPLY =
+  `我是${PERSONA_ANCHOR.identity[0]}，也是你的 ${PERSONA_ANCHOR.identity[1]}；` +
+  `${PERSONA_ANCHOR.temperament.join("、")}。普通问题我会先答事，再短短陪你收束。`;
+
 export function createFakeChatProvider(): ChatProvider {
   return {
     id: "fake",
@@ -75,12 +81,17 @@ function createFakeReply(request: ChatRequest): ChatProviderResult {
   const latestUserMessage = getLatestUserMessage(request.messages);
   const classification = classifyEmotion({ latestUserMessage });
   const commonSenseReply = createCurrentTimeOrCommonSenseReply(request, latestUserMessage, classification);
+  const personaIdentityReply = createPersonaIdentityReply(latestUserMessage, classification);
   const relevanceReply = createRelevanceReply(request, latestUserMessage, classification);
   const qualityReply = createQualityReply(request, latestUserMessage, classification);
   const dailyCompanionReply = createDailyCompanionReply(latestUserMessage, classification);
 
   if (commonSenseReply) {
     return commonSenseReply;
+  }
+
+  if (personaIdentityReply) {
+    return personaIdentityReply;
   }
 
   if (relevanceReply) {
@@ -103,6 +114,20 @@ function createFakeReply(request: ChatRequest): ChatProviderResult {
 
   return {
     text: `${prefix}${variants[variantIndex] ?? REPLIES[classification.emotion]}`,
+    ...classification
+  };
+}
+
+function createPersonaIdentityReply(
+  latestUserMessage: string,
+  classification: ReturnType<typeof classifyEmotion>
+): ChatProviderResult | null {
+  if (!asksPersonaIdentity(latestUserMessage)) {
+    return null;
+  }
+
+  return {
+    text: PERSONA_IDENTITY_REPLY,
     ...classification
   };
 }
@@ -315,6 +340,10 @@ function asksForUnknownMemory(message: string): boolean {
 
 function asksForSavedPreference(message: string): boolean {
   return /我喜欢什么|我的偏好|我常用什么|我爱用什么/.test(message);
+}
+
+function asksPersonaIdentity(message: string): boolean {
+  return /你是谁|你的身份|你的人设|你的人格|你是什么角色|你算什么角色|你是.*(ChatGPT|客服|搜索应用|操作系统)|模式.*(人格|身份).*变|身份.*会.*变/.test(message);
 }
 
 function asksDirectPlanningQuestion(message: string): boolean {

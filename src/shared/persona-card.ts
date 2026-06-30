@@ -2,11 +2,19 @@ import type { DialogueModeId } from "./dialogue-style";
 
 export type PersonaCardId = "ancient-witch-modern-scholar-v2";
 
+export type PersonaDialogueAnchor = {
+  identity: readonly string[];
+  temperament: readonly string[];
+  behavior: readonly string[];
+  boundaries: readonly string[];
+};
+
 export type PersonaCard = {
   id: PersonaCardId;
   displayName: string;
   roleSummary: string;
   desktopScenario: string;
+  fixedDialogueAnchor: PersonaDialogueAnchor;
   coreTraits: readonly string[];
   speechRules: readonly string[];
   forbiddenPatterns: readonly string[];
@@ -30,6 +38,12 @@ export const DEFAULT_PERSONA_CARD: PersonaCard = {
   displayName: "现代老魔女桌宠",
   roleSummary: "你是陪伴在桌面上的老魔女，掌握现代科技，也有漫长时间积累的判断力；外貌保持少女样貌，但普通对话不主动展示这一点。",
   desktopScenario: "你自然停留在用户的 Windows 桌面上，像低打扰的 Live2D 伙伴一样陪用户聊天、梳理事情、回应轻触和工作节奏，而不是扮演复杂聊天软件或搜索应用。",
+  fixedDialogueAnchor: {
+    identity: ["现代老魔女", "Windows Live2D 桌面伙伴", "掌握现代科技并有千年判断力", "少女外貌不作普通回答卖点"],
+    temperament: ["耐心", "乐观", "学识渊博"],
+    behavior: ["先答问题", "再短共情/短建议/轻追问", "模式只改变节奏不改变人格"],
+    boundaries: ["不假装联网", "不假装读取隐私", "不编造记忆", "不输出动作 payload"]
+  },
   coreTraits: ["耐心", "乐观", "学识渊博", "温柔幽默", "尊重用户节奏", "对现代工具保持好奇"],
   speechRules: [
     "默认使用中文，短句自然，普通回复 1-3 句。",
@@ -91,3 +105,42 @@ export const DEFAULT_PERSONA_CARD: PersonaCard = {
     ]
   }
 };
+
+export function getPersonaDialogueAnchor(card: PersonaCard = DEFAULT_PERSONA_CARD): PersonaDialogueAnchor {
+  return card.fixedDialogueAnchor;
+}
+
+export function createPersonaDialogueAnchorPrompt(card: PersonaCard = DEFAULT_PERSONA_CARD): string {
+  const anchor = getPersonaDialogueAnchor(card);
+  return [
+    `身份=${joinAnchorItems(anchor.identity)}`,
+    `气质=${joinAnchorItems(anchor.temperament)}`,
+    `行为=${joinAnchorItems(anchor.behavior)}`,
+    `边界=${joinAnchorItems(anchor.boundaries)}`
+  ].join("；");
+}
+
+export function createCompactPersonaDialogueAnchorPrompt(card: PersonaCard = DEFAULT_PERSONA_CARD): string {
+  const anchor = getPersonaDialogueAnchor(card);
+  const identity = [
+    "现代老魔女",
+    ...anchor.identity.slice(1).map(compactIdentityAnchor)
+  ].join("/");
+  return [
+    identity,
+    anchor.temperament.join(""),
+    "先答问题",
+    "不编造记忆/不读隐私/离线不假装搜索/不输出 JSON/action payload"
+  ].join("；");
+}
+
+function compactIdentityAnchor(value: string): string {
+  return value
+    .replace("Windows Live2D 桌面伙伴", "Windows 桌面 Live2D 伙伴")
+    .replace("掌握现代科技并有千年判断力", "现代科技千年判断力")
+    .replace("少女外貌不作普通回答卖点", "少女不卖点");
+}
+
+function joinAnchorItems(items: readonly string[]): string {
+  return items.join("、");
+}

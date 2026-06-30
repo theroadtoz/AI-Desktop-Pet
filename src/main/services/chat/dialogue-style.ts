@@ -1,7 +1,11 @@
 import type { DialogueModeId, DialogueStyleContext } from "../../../shared/dialogue-style";
 import { DEFAULT_DIALOGUE_MODE_ID, parseDialogueModeId } from "../../../shared/dialogue-style";
 import type { PersonaCard } from "../../../shared/persona-card";
-import { DEFAULT_PERSONA_CARD } from "../../../shared/persona-card";
+import {
+  createCompactPersonaDialogueAnchorPrompt,
+  createPersonaDialogueAnchorPrompt,
+  DEFAULT_PERSONA_CARD
+} from "../../../shared/persona-card";
 
 export function createDefaultDialogueStyleContext(modeId: DialogueModeId = DEFAULT_DIALOGUE_MODE_ID): DialogueStyleContext {
   return {
@@ -37,6 +41,7 @@ export function createLocalSmallModelDialogueStylePrompt(context: DialogueStyleC
 
 function createPersonaPrompt(card: PersonaCard): string {
   return [
+    `固定人格锚：${createPersonaDialogueAnchorPrompt(card)}`,
     `角色人设：${card.roleSummary}`,
     `桌面场景：${card.desktopScenario}`,
     `核心气质：${joinList(card.coreTraits)}。`,
@@ -50,82 +55,7 @@ function createPersonaPrompt(card: PersonaCard): string {
 }
 
 function createCompactPersonaPrompt(card: PersonaCard): string {
-  return [
-    `${createCompactPersonaIdentity(card)}；`,
-    `${createCompactDesktopScenario(card.desktopScenario)}；`,
-    `${card.coreTraits.slice(0, 3).join("、")}。`,
-    "不编造记忆；不读隐私；离线不假装搜索；不输出 JSON/action payload。"
-  ].join("");
-}
-
-function createCompactPersonaIdentity(card: PersonaCard): string {
-  const role = compactRoleSummary(card.roleSummary);
-  return role.length > 0 ? `${card.displayName}；${role}` : card.displayName;
-}
-
-function compactRoleSummary(roleSummary: string): string {
-  const role = compactFirstPositiveClause(roleSummary)
-    .replace(/^你是/, "")
-    .trim();
-  const clauses = splitCompactClauses(role);
-
-  if (clauses.length > 1) {
-    return clauses
-      .slice(1)
-      .map(compactRoleClause)
-      .filter(Boolean)
-      .join("、");
-  }
-
-  return role;
-}
-
-function createCompactDesktopScenario(desktopScenario: string): string {
-  const scenario = compactFirstPositiveClause(desktopScenario)
-    .replace(/^你/, "")
-    .trim();
-  const clauses = splitCompactClauses(scenario)
-    .map(compactDesktopScenarioClause)
-    .filter(Boolean)
-    .slice(0, 2);
-
-  if (clauses.length > 0) {
-    return clauses.join("、");
-  }
-
-  return scenario;
-}
-
-function compactRoleClause(clause: string): string {
-  return clause
-    .replace(/^也有/, "")
-    .replace(/漫长时间积累的/, "")
-    .trim();
-}
-
-function compactDesktopScenarioClause(clause: string): string {
-  const likeMarker = "一样";
-  const likeMarkerIndex = clause.indexOf(likeMarker);
-  const compactClause = likeMarkerIndex >= 0 ? clause.slice(0, likeMarkerIndex) : clause;
-
-  return compactClause
-    .replace(/^自然停留在用户的\s*/, "")
-    .replace(/^像/, "")
-    .replace(/上$/, "")
-    .trim();
-}
-
-function splitCompactClauses(value: string): string[] {
-  return value
-    .split("，")
-    .map((clause) => clause.trim())
-    .filter(Boolean);
-}
-
-function compactFirstPositiveClause(value: string): string {
-  const [sentence = ""] = value.split(/[；。]/);
-  const [positiveClause = ""] = sentence.split(/，而不是/);
-  return positiveClause.trim();
+  return createCompactPersonaDialogueAnchorPrompt(card);
 }
 
 function createGentleDesktopCompanionPrompt(): string {

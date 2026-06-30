@@ -28,12 +28,12 @@ test("persona prompts are rendered from the shared persona card", () => {
   assert.match(cloudPrompt, new RegExp(escapeRegExp(DEFAULT_PERSONA_CARD.desktopScenario)));
   assert.match(cloudPrompt, new RegExp(escapeRegExp(DEFAULT_PERSONA_CARD.actionIntentPolicy.summary)));
   assert.match(cloudPrompt, new RegExp(escapeRegExp(DEFAULT_PERSONA_CARD.searchPolicy.summary)));
-  assert.match(localPrompt, new RegExp(escapeRegExp(DEFAULT_PERSONA_CARD.displayName)));
+  assert.match(localPrompt, /现代老魔女/);
   assert.match(localPrompt, /现代科技/);
   assert.match(localPrompt, /判断力/);
   assert.match(localPrompt, /Windows 桌面/);
   assert.match(localPrompt, /Live2D 伙伴/);
-  assert.match(localPrompt, /耐心、乐观、学识渊博/);
+  assert.match(localPrompt, /耐心.*乐观.*学识渊博/);
 });
 
 test("persona card records privacy, memory, action, and search boundaries only", () => {
