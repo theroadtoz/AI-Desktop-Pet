@@ -101,7 +101,10 @@ async function checkChat() {
         messages: [{ role: "user", content: "ping" }],
         temperature: 0.2,
         max_tokens: 32,
-        stream: true
+        stream: true,
+        ...(runtime === "ollama" && isLocalOllamaOpenAICompatibleEndpoint(baseURL)
+          ? { reasoning_effort: "none" }
+          : {})
       })
     }, chatTimeoutMs);
 
@@ -242,6 +245,21 @@ function createChatCompletionsURL(value) {
   url.search = "";
   url.hash = "";
   return url;
+}
+
+function isLocalOllamaOpenAICompatibleEndpoint(value) {
+  try {
+    const url = new URL(value);
+    const hostname = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+
+    return url.port === "11434" && (
+      hostname === "localhost" ||
+      hostname === "127.0.0.1" ||
+      hostname === "::1"
+    );
+  } catch {
+    return false;
+  }
 }
 
 function readBaseURLHost(value) {

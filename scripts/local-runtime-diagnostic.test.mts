@@ -123,6 +123,91 @@ test("diagnostic reports ready for OpenAI-compatible models and streaming chat",
   }
 });
 
+test("diagnostic default chat timeout allows local runtime cold starts", async () => {
+  const recordedTimeouts: number[] = [];
+  const originalSetTimeout = globalThis.setTimeout;
+  globalThis.setTimeout = ((handler: TimerHandler, timeout?: number, ...args: unknown[]) => {
+    if (typeof timeout === "number") {
+      recordedTimeouts.push(timeout);
+    }
+
+    return originalSetTimeout(handler, timeout, ...args);
+  }) as typeof setTimeout;
+
+  const fetchImpl = (async (input) => {
+    const url = String(input);
+
+    if (url.endsWith("/models")) {
+      return new Response(JSON.stringify({ data: [{ id: "target-model" }] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+
+    assert.ok(url.endsWith("/chat/completions"));
+
+    return new Response(
+      `data: ${JSON.stringify({ choices: [{ delta: { content: "pong" } }] })}\n\ndata: [DONE]\n\n`,
+      { status: 200, headers: { "Content-Type": "text/event-stream" } }
+    );
+  }) as typeof fetch;
+
+  try {
+    await diagnoseLocalRuntimes({
+      runtimes: [testRuntime],
+      env: {},
+      commandExists: async () => true,
+      processExists: async () => true,
+      tcpReachable: async () => true,
+      fetchImpl
+    });
+  } finally {
+    globalThis.setTimeout = originalSetTimeout;
+  }
+
+  assert.deepEqual(recordedTimeouts, [2_000, 15_000]);
+});
+
+test("diagnostic sends reasoning-off for local Ollama chat and keeps output safe", async () => {
+  let requestBody: unknown = null;
+  const fetchImpl = (async (input, init) => {
+    const url = String(input);
+
+    if (url === "http://localhost:11434/v1/models") {
+      return new Response(JSON.stringify({ data: [{ id: "target-model" }] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+
+    assert.equal(url, "http://localhost:11434/v1/chat/completions");
+    requestBody = JSON.parse(String(init?.body));
+
+    return new Response(
+      `data: ${JSON.stringify({ choices: [{ delta: { content: "pong" } }] })}\n\ndata: [DONE]\n\n`,
+      { status: 200, headers: { "Content-Type": "text/event-stream" } }
+    );
+  }) as typeof fetch;
+
+  const result = await diagnoseLocalRuntimes({
+    runtimes: [{
+      ...testRuntime,
+      id: "ollama",
+      baseURL: "http://localhost:11434/v1"
+    }],
+    env: {},
+    commandExists: async () => true,
+    processExists: async () => true,
+    tcpReachable: async () => true,
+    fetchImpl
+  });
+  const output = JSON.stringify(result);
+
+  assert.equal(result.ok, true);
+  assert.equal((requestBody as { reasoning_effort?: string }).reasoning_effort, "none");
+  assert.doesNotMatch(output, /reasoning_effort|requestBody|messages|"content"|ping|pong/);
+});
+
 test("diagnostic output omits local paths and sensitive bodies", async () => {
   const result = await diagnoseLocalRuntimes({
     runtimes: [testRuntime],

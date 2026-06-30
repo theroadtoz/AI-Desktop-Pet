@@ -142,7 +142,7 @@ export async function diagnoseLocalRuntimes(options: LocalModelDiagnosticOptions
   const timing: RuntimeTiming = {
     tcpTimeoutMs: options.tcpTimeoutMs ?? 700,
     modelsTimeoutMs: options.modelsTimeoutMs ?? 2_000,
-    chatTimeoutMs: options.chatTimeoutMs ?? 5_000
+    chatTimeoutMs: options.chatTimeoutMs ?? 15_000
   };
   const runtimeSummaries: LocalModelDiagnosticRuntimeSummary[] = [];
 
@@ -209,7 +209,7 @@ async function diagnoseOpenAICompatibleRuntime(
     });
   }
 
-  const chatCheck = await checkChat(runtime.baseURL, runtime.model, checks.fetchImpl, timing.chatTimeoutMs);
+  const chatCheck = await checkChat(runtime.id, runtime.baseURL, runtime.model, checks.fetchImpl, timing.chatTimeoutMs);
 
   return createRuntimeSummary(runtime, {
     status: chatCheck.status,
@@ -314,6 +314,7 @@ async function checkModels(
 }
 
 async function checkChat(
+  runtimeId: string,
   baseURL: string,
   model: string,
   fetchImpl: typeof fetch,
@@ -332,7 +333,10 @@ async function checkChat(
         messages: [{ role: "user", content: "ping" }],
         temperature: 0.2,
         max_tokens: 32,
-        stream: true
+        stream: true,
+        ...(runtimeId === "ollama" && isLocalOllamaOpenAICompatibleEndpoint(baseURL)
+          ? { reasoning_effort: "none" }
+          : {})
       })
     }, timeoutMs);
 
@@ -469,6 +473,21 @@ export function createChatCompletionsURL(value: string): URL {
   url.search = "";
   url.hash = "";
   return url;
+}
+
+function isLocalOllamaOpenAICompatibleEndpoint(value: string): boolean {
+  try {
+    const url = new URL(value);
+    const hostname = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+
+    return url.port === "11434" && (
+      hostname === "localhost" ||
+      hostname === "127.0.0.1" ||
+      hostname === "::1"
+    );
+  } catch {
+    return false;
+  }
 }
 
 async function commandExists(command: string): Promise<boolean> {

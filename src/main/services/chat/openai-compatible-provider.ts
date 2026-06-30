@@ -136,6 +136,7 @@ async function streamChatCompletions(input: {
     const headers: Record<string, string> = {
       "Content-Type": "application/json"
     };
+    const providerId = input.options.providerId ?? "openai-compatible";
 
     if (input.options.apiKey) {
       headers.Authorization = `Bearer ${input.options.apiKey}`;
@@ -151,12 +152,15 @@ async function streamChatCompletions(input: {
           input.request.memoryContext,
           input.request.dialogueStyleContext,
           input.request.userProfileContext,
-          getPromptTemplateProfile(input.options.providerId ?? "openai-compatible"),
+          getPromptTemplateProfile(providerId),
           input.request.runtimeContext
         ),
         temperature: input.options.temperature,
         max_tokens: input.options.maxTokens,
-        stream: true
+        stream: true,
+        ...(providerId === "local-openai-compatible" && isLocalOllamaOpenAICompatibleEndpoint(input.options.baseURL)
+          ? { reasoning_effort: "none" }
+          : {})
       }),
       signal: controller.signal
     });
@@ -201,6 +205,21 @@ export function createChatCompletionsURL(baseURL: string): URL {
   url.search = "";
   url.hash = "";
   return url;
+}
+
+function isLocalOllamaOpenAICompatibleEndpoint(baseURL: string): boolean {
+  try {
+    const url = new URL(baseURL);
+    const hostname = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+
+    return url.port === "11434" && (
+      hostname === "localhost" ||
+      hostname === "127.0.0.1" ||
+      hostname === "::1"
+    );
+  } catch {
+    return false;
+  }
 }
 
 async function readSseStream(

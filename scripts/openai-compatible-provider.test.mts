@@ -27,6 +27,39 @@ test("chat completions URL keeps cloud base URL behavior without /v1", () => {
   );
 });
 
+test("local Ollama OpenAI-compatible provider sends reasoning-off parameter", async () => {
+  let requestBody: unknown = null;
+  const originalFetch = globalThis.fetch;
+
+  globalThis.fetch = (async (input, init) => {
+    assert.equal(String(input), "http://localhost:11434/v1/chat/completions");
+    requestBody = JSON.parse(String(init?.body));
+
+    return new Response(
+      `data: ${JSON.stringify({ choices: [{ delta: { content: "ok" } }] })}\n\ndata: [DONE]\n\n`,
+      { status: 200, headers: { "Content-Type": "text/event-stream" } }
+    );
+  }) as typeof fetch;
+
+  try {
+    await createOpenAICompatibleProvider({
+      providerId: "local-openai-compatible",
+      baseURL: "http://localhost:11434/v1",
+      model: "qwen3.5:2b",
+      temperature: 0.7,
+      maxTokens: 240,
+      timeoutMs: 60000
+    }).streamReply(createMinimalRequest(), {
+      signal: new AbortController().signal,
+      onDelta() {}
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal((requestBody as { reasoning_effort?: string }).reasoning_effort, "none");
+});
+
 test("local OpenAI-compatible provider streams SSE without Authorization and keeps main-process mapping", async () => {
   let requestedURL = "";
   let requestBody: unknown = null;
@@ -81,6 +114,7 @@ test("local OpenAI-compatible provider streams SSE without Authorization and kee
     const body = requestBody as {
       model?: string;
       stream?: boolean;
+      reasoning_effort?: string;
       messages?: Array<{ role?: string; content?: string }>;
     };
 
@@ -89,6 +123,7 @@ test("local OpenAI-compatible provider streams SSE without Authorization and kee
     assert.equal(authorization, "");
     assert.equal(body.model, "qwen3.5:2b");
     assert.equal(body.stream, true);
+    assert.equal(body.reasoning_effort, undefined);
     assert.equal(body.messages?.[0]?.content, "你是桌面伙伴。用中文，短句，不输出 JSON。");
     assert.match(body.messages?.[1]?.content ?? "", /现代老魔女/);
     assert.match(body.messages?.[2]?.content ?? "", /模式：工作=给下一步/);
@@ -141,10 +176,12 @@ test("cloud OpenAI-compatible provider keeps cloud prompt template", async () =>
     });
 
     const body = requestBody as {
+      reasoning_effort?: string;
       messages?: Array<{ role?: string; content?: string }>;
     };
 
     assert.equal(authorization, "Bearer test-cloud-key");
+    assert.equal(body.reasoning_effort, undefined);
     assert.match(body.messages?.[0]?.content ?? "", /低打扰的桌面伙伴/);
     assert.match(body.messages?.[1]?.content ?? "", /掌握现代科技/);
     assert.match(body.messages?.[1]?.content ?? "", /学识渊博/);
