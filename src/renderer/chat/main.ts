@@ -13,6 +13,10 @@ import {
 } from "../../shared/provider-config";
 import type { ProviderHealthCheckRequest } from "../../shared/provider-health";
 import type { LlamaCppRuntimeSafeSummary } from "../../shared/llama-cpp-runtime";
+import type {
+  LocalModelDiagnosticRuntimeSummary,
+  LocalModelDiagnosticSafeSummary
+} from "../../shared/local-model-diagnostic";
 import { polishAssistantDisplayText } from "../../shared/reply-text-polish";
 import {
   DEFAULT_PET_PRESENTATION_PREFERENCES,
@@ -92,6 +96,11 @@ const timeoutInput = document.querySelector<HTMLInputElement>("#provider-timeout
 const localProviderPresetContainer = document.querySelector<HTMLElement>("#local-provider-preset-field");
 const localProviderPresetSelect = document.querySelector<HTMLSelectElement>("#local-provider-preset");
 const localProviderNote = document.querySelector<HTMLElement>("#local-provider-note");
+const localModelDiagnosticSection = document.querySelector<HTMLElement>("#local-model-diagnostic-section");
+const localModelDiagnosticStatus = document.querySelector<HTMLElement>("#local-model-diagnostic-status");
+const localModelDiagnosticSummary = document.querySelector<HTMLElement>("#local-model-diagnostic-summary");
+const localModelDiagnosticRuntimes = document.querySelector<HTMLElement>("#local-model-diagnostic-runtimes");
+const localModelDiagnosticButton = document.querySelector<HTMLButtonElement>("#local-model-diagnostic-button");
 const llamaCppRuntimeSection = document.querySelector<HTMLElement>("#llama-cpp-runtime-section");
 const llamaCppRuntimeStatus = document.querySelector<HTMLElement>("#llama-cpp-runtime-status");
 const llamaCppRuntimeFiles = document.querySelector<HTMLElement>("#llama-cpp-runtime-files");
@@ -185,6 +194,8 @@ if (
   !settingsAdvancedPage || !settingsMemoryDetailPage || !memoryDetail || !settingsHistoryDetailPage || !providerIdSelect ||
   !displayNameInput || !openAIFields || !baseURLInput || !modelInput || !temperatureInput ||
   !maxTokensInput || !timeoutInput || !localProviderPresetContainer || !localProviderPresetSelect || !localProviderNote ||
+  !localModelDiagnosticSection || !localModelDiagnosticStatus || !localModelDiagnosticSummary ||
+  !localModelDiagnosticRuntimes || !localModelDiagnosticButton ||
   !llamaCppRuntimeSection || !llamaCppRuntimeStatus || !llamaCppRuntimeFiles || !llamaCppRuntimeEnabled ||
   !llamaCppRuntimeHost || !llamaCppRuntimePort || !llamaCppRuntimeCtx || !llamaCppRuntimeAlias ||
   !llamaCppRuntimeSaveButton || !llamaCppRuntimeExecutableButton || !llamaCppRuntimeModelButton ||
@@ -243,6 +254,11 @@ const timeoutField = timeoutInput;
 const localProviderPresetFieldBox = localProviderPresetContainer;
 const localProviderPresetField = localProviderPresetSelect;
 const localProviderNoteBox = localProviderNote;
+const localModelDiagnosticSectionBox = localModelDiagnosticSection;
+const localModelDiagnosticStatusBox = localModelDiagnosticStatus;
+const localModelDiagnosticSummaryBox = localModelDiagnosticSummary;
+const localModelDiagnosticRuntimesBox = localModelDiagnosticRuntimes;
+const localModelDiagnosticAction = localModelDiagnosticButton;
 const llamaCppRuntimeSectionBox = llamaCppRuntimeSection;
 const llamaCppRuntimeStatusBox = llamaCppRuntimeStatus;
 const llamaCppRuntimeFilesBox = llamaCppRuntimeFiles;
@@ -421,6 +437,8 @@ let presenceModes: PresenceModeView[] = [];
 let currentPresenceModeId: PresenceModeId = "default";
 let currentUserProfile: UserProfile | null = null;
 let currentMemoryInjectionCount: number | null = null;
+let latestLocalModelDiagnosticSummary: LocalModelDiagnosticSafeSummary | null = null;
+let isLocalModelDiagnosticRunning = false;
 
 let currentActivityEcho = ACTIVITY_ECHO_IDLE_MESSAGE;
 let currentActivityEchoState: ActivityEchoState = "idle";
@@ -445,6 +463,134 @@ function resetProviderHealthStatus(): void {
 function setProviderHealthStatus(message: string, state: "ready" | "fallback" = "fallback"): void {
   providerHealthStatusBox.textContent = message;
   providerHealthStatusBox.dataset.state = state;
+}
+
+function resetLocalModelDiagnosticSummary(): void {
+  latestLocalModelDiagnosticSummary = null;
+  localModelDiagnosticStatusBox.textContent = "本地模型诊断尚未运行。";
+  localModelDiagnosticStatusBox.dataset.state = "fallback";
+  localModelDiagnosticSummaryBox.textContent = "运行后会显示 Ollama、LM Studio 和 llama.cpp 的安全摘要。";
+  localModelDiagnosticRuntimesBox.replaceChildren();
+  localModelDiagnosticAction.disabled = false;
+  localModelDiagnosticAction.textContent = "运行本地诊断";
+}
+
+function setLocalModelDiagnosticPending(): void {
+  localModelDiagnosticStatusBox.textContent = "正在运行本地模型诊断...";
+  localModelDiagnosticStatusBox.dataset.state = "fallback";
+  localModelDiagnosticSummaryBox.textContent = "正在检查命令、进程、端口、模型列表和最小聊天探测。";
+  localModelDiagnosticAction.disabled = true;
+  localModelDiagnosticAction.textContent = "诊断中...";
+}
+
+function formatLocalModelDiagnosticStatus(status: LocalModelDiagnosticRuntimeSummary["status"]): string {
+  const labels: Record<LocalModelDiagnosticRuntimeSummary["status"], string> = {
+    ready: "已就绪",
+    not_installed_or_unreachable: "未安装或不可达",
+    model_missing: "缺少模型",
+    chat_failed: "聊天探测失败",
+    env_configured: "已配置，待启动",
+    skipped: "未配置"
+  };
+
+  return labels[status];
+}
+
+function formatLocalModelDiagnosticNextAction(runtime: LocalModelDiagnosticRuntimeSummary): string {
+  if (runtime.status === "ready") {
+    return "可以用于真实本地模型验收。";
+  }
+
+  if (runtime.id === "llama-cpp-managed" && runtime.reason === "missing_local_paths") {
+    return "先在托管 llama.cpp 区选择运行文件和 GGUF 模型。";
+  }
+
+  if (runtime.reason === "command_missing") {
+    return runtime.id === "ollama"
+      ? "安装并启动 Ollama，再手动拉取目标模型。"
+      : "安装或打开对应本地运行时，并启动 OpenAI-compatible 服务。";
+  }
+
+  if (runtime.reason === "tcp_unreachable") {
+    return "启动对应本地服务，并确认端口正在监听。";
+  }
+
+  if (runtime.reason === "model_missing") {
+    return "准备目标模型后重新诊断。";
+  }
+
+  if (runtime.status === "chat_failed") {
+    return "检查本地服务控制台和模型兼容性后重试。";
+  }
+
+  return runtime.nextAction ?? "按运行时提示完成本地服务准备后重试。";
+}
+
+function formatLocalModelDiagnosticRuntime(runtime: LocalModelDiagnosticRuntimeSummary): string {
+  const details = [
+    `${runtime.label}：${formatLocalModelDiagnosticStatus(runtime.status)}`,
+    runtime.baseURLHost ? `Host：${runtime.baseURLHost}` : null,
+    runtime.model ? `模型：${runtime.model}` : null,
+    typeof runtime.modelCount === "number" ? `模型数：${runtime.modelCount}` : null,
+    typeof runtime.firstTokenMs === "number" ? `首 token：${runtime.firstTokenMs}ms` : null,
+    typeof runtime.replyLength === "number" ? `回复长度：${runtime.replyLength}` : null,
+    `下一步：${formatLocalModelDiagnosticNextAction(runtime)}`
+  ].filter(Boolean);
+
+  return details.join(" · ");
+}
+
+function renderLocalModelDiagnosticSummary(summary: LocalModelDiagnosticSafeSummary): void {
+  latestLocalModelDiagnosticSummary = summary;
+  const state = summary.status === "ready" ? "ready" : "fallback";
+  localModelDiagnosticStatusBox.dataset.state = state;
+  localModelDiagnosticStatusBox.textContent = summary.ok
+    ? `诊断完成：已有可用本地运行时 · 建议 ${summary.recommendedRuntime} · ${summary.durationMs}ms`
+    : `诊断完成：本地模型尚未就绪 · 建议先看 ${summary.recommendedRuntime} · ${summary.durationMs}ms`;
+  localModelDiagnosticSummaryBox.textContent = summary.ok
+    ? "可以继续做真实本地模型 Chat 验收；不要用 mock 或 Fake 代替真实运行时。"
+    : "诊断功能正常完成，但当前本地运行时还没准备好。";
+  localModelDiagnosticRuntimesBox.replaceChildren(
+    ...summary.runtimes.map((runtime) => {
+      const item = document.createElement("p");
+      item.className = "selection-note";
+      item.dataset.state = runtime.status === "ready" ? "ready" : "fallback";
+      item.textContent = formatLocalModelDiagnosticRuntime(runtime);
+      return item;
+    })
+  );
+}
+
+function setLocalModelDiagnosticUnavailable(): void {
+  latestLocalModelDiagnosticSummary = null;
+  localModelDiagnosticStatusBox.textContent = "本地模型诊断功能不可用。";
+  localModelDiagnosticStatusBox.dataset.state = "fallback";
+  localModelDiagnosticSummaryBox.textContent = "请稍后重试，或使用命令行诊断入口。";
+  localModelDiagnosticRuntimesBox.replaceChildren();
+}
+
+async function runLocalModelDiagnostic(): Promise<void> {
+  if (chatTurnState.isReplying || isLocalModelDiagnosticRunning) {
+    return;
+  }
+
+  if (!window.localRuntimeApi) {
+    setLocalModelDiagnosticUnavailable();
+    return;
+  }
+
+  isLocalModelDiagnosticRunning = true;
+  setLocalModelDiagnosticPending();
+
+  try {
+    renderLocalModelDiagnosticSummary(await window.localRuntimeApi.diagnoseLocalModel());
+  } catch {
+    setLocalModelDiagnosticUnavailable();
+  } finally {
+    isLocalModelDiagnosticRunning = false;
+    localModelDiagnosticAction.disabled = false;
+    localModelDiagnosticAction.textContent = "运行本地诊断";
+  }
 }
 
 function formatLlamaCppRuntimeStatus(status: LlamaCppRuntimeSafeSummary["status"]): string {
@@ -1932,6 +2078,7 @@ function applyLocalProviderPreset(presetId: LocalProviderPresetId): void {
   }
 
   resetProviderHealthStatus();
+  resetLocalModelDiagnosticSummary();
 }
 
 function updateProviderFields(): void {
@@ -1942,6 +2089,7 @@ function updateProviderFields(): void {
   connectionSafeSectionBox.hidden = !isCloudOpenAI;
   localProviderPresetFieldBox.hidden = !isLocalOpenAI;
   localProviderNoteBox.hidden = !isLocalOpenAI;
+  localModelDiagnosticSectionBox.hidden = !isLocalOpenAI;
   llamaCppRuntimeSectionBox.hidden = !isLocalOpenAI;
   providerHealthCheckAction.hidden = !hasOpenAIFields;
   providerHealthStatusBox.hidden = !hasOpenAIFields;
@@ -1961,6 +2109,7 @@ function fillOpenAIDefaults(): void {
   maxTokensField.value = String(DEFAULT_OPENAI_CONFIG.maxTokens);
   timeoutField.value = String(DEFAULT_OPENAI_CONFIG.timeoutMs);
   resetProviderHealthStatus();
+  resetLocalModelDiagnosticSummary();
 }
 
 function fillLocalOpenAIDefaults(): void {
@@ -1972,6 +2121,7 @@ function fillLocalOpenAIDefaults(): void {
   maxTokensField.value = String(DEFAULT_LOCAL_OPENAI_CONFIG.maxTokens);
   timeoutField.value = String(DEFAULT_LOCAL_OPENAI_CONFIG.timeoutMs);
   resetProviderHealthStatus();
+  resetLocalModelDiagnosticSummary();
 }
 
 function fillProviderForm(config: ProviderConfig): void {
@@ -1995,6 +2145,7 @@ function fillProviderForm(config: ProviderConfig): void {
   apiKeyField.value = "";
   updateProviderFields();
   resetProviderHealthStatus();
+  resetLocalModelDiagnosticSummary();
 }
 
 function getApiKeyRef(): string {
@@ -2650,6 +2801,7 @@ providerIdField.addEventListener("change", () => {
   }
 
   updateProviderFields();
+  resetLocalModelDiagnosticSummary();
   clearSettingsFeedback();
 });
 
@@ -2662,9 +2814,18 @@ localProviderPresetField.addEventListener("change", () => {
   clearSettingsFeedback();
 });
 
-for (const field of [baseURLField, modelField, timeoutField]) {
-  field.addEventListener("input", resetProviderHealthStatus);
+for (const field of [baseURLField, modelField]) {
+  field.addEventListener("input", () => {
+    resetProviderHealthStatus();
+    resetLocalModelDiagnosticSummary();
+  });
 }
+
+timeoutField.addEventListener("input", resetProviderHealthStatus);
+
+localModelDiagnosticAction.addEventListener("click", () => {
+  void runLocalModelDiagnostic();
+});
 
 providerHealthCheckAction.addEventListener("click", () => {
   if (chatTurnState.isReplying || !window.configApi) {

@@ -229,6 +229,15 @@
                 </label>
               </div>
               <p id="local-provider-note" class="selection-note" hidden>推荐本地默认：Ollama、http://localhost:11434/v1、qwen3.5:2b。本地服务不会要求 API Key；如果未安装或未启动 Ollama，连接检查会显示未就绪。缺模型时请手动运行 ollama pull qwen3.5:2b。</p>
+              <section id="local-model-diagnostic-section" class="content-stack" aria-labelledby="local-model-diagnostic-title" hidden>
+                <h3 id="local-model-diagnostic-title" class="settings-section-title">本地模型诊断</h3>
+                <p id="local-model-diagnostic-status" class="status-box" data-state="fallback" aria-live="polite">本地模型诊断尚未运行。</p>
+                <p id="local-model-diagnostic-summary" class="selection-note">运行后会显示 Ollama、LM Studio 和 llama.cpp 的安全摘要。</p>
+                <div id="local-model-diagnostic-runtimes" class="content-stack" aria-live="polite"></div>
+                <div class="inline-actions">
+                  <button id="local-model-diagnostic-button" class="button-light" type="button">运行本地诊断</button>
+                </div>
+              </section>
               <section id="llama-cpp-runtime-section" class="content-stack" aria-labelledby="llama-cpp-runtime-title" hidden>
                 <h3 id="llama-cpp-runtime-title" class="settings-section-title">托管 llama.cpp</h3>
                 <p id="llama-cpp-runtime-status" class="status-box" data-state="fallback" aria-live="polite">运行时状态尚未读取。</p>

@@ -15,6 +15,7 @@ import type { ShortcutActionId, ShortcutPreferenceView, ShortcutUpdateResult } f
 import type { UserProfile, UserProfileInput } from "./user-profile";
 import type { PetActionTrigger } from "./pet-action-trigger";
 import type { LlamaCppRuntimeSafeSummary, LlamaCppRuntimeSettingsUpdate } from "./llama-cpp-runtime";
+import type { LocalModelDiagnosticSafeSummary } from "./local-model-diagnostic";
 
 export type { PetTelemetryEvent } from "./pet-telemetry-contract";
 
@@ -169,6 +170,7 @@ export type ConfigApi = {
 };
 
 export type LocalRuntimeApi = {
+  diagnoseLocalModel(): Promise<LocalModelDiagnosticSafeSummary>;
   getLlamaCppSettings(): Promise<LlamaCppRuntimeSafeSummary>;
   updateLlamaCppSettings(update: LlamaCppRuntimeSettingsUpdate): Promise<LlamaCppRuntimeSafeSummary>;
   chooseLlamaCppExecutable(): Promise<LlamaCppRuntimeSafeSummary>;

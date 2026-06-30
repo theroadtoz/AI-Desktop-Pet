@@ -91,6 +91,56 @@ const llamaCppRuntimeReasons: readonly NonNullable<LlamaCppRuntimeSafeSummary["r
   "health_timeout",
   "stop_timeout"
 ] as const;
+const localModelDiagnosticStatuses = ["ready", "not_ready", "script_failed"] as const;
+const localModelDiagnosticRuntimeStatuses = [
+  "ready",
+  "not_installed_or_unreachable",
+  "model_missing",
+  "chat_failed",
+  "env_configured",
+  "skipped"
+] as const;
+const localModelDiagnosticEndpointStatuses = [
+  "ready",
+  "model_missing",
+  "service_unreachable",
+  "incompatible_response",
+  "chat_failed",
+  "skipped"
+] as const;
+
+type LocalModelDiagnosticRuntimeStatus = (typeof localModelDiagnosticRuntimeStatuses)[number];
+type LocalModelDiagnosticEndpointStatus = (typeof localModelDiagnosticEndpointStatuses)[number];
+type LocalModelDiagnosticSafeSummary = {
+  ok: boolean;
+  status: (typeof localModelDiagnosticStatuses)[number];
+  recommendedRuntime: string;
+  durationMs: number;
+  safeSummaryOnly: true;
+  runtimes: Array<{
+    id: string;
+    label: string;
+    status: LocalModelDiagnosticRuntimeStatus;
+    baseURLHost?: string;
+    model?: string;
+    reason?: string;
+    nextAction?: string;
+    commandFound?: boolean;
+    processFound?: boolean;
+    tcpReachable?: boolean;
+    modelsStatus?: LocalModelDiagnosticEndpointStatus;
+    chatStatus?: LocalModelDiagnosticEndpointStatus;
+    modelCount?: number;
+    firstTokenMs?: number;
+    replyLength?: number;
+    modelsCheckMs?: number;
+    chatCheckMs?: number;
+    durationMs?: number;
+    managedEnabled?: boolean;
+    executableConfigured?: boolean;
+    modelConfigured?: boolean;
+  }>;
+};
 
 const emotionTags = ["neutral", "happy", "sad", "surprised", "confused", "angry"] as const;
 const emotionIntensities = ["low", "medium", "high"] as const;
@@ -617,17 +667,41 @@ function parsePositiveInteger(value: unknown): number | null {
   return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : null;
 }
 
-function hasUnsafeRuntimePathField(value: unknown): boolean {
+const unsafeRuntimeFieldNames = new Set([
+  "body",
+  "prompt",
+  "request",
+  "messages",
+  "content",
+  "apikey"
+]);
+
+function hasUnsafeRuntimeField(value: unknown): boolean {
+  if (Array.isArray(value)) {
+    return value.some(hasUnsafeRuntimeField);
+  }
+
   if (!value || typeof value !== "object") {
     return false;
   }
 
   for (const [key, nestedValue] of Object.entries(value)) {
-    if (key.toLowerCase().includes("path")) {
+    const normalizedKey = key.toLowerCase();
+    const compactKey = normalizedKey.replace(/[^a-z0-9]/g, "");
+
+    if (
+      normalizedKey.includes("path") ||
+      unsafeRuntimeFieldNames.has(normalizedKey) ||
+      unsafeRuntimeFieldNames.has(compactKey) ||
+      compactKey.includes("body") ||
+      compactKey.includes("prompt") ||
+      compactKey.includes("request") ||
+      compactKey.includes("apikey")
+    ) {
       return true;
     }
 
-    if (hasUnsafeRuntimePathField(nestedValue)) {
+    if (hasUnsafeRuntimeField(nestedValue)) {
       return true;
     }
   }
@@ -643,13 +717,132 @@ function isOptionalRuntimeNumber(value: unknown): value is number | undefined {
   return value === undefined || (typeof value === "number" && Number.isFinite(value));
 }
 
+function isOptionalRuntimeBoolean(value: unknown): value is boolean | undefined {
+  return value === undefined || typeof value === "boolean";
+}
+
+function isSafeRuntimeText(value: string): boolean {
+  return (
+    value.length <= 240 &&
+    !/[\u0000-\u001f\u007f]/.test(value) &&
+    !/[A-Za-z]:\\/.test(value) &&
+    !/(^|[\s([{])\/(?:home|Users|Volumes|mnt|var|tmp|opt|usr|etc)\//.test(value)
+  );
+}
+
+function isOptionalSafeRuntimeText(value: unknown): value is string | undefined {
+  return value === undefined || (typeof value === "string" && isSafeRuntimeText(value));
+}
+
+function isOptionalLocalModelEndpointStatus(value: unknown): value is LocalModelDiagnosticEndpointStatus | undefined {
+  return value === undefined || (
+    typeof value === "string" &&
+    localModelDiagnosticEndpointStatuses.includes(value as LocalModelDiagnosticEndpointStatus)
+  );
+}
+
+function parseLocalModelDiagnosticRuntimeSummary(value: unknown): LocalModelDiagnosticSafeSummary["runtimes"][number] | null {
+  const runtime = value as Partial<LocalModelDiagnosticSafeSummary["runtimes"][number]> | null;
+
+  if (
+    !runtime ||
+    typeof runtime !== "object" ||
+    typeof runtime.id !== "string" ||
+    !isSafeRuntimeText(runtime.id) ||
+    typeof runtime.label !== "string" ||
+    !isSafeRuntimeText(runtime.label) ||
+    typeof runtime.status !== "string" ||
+    !localModelDiagnosticRuntimeStatuses.includes(runtime.status as LocalModelDiagnosticRuntimeStatus) ||
+    !isOptionalSafeRuntimeText(runtime.baseURLHost) ||
+    !isOptionalSafeRuntimeText(runtime.model) ||
+    !isOptionalSafeRuntimeText(runtime.reason) ||
+    !isOptionalSafeRuntimeText(runtime.nextAction) ||
+    !isOptionalRuntimeBoolean(runtime.commandFound) ||
+    !isOptionalRuntimeBoolean(runtime.processFound) ||
+    !isOptionalRuntimeBoolean(runtime.tcpReachable) ||
+    !isOptionalLocalModelEndpointStatus(runtime.modelsStatus) ||
+    !isOptionalLocalModelEndpointStatus(runtime.chatStatus) ||
+    !isOptionalRuntimeNumber(runtime.modelCount) ||
+    !isOptionalRuntimeNumber(runtime.firstTokenMs) ||
+    !isOptionalRuntimeNumber(runtime.replyLength) ||
+    !isOptionalRuntimeNumber(runtime.modelsCheckMs) ||
+    !isOptionalRuntimeNumber(runtime.chatCheckMs) ||
+    !isOptionalRuntimeNumber(runtime.durationMs) ||
+    !isOptionalRuntimeBoolean(runtime.managedEnabled) ||
+    !isOptionalRuntimeBoolean(runtime.executableConfigured) ||
+    !isOptionalRuntimeBoolean(runtime.modelConfigured)
+  ) {
+    return null;
+  }
+
+  return {
+    id: runtime.id,
+    label: runtime.label,
+    status: runtime.status as LocalModelDiagnosticRuntimeStatus,
+    ...(runtime.baseURLHost ? { baseURLHost: runtime.baseURLHost } : {}),
+    ...(runtime.model ? { model: runtime.model } : {}),
+    ...(runtime.reason ? { reason: runtime.reason } : {}),
+    ...(runtime.nextAction ? { nextAction: runtime.nextAction } : {}),
+    ...(typeof runtime.commandFound === "boolean" ? { commandFound: runtime.commandFound } : {}),
+    ...(typeof runtime.processFound === "boolean" ? { processFound: runtime.processFound } : {}),
+    ...(typeof runtime.tcpReachable === "boolean" ? { tcpReachable: runtime.tcpReachable } : {}),
+    ...(runtime.modelsStatus ? { modelsStatus: runtime.modelsStatus } : {}),
+    ...(runtime.chatStatus ? { chatStatus: runtime.chatStatus } : {}),
+    ...(typeof runtime.modelCount === "number" ? { modelCount: runtime.modelCount } : {}),
+    ...(typeof runtime.firstTokenMs === "number" ? { firstTokenMs: runtime.firstTokenMs } : {}),
+    ...(typeof runtime.replyLength === "number" ? { replyLength: runtime.replyLength } : {}),
+    ...(typeof runtime.modelsCheckMs === "number" ? { modelsCheckMs: runtime.modelsCheckMs } : {}),
+    ...(typeof runtime.chatCheckMs === "number" ? { chatCheckMs: runtime.chatCheckMs } : {}),
+    ...(typeof runtime.durationMs === "number" ? { durationMs: runtime.durationMs } : {}),
+    ...(typeof runtime.managedEnabled === "boolean" ? { managedEnabled: runtime.managedEnabled } : {}),
+    ...(typeof runtime.executableConfigured === "boolean" ? { executableConfigured: runtime.executableConfigured } : {}),
+    ...(typeof runtime.modelConfigured === "boolean" ? { modelConfigured: runtime.modelConfigured } : {})
+  };
+}
+
+function parseLocalModelDiagnosticSafeSummary(value: unknown): LocalModelDiagnosticSafeSummary | null {
+  const summary = value as Partial<LocalModelDiagnosticSafeSummary> | null;
+
+  if (
+    !summary ||
+    typeof summary !== "object" ||
+    hasUnsafeRuntimeField(summary) ||
+    summary.safeSummaryOnly !== true ||
+    typeof summary.ok !== "boolean" ||
+    typeof summary.status !== "string" ||
+    !localModelDiagnosticStatuses.includes(summary.status as (typeof localModelDiagnosticStatuses)[number]) ||
+    typeof summary.recommendedRuntime !== "string" ||
+    !isSafeRuntimeText(summary.recommendedRuntime) ||
+    typeof summary.durationMs !== "number" ||
+    !Number.isFinite(summary.durationMs) ||
+    !Array.isArray(summary.runtimes)
+  ) {
+    return null;
+  }
+
+  const runtimes = summary.runtimes.map(parseLocalModelDiagnosticRuntimeSummary);
+
+  if (runtimes.some((runtime) => runtime === null)) {
+    return null;
+  }
+
+  return {
+    ok: summary.ok,
+    status: summary.status as LocalModelDiagnosticSafeSummary["status"],
+    recommendedRuntime: summary.recommendedRuntime,
+    durationMs: summary.durationMs,
+    safeSummaryOnly: true,
+    runtimes: runtimes as LocalModelDiagnosticSafeSummary["runtimes"]
+  };
+}
+
 function parseLlamaCppRuntimeSafeSummary(value: unknown): LlamaCppRuntimeSafeSummary | null {
   const summary = value as Partial<LlamaCppRuntimeSafeSummary> | null;
 
   if (
     !summary ||
     typeof summary !== "object" ||
-    hasUnsafeRuntimePathField(summary) ||
+    hasUnsafeRuntimeField(summary) ||
     summary.runtime !== "llama.cpp" ||
     summary.safeSummaryOnly !== true ||
     typeof summary.enabled !== "boolean" ||
@@ -708,7 +901,7 @@ function parseLlamaCppRuntimeSafeSummary(value: unknown): LlamaCppRuntimeSafeSum
 function parseLlamaCppRuntimeSettingsUpdate(value: unknown): LlamaCppRuntimeSettingsUpdate | null {
   const update = value as Partial<LlamaCppRuntimeSettingsUpdate> | null;
 
-  if (!update || typeof update !== "object" || hasUnsafeRuntimePathField(update)) {
+  if (!update || typeof update !== "object" || hasUnsafeRuntimeField(update)) {
     return null;
   }
 
@@ -771,6 +964,16 @@ async function invokeLocalRuntimeSummary(channel: string, ...args: unknown[]): P
 
   if (!summary) {
     throw new Error("Invalid local runtime response");
+  }
+
+  return summary;
+}
+
+async function invokeLocalModelDiagnosticSummary(): Promise<LocalModelDiagnosticSafeSummary> {
+  const summary = parseLocalModelDiagnosticSafeSummary(await ipcRenderer.invoke("localRuntime:diagnose-local-model"));
+
+  if (!summary) {
+    throw new Error("Invalid local model diagnostic response");
   }
 
   return summary;
@@ -1125,6 +1328,9 @@ const configApi: ConfigApi = {
 };
 
 const localRuntimeApi: LocalRuntimeApi = {
+  diagnoseLocalModel() {
+    return invokeLocalModelDiagnosticSummary();
+  },
   getLlamaCppSettings() {
     return invokeLocalRuntimeSummary("localRuntime:get-llama-cpp-settings");
   },

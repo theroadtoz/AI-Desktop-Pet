@@ -47,6 +47,10 @@ import {
 import type { LocalOpenAICompatibleConfig, ProviderConfig, ProviderStatus } from "../shared/provider-config";
 import type { ProviderHealthCheckRequest } from "../shared/provider-health";
 import type { LlamaCppRuntimeSettingsUpdate } from "../shared/llama-cpp-runtime";
+import {
+  parseLocalModelDiagnosticSafeSummary,
+  type LocalModelDiagnosticSafeSummary
+} from "../shared/local-model-diagnostic";
 import { createUserProfilePromptContext } from "../shared/user-profile";
 import {
   calculateInitialPetBounds,
@@ -105,6 +109,7 @@ import {
   createLlamaCppRuntimeSettingsStore,
   type LlamaCppRuntimeSettingsStore
 } from "./services/local-runtime/llama-cpp-runtime-settings-store";
+import { diagnoseLocalRuntimes } from "./services/local-runtime/local-model-diagnostic";
 import { createChatWindow, focusChatInput, showChatWindow } from "./windows/chat-window";
 import { createPetWindow } from "./windows/pet-window";
 import { restorePetWindowOnTop } from "./windows/topmost-policy";
@@ -448,6 +453,59 @@ function removeUndefinedRuntimeSummary(summary: LlamaCppRuntimeSummary): LlamaCp
   return Object.fromEntries(
     Object.entries(summary).filter(([, value]) => typeof value !== "undefined")
   ) as LlamaCppRuntimeSummary;
+}
+
+function getManagedLlamaCppDiagnosticConfig() {
+  const settingsView = llamaCppRuntimeSettingsStore?.getSafeSettingsView(latestLlamaCppRuntimeSummary);
+
+  return {
+    enabled: settingsView?.enabled ?? false,
+    executableConfigured: settingsView?.executableConfigured ?? false,
+    modelConfigured: settingsView?.modelConfigured ?? false,
+    ...(settingsView?.host ? { host: settingsView.host } : {}),
+    ...(typeof settingsView?.port === "number" ? { port: settingsView.port } : {}),
+    ...(settingsView?.alias ? { alias: settingsView.alias } : {})
+  };
+}
+
+function createLocalModelDiagnosticFailureSummary(): LocalModelDiagnosticSafeSummary {
+  return {
+    ok: false,
+    status: "script_failed",
+    recommendedRuntime: "ollama",
+    durationMs: 0,
+    safeSummaryOnly: true,
+    runtimes: []
+  };
+}
+
+function logLocalModelDiagnosticSummary(summary: LocalModelDiagnosticSafeSummary): void {
+  logTelemetry("local_model_diagnostic_completed", {
+    ok: summary.ok,
+    status: summary.status,
+    recommendedRuntime: summary.recommendedRuntime,
+    durationMs: summary.durationMs,
+    runtimeCount: summary.runtimes.length,
+    readyRuntimeCount: summary.runtimes.filter((runtime) => runtime.status === "ready").length,
+    runtimes: summary.runtimes.map((runtime) => ({
+      id: runtime.id,
+      status: runtime.status,
+      baseURLHost: runtime.baseURLHost,
+      model: runtime.model,
+      commandFound: runtime.commandFound,
+      processFound: runtime.processFound,
+      tcpReachable: runtime.tcpReachable,
+      modelsStatus: runtime.modelsStatus,
+      chatStatus: runtime.chatStatus,
+      modelCount: runtime.modelCount,
+      firstTokenMs: runtime.firstTokenMs,
+      replyLength: runtime.replyLength,
+      durationMs: runtime.durationMs,
+      managedEnabled: runtime.managedEnabled,
+      executableConfigured: runtime.executableConfigured,
+      modelConfigured: runtime.modelConfigured
+    }))
+  });
 }
 
 function logPetTelemetry(event: { type: PetTelemetryEventType; payload?: unknown }): void {
@@ -1721,6 +1779,25 @@ app.whenReady().then(async () => {
     }
 
     return getCurrentProviderConfig();
+  });
+
+  ipcMain.handle("localRuntime:diagnose-local-model", async (event) => {
+    if (!isChatSender(event)) {
+      throw new Error("Unauthorized local runtime request");
+    }
+
+    try {
+      const parsedSummary = parseLocalModelDiagnosticSafeSummary(await diagnoseLocalRuntimes({
+        managedLlamaCpp: getManagedLlamaCppDiagnosticConfig()
+      }));
+      const summary = parsedSummary ?? createLocalModelDiagnosticFailureSummary();
+      logLocalModelDiagnosticSummary(summary);
+      return summary;
+    } catch {
+      const summary = createLocalModelDiagnosticFailureSummary();
+      logLocalModelDiagnosticSummary(summary);
+      return summary;
+    }
   });
 
   ipcMain.handle("localRuntime:get-llama-cpp-settings", (event) => {

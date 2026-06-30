@@ -6,6 +6,9 @@ import test from "node:test";
 import {
   diagnoseLocalRuntimes
 } from "./p2-20b-local-runtime-diagnostic.mjs";
+import {
+  parseLocalModelDiagnosticSafeSummary
+} from "../src/shared/local-model-diagnostic.ts";
 
 const testRuntime = {
   id: "test-runtime",
@@ -147,10 +150,81 @@ test("diagnostic output omits local paths and sensitive bodies", async () => {
   assert.doesNotMatch(output, /[A-Z]:\\/);
 });
 
+test("safe diagnostic parser rejects renderer-unsafe fields", () => {
+  const safeSummary = {
+    ok: false,
+    status: "not_ready",
+    recommendedRuntime: "ollama",
+    durationMs: 12,
+    safeSummaryOnly: true,
+    runtimes: [{
+      id: "ollama",
+      label: "Ollama",
+      status: "not_installed_or_unreachable",
+      baseURLHost: "localhost:11434",
+      model: "qwen3.5:2b",
+      commandFound: false,
+      processFound: false,
+      tcpReachable: false,
+      modelsStatus: "skipped",
+      chatStatus: "skipped"
+    }]
+  };
+
+  assert.ok(parseLocalModelDiagnosticSafeSummary(safeSummary));
+
+  for (const field of ["path", "body", "prompt", "request", "requestBody", "messages", "content", "apiKey", "api_key"]) {
+    assert.equal(
+      parseLocalModelDiagnosticSafeSummary({
+        ...safeSummary,
+        runtimes: [{ ...safeSummary.runtimes[0], [field]: "secret" }]
+      }),
+      null,
+      `${field} should be rejected`
+    );
+  }
+
+  assert.equal(
+    parseLocalModelDiagnosticSafeSummary({
+      ...safeSummary,
+      runtimes: [{ ...safeSummary.runtimes[0], model: "/home/user/private-model.gguf" }]
+    }),
+    null,
+    "Unix-like local paths should be rejected"
+  );
+});
+
+test("app, preload, and renderer wire local model diagnostic through safe summaries", () => {
+  const appSource = readFileSync(new URL("../src/main/app.ts", import.meta.url), "utf8");
+  const preloadSource = readFileSync(new URL("../src/preload/chat-preload.ts", import.meta.url), "utf8");
+  const rendererSource = readFileSync(new URL("../src/renderer/chat/main.ts", import.meta.url), "utf8");
+  const htmlSource = readFileSync(new URL("../src/renderer/chat/index.html", import.meta.url), "utf8");
+
+  assert.match(appSource, /ipcMain\.handle\("localRuntime:diagnose-local-model"/);
+  assert.match(appSource, /isChatSender\(event\)/);
+  assert.match(appSource, /parseLocalModelDiagnosticSafeSummary/);
+  assert.match(preloadSource, /parseLocalModelDiagnosticSafeSummary/);
+  assert.match(preloadSource, /diagnoseLocalModel\(\)/);
+  for (const field of ["body", "prompt", "request", "messages", "content", "apikey"]) {
+    assert.match(preloadSource, new RegExp(`"${field}"`));
+  }
+  assert.match(htmlSource, /id="local-model-diagnostic-section" class="content-stack"/);
+  assert.match(htmlSource, /id="local-model-diagnostic-status" class="status-box"/);
+  assert.match(htmlSource, /id="local-model-diagnostic-summary" class="selection-note"/);
+  assert.match(htmlSource, /id="local-model-diagnostic-button" class="button-light"/);
+  assert.match(rendererSource, /window\.localRuntimeApi\.diagnoseLocalModel\(\)/);
+  assert.match(rendererSource, /resetLocalModelDiagnosticSummary\(\)/);
+  assert.doesNotMatch(rendererSource, /JSON\.stringify\([^)]*LocalModelDiagnostic/i);
+  assert.doesNotMatch(htmlSource, /<pre[^>]*local-model-diagnostic/i);
+});
+
 test("package registers local model diagnostic script and history test", () => {
   const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 
-  assert.equal(packageJson.scripts["diagnose:local-model"], "node scripts/p2-20b-local-runtime-diagnostic.mjs");
+  assert.equal(
+    packageJson.scripts["diagnose:local-model"],
+    "node --no-warnings --experimental-strip-types scripts/p2-20b-local-runtime-diagnostic.mjs"
+  );
   assert.match(packageJson.scripts["test:history"], /scripts\/local-runtime-diagnostic\.test\.mts/);
 });
 
