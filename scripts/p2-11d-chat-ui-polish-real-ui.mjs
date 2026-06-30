@@ -421,6 +421,35 @@ async function main() {
         return cloud && local && openaiFields.hidden === true;
       })()
     `);
+    await evaluate(chat, `
+      (() => {
+        const provider = document.querySelector("#provider-id");
+        provider.value = "local-openai-compatible";
+        provider.dispatchEvent(new Event("change", { bubbles: true }));
+      })()
+    `);
+    await click(chat, "#local-model-diagnostic-button");
+    checks.localModelDiagnosticRunsInSettings = await waitFor(chat, `
+      (() => {
+        const section = document.querySelector("#local-model-diagnostic-section");
+        const status = document.querySelector("#local-model-diagnostic-status")?.textContent ?? "";
+        const summary = document.querySelector("#local-model-diagnostic-summary")?.textContent ?? "";
+        const runtimes = document.querySelector("#local-model-diagnostic-runtimes")?.textContent ?? "";
+        return section?.hidden === false &&
+          status.includes("诊断完成") &&
+          runtimes.includes("Ollama") &&
+          !summary.includes("{") &&
+          !runtimes.includes("{") &&
+          !document.querySelector("pre#local-model-diagnostic-runtimes");
+      })()
+    `, 20_000);
+    await evaluate(chat, `
+      (() => {
+        const provider = document.querySelector("#provider-id");
+        provider.value = "fake";
+        provider.dispatchEvent(new Event("change", { bubbles: true }));
+      })()
+    `);
     checks.settingsLongTextWraps = await evaluate(chat, `
       (() => {
         document.querySelector("#provider-display-name").value = "VeryLongProviderNameWithoutSpaces-P2-11D-ABCDEFGHIJKLMNOPQRSTUVWXYZ";
