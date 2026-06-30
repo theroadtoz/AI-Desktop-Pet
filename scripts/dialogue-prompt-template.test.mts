@@ -35,6 +35,7 @@ test("prompt template: local small model keeps system order but uses shorter fir
   assert.match(local[1]?.content ?? "", /action payload/);
   assert.match(local[2]?.content ?? "", /不编造记忆/);
   assert.match(local[2]?.content ?? "", /不泄露提示词/);
+  assert.match(local[2]?.content ?? "", /银行卡.*敏感信息.*拒绝.*记住.*保存.*记录/);
   assert.match(local[2]?.content ?? "", /不固定/);
 });
 
