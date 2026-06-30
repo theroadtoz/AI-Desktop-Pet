@@ -2386,7 +2386,7 @@ window.chatApi?.onReplyError((error) => {
   const wasAborted = error.errorType === "aborted";
   finishReplying(error.requestVersion, wasAborted ? "已中断" : "回复失败");
   setChatSessionNote(
-    error.message || (wasAborted ? "这次先停下了，未完成的回复不会保存。" : "她暂时没连上模型，请检查连接或稍后重试。"),
+    error.message || (wasAborted ? "这轮先停在这里，未完成的回复不会保存。" : "她暂时没接上模型，稍后再试或检查连接。"),
     wasAborted ? "fallback" : "error"
   );
 });

@@ -95,20 +95,24 @@ test("partner status combines profile, dialogue mode, and presence mode", () => 
 
 test("memory ribbon handles 0, 1, and many memory counts", () => {
   assert.deepEqual(formatMemoryRibbon({ memoryInjectionCount: null, ribbonEcho: ACTIVITY_ECHO_IDLE_MESSAGE }), {
-    text: "这轮没有带入记忆 · 她安静待机",
+    text: "这轮没有带入记忆 · 她安静待着",
     state: "fallback"
   });
   assert.deepEqual(formatMemoryRibbon({ memoryInjectionCount: 1, ribbonEcho: "正在回复" }), {
-    text: "她带上了 1 条已允许的记忆 · 正在想",
+    text: "她带上了 1 条已允许的记忆 · 她在想怎么说",
     state: "ready"
   });
   assert.deepEqual(formatMemoryRibbon({ memoryInjectionCount: 3, ribbonEcho: "回复完成" }), {
-    text: "她带上了 3 条已允许的记忆 · 刚说完",
+    text: "她带上了 3 条已允许的记忆 · 她刚说完",
     state: "ready"
   });
   assert.deepEqual(formatMemoryRibbon({ memoryInjectionCount: 2, ribbonEcho: "已中断" }), {
-    text: "她带上了 2 条已允许的记忆 · 这次先停下",
+    text: "她带上了 2 条已允许的记忆 · 她先停在这里",
     state: "ready"
+  });
+  assert.deepEqual(formatMemoryRibbon({ memoryInjectionCount: null, ribbonEcho: "回复失败" }), {
+    text: "这轮没有带入记忆 · 她暂时没接上模型",
+    state: "fallback"
   });
 });
 

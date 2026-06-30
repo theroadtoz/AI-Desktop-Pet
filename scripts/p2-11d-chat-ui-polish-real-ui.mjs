@@ -481,7 +481,7 @@ async function main() {
         const note = noteElement?.textContent ?? "";
         const memory = document.querySelector("#memory-session-status")?.textContent ?? "";
         return noteElement?.hidden === false &&
-          note.includes("她说完了，可以继续聊") &&
+          note.includes("她刚说完，可以继续聊") &&
           memory.includes("她带上了 1 条已允许的记忆");
       })()
     `);
@@ -492,7 +492,7 @@ async function main() {
         const memory = document.querySelector("#memory-session-status")?.textContent ?? "";
         const messages = [...document.querySelectorAll(".message")];
         return noteElement?.hidden === false &&
-          note.includes("她说完了，可以继续聊") &&
+          note.includes("她刚说完，可以继续聊") &&
           memory.includes("她带上了 1 条已允许的记忆") &&
           messages.some((node) => node.classList.contains("message-user")) &&
           messages.some((node) => node.classList.contains("message-pet"));
@@ -528,7 +528,7 @@ async function main() {
     checks.abortOrCompleteState = await evaluate(chat, `
       (() => {
         const note = document.querySelector("#chat-session-note")?.textContent ?? "";
-        return note.includes("这次先停下了") || note.includes("她说完了");
+        return note.includes("这轮先停在这里") || note.includes("她刚说完");
       })()
     `);
 

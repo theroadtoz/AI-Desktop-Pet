@@ -6,8 +6,8 @@ import type { ProviderStatus } from "../../shared/provider-config";
 export type StatusDatasetState = "ready" | "fallback" | "error";
 export type ActivityEchoState = "idle" | "active" | "fading";
 
-export const ACTIVITY_ECHO_IDLE_MESSAGE = "安静待机";
-export const ACTIVITY_ECHO_FADING_MESSAGE = "安静陪伴中";
+export const ACTIVITY_ECHO_IDLE_MESSAGE = "安静待着";
+export const ACTIVITY_ECHO_FADING_MESSAGE = "在旁边陪着";
 export const ACTIVITY_ECHO_ACTIVE_MS = 5_000;
 export const ACTIVITY_ECHO_FADING_MS = 4_000;
 export const ACTIVITY_ECHO_DEDUPE_MS = 2_500;
@@ -147,27 +147,27 @@ export function formatMemoryRibbon(input: {
 
 function formatCompanionStateEcho(echo: string): string {
   if (echo === ACTIVITY_ECHO_IDLE_MESSAGE) {
-    return "她安静待机";
+    return "她安静待着";
   }
 
   if (echo === ACTIVITY_ECHO_FADING_MESSAGE) {
-    return "她安静陪伴中";
+    return "她在旁边陪着";
   }
 
   if (echo === "正在回复") {
-    return "正在想";
+    return "她在想怎么说";
   }
 
   if (echo === "回复完成") {
-    return "刚说完";
+    return "她刚说完";
   }
 
   if (echo === "回复失败") {
-    return "暂时没连上模型";
+    return "她暂时没接上模型";
   }
 
   if (echo === "已中断") {
-    return "这次先停下";
+    return "她先停在这里";
   }
 
   return echo;

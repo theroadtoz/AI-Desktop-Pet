@@ -179,12 +179,12 @@ async function runFirstSession(checks) {
       (() => {
         const echo = document.querySelector("#shelf-action-echo");
         return echo?.dataset.state === "fading" &&
-          echo.textContent.includes("安静陪伴中");
+          echo.textContent.includes("在旁边陪着");
       })()
     `);
     await waitFor(chat, "document.querySelector('#shelf-action-echo')?.dataset.state === 'idle'", 6_000);
     checks.actionEchoReturnsToIdle = await evaluate(chat, `
-      document.querySelector("#shelf-action-echo")?.textContent === "小动作：安静待机"
+      document.querySelector("#shelf-action-echo")?.textContent === "小动作：安静待着"
     `);
 
     await evaluate(pet, `

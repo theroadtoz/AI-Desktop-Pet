@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
   PET_ACTION_TRIGGER_ACTION_BY_REASON,
@@ -51,4 +52,14 @@ test("pet edge helper detects settled visible edges without exposing bounds", ()
   assert.equal(isPetNearWorkAreaEdge({ x: 720, y: -60, width: 420, height: 600 }, workArea), true);
   assert.equal(isPetNearWorkAreaEdge({ x: 720, y: 741, width: 420, height: 600 }, workArea), true);
   assert.equal(isPetNearWorkAreaEdge({ x: Number.NaN, y: 0, width: 420, height: 600 }, workArea), false);
+});
+
+test("completed chat streams clear the sustain trigger timer before done is sent", async () => {
+  const source = await readFile(new URL("../src/main/app.ts", import.meta.url), "utf8");
+  const completedIndex = source.indexOf('type: "reply:completed"');
+  const doneIndex = source.indexOf('"chat:stream-done"', completedIndex);
+
+  assert.notEqual(completedIndex, -1);
+  assert.notEqual(doneIndex, -1);
+  assert.match(source.slice(completedIndex, doneIndex), /if \(activeChatRequestVersion === request\.requestVersion\) \{\s*activeChatRequestVersion = null;\s*clearChatReplySustainTimer\(\);\s*\}/);
 });

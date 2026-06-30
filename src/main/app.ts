@@ -1048,7 +1048,7 @@ function applyPetPresentationPreferences(
 
 function getChatErrorMessage(errorType: ChatStreamErrorType): string {
   if (errorType === "aborted") {
-    return "这次先停下了，未完成的回复不会保存。";
+    return "这轮先停在这里，未完成的回复不会保存。";
   }
 
   if (errorType === "busy") {
@@ -1091,7 +1091,7 @@ function getChatErrorMessage(errorType: ChatStreamErrorType): string {
     return "连接失败，请检查网络、baseURL；若使用推荐本地模型，请确认 Ollama 已安装并启动。";
   }
 
-  return "她暂时没连上模型，请检查连接或稍后重试。";
+  return "她暂时没接上模型，稍后再试或检查连接。";
 }
 
 function rebuildPetWindow(recoverySource?: string): void {
@@ -1707,6 +1707,7 @@ app.whenReady().then(async () => {
       });
       if (activeChatRequestVersion === request.requestVersion) {
         activeChatRequestVersion = null;
+        clearChatReplySustainTimer();
       }
       if (!accepted) {
         return;

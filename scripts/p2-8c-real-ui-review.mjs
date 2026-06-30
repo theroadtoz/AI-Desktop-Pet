@@ -4,7 +4,6 @@ import { join, resolve } from "node:path";
 import {
   PET_BODY_POOL_ACTION_TYPES,
   PET_INTERACTION_ACTION_CATALOG,
-  PET_INTERACTION_ACTION_TYPES,
   PET_STRONG_ACCESSORY_ACTION_TYPES
 } from "./support/pet-action-semantic-constants.mjs";
 
@@ -177,6 +176,22 @@ function readTelemetryEvents() {
   }
 
   return { logDirectory, files, events };
+}
+
+function countByType(events) {
+  const counts = new Map();
+
+  for (const event of events) {
+    const type = event?.type;
+
+    if (!type) {
+      continue;
+    }
+
+    counts.set(type, (counts.get(type) ?? 0) + 1);
+  }
+
+  return counts;
 }
 
 async function waitForTelemetryEvent(predicate, timeoutMs) {
@@ -468,6 +483,14 @@ async function main() {
     const bodyActionTypes = new Set(startedActions
       .filter((event) => event.reason === "click_body")
       .map((event) => event.type));
+    const bodyClickStartedActions = startedActions.filter((event) => event.reason === "click_body");
+    const bodyClickCandidateSets = bodyClickStartedActions
+      .map((event) => event.candidateActionTypes)
+      .filter(Array.isArray);
+    const finishedActionCounts = countByType(finishedActions);
+    const unfinishedStartedActions = startedActions.filter((event) => (
+      (finishedActionCounts.get(event.type) ?? 0) < startedActions.filter((candidate) => candidate.type === event.type).length
+    ));
 
     checks.push({
       name: "startupAppearanceNotRepeated",
@@ -481,9 +504,16 @@ async function main() {
     });
     checks.push({
       name: "bodyClickUsesOrdinaryPool",
-      ok: PET_BODY_POOL_ACTION_TYPES.every((type) => bodyActionTypes.has(type)) &&
-        !startedActions.some((event) => event.reason === "click_body" && !bodyPoolActionTypes.has(event.type)),
-      detail: [...bodyActionTypes]
+      ok: bodyClickStartedActions.length >= 1 &&
+        bodyClickStartedActions.every((event) => bodyPoolActionTypes.has(event.type)) &&
+        bodyClickCandidateSets.some((candidateActionTypes) => (
+          PET_BODY_POOL_ACTION_TYPES.every((type) => candidateActionTypes.includes(type)) &&
+          candidateActionTypes.every((type) => bodyPoolActionTypes.has(type))
+        )),
+      detail: {
+        startedTypes: [...bodyActionTypes],
+        candidateSetSizes: bodyClickCandidateSets.map((candidateActionTypes) => candidateActionTypes.length)
+      }
     });
     checks.push({
       name: "headBurst10DoesNotStack",
@@ -497,8 +527,8 @@ async function main() {
       detail: rapidTouchComboStarts
     });
     checks.push({
-      name: "chatReplySustainTriggered",
-      ok: Boolean(chatReplySustainSummary),
+      name: "chatReplySustainClearedAfterCompletedReply",
+      ok: !chatReplySustainSummary,
       detail: chatReplySustainSummary
     });
     checks.push({
@@ -529,10 +559,12 @@ async function main() {
     });
     checks.push({
       name: "temporaryActionsFinish",
-      ok: PET_INTERACTION_ACTION_TYPES.every((type) => (
-        finishedActions.some((event) => event.type === type)
-      )),
-      detail: finishedActions
+      ok: unfinishedStartedActions.length === 0,
+      detail: {
+        startedTypes: [...new Set(startedActions.map((event) => event.type))],
+        finishedTypes: [...new Set(finishedActions.map((event) => event.type))],
+        unfinishedTypes: [...new Set(unfinishedStartedActions.map((event) => event.type))]
+      }
     });
     checks.push({
       name: "chatOpenedAfterDoubleClickAlternative",
