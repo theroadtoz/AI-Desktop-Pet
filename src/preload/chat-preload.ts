@@ -11,6 +11,7 @@ import type {
   ConfigSetApiKeyRequest,
   DialogueModeApi,
   HistoryApi,
+  LocalRuntimeApi,
   MemoryApi,
   PetActivityEcho,
   PetLockState,
@@ -28,6 +29,11 @@ import type { ProviderHealthCheckRequest, ProviderHealthResult, ProviderHealthSt
 import type { PetPresentationPreferences } from "../shared/pet-presentation";
 import type { ShortcutActionId, ShortcutPreferenceView, ShortcutUpdateResult } from "../shared/shortcut-preferences";
 import type { UserProfile, UserProfileInput } from "../shared/user-profile";
+import type {
+  LlamaCppRuntimeSafeSummary,
+  LlamaCppRuntimeSettingsUpdate,
+  LlamaCppRuntimeStatus
+} from "../shared/llama-cpp-runtime";
 
 const petAccessoryPresetIds = ["none", "glasses"] as const;
 const shortcutActionIds = ["togglePetLock", "adjustPetScaleWithWheel"] as const;
@@ -68,6 +74,22 @@ const providerHealthStatuses: readonly ProviderHealthStatus[] = [
   "missing_api_key",
   "cancelled",
   "invalid_config"
+] as const;
+const llamaCppRuntimeStatuses: readonly LlamaCppRuntimeStatus[] = [
+  "disabled",
+  "missing_binary",
+  "missing_model",
+  "starting",
+  "ready",
+  "exited",
+  "timeout",
+  "error"
+] as const;
+const llamaCppRuntimeReasons: readonly NonNullable<LlamaCppRuntimeSafeSummary["reason"]>[] = [
+  "invalid_model_extension",
+  "spawn_failed",
+  "health_timeout",
+  "stop_timeout"
 ] as const;
 
 const emotionTags = ["neutral", "happy", "sad", "surprised", "confused", "angry"] as const;
@@ -595,6 +617,165 @@ function parsePositiveInteger(value: unknown): number | null {
   return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : null;
 }
 
+function hasUnsafeRuntimePathField(value: unknown): boolean {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  for (const [key, nestedValue] of Object.entries(value)) {
+    if (key.toLowerCase().includes("path")) {
+      return true;
+    }
+
+    if (hasUnsafeRuntimePathField(nestedValue)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function isOptionalRuntimeString(value: unknown): value is string | undefined | null {
+  return value === undefined || value === null || typeof value === "string";
+}
+
+function isOptionalRuntimeNumber(value: unknown): value is number | undefined {
+  return value === undefined || (typeof value === "number" && Number.isFinite(value));
+}
+
+function parseLlamaCppRuntimeSafeSummary(value: unknown): LlamaCppRuntimeSafeSummary | null {
+  const summary = value as Partial<LlamaCppRuntimeSafeSummary> | null;
+
+  if (
+    !summary ||
+    typeof summary !== "object" ||
+    hasUnsafeRuntimePathField(summary) ||
+    summary.runtime !== "llama.cpp" ||
+    summary.safeSummaryOnly !== true ||
+    typeof summary.enabled !== "boolean" ||
+    typeof summary.status !== "string" ||
+    !llamaCppRuntimeStatuses.includes(summary.status as LlamaCppRuntimeStatus) ||
+    typeof summary.executableConfigured !== "boolean" ||
+    typeof summary.modelConfigured !== "boolean" ||
+    !isOptionalRuntimeString(summary.executableName) ||
+    !isOptionalRuntimeString(summary.modelName) ||
+    !isOptionalRuntimeString(summary.host) ||
+    !isOptionalRuntimeString(summary.baseURLHost) ||
+    !isOptionalRuntimeString(summary.alias) ||
+    !isOptionalRuntimeNumber(summary.port) ||
+    !isOptionalRuntimeNumber(summary.ctxSize) ||
+    !isOptionalRuntimeNumber(summary.startupTimeoutMs) ||
+    !isOptionalRuntimeNumber(summary.stopTimeoutMs) ||
+    !isOptionalRuntimeNumber(summary.healthPollIntervalMs) ||
+    !isOptionalRuntimeNumber(summary.durationMs) ||
+    !isOptionalRuntimeNumber(summary.startupMs) ||
+    !isOptionalRuntimeNumber(summary.stdoutBytes) ||
+    !isOptionalRuntimeNumber(summary.stderrBytes) ||
+    !(summary.exitCode === undefined || summary.exitCode === null || typeof summary.exitCode === "number") ||
+    !(summary.signal === undefined || summary.signal === null || typeof summary.signal === "string") ||
+    !(summary.reason === undefined || llamaCppRuntimeReasons.includes(summary.reason))
+  ) {
+    return null;
+  }
+
+  return {
+    runtime: "llama.cpp",
+    enabled: summary.enabled,
+    status: summary.status as LlamaCppRuntimeStatus,
+    safeSummaryOnly: true,
+    executableConfigured: summary.executableConfigured,
+    modelConfigured: summary.modelConfigured,
+    ...(summary.executableName ? { executableName: summary.executableName } : {}),
+    ...(summary.modelName ? { modelName: summary.modelName } : {}),
+    ...(summary.host ? { host: summary.host } : {}),
+    ...(typeof summary.port === "number" ? { port: summary.port } : {}),
+    ...(typeof summary.ctxSize === "number" ? { ctxSize: summary.ctxSize } : {}),
+    ...(summary.baseURLHost ? { baseURLHost: summary.baseURLHost } : {}),
+    ...(summary.alias ? { alias: summary.alias } : {}),
+    ...(typeof summary.startupTimeoutMs === "number" ? { startupTimeoutMs: summary.startupTimeoutMs } : {}),
+    ...(typeof summary.stopTimeoutMs === "number" ? { stopTimeoutMs: summary.stopTimeoutMs } : {}),
+    ...(typeof summary.healthPollIntervalMs === "number" ? { healthPollIntervalMs: summary.healthPollIntervalMs } : {}),
+    ...(typeof summary.durationMs === "number" ? { durationMs: summary.durationMs } : {}),
+    ...(typeof summary.startupMs === "number" ? { startupMs: summary.startupMs } : {}),
+    ...(summary.exitCode !== undefined ? { exitCode: summary.exitCode } : {}),
+    ...(summary.signal !== undefined ? { signal: summary.signal } : {}),
+    ...(typeof summary.stdoutBytes === "number" ? { stdoutBytes: summary.stdoutBytes } : {}),
+    ...(typeof summary.stderrBytes === "number" ? { stderrBytes: summary.stderrBytes } : {}),
+    ...(summary.reason ? { reason: summary.reason } : {})
+  };
+}
+
+function parseLlamaCppRuntimeSettingsUpdate(value: unknown): LlamaCppRuntimeSettingsUpdate | null {
+  const update = value as Partial<LlamaCppRuntimeSettingsUpdate> | null;
+
+  if (!update || typeof update !== "object" || hasUnsafeRuntimePathField(update)) {
+    return null;
+  }
+
+  const parsed: LlamaCppRuntimeSettingsUpdate = {};
+
+  if ("enabled" in update) {
+    if (typeof update.enabled !== "boolean") {
+      return null;
+    }
+    parsed.enabled = update.enabled;
+  }
+  if ("host" in update) {
+    if (typeof update.host !== "string") {
+      return null;
+    }
+    parsed.host = update.host;
+  }
+  if ("port" in update) {
+    if (update.port !== null && (typeof update.port !== "number" || !Number.isInteger(update.port))) {
+      return null;
+    }
+    parsed.port = update.port;
+  }
+  if ("ctxSize" in update) {
+    if (update.ctxSize !== null && (typeof update.ctxSize !== "number" || !Number.isInteger(update.ctxSize))) {
+      return null;
+    }
+    parsed.ctxSize = update.ctxSize;
+  }
+  if ("alias" in update) {
+    if (typeof update.alias !== "string") {
+      return null;
+    }
+    parsed.alias = update.alias;
+  }
+  if ("startupTimeoutMs" in update) {
+    if (typeof update.startupTimeoutMs !== "number" || !Number.isInteger(update.startupTimeoutMs)) {
+      return null;
+    }
+    parsed.startupTimeoutMs = update.startupTimeoutMs;
+  }
+  if ("stopTimeoutMs" in update) {
+    if (typeof update.stopTimeoutMs !== "number" || !Number.isInteger(update.stopTimeoutMs)) {
+      return null;
+    }
+    parsed.stopTimeoutMs = update.stopTimeoutMs;
+  }
+  if ("healthPollIntervalMs" in update) {
+    if (typeof update.healthPollIntervalMs !== "number" || !Number.isInteger(update.healthPollIntervalMs)) {
+      return null;
+    }
+    parsed.healthPollIntervalMs = update.healthPollIntervalMs;
+  }
+
+  return parsed;
+}
+
+async function invokeLocalRuntimeSummary(channel: string, ...args: unknown[]): Promise<LlamaCppRuntimeSafeSummary> {
+  const summary = parseLlamaCppRuntimeSafeSummary(await ipcRenderer.invoke(channel, ...args));
+
+  if (!summary) {
+    throw new Error("Invalid local runtime response");
+  }
+
+  return summary;
+}
+
 function parseMemoryCardDraft(value: unknown): MemoryCardDraft | null {
   const draft = value as Partial<MemoryCardDraft> | null;
   const title = normalizeMemoryText(draft?.title, 80);
@@ -940,6 +1121,36 @@ const configApi: ConfigApi = {
     }
 
     return Boolean(await ipcRenderer.invoke("config:delete-api-key", request));
+  }
+};
+
+const localRuntimeApi: LocalRuntimeApi = {
+  getLlamaCppSettings() {
+    return invokeLocalRuntimeSummary("localRuntime:get-llama-cpp-settings");
+  },
+  updateLlamaCppSettings(update) {
+    const parsedUpdate = parseLlamaCppRuntimeSettingsUpdate(update);
+
+    if (!parsedUpdate) {
+      throw new Error("Invalid local runtime settings update");
+    }
+
+    return invokeLocalRuntimeSummary("localRuntime:update-llama-cpp-settings", parsedUpdate);
+  },
+  chooseLlamaCppExecutable() {
+    return invokeLocalRuntimeSummary("localRuntime:choose-llama-cpp-executable");
+  },
+  chooseLlamaCppModel() {
+    return invokeLocalRuntimeSummary("localRuntime:choose-llama-cpp-model");
+  },
+  startLlamaCpp() {
+    return invokeLocalRuntimeSummary("localRuntime:start-llama-cpp");
+  },
+  stopLlamaCpp() {
+    return invokeLocalRuntimeSummary("localRuntime:stop-llama-cpp");
+  },
+  getLlamaCppStatus() {
+    return invokeLocalRuntimeSummary("localRuntime:get-llama-cpp-status");
   }
 };
 
@@ -1316,6 +1527,7 @@ ipcRenderer.on("chat:focus-input", () => {
 
 contextBridge.exposeInMainWorld("chatApi", api);
 contextBridge.exposeInMainWorld("configApi", configApi);
+contextBridge.exposeInMainWorld("localRuntimeApi", localRuntimeApi);
 contextBridge.exposeInMainWorld("historyApi", historyApi);
 contextBridge.exposeInMainWorld("memoryApi", memoryApi);
 contextBridge.exposeInMainWorld("petPresentationApi", petPresentationApi);

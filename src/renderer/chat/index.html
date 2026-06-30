@@ -229,6 +229,43 @@
                 </label>
               </div>
               <p id="local-provider-note" class="selection-note" hidden>推荐本地默认：Ollama、http://localhost:11434/v1、qwen3.5:2b-q4_K_M。本地服务不会要求 API Key；如果未安装或未启动 Ollama，连接检查会显示未就绪。缺模型时请手动运行 ollama pull qwen3.5:2b-q4_K_M。</p>
+              <section id="llama-cpp-runtime-section" class="content-stack" aria-labelledby="llama-cpp-runtime-title" hidden>
+                <h3 id="llama-cpp-runtime-title" class="settings-section-title">托管 llama.cpp</h3>
+                <p id="llama-cpp-runtime-status" class="status-box" data-state="fallback" aria-live="polite">运行时状态尚未读取。</p>
+                <p id="llama-cpp-runtime-files" class="selection-note">运行文件：未选择 · 模型：未选择</p>
+                <label class="field-label">
+                  <span>
+                    <input id="llama-cpp-runtime-enabled" type="checkbox" />
+                    启用托管运行时
+                  </span>
+                </label>
+                <div class="field-grid">
+                  <label class="field-label">
+                    Host
+                    <input id="llama-cpp-runtime-host" type="text" inputmode="url" autocomplete="off" />
+                  </label>
+                  <label class="field-label">
+                    Port
+                    <input id="llama-cpp-runtime-port" type="number" min="1" max="65535" step="1" />
+                  </label>
+                  <label class="field-label">
+                    Context
+                    <input id="llama-cpp-runtime-ctx" type="number" min="1" step="1" />
+                  </label>
+                </div>
+                <label class="field-label">
+                  Alias
+                  <input id="llama-cpp-runtime-alias" type="text" autocomplete="off" />
+                </label>
+                <div class="settings-actions">
+                  <button id="llama-cpp-runtime-save-button" class="button-light" type="button">保存开关与参数</button>
+                  <button id="llama-cpp-runtime-executable-button" class="button-light" type="button">选择运行文件</button>
+                  <button id="llama-cpp-runtime-model-button" class="button-light" type="button">选择模型</button>
+                  <button id="llama-cpp-runtime-start-button" class="button" type="button">启动</button>
+                  <button id="llama-cpp-runtime-stop-button" class="button-danger" type="button">停止</button>
+                  <button id="llama-cpp-runtime-refresh-button" class="button-light" type="button">刷新</button>
+                </div>
+              </section>
               <div class="inline-actions">
                 <button id="provider-health-check-button" class="button-light" type="button">检查连接</button>
               </div>

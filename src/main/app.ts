@@ -1,10 +1,12 @@
 import {
   app,
   BrowserWindow,
+  dialog,
   globalShortcut,
   ipcMain,
   protocol,
   screen,
+  type OpenDialogOptions,
   type IpcMainEvent,
   type IpcMainInvokeEvent
 } from "electron";
@@ -44,6 +46,7 @@ import {
 } from "../shared/pet-role-state";
 import type { LocalOpenAICompatibleConfig, ProviderConfig, ProviderStatus } from "../shared/provider-config";
 import type { ProviderHealthCheckRequest } from "../shared/provider-health";
+import type { LlamaCppRuntimeSettingsUpdate } from "../shared/llama-cpp-runtime";
 import { createUserProfilePromptContext } from "../shared/user-profile";
 import {
   calculateInitialPetBounds,
@@ -93,9 +96,15 @@ import { createTelemetryService, type TelemetryPayload, type TelemetryService } 
 import {
   createLlamaCppRuntime,
   readLlamaCppRuntimeConfigFromEnv,
+  type LlamaCppRuntimeConfig,
+  type LlamaCppRuntimeSummary,
   type LlamaCppRuntime
 } from "./services/local-runtime/llama-cpp-runtime";
 import { createLlamaCppProviderHandoff } from "./services/local-runtime/llama-cpp-provider-handoff";
+import {
+  createLlamaCppRuntimeSettingsStore,
+  type LlamaCppRuntimeSettingsStore
+} from "./services/local-runtime/llama-cpp-runtime-settings-store";
 import { createChatWindow, focusChatInput, showChatWindow } from "./windows/chat-window";
 import { createPetWindow } from "./windows/pet-window";
 import { restorePetWindowOnTop } from "./windows/topmost-policy";
@@ -125,6 +134,9 @@ let shortcutPreferencesStore: ShortcutPreferencesStore | null = null;
 let userProfileStore: UserProfileStore | null = null;
 let shortcutRegistry: ShortcutRegistry | null = null;
 let llamaCppRuntime: LlamaCppRuntime | null = null;
+let llamaCppRuntimeSettingsStore: LlamaCppRuntimeSettingsStore | null = null;
+let latestLlamaCppRuntimeSummary: LlamaCppRuntimeSummary | null = null;
+let refreshCurrentProvider: (() => void) | null = null;
 let currentPetPresentationPreferences: PetPresentationPreferences = DEFAULT_PET_PRESENTATION_PREFERENCES;
 let isChatInteractionActive = false;
 let petRoleSnapshot: PetRoleSnapshot = INITIAL_PET_ROLE_SNAPSHOT;
@@ -306,71 +318,136 @@ function logTelemetry(type: string, payload: TelemetryPayload = {}): void {
 function startLlamaCppRuntimeIfEnabled(options: {
   refreshProvider?: () => void;
 } = {}): void {
-  const config = readLlamaCppRuntimeConfigFromEnv();
+  void startLlamaCppRuntimeNow(options);
+}
+
+async function startLlamaCppRuntimeNow(options: {
+  refreshProvider?: () => void;
+} = {}): Promise<LlamaCppRuntimeSummary> {
+  const config = readMergedLlamaCppRuntimeConfig();
 
   if (!config.enabled) {
-    return;
+    latestLlamaCppRuntimeSummary = llamaCppRuntimeSettingsStore?.getSafeSettingsView() ?? null;
+    return latestLlamaCppRuntimeSummary ?? {
+      runtime: "llama.cpp",
+      enabled: false,
+      status: "disabled",
+      safeSummaryOnly: true,
+      executableConfigured: false,
+      modelConfigured: false
+    };
   }
 
   const runtime = createLlamaCppRuntime(config);
   llamaCppRuntime = runtime;
-  void runtime.start()
-    .then((summary) => {
-      if (llamaCppRuntime !== runtime) {
-        return;
-      }
+  latestLlamaCppRuntimeSummary = llamaCppRuntimeSettingsStore?.getSafeSettingsView(removeUndefinedRuntimeSummary({
+    runtime: "llama.cpp",
+    enabled: config.enabled,
+    status: "starting",
+    safeSummaryOnly: true,
+    executableConfigured: Boolean(config.executablePath),
+    modelConfigured: Boolean(config.modelPath),
+    ...(config.alias ? { alias: config.alias } : {})
+  })) ?? null;
 
-      logTelemetry("llama_cpp_runtime_status", summary);
-      const handoff = createLlamaCppProviderHandoff(summary, runtime.getBaseURL());
+  try {
+    const summary = await runtime.start();
 
-      if (!handoff) {
-        if (managedLlamaCppProviderConfig) {
-          managedLlamaCppProviderConfig = null;
-          options.refreshProvider?.();
-        }
-        return;
-      }
+    if (llamaCppRuntime !== runtime) {
+      return latestLlamaCppRuntimeSummary ?? summary;
+    }
 
-      managedLlamaCppProviderConfig = handoff.providerConfig;
-      logTelemetry("llama_cpp_provider_handoff", handoff.safeSummary);
-      options.refreshProvider?.();
-    })
-    .catch(() => {
-      if (llamaCppRuntime === runtime && managedLlamaCppProviderConfig) {
+    latestLlamaCppRuntimeSummary = llamaCppRuntimeSettingsStore?.getSafeSettingsView(summary) ?? summary;
+    logTelemetry("llama_cpp_runtime_status", summary);
+    const handoff = createLlamaCppProviderHandoff(summary, runtime.getBaseURL());
+
+    if (!handoff) {
+      if (managedLlamaCppProviderConfig) {
         managedLlamaCppProviderConfig = null;
         options.refreshProvider?.();
       }
+      return latestLlamaCppRuntimeSummary;
+    }
 
-      logTelemetry("llama_cpp_runtime_status", {
-        runtime: "llama.cpp",
-        enabled: true,
-        status: "error",
-        safeSummaryOnly: true
-      });
-    });
+    managedLlamaCppProviderConfig = handoff.providerConfig;
+    logTelemetry("llama_cpp_provider_handoff", handoff.safeSummary);
+    options.refreshProvider?.();
+    return latestLlamaCppRuntimeSummary;
+  } catch {
+    if (llamaCppRuntime === runtime && managedLlamaCppProviderConfig) {
+      managedLlamaCppProviderConfig = null;
+      options.refreshProvider?.();
+    }
+
+    const errorSummary: LlamaCppRuntimeSummary = {
+      runtime: "llama.cpp",
+      enabled: true,
+      status: "error",
+      safeSummaryOnly: true,
+      executableConfigured: Boolean(config.executablePath),
+      modelConfigured: Boolean(config.modelPath)
+    };
+    latestLlamaCppRuntimeSummary = llamaCppRuntimeSettingsStore?.getSafeSettingsView(errorSummary) ?? errorSummary;
+    logTelemetry("llama_cpp_runtime_status", errorSummary);
+    return latestLlamaCppRuntimeSummary;
+  }
 }
 
-function stopLlamaCppRuntime(): void {
+async function stopLlamaCppRuntime(): Promise<LlamaCppRuntimeSummary | null> {
   const runtime = llamaCppRuntime;
 
   if (!runtime) {
-    return;
+    managedLlamaCppProviderConfig = null;
+    refreshCurrentProvider?.();
+    return latestLlamaCppRuntimeSummary;
   }
 
   llamaCppRuntime = null;
   managedLlamaCppProviderConfig = null;
-  void runtime.stop()
+  refreshCurrentProvider?.();
+  return runtime.stop()
     .then((summary) => {
+      latestLlamaCppRuntimeSummary = llamaCppRuntimeSettingsStore?.getSafeSettingsView(summary) ?? summary;
       logTelemetry("llama_cpp_runtime_stopped", summary);
+      return latestLlamaCppRuntimeSummary;
     })
     .catch(() => {
-      logTelemetry("llama_cpp_runtime_stopped", {
+      const errorSummary: LlamaCppRuntimeSummary = {
         runtime: "llama.cpp",
         enabled: true,
         status: "error",
-        safeSummaryOnly: true
-      });
+        safeSummaryOnly: true,
+        executableConfigured: false,
+        modelConfigured: false
+      };
+      latestLlamaCppRuntimeSummary = llamaCppRuntimeSettingsStore?.getSafeSettingsView(errorSummary) ?? errorSummary;
+      logTelemetry("llama_cpp_runtime_stopped", errorSummary);
+      return latestLlamaCppRuntimeSummary;
     });
+}
+
+function readMergedLlamaCppRuntimeConfig(): LlamaCppRuntimeConfig {
+  const savedConfig = llamaCppRuntimeSettingsStore?.getRuntimeConfig() ?? { enabled: false };
+  const envConfig = readLlamaCppRuntimeConfigFromEnv();
+  const merged: LlamaCppRuntimeConfig = {
+    ...savedConfig,
+    ...removeUndefinedConfig(envConfig),
+    enabled: Boolean(savedConfig.enabled || envConfig.enabled)
+  };
+
+  return merged;
+}
+
+function removeUndefinedConfig(config: LlamaCppRuntimeConfig): LlamaCppRuntimeConfig {
+  return Object.fromEntries(
+    Object.entries(config).filter(([, value]) => typeof value !== "undefined")
+  ) as LlamaCppRuntimeConfig;
+}
+
+function removeUndefinedRuntimeSummary(summary: LlamaCppRuntimeSummary): LlamaCppRuntimeSummary {
+  return Object.fromEntries(
+    Object.entries(summary).filter(([, value]) => typeof value !== "undefined")
+  ) as LlamaCppRuntimeSummary;
 }
 
 function logPetTelemetry(event: { type: PetTelemetryEventType; payload?: unknown }): void {
@@ -801,6 +878,29 @@ function isProviderHealthCheckRequest(value: unknown): value is ProviderHealthCh
   );
 }
 
+function isLlamaCppRuntimeSettingsUpdate(value: unknown): value is LlamaCppRuntimeSettingsUpdate {
+  const update = value as Partial<LlamaCppRuntimeSettingsUpdate> & Record<string, unknown> | null;
+
+  if (!update || typeof update !== "object" || "executablePath" in update || "modelPath" in update) {
+    return false;
+  }
+
+  return (
+    (update.enabled === undefined || typeof update.enabled === "boolean") &&
+    (update.host === undefined || typeof update.host === "string") &&
+    (update.port === undefined || update.port === null || isPositiveInteger(update.port)) &&
+    (update.ctxSize === undefined || update.ctxSize === null || isPositiveInteger(update.ctxSize)) &&
+    (update.alias === undefined || typeof update.alias === "string") &&
+    (update.startupTimeoutMs === undefined || isPositiveInteger(update.startupTimeoutMs)) &&
+    (update.stopTimeoutMs === undefined || isPositiveInteger(update.stopTimeoutMs)) &&
+    (update.healthPollIntervalMs === undefined || isPositiveInteger(update.healthPollIntervalMs))
+  );
+}
+
+function isPositiveInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value > 0;
+}
+
 function isAbortError(error: unknown): boolean {
   return error instanceof DOMException && error.name === "AbortError";
 }
@@ -993,13 +1093,19 @@ app.whenReady().then(async () => {
   userProfileStore = createUserProfileStore({ logTelemetry });
   shortcutRegistry = createUserShortcutRegistry();
   secureKeyStore = createSecureKeyStore({ logTelemetry });
+  llamaCppRuntimeSettingsStore = createLlamaCppRuntimeSettingsStore({
+    userDataPath: app.getPath("userData")
+  });
   envProviderConfig = readEnvProviderConfig();
   chatEngine = createChatEngine(createProviderFromCurrentConfig());
+  refreshCurrentProvider = () => {
+    chatEngine?.setProvider(createProviderFromCurrentConfig());
+  };
   logStartupInfo();
   registerModelAssetProtocol();
   startLlamaCppRuntimeIfEnabled({
     refreshProvider() {
-      chatEngine?.setProvider(createProviderFromCurrentConfig());
+      refreshCurrentProvider?.();
     }
   });
 
@@ -1615,6 +1721,107 @@ app.whenReady().then(async () => {
     }
 
     return getCurrentProviderConfig();
+  });
+
+  ipcMain.handle("localRuntime:get-llama-cpp-settings", (event) => {
+    if (!isChatSender(event) || !llamaCppRuntimeSettingsStore) {
+      throw new Error("Unauthorized local runtime request");
+    }
+
+    return llamaCppRuntimeSettingsStore.getSafeSettingsView(latestLlamaCppRuntimeSummary);
+  });
+
+  ipcMain.handle("localRuntime:update-llama-cpp-settings", async (event, update: unknown) => {
+    if (!isChatSender(event) || !llamaCppRuntimeSettingsStore || !isLlamaCppRuntimeSettingsUpdate(update)) {
+      throw new Error("Invalid local runtime settings request");
+    }
+
+    const view = llamaCppRuntimeSettingsStore.updateSettings(update);
+
+    if (update.enabled === false) {
+      await stopLlamaCppRuntime();
+      return llamaCppRuntimeSettingsStore.getSafeSettingsView(latestLlamaCppRuntimeSummary);
+    }
+
+    latestLlamaCppRuntimeSummary = view;
+    return view;
+  });
+
+  ipcMain.handle("localRuntime:choose-llama-cpp-executable", async (event) => {
+    if (!isChatSender(event) || !llamaCppRuntimeSettingsStore) {
+      throw new Error("Unauthorized local runtime request");
+    }
+
+    const options: OpenDialogOptions = {
+      title: "选择 llama.cpp 运行文件",
+      properties: ["openFile"],
+      filters: [
+        { name: "llama.cpp server", extensions: ["exe"] },
+        { name: "All files", extensions: ["*"] }
+      ]
+    };
+    const result = chatWindow
+      ? await dialog.showOpenDialog(chatWindow, options)
+      : await dialog.showOpenDialog(options);
+
+    if (result.canceled || !result.filePaths[0]) {
+      return llamaCppRuntimeSettingsStore.getSafeSettingsView(latestLlamaCppRuntimeSummary);
+    }
+
+    latestLlamaCppRuntimeSummary = llamaCppRuntimeSettingsStore.setExecutablePath(result.filePaths[0]);
+    return latestLlamaCppRuntimeSummary;
+  });
+
+  ipcMain.handle("localRuntime:choose-llama-cpp-model", async (event) => {
+    if (!isChatSender(event) || !llamaCppRuntimeSettingsStore) {
+      throw new Error("Unauthorized local runtime request");
+    }
+
+    const options: OpenDialogOptions = {
+      title: "选择 GGUF 模型文件",
+      properties: ["openFile"],
+      filters: [
+        { name: "GGUF model", extensions: ["gguf"] }
+      ]
+    };
+    const result = chatWindow
+      ? await dialog.showOpenDialog(chatWindow, options)
+      : await dialog.showOpenDialog(options);
+
+    if (result.canceled || !result.filePaths[0]) {
+      return llamaCppRuntimeSettingsStore.getSafeSettingsView(latestLlamaCppRuntimeSummary);
+    }
+
+    latestLlamaCppRuntimeSummary = llamaCppRuntimeSettingsStore.setModelPath(result.filePaths[0]);
+    return latestLlamaCppRuntimeSummary;
+  });
+
+  ipcMain.handle("localRuntime:start-llama-cpp", async (event) => {
+    if (!isChatSender(event) || !llamaCppRuntimeSettingsStore) {
+      throw new Error("Unauthorized local runtime request");
+    }
+
+    await stopLlamaCppRuntime();
+    return startLlamaCppRuntimeNow(refreshCurrentProvider ? { refreshProvider: refreshCurrentProvider } : {});
+  });
+
+  ipcMain.handle("localRuntime:stop-llama-cpp", async (event) => {
+    if (!isChatSender(event) || !llamaCppRuntimeSettingsStore) {
+      throw new Error("Unauthorized local runtime request");
+    }
+
+    await stopLlamaCppRuntime();
+    return llamaCppRuntimeSettingsStore.getSafeSettingsView(latestLlamaCppRuntimeSummary);
+  });
+
+  ipcMain.handle("localRuntime:get-llama-cpp-status", (event) => {
+    if (!isChatSender(event) || !llamaCppRuntimeSettingsStore) {
+      throw new Error("Unauthorized local runtime request");
+    }
+
+    const runtimeSummary = llamaCppRuntime?.getStatus() ?? latestLlamaCppRuntimeSummary;
+    latestLlamaCppRuntimeSummary = llamaCppRuntimeSettingsStore.getSafeSettingsView(runtimeSummary);
+    return latestLlamaCppRuntimeSummary;
   });
 
   ipcMain.handle("history:list", (event) => {

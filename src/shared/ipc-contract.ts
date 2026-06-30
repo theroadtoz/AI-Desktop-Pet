@@ -14,6 +14,7 @@ import type { PetTelemetryEvent } from "./pet-telemetry-contract";
 import type { ShortcutActionId, ShortcutPreferenceView, ShortcutUpdateResult } from "./shortcut-preferences";
 import type { UserProfile, UserProfileInput } from "./user-profile";
 import type { PetActionTrigger } from "./pet-action-trigger";
+import type { LlamaCppRuntimeSafeSummary, LlamaCppRuntimeSettingsUpdate } from "./llama-cpp-runtime";
 
 export type { PetTelemetryEvent } from "./pet-telemetry-contract";
 
@@ -165,6 +166,16 @@ export type ConfigApi = {
   hasApiKey(request: ConfigApiKeyRequest): Promise<boolean>;
   setApiKey(request: ConfigSetApiKeyRequest): Promise<boolean>;
   deleteApiKey(request: ConfigApiKeyRequest): Promise<boolean>;
+};
+
+export type LocalRuntimeApi = {
+  getLlamaCppSettings(): Promise<LlamaCppRuntimeSafeSummary>;
+  updateLlamaCppSettings(update: LlamaCppRuntimeSettingsUpdate): Promise<LlamaCppRuntimeSafeSummary>;
+  chooseLlamaCppExecutable(): Promise<LlamaCppRuntimeSafeSummary>;
+  chooseLlamaCppModel(): Promise<LlamaCppRuntimeSafeSummary>;
+  startLlamaCpp(): Promise<LlamaCppRuntimeSafeSummary>;
+  stopLlamaCpp(): Promise<LlamaCppRuntimeSafeSummary>;
+  getLlamaCppStatus(): Promise<LlamaCppRuntimeSafeSummary>;
 };
 
 export type HistoryApi = {

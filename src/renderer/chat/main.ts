@@ -12,6 +12,7 @@ import {
   type ProviderStatus
 } from "../../shared/provider-config";
 import type { ProviderHealthCheckRequest } from "../../shared/provider-health";
+import type { LlamaCppRuntimeSafeSummary } from "../../shared/llama-cpp-runtime";
 import { polishAssistantDisplayText } from "../../shared/reply-text-polish";
 import {
   DEFAULT_PET_PRESENTATION_PREFERENCES,
@@ -91,6 +92,20 @@ const timeoutInput = document.querySelector<HTMLInputElement>("#provider-timeout
 const localProviderPresetContainer = document.querySelector<HTMLElement>("#local-provider-preset-field");
 const localProviderPresetSelect = document.querySelector<HTMLSelectElement>("#local-provider-preset");
 const localProviderNote = document.querySelector<HTMLElement>("#local-provider-note");
+const llamaCppRuntimeSection = document.querySelector<HTMLElement>("#llama-cpp-runtime-section");
+const llamaCppRuntimeStatus = document.querySelector<HTMLElement>("#llama-cpp-runtime-status");
+const llamaCppRuntimeFiles = document.querySelector<HTMLElement>("#llama-cpp-runtime-files");
+const llamaCppRuntimeEnabled = document.querySelector<HTMLInputElement>("#llama-cpp-runtime-enabled");
+const llamaCppRuntimeHost = document.querySelector<HTMLInputElement>("#llama-cpp-runtime-host");
+const llamaCppRuntimePort = document.querySelector<HTMLInputElement>("#llama-cpp-runtime-port");
+const llamaCppRuntimeCtx = document.querySelector<HTMLInputElement>("#llama-cpp-runtime-ctx");
+const llamaCppRuntimeAlias = document.querySelector<HTMLInputElement>("#llama-cpp-runtime-alias");
+const llamaCppRuntimeSaveButton = document.querySelector<HTMLButtonElement>("#llama-cpp-runtime-save-button");
+const llamaCppRuntimeExecutableButton = document.querySelector<HTMLButtonElement>("#llama-cpp-runtime-executable-button");
+const llamaCppRuntimeModelButton = document.querySelector<HTMLButtonElement>("#llama-cpp-runtime-model-button");
+const llamaCppRuntimeStartButton = document.querySelector<HTMLButtonElement>("#llama-cpp-runtime-start-button");
+const llamaCppRuntimeStopButton = document.querySelector<HTMLButtonElement>("#llama-cpp-runtime-stop-button");
+const llamaCppRuntimeRefreshButton = document.querySelector<HTMLButtonElement>("#llama-cpp-runtime-refresh-button");
 const providerHealthCheckButton = document.querySelector<HTMLButtonElement>("#provider-health-check-button");
 const providerHealthStatus = document.querySelector<HTMLElement>("#provider-health-status");
 const apiKeyInput = document.querySelector<HTMLInputElement>("#provider-api-key");
@@ -170,6 +185,10 @@ if (
   !settingsAdvancedPage || !settingsMemoryDetailPage || !memoryDetail || !settingsHistoryDetailPage || !providerIdSelect ||
   !displayNameInput || !openAIFields || !baseURLInput || !modelInput || !temperatureInput ||
   !maxTokensInput || !timeoutInput || !localProviderPresetContainer || !localProviderPresetSelect || !localProviderNote ||
+  !llamaCppRuntimeSection || !llamaCppRuntimeStatus || !llamaCppRuntimeFiles || !llamaCppRuntimeEnabled ||
+  !llamaCppRuntimeHost || !llamaCppRuntimePort || !llamaCppRuntimeCtx || !llamaCppRuntimeAlias ||
+  !llamaCppRuntimeSaveButton || !llamaCppRuntimeExecutableButton || !llamaCppRuntimeModelButton ||
+  !llamaCppRuntimeStartButton || !llamaCppRuntimeStopButton || !llamaCppRuntimeRefreshButton ||
   !providerHealthCheckButton || !providerHealthStatus || !apiKeyInput || !apiKeyStatus || !connectionSafeSection || !deleteApiKeyButton ||
   !deleteKeyConfirmation || !cancelDeleteApiKeyButton || !confirmDeleteApiKeyButton || !settingsFeedback ||
   !petScaleInput || !petScaleValue || !petAccessorySelect || !petAccessoryStatus || !savePetScaleButton ||
@@ -224,6 +243,20 @@ const timeoutField = timeoutInput;
 const localProviderPresetFieldBox = localProviderPresetContainer;
 const localProviderPresetField = localProviderPresetSelect;
 const localProviderNoteBox = localProviderNote;
+const llamaCppRuntimeSectionBox = llamaCppRuntimeSection;
+const llamaCppRuntimeStatusBox = llamaCppRuntimeStatus;
+const llamaCppRuntimeFilesBox = llamaCppRuntimeFiles;
+const llamaCppRuntimeEnabledField = llamaCppRuntimeEnabled;
+const llamaCppRuntimeHostField = llamaCppRuntimeHost;
+const llamaCppRuntimePortField = llamaCppRuntimePort;
+const llamaCppRuntimeCtxField = llamaCppRuntimeCtx;
+const llamaCppRuntimeAliasField = llamaCppRuntimeAlias;
+const llamaCppRuntimeSaveAction = llamaCppRuntimeSaveButton;
+const llamaCppRuntimeExecutableAction = llamaCppRuntimeExecutableButton;
+const llamaCppRuntimeModelAction = llamaCppRuntimeModelButton;
+const llamaCppRuntimeStartAction = llamaCppRuntimeStartButton;
+const llamaCppRuntimeStopAction = llamaCppRuntimeStopButton;
+const llamaCppRuntimeRefreshAction = llamaCppRuntimeRefreshButton;
 const providerHealthCheckAction = providerHealthCheckButton;
 const providerHealthStatusBox = providerHealthStatus;
 const apiKeyField = apiKeyInput;
@@ -412,6 +445,123 @@ function resetProviderHealthStatus(): void {
 function setProviderHealthStatus(message: string, state: "ready" | "fallback" = "fallback"): void {
   providerHealthStatusBox.textContent = message;
   providerHealthStatusBox.dataset.state = state;
+}
+
+function formatLlamaCppRuntimeStatus(status: LlamaCppRuntimeSafeSummary["status"]): string {
+  const labels: Record<LlamaCppRuntimeSafeSummary["status"], string> = {
+    disabled: "未启用",
+    missing_binary: "缺运行文件",
+    missing_model: "缺模型",
+    starting: "启动中",
+    ready: "已就绪",
+    exited: "已退出",
+    timeout: "超时",
+    error: "错误"
+  };
+
+  return labels[status];
+}
+
+function renderLlamaCppRuntimeSummary(summary: LlamaCppRuntimeSafeSummary): void {
+  llamaCppRuntimeEnabledField.checked = summary.enabled;
+  llamaCppRuntimeHostField.value = summary.host ?? "";
+  llamaCppRuntimePortField.value = typeof summary.port === "number" ? String(summary.port) : "";
+  llamaCppRuntimeCtxField.value = typeof summary.ctxSize === "number" ? String(summary.ctxSize) : "";
+  llamaCppRuntimeAliasField.value = summary.alias ?? "";
+
+  const hostLabel = summary.baseURLHost ?? [
+    summary.host,
+    typeof summary.port === "number" ? summary.port : null
+  ].filter(Boolean).join(":");
+  const details = [
+    `状态：${formatLlamaCppRuntimeStatus(summary.status)}`,
+    summary.enabled ? "开关：已启用" : "开关：未启用",
+    hostLabel ? `Host：${hostLabel}` : null,
+    typeof summary.ctxSize === "number" ? `Context：${summary.ctxSize}` : null,
+    summary.alias ? `Alias：${summary.alias}` : null
+  ].filter(Boolean);
+
+  llamaCppRuntimeStatusBox.textContent = details.join(" · ");
+  llamaCppRuntimeStatusBox.dataset.state = summary.status === "ready" ? "ready" : "fallback";
+  llamaCppRuntimeFilesBox.textContent = `运行文件：${summary.executableName ?? "未选择"} · 模型：${summary.modelName ?? "未选择"}`;
+}
+
+function setLlamaCppRuntimeStatus(message: string, state: "ready" | "fallback" = "fallback"): void {
+  llamaCppRuntimeStatusBox.textContent = message;
+  llamaCppRuntimeStatusBox.dataset.state = state;
+}
+
+async function refreshLlamaCppRuntimeStatus(): Promise<void> {
+  if (!window.localRuntimeApi) {
+    setLlamaCppRuntimeStatus("托管 llama.cpp 设置不可用。", "fallback");
+    return;
+  }
+
+  try {
+    renderLlamaCppRuntimeSummary(await window.localRuntimeApi.getLlamaCppStatus());
+  } catch {
+    setLlamaCppRuntimeStatus("托管 llama.cpp 状态不可用。", "fallback");
+  }
+}
+
+function parseOptionalRuntimeInteger(field: HTMLInputElement, fieldName: string): number | undefined | null {
+  if (field.value.trim() === "") {
+    return undefined;
+  }
+
+  const value = Number(field.value);
+
+  if (!Number.isInteger(value) || value <= 0) {
+    setSettingsFeedback(`${fieldName}必须留空或填写正整数。`);
+    return null;
+  }
+
+  return value;
+}
+
+async function saveLlamaCppRuntimeSettings(): Promise<void> {
+  if (!window.localRuntimeApi) {
+    setLlamaCppRuntimeStatus("托管 llama.cpp 设置不可用。", "fallback");
+    return;
+  }
+
+  const port = parseOptionalRuntimeInteger(llamaCppRuntimePortField, "Port");
+  const ctxSize = parseOptionalRuntimeInteger(llamaCppRuntimeCtxField, "Context");
+
+  if (port === null || ctxSize === null) {
+    return;
+  }
+
+  try {
+    const summary = await window.localRuntimeApi.updateLlamaCppSettings({
+      enabled: llamaCppRuntimeEnabledField.checked,
+      host: llamaCppRuntimeHostField.value,
+      port: typeof port === "number" ? port : null,
+      ctxSize: typeof ctxSize === "number" ? ctxSize : null,
+      alias: llamaCppRuntimeAliasField.value
+    });
+    renderLlamaCppRuntimeSummary(summary);
+    setSettingsFeedback("托管 llama.cpp 设置已保存。", "ready");
+  } catch {
+    setLlamaCppRuntimeStatus("无法保存托管 llama.cpp 设置。", "fallback");
+  }
+}
+
+async function runLlamaCppRuntimeAction(
+  action: () => Promise<LlamaCppRuntimeSafeSummary>,
+  pendingMessage: string
+): Promise<void> {
+  if (chatTurnState.isReplying) {
+    return;
+  }
+
+  setLlamaCppRuntimeStatus(pendingMessage, "fallback");
+
+  try {
+    renderLlamaCppRuntimeSummary(await action());
+  } catch {
+    setLlamaCppRuntimeStatus("托管 llama.cpp 操作失败，请稍后重试。", "fallback");
+  }
 }
 
 function setPartnerStatus(message: string): void {
@@ -870,6 +1020,8 @@ function setSettingsPage(page: SettingsPageId): void {
     renderMemoryDetail();
   } else if (page === "model") {
     void refreshProviderStatus();
+  } else if (page === "model-detail") {
+    void refreshLlamaCppRuntimeStatus();
   }
 }
 
@@ -1790,6 +1942,7 @@ function updateProviderFields(): void {
   connectionSafeSectionBox.hidden = !isCloudOpenAI;
   localProviderPresetFieldBox.hidden = !isLocalOpenAI;
   localProviderNoteBox.hidden = !isLocalOpenAI;
+  llamaCppRuntimeSectionBox.hidden = !isLocalOpenAI;
   providerHealthCheckAction.hidden = !hasOpenAIFields;
   providerHealthStatusBox.hidden = !hasOpenAIFields;
   baseURLField.required = hasOpenAIFields;
@@ -1876,6 +2029,9 @@ async function openSettings(page: SettingsPageId = "basic"): Promise<void> {
       const config = await window.configApi.getProvider();
       fillProviderForm(config);
       await refreshApiKeyStatus();
+      if (activeSettingsPage === "model-detail") {
+        await refreshLlamaCppRuntimeStatus();
+      }
     } else {
       setProviderHealthStatus("Provider 设置不可用。", "fallback");
     }
@@ -2241,6 +2397,64 @@ settingsModelDetailAction.addEventListener("click", () => {
   setSettingsPage("model-detail");
 });
 
+llamaCppRuntimeSaveAction.addEventListener("click", () => {
+  if (!chatTurnState.isReplying) {
+    void saveLlamaCppRuntimeSettings();
+  }
+});
+
+llamaCppRuntimeExecutableAction.addEventListener("click", () => {
+  if (!window.localRuntimeApi) {
+    setLlamaCppRuntimeStatus("托管 llama.cpp 设置不可用。", "fallback");
+    return;
+  }
+
+  void runLlamaCppRuntimeAction(
+    () => window.localRuntimeApi!.chooseLlamaCppExecutable(),
+    "正在选择运行文件..."
+  );
+});
+
+llamaCppRuntimeModelAction.addEventListener("click", () => {
+  if (!window.localRuntimeApi) {
+    setLlamaCppRuntimeStatus("托管 llama.cpp 设置不可用。", "fallback");
+    return;
+  }
+
+  void runLlamaCppRuntimeAction(
+    () => window.localRuntimeApi!.chooseLlamaCppModel(),
+    "正在选择模型..."
+  );
+});
+
+llamaCppRuntimeStartAction.addEventListener("click", () => {
+  if (!window.localRuntimeApi) {
+    setLlamaCppRuntimeStatus("托管 llama.cpp 设置不可用。", "fallback");
+    return;
+  }
+
+  void runLlamaCppRuntimeAction(
+    () => window.localRuntimeApi!.startLlamaCpp(),
+    "正在启动托管 llama.cpp..."
+  );
+});
+
+llamaCppRuntimeStopAction.addEventListener("click", () => {
+  if (!window.localRuntimeApi) {
+    setLlamaCppRuntimeStatus("托管 llama.cpp 设置不可用。", "fallback");
+    return;
+  }
+
+  void runLlamaCppRuntimeAction(
+    () => window.localRuntimeApi!.stopLlamaCpp(),
+    "正在停止托管 llama.cpp..."
+  );
+});
+
+llamaCppRuntimeRefreshAction.addEventListener("click", () => {
+  void refreshLlamaCppRuntimeStatus();
+});
+
 chatTabAction.addEventListener("click", () => {
   setActivePage("chat");
 });
@@ -2432,6 +2646,7 @@ providerIdField.addEventListener("change", () => {
     void refreshApiKeyStatus();
   } else if (isLocalOpenAICompatibleSelected()) {
     fillLocalOpenAIDefaults();
+    void refreshLlamaCppRuntimeStatus();
   }
 
   updateProviderFields();

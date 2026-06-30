@@ -2,6 +2,10 @@ import { spawn as nodeSpawn, type ChildProcess, type SpawnOptions } from "node:c
 import { existsSync, statSync } from "node:fs";
 import { createServer } from "node:net";
 import { extname } from "node:path";
+import type {
+  LlamaCppRuntimeSafeSummary,
+  LlamaCppRuntimeStatus
+} from "../../../shared/llama-cpp-runtime";
 
 export type LlamaCppRuntimeConfig = {
   enabled: boolean;
@@ -16,33 +20,9 @@ export type LlamaCppRuntimeConfig = {
   healthPollIntervalMs?: number;
 };
 
-export type LlamaCppRuntimeStatus =
-  | "disabled"
-  | "missing_binary"
-  | "missing_model"
-  | "starting"
-  | "ready"
-  | "exited"
-  | "timeout"
-  | "error";
+export type { LlamaCppRuntimeStatus } from "../../../shared/llama-cpp-runtime";
 
-export type LlamaCppRuntimeSummary = {
-  runtime: "llama.cpp";
-  enabled: boolean;
-  status: LlamaCppRuntimeStatus;
-  safeSummaryOnly: true;
-  executableConfigured: boolean;
-  modelConfigured: boolean;
-  baseURLHost?: string;
-  alias?: string;
-  durationMs?: number;
-  startupMs?: number;
-  exitCode?: number | null;
-  signal?: NodeJS.Signals | string | null;
-  stdoutBytes?: number;
-  stderrBytes?: number;
-  reason?: "invalid_model_extension" | "spawn_failed" | "health_timeout" | "stop_timeout";
-};
+export type LlamaCppRuntimeSummary = LlamaCppRuntimeSafeSummary;
 
 export type LlamaCppRuntime = {
   start(): Promise<LlamaCppRuntimeSummary>;
@@ -94,6 +74,7 @@ export function readLlamaCppRuntimeConfigFromEnv(
   const alias = readNonEmptyString(env.AI_DESKTOP_PET_LLAMA_CPP_ALIAS);
   const startupTimeoutMs = readPositiveInteger(env.AI_DESKTOP_PET_LLAMA_CPP_STARTUP_TIMEOUT_MS);
   const stopTimeoutMs = readPositiveInteger(env.AI_DESKTOP_PET_LLAMA_CPP_STOP_TIMEOUT_MS);
+  const healthPollIntervalMs = readPositiveInteger(env.AI_DESKTOP_PET_LLAMA_CPP_HEALTH_POLL_INTERVAL_MS);
 
   if (executablePath) {
     config.executablePath = executablePath;
@@ -118,6 +99,9 @@ export function readLlamaCppRuntimeConfigFromEnv(
   }
   if (stopTimeoutMs) {
     config.stopTimeoutMs = stopTimeoutMs;
+  }
+  if (healthPollIntervalMs) {
+    config.healthPollIntervalMs = healthPollIntervalMs;
   }
 
   return config;
