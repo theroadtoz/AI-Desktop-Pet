@@ -268,7 +268,9 @@ test("memory injection applies deterministic budget sorting when context crosses
 
     const injection = store.createInjection();
     assert.equal(injection.count, MEMORY_INJECTION_BUDGET);
+    assert.equal(injection.count <= MEMORY_INJECTION_BUDGET, true);
     assert.equal(store.listCards().some((card) => card.compressionState === "budgeted"), true);
+    assert.equal(store.listCards().filter((card) => card.enabled && card.compressionState === "budgeted").length, MEMORY_CONTEXT_COMPRESSION_THRESHOLD + 2);
   } finally {
     await rm(userDataPath, { recursive: true, force: true });
   }

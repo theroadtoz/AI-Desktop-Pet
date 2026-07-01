@@ -1,4 +1,4 @@
-import type { ChatMessage } from "./chat";
+import type { ChatMessage, ChatRole } from "./chat";
 import type { MemoryInjection } from "./chat-memory";
 import type { DialogueStyleContext } from "./dialogue-style";
 import type { EmotionClassification } from "./emotion";
@@ -16,10 +16,27 @@ export type ChatRuntimeContext = {
   locale: string;
 };
 
+export type ChatProviderMessage = {
+  id?: string;
+  role: ChatRole | "system";
+  content: string;
+};
+
+export type ChatContextBudgetSummary = {
+  originalMessageCount: number;
+  providerMessageCount: number;
+  compressed: boolean;
+  summaryMessageCount: number;
+  summarizedMessageCount: number;
+  recentMessageCount: number;
+};
+
 export type ChatRequest = {
   requestVersion: number;
   conversationId: string;
   messages: ChatMessage[];
+  providerMessages?: ChatProviderMessage[];
+  contextBudget?: ChatContextBudgetSummary;
   memoryContext?: MemoryInjection;
   dialogueStyleContext?: DialogueStyleContext;
   userProfileContext?: UserProfilePromptContext;

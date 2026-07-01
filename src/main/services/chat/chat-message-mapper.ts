@@ -1,5 +1,5 @@
 import type { ChatMessage } from "../../../shared/chat";
-import type { ChatRuntimeContext } from "../../../shared/chat-provider";
+import type { ChatProviderMessage, ChatRuntimeContext } from "../../../shared/chat-provider";
 import type { MemoryInjection } from "../../../shared/chat-memory";
 import type { DialogueStyleContext } from "../../../shared/dialogue-style";
 import type { UserProfilePromptContext } from "../../../shared/user-profile";
@@ -22,7 +22,7 @@ const SYSTEM_PROMPT = "你是一个低打扰的桌面伙伴。回复要自然、
 const LOCAL_SMALL_MODEL_SYSTEM_PROMPT = "你是桌面伙伴。用中文，短句，不输出 JSON。";
 
 export function mapChatMessagesToOpenAICompatible(
-  messages: ChatMessage[],
+  messages: readonly ChatProviderMessage[],
   memoryContext?: MemoryInjection,
   dialogueStyleContext: DialogueStyleContext = createDefaultDialogueStyleContext(),
   userProfileContext?: UserProfilePromptContext,
@@ -123,7 +123,7 @@ function createMemoryMessage(memoryContext?: MemoryInjection): OpenAICompatibleM
   };
 }
 
-export function getLatestUserMessage(messages: ChatMessage[]): string {
+export function getLatestUserMessage(messages: readonly (ChatMessage | ChatProviderMessage)[]): string {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
 

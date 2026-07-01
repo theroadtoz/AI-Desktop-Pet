@@ -138,6 +138,70 @@ test("local OpenAI-compatible provider streams SSE without Authorization and kee
   }
 });
 
+test("OpenAI-compatible provider maps budgeted context messages without older text", async () => {
+  let requestBody: unknown = null;
+  const oldPrivateText = "older-user-text-that-should-stay-out";
+  const safeSummary = [
+    "context_summary_kind=earlier_history_counts",
+    "summarizedMessageCount=10",
+    "summarizedUserMessageCount=5",
+    "summarizedAssistantMessageCount=5"
+  ].join("\n");
+
+  const server = createServer(async (request: IncomingMessage, response: ServerResponse) => {
+    requestBody = JSON.parse(await readRequestBody(request));
+    response.writeHead(200, { "Content-Type": "text/event-stream" });
+    response.end(`data: ${JSON.stringify({ choices: [{ delta: { content: "ok" } }] })}\n\ndata: [DONE]\n\n`);
+  });
+
+  try {
+    await listen(server);
+
+    await createOpenAICompatibleProvider({
+      providerId: "local-openai-compatible",
+      baseURL: localBaseURL(server),
+      model: "qwen2.5:3b-instruct",
+      temperature: 0.2,
+      maxTokens: 80,
+      timeoutMs: 60000
+    }).streamReply({
+      requestVersion: 1,
+      conversationId: "budgeted-provider-test",
+      messages: [
+        { id: crypto.randomUUID(), role: "user", content: oldPrivateText },
+        { id: crypto.randomUUID(), role: "assistant", content: "older assistant text" },
+        { id: crypto.randomUUID(), role: "user", content: "recent follow up" }
+      ],
+      providerMessages: [
+        { role: "system", content: safeSummary },
+        { id: crypto.randomUUID(), role: "user", content: "recent follow up" }
+      ],
+      contextBudget: {
+        originalMessageCount: 13,
+        providerMessageCount: 9,
+        compressed: true,
+        summaryMessageCount: 1,
+        summarizedMessageCount: 5,
+        recentMessageCount: 8
+      }
+    }, {
+      signal: new AbortController().signal,
+      onDelta() {}
+    });
+
+    const body = requestBody as {
+      messages?: Array<{ role?: string; content?: string }>;
+    };
+    const contents = body.messages?.map((message) => message.content ?? "") ?? [];
+
+    assert.equal(contents.some((content) => content.includes(safeSummary)), true);
+    assert.equal(contents.some((content) => content.includes("recent follow up")), true);
+    assert.equal(contents.some((content) => content.includes(oldPrivateText)), false);
+  } finally {
+    await close(server);
+  }
+});
+
 test("cloud OpenAI-compatible provider keeps cloud prompt template", async () => {
   let requestBody: unknown = null;
   let authorization = "";

@@ -1,4 +1,4 @@
-import type { ChatProvider, ChatProviderResult, ChatRequest } from "../../../shared/chat-provider";
+import type { ChatProvider, ChatProviderMessage, ChatProviderResult, ChatRequest } from "../../../shared/chat-provider";
 import type { ProviderId } from "../../../shared/provider-config";
 import type { TelemetryPayload } from "../telemetry";
 import {
@@ -51,13 +51,15 @@ export function createOpenAICompatibleProvider(
     async streamReply(request, streamOptions) {
       const startedAt = Date.now();
       let replyText = "";
+      const providerMessages = getProviderMessages(request);
 
       log(options, "provider_request_started", {
         providerId,
         model: options.model,
         baseURLHost,
         promptTemplateProfile,
-        messageCount: request.messages.length
+        messageCount: request.messages.length,
+        providerMessageCount: providerMessages.length
       });
 
       try {
@@ -86,6 +88,7 @@ export function createOpenAICompatibleProvider(
           baseURLHost,
           promptTemplateProfile,
           messageCount: request.messages.length,
+          providerMessageCount: providerMessages.length,
           replyLength: replyText.length,
           durationMs: Date.now() - startedAt
         });
@@ -102,6 +105,7 @@ export function createOpenAICompatibleProvider(
           baseURLHost,
           promptTemplateProfile,
           messageCount: request.messages.length,
+          providerMessageCount: providerMessages.length,
           replyLength: replyText.length,
           durationMs: Date.now() - startedAt,
           errorType: getProviderErrorType(error)
@@ -148,7 +152,7 @@ async function streamChatCompletions(input: {
       body: JSON.stringify({
         model: input.options.model,
         messages: mapChatMessagesToOpenAICompatible(
-          input.request.messages,
+          getProviderMessages(input.request),
           input.request.memoryContext,
           input.request.dialogueStyleContext,
           input.request.userProfileContext,
@@ -192,6 +196,10 @@ async function streamChatCompletions(input: {
     clearTimeout(timeoutId);
     input.signal.removeEventListener("abort", abort);
   }
+}
+
+function getProviderMessages(request: ChatRequest): readonly ChatProviderMessage[] {
+  return request.providerMessages ?? request.messages;
 }
 
 function getPromptTemplateProfile(providerId: Extract<ProviderId, "openai-compatible" | "local-openai-compatible">): PromptTemplateProfile {

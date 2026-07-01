@@ -68,6 +68,7 @@ import {
   type PetActionTriggerReason
 } from "../shared/pet-action-trigger";
 import { ChatEngineBusyError, createChatEngine, type ChatEngine } from "./services/chat/chat-engine";
+import { budgetChatContext } from "./services/chat/chat-context-budget";
 import { createHistoryStore, type HistoryStore } from "./services/chat/history-store";
 import { createMemoryStore, type MemoryStore } from "./services/chat/memory-store";
 import { createChatProviderFromConfig } from "./services/chat/provider-factory";
@@ -1648,6 +1649,7 @@ app.whenReady().then(async () => {
     };
     const userProfileContext = createUserProfilePromptContext(userProfileStore?.getProfile() ?? null);
     const runtimeContext = createChatRuntimeContext();
+    const contextBudget = budgetChatContext(request.messages);
     event.sender.send("chat:memory-injection", {
       requestVersion: request.requestVersion,
       count: memoryContext.count
@@ -1656,11 +1658,20 @@ app.whenReady().then(async () => {
     logTelemetry("chat_stream_started", {
       providerId,
       conversationId: request.conversationId,
-      messageCount: request.messages.length
+      messageCount: request.messages.length,
+      originalMessageCount: contextBudget.summary.originalMessageCount,
+      providerMessageCount: contextBudget.summary.providerMessageCount,
+      compressed: contextBudget.summary.compressed,
+      summaryMessageCount: contextBudget.summary.summaryMessageCount,
+      summarizedMessageCount: contextBudget.summary.summarizedMessageCount,
+      recentMessageCount: contextBudget.summary.recentMessageCount,
+      memoryInjectionCount: memoryContext.count
     });
 
     void chatEngine.startChatStream({
       ...request,
+      providerMessages: contextBudget.providerMessages,
+      contextBudget: contextBudget.summary,
       memoryContext,
       dialogueStyleContext,
       runtimeContext,
