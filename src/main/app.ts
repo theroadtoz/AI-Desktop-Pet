@@ -69,6 +69,7 @@ import {
 } from "../shared/pet-action-trigger";
 import { ChatEngineBusyError, createChatEngine, type ChatEngine } from "./services/chat/chat-engine";
 import { budgetChatContext } from "./services/chat/chat-context-budget";
+import { createChatReplySustainTriggerController } from "./services/chat/chat-reply-sustain-trigger";
 import { createHistoryStore, type HistoryStore } from "./services/chat/history-store";
 import { createMemoryStore, type MemoryStore } from "./services/chat/memory-store";
 import { createChatProviderFromConfig } from "./services/chat/provider-factory";
@@ -153,7 +154,6 @@ let currentPresenceModeId: PresenceModeId = "default";
 let performanceHeartbeat: NodeJS.Timeout | null = null;
 let isPetLocked = false;
 let initialEdgeGlanceTimer: NodeJS.Timeout | null = null;
-let chatReplySustainTimer: NodeJS.Timeout | null = null;
 
 const PET_RENDERER_RECOVERY_WINDOW_MS = 60_000;
 const DEFAULT_API_KEY_REF = "openai-compatible-default";
@@ -167,6 +167,13 @@ const PET_CHAT_REPLY_SUSTAIN_DELAY_MS = 1_250;
 const isAcceptanceTelemetryEnabled = process.env.AI_DESKTOP_PET_ACCEPTANCE_TELEMETRY === "1";
 let petRendererRecoveryTimes: number[] = [];
 const lastPetActionTriggerAtByReason: Partial<Record<PetActionTriggerReason, number>> = {};
+const chatReplySustainTrigger = createChatReplySustainTriggerController({
+  minChars: PET_CHAT_REPLY_SUSTAIN_MIN_CHARS,
+  delayMs: PET_CHAT_REPLY_SUSTAIN_DELAY_MS,
+  sendReason(reason) {
+    sendPetActionTrigger(reason);
+  }
+});
 
 const userDataPathOverride = process.env.AI_DESKTOP_PET_USER_DATA_PATH;
 
@@ -545,23 +552,11 @@ function triggerEdgeGlanceIfPetSettled(): boolean {
 }
 
 function clearChatReplySustainTimer(): void {
-  if (!chatReplySustainTimer) {
-    return;
-  }
-
-  clearTimeout(chatReplySustainTimer);
-  chatReplySustainTimer = null;
+  chatReplySustainTrigger.clear();
 }
 
-function scheduleChatReplySustainTrigger(): void {
-  if (chatReplySustainTimer) {
-    return;
-  }
-
-  chatReplySustainTimer = setTimeout(() => {
-    chatReplySustainTimer = null;
-    sendPetActionTrigger("chat_reply_sustain");
-  }, PET_CHAT_REPLY_SUSTAIN_DELAY_MS);
+function scheduleChatReplySustainTrigger(replyLength: number): void {
+  chatReplySustainTrigger.observeReplyLength(replyLength);
 }
 
 function scheduleInitialEdgeGlanceIfNeeded(): void {
@@ -1683,9 +1678,7 @@ app.whenReady().then(async () => {
         }
 
         replyLength += delta.text.length;
-        if (replyLength >= PET_CHAT_REPLY_SUSTAIN_MIN_CHARS) {
-          scheduleChatReplySustainTrigger();
-        }
+        scheduleChatReplySustainTrigger(replyLength);
         event.sender.send("chat:stream-delta", { ...delta, requestVersion: request.requestVersion });
       }
     }).then((result) => {

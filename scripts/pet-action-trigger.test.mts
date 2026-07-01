@@ -4,11 +4,15 @@ import test from "node:test";
 import {
   PET_ACTION_TRIGGER_ACTION_BY_REASON,
   PET_ACTION_TRIGGER_REASONS,
+  type PetActionTriggerReason,
   getPetActionTriggerActionType,
   isPetNearWorkAreaEdge,
   parsePetActionTrigger
 } from "../src/shared/pet-action-trigger.ts";
+import { createChatReplySustainTriggerController } from "../src/main/services/chat/chat-reply-sustain-trigger.ts";
 import { calculateInitialPetBounds } from "../src/shared/pet-presentation.ts";
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 test("pet action trigger allowlist only exposes fixed action and reason combinations", () => {
   assert.deepEqual(PET_ACTION_TRIGGER_REASONS, [
@@ -62,4 +66,26 @@ test("completed chat streams clear the sustain trigger timer before done is sent
   assert.notEqual(completedIndex, -1);
   assert.notEqual(doneIndex, -1);
   assert.match(source.slice(completedIndex, doneIndex), /if \(activeChatRequestVersion === request\.requestVersion\) \{\s*activeChatRequestVersion = null;\s*clearChatReplySustainTimer\(\);\s*\}/);
+});
+
+test("slow chat streams trigger the fixed reply sustain reason while still streaming", async (t) => {
+  const reasons: PetActionTriggerReason[] = [];
+  const controller = createChatReplySustainTriggerController({
+    minChars: 5,
+    delayMs: 15,
+    sendReason(reason) {
+      reasons.push(reason);
+    }
+  });
+  t.after(() => controller.clear());
+
+  controller.observeReplyLength(4);
+  await sleep(25);
+  assert.deepEqual(reasons, []);
+
+  controller.observeReplyLength(5);
+  await sleep(25);
+
+  assert.deepEqual(reasons, ["chat_reply_sustain"]);
+  assert.equal(getPetActionTriggerActionType(reasons[0]), "replySustain");
 });
