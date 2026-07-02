@@ -33,14 +33,25 @@ import {
 import type { PetPresentationIntent } from "../../shared/pet-role-state";
 import { getPetActionTriggerActionType } from "../../shared/pet-action-trigger";
 import { getPetAccessoryPreset, type PetAccessoryPresetId } from "../../shared/pet-accessory";
+import {
+  clampProactiveSpeechBubbleDuration,
+  getProactiveSpeechBubbleLine,
+  type ProactiveSpeechBubblePayload
+} from "../../shared/proactive-speech-bubble";
 
 const foundCanvas = document.querySelector<HTMLCanvasElement>("#pet-canvas");
+const foundProactiveSpeechBubble = document.querySelector<HTMLDivElement>("#proactive-speech-bubble");
 
 if (!foundCanvas) {
   throw new Error("pet canvas missing");
 }
 
+if (!foundProactiveSpeechBubble) {
+  throw new Error("proactive speech bubble missing");
+}
+
 const canvas: HTMLCanvasElement = foundCanvas;
+const proactiveSpeechBubble: HTMLDivElement = foundProactiveSpeechBubble;
 const foundGl = canvas.getContext("webgl2", {
   alpha: true,
   antialias: true,
@@ -252,6 +263,38 @@ let pendingLive2DFrameSample: ((sample: Live2DFrameSample) => void) | null = nul
 let hasPlayedStartupAppearance = false;
 let currentDialogueModeId: DialogueModeId = DEFAULT_DIALOGUE_MODE_ID;
 let currentPresenceModeId: PresenceModeId = DEFAULT_PRESENCE_MODE_ID;
+let proactiveSpeechBubbleTimeout: number | null = null;
+
+function clearProactiveSpeechBubble(): void {
+  if (proactiveSpeechBubbleTimeout !== null) {
+    window.clearTimeout(proactiveSpeechBubbleTimeout);
+    proactiveSpeechBubbleTimeout = null;
+  }
+
+  proactiveSpeechBubble.textContent = "";
+  proactiveSpeechBubble.dataset.state = "hidden";
+  delete proactiveSpeechBubble.dataset.lineId;
+  delete proactiveSpeechBubble.dataset.reason;
+  proactiveSpeechBubble.setAttribute("aria-hidden", "true");
+}
+
+function showProactiveSpeechBubble(payload: ProactiveSpeechBubblePayload): void {
+  if (currentPresenceModeId === "sleep") {
+    clearProactiveSpeechBubble();
+    return;
+  }
+
+  clearProactiveSpeechBubble();
+  proactiveSpeechBubble.textContent = getProactiveSpeechBubbleLine(payload.lineId);
+  proactiveSpeechBubble.dataset.state = "visible";
+  proactiveSpeechBubble.dataset.lineId = payload.lineId;
+  proactiveSpeechBubble.dataset.reason = payload.reason;
+  proactiveSpeechBubble.setAttribute("aria-hidden", "false");
+  proactiveSpeechBubbleTimeout = window.setTimeout(
+    clearProactiveSpeechBubble,
+    clampProactiveSpeechBubbleDuration(payload.durationMs)
+  );
+}
 
 async function applyBasePresentationToLoadedModel(
   presentation: EmotionPresentation,
@@ -616,12 +659,22 @@ const removeDialogueModeChangedListener = window.petApi?.onDialogueModeChanged((
 const removePresenceModeChangedListener = window.petApi?.onPresenceModeChanged((modeId) => {
   currentPresenceModeId = modeId;
   live2DRenderer?.setPresenceMode(modeId);
+  if (modeId === "sleep") {
+    clearProactiveSpeechBubble();
+  }
 }) ?? null;
 const removeActionTriggerListener = window.petApi?.onActionTrigger((trigger) => {
+  if (trigger.reason === "chat_opened" || trigger.reason === "chat_input_focus") {
+    clearProactiveSpeechBubble();
+  }
+
   interactionActionPlayer.playAction(
     getPetInteractionAction(getPetActionTriggerActionType(trigger.reason)),
     trigger.reason
   );
+}) ?? null;
+const removeProactiveSpeechBubbleListener = window.petApi?.onProactiveSpeechBubble((payload) => {
+  showProactiveSpeechBubble(payload);
 }) ?? null;
 const removeWindowMotionFeedbackListener = window.petApi?.onWindowMotionFeedback((feedback) => {
   if (feedback.type === "shake_light_feedback") {
@@ -666,7 +719,9 @@ window.addEventListener("beforeunload", () => {
   removeDialogueModeChangedListener?.();
   removePresenceModeChangedListener?.();
   removeActionTriggerListener?.();
+  removeProactiveSpeechBubbleListener?.();
   removeWindowMotionFeedbackListener?.();
+  clearProactiveSpeechBubble();
   cancelClickInteractionAction();
   rapidTouchComboDetector.reset();
   interactionActionPlayer.dispose();

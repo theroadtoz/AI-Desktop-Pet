@@ -26,6 +26,11 @@ import type {
   RenderHealth
 } from "../shared/ipc-contract";
 import { isChatMessage } from "../shared/ipc-contract";
+import {
+  DEFAULT_PROACTIVE_SPEECH_BUBBLE_DURATION_MS,
+  DEFAULT_PROACTIVE_SPEECH_BUBBLE_LINE_ID,
+  type ProactiveSpeechBubblePayload
+} from "../shared/proactive-speech-bubble";
 import { isHistoryId, type HistoryMessage } from "../shared/chat-history";
 import { isMemoryId, parseMemoryCardDraft, parseMemoryCardUpdate, type MemoryCardUpdate } from "../shared/chat-memory";
 import { DIALOGUE_MODE_VIEWS, isDialogueModeId, type DialogueModeId } from "../shared/dialogue-style";
@@ -161,6 +166,8 @@ let currentPresenceModeId: PresenceModeId = "default";
 let performanceHeartbeat: NodeJS.Timeout | null = null;
 let isPetLocked = false;
 let initialEdgeGlanceTimer: NodeJS.Timeout | null = null;
+let startupProactiveSpeechBubbleTimer: NodeJS.Timeout | null = null;
+let hasHandledStartupProactiveSpeechBubble = false;
 
 const PET_RENDERER_RECOVERY_WINDOW_MS = 60_000;
 const DEFAULT_API_KEY_REF = "openai-compatible-default";
@@ -171,6 +178,7 @@ const PET_INITIAL_EDGE_GLANCE_DELAY_MS = 2_350;
 const PET_DRAG_END_EDGE_GLANCE_DELAY_MS = 100;
 const PET_CHAT_REPLY_SUSTAIN_MIN_CHARS = 42;
 const PET_CHAT_REPLY_SUSTAIN_DELAY_MS = 1_250;
+const PET_STARTUP_PROACTIVE_SPEECH_BUBBLE_DELAY_MS = 1_100;
 const isAcceptanceTelemetryEnabled = process.env.AI_DESKTOP_PET_ACCEPTANCE_TELEMETRY === "1";
 let petRendererRecoveryTimes: number[] = [];
 const lastPetActionTriggerAtByReason: Partial<Record<PetActionTriggerReason, number>> = {};
@@ -657,6 +665,58 @@ function sendPetActionTrigger(reason: PetActionTriggerReason): boolean {
   lastPetActionTriggerAtByReason[reason] = now;
   petWindow.webContents.send("pet:action-trigger", { reason });
   return true;
+}
+
+function sendProactiveSpeechBubble(payload: ProactiveSpeechBubblePayload): boolean {
+  if (!petWindow || petWindow.isDestroyed()) {
+    return false;
+  }
+
+  petWindow.webContents.send("pet:proactive-speech-bubble", payload);
+  return true;
+}
+
+function isChatVisible(): boolean {
+  return Boolean(chatWindow && !chatWindow.isDestroyed() && chatWindow.isVisible());
+}
+
+function canShowStartupProactiveSpeechBubble(): boolean {
+  return currentPresenceModeId !== "sleep" && !isChatVisible() && !isChatInteractionActive;
+}
+
+function cancelStartupProactiveSpeechBubbleTimer(): void {
+  if (!startupProactiveSpeechBubbleTimer) {
+    return;
+  }
+
+  clearTimeout(startupProactiveSpeechBubbleTimer);
+  startupProactiveSpeechBubbleTimer = null;
+}
+
+function scheduleStartupProactiveSpeechBubbleIfNeeded(): void {
+  if (hasHandledStartupProactiveSpeechBubble) {
+    return;
+  }
+
+  hasHandledStartupProactiveSpeechBubble = true;
+  cancelStartupProactiveSpeechBubbleTimer();
+
+  if (!canShowStartupProactiveSpeechBubble()) {
+    return;
+  }
+
+  startupProactiveSpeechBubbleTimer = setTimeout(() => {
+    startupProactiveSpeechBubbleTimer = null;
+    if (!canShowStartupProactiveSpeechBubble()) {
+      return;
+    }
+
+    sendProactiveSpeechBubble({
+      lineId: DEFAULT_PROACTIVE_SPEECH_BUBBLE_LINE_ID,
+      reason: "startup_presence",
+      durationMs: DEFAULT_PROACTIVE_SPEECH_BUBBLE_DURATION_MS
+    });
+  }, PET_STARTUP_PROACTIVE_SPEECH_BUBBLE_DELAY_MS);
 }
 
 function isCurrentPetWindowNearEdge(): boolean {
@@ -1336,6 +1396,7 @@ app.whenReady().then(async () => {
       chatWindow = createChatWindow();
     }
 
+    cancelStartupProactiveSpeechBubbleTimer();
     showChatWindow(chatWindow);
     focusChatInput(chatWindow);
     transitionPetRole({ type: "chat:opened" });
@@ -1565,6 +1626,7 @@ app.whenReady().then(async () => {
     logTelemetry("first_frame", sanitizeFirstFrame(info));
     console.info("[pet] first frame reported");
     scheduleInitialEdgeGlanceIfNeeded();
+    scheduleStartupProactiveSpeechBubbleIfNeeded();
   });
 
   ipcMain.on("pet:health", (event, state: RenderHealth) => {
@@ -1626,6 +1688,7 @@ app.whenReady().then(async () => {
     isChatInteractionActive = isActive;
     transitionPetRole({ type: "chat:interaction", active: isActive });
     if (isActive) {
+      cancelStartupProactiveSpeechBubbleTimer();
       sendPetActionTrigger("chat_input_focus");
     }
   });
@@ -2201,6 +2264,10 @@ app.whenReady().then(async () => {
     currentPresenceModeId = presenceModeStore.saveMode(modeId);
 
     if (previousModeId !== currentPresenceModeId) {
+      if (currentPresenceModeId === "sleep") {
+        cancelStartupProactiveSpeechBubbleTimer();
+      }
+
       logTelemetry("presence_mode_changed", {
         previousModeId,
         nextModeId: currentPresenceModeId,
@@ -2425,6 +2492,7 @@ app.on("window-all-closed", () => {
 });
 
 app.on("will-quit", () => {
+  cancelStartupProactiveSpeechBubbleTimer();
   bundledLlamaCppRuntime?.stop();
   stopLlamaCppRuntime();
   petPresentationPersistence?.flush();

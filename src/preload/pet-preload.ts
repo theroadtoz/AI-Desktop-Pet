@@ -6,6 +6,7 @@ import type {
   PetDragDelta,
   PetFirstFrameInfo
 } from "../shared/ipc-contract";
+import type { ProactiveSpeechBubblePayload, ProactiveSpeechBubbleReason } from "../shared/proactive-speech-bubble";
 import type { PetActionTrigger, PetActionTriggerReason } from "../shared/pet-action-trigger";
 import type { DialogueModeId } from "../shared/dialogue-style";
 import type { PresenceModeId } from "../shared/presence-mode";
@@ -25,6 +26,12 @@ const emotionIntensities = ["low", "medium", "high"] as const;
 const petAccessoryPresetIds = ["none", "glasses"] as const;
 const dialogueModeIds = ["default", "work", "game", "reading"] as const;
 const presenceModeIds = ["default", "focus", "quiet", "sleep"] as const;
+const proactiveSpeechBubbleLineIds = [
+  "startup_presence_ready",
+  "startup_presence_soft",
+  "startup_presence_focus"
+] as const;
+const proactiveSpeechBubbleReasons = ["startup_presence"] as const;
 const petActionTriggerReasons = [
   "chat_opened",
   "chat_input_focus",
@@ -129,6 +136,37 @@ function parsePetActionTrigger(value: unknown): PetActionTrigger | null {
     : null;
 }
 
+function parseProactiveSpeechBubblePayload(value: unknown): ProactiveSpeechBubblePayload | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+
+  const payload = value as Partial<ProactiveSpeechBubblePayload>;
+  const durationMs = payload.durationMs;
+  const lineId = typeof payload.lineId === "string" &&
+    proactiveSpeechBubbleLineIds.includes(payload.lineId as (typeof proactiveSpeechBubbleLineIds)[number])
+    ? payload.lineId as ProactiveSpeechBubblePayload["lineId"]
+    : null;
+  const reason = typeof payload.reason === "string" &&
+    proactiveSpeechBubbleReasons.includes(payload.reason as ProactiveSpeechBubbleReason)
+    ? payload.reason as ProactiveSpeechBubbleReason
+    : null;
+
+  if (!lineId || !reason || typeof durationMs !== "number" || !Number.isFinite(durationMs)) {
+    return null;
+  }
+
+  if (durationMs < 1_000 || durationMs > 10_000) {
+    return null;
+  }
+
+  return {
+    lineId,
+    reason,
+    durationMs: Math.round(durationMs)
+  };
+}
+
 const api: PetApi = {
   reportFirstFrame(info: PetFirstFrameInfo) {
     ipcRenderer.send("pet:first-frame", info);
@@ -170,6 +208,20 @@ const api: PetApi = {
 
     return () => {
       ipcRenderer.removeListener("pet:action-trigger", listener);
+    };
+  },
+  onProactiveSpeechBubble(handler) {
+    const listener = (_event: Electron.IpcRendererEvent, value: unknown): void => {
+      const payload = parseProactiveSpeechBubblePayload(value);
+      if (payload) {
+        handler(payload);
+      }
+    };
+
+    ipcRenderer.on("pet:proactive-speech-bubble", listener);
+
+    return () => {
+      ipcRenderer.removeListener("pet:proactive-speech-bubble", listener);
     };
   },
   onInjectWebGLContextLoss(handler: () => void) {

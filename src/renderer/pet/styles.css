@@ -7,9 +7,44 @@ body {
   background: transparent;
 }
 
+body {
+  position: relative;
+}
+
 #pet-canvas {
   width: 100vw;
   height: 100vh;
   display: block;
   background: transparent;
+}
+
+#proactive-speech-bubble {
+  position: fixed;
+  top: clamp(12px, 6vh, 34px);
+  left: clamp(14px, 8vw, 38px);
+  max-width: min(178px, calc(100vw - 32px));
+  box-sizing: border-box;
+  padding: 8px 11px;
+  border: 1px solid rgba(92, 58, 92, 0.18);
+  border-radius: 8px;
+  color: rgba(42, 28, 46, 0.92);
+  background: rgba(255, 250, 253, 0.82);
+  box-shadow: 0 8px 22px rgba(46, 28, 54, 0.16);
+  font: 13px/1.45 "Microsoft YaHei", "Segoe UI", sans-serif;
+  letter-spacing: 0;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-3px);
+  transition:
+    opacity 160ms ease,
+    transform 160ms ease,
+    visibility 160ms ease;
+}
+
+#proactive-speech-bubble[data-state="visible"] {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
 }

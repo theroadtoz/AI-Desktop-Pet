@@ -16,6 +16,7 @@ import type { UserProfile, UserProfileInput } from "./user-profile";
 import type { PetActionTrigger } from "./pet-action-trigger";
 import type { LlamaCppRuntimeSafeSummary, LlamaCppRuntimeSettingsUpdate } from "./llama-cpp-runtime";
 import type { LocalModelDiagnosticSafeSummary } from "./local-model-diagnostic";
+import type { ProactiveSpeechBubblePayload } from "./proactive-speech-bubble";
 
 export type { PetTelemetryEvent } from "./pet-telemetry-contract";
 
@@ -26,6 +27,7 @@ export type PetWindowCommand =
   | { type: "pet:pointer-hit-change"; payload: PetPointerHitState }
   | { type: "pet:apply-presentation"; payload: PetPresentationIntent }
   | { type: "pet:action-trigger"; payload: PetActionTrigger }
+  | { type: "pet:proactive-speech-bubble"; payload: ProactiveSpeechBubblePayload }
   | { type: "pet:window-motion-feedback"; payload: PetWindowMotionFeedback }
   | { type: "presenceMode:changed"; payload: PresenceModeId }
   | { type: "pet:inject-webgl-context-loss" }
@@ -132,6 +134,7 @@ export type PetApi = {
   presentationReady(): void;
   onPresentationIntent(handler: (intent: PetPresentationIntent) => void): () => void;
   onActionTrigger(handler: (trigger: PetActionTrigger) => void): () => void;
+  onProactiveSpeechBubble(handler: (payload: ProactiveSpeechBubblePayload) => void): () => void;
   onInjectWebGLContextLoss(handler: () => void): () => void;
   onWindowMotionFeedback(handler: (feedback: PetWindowMotionFeedback) => void): () => void;
   openChat(): void;
