@@ -1,5 +1,6 @@
 import { BrowserWindow } from "electron";
 import { join } from "node:path";
+import { getWindowIconPath } from "./app-icon";
 import { showChatWindowAbovePet } from "./topmost-policy";
 
 export function createChatWindow(): BrowserWindow {
@@ -9,7 +10,7 @@ export function createChatWindow(): BrowserWindow {
     height: 640,
     show: false,
     title: "Desktop Pet Chat",
-    icon: join(process.cwd(), "resources/icons/app-icon-256.png"),
+    icon: getWindowIconPath(),
     webPreferences: {
       preload,
       nodeIntegration: false,

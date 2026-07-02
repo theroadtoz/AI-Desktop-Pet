@@ -1,5 +1,6 @@
 import { BrowserWindow } from "electron";
 import { join } from "node:path";
+import { getWindowIconPath } from "./app-icon";
 import { restorePetWindowOnTop } from "./topmost-policy";
 
 export function createPetWindow(): BrowserWindow {
@@ -15,7 +16,7 @@ export function createPetWindow(): BrowserWindow {
     skipTaskbar: true,
     show: false,
     focusable: false,
-    icon: join(process.cwd(), "resources/icons/app-icon-256.png"),
+    icon: getWindowIconPath(),
     webPreferences: {
       preload,
       nodeIntegration: false,

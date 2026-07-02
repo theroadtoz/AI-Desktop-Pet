@@ -2,7 +2,9 @@
   "name": "ai-desktop-pet",
   "version": "0.0.0",
   "private": true,
-  "description": "Phase 0 prototype for a low-interruption Live2D AI desktop pet.",
+  "description": "Windows Live2D AI desktop pet with a local-first companion experience.",
+  "author": "AI Desktop Pet Project",
+  "license": "UNLICENSED",
   "main": "dist/main/app.js",
   "scripts": {
     "dev": "npm run build && electron .",
@@ -18,6 +20,7 @@
     "accept:offline-local-llm-install-layout": "node scripts/p2-20i-install-layout-embedded-runtime-real-chat.mjs",
     "stage:electron-builder-local-llm": "node scripts/p2-20j-stage-electron-builder-extra-resources.mjs",
     "package:win:dir": "npm run build && electron-builder --win dir --config electron-builder.config.cjs",
+    "package:win:portable": "npm run build && electron-builder --win portable --config electron-builder.config.cjs",
     "accept:electron-builder-local-llm": "node scripts/p2-20j-packaged-app-extra-resources-real-chat.mjs",
     "test:live2d-parameters": "node --test --experimental-strip-types scripts/cubism-breath.test.mts scripts/cubism-frame-pipeline.test.mts scripts/cubism-drag-physics.test.mts scripts/cubism-expression-state.test.mts scripts/cubism-micro-expression.test.mts scripts/cubism-render-budget.test.mts scripts/emotion-presentation.test.mts scripts/live2d-expression-asset-audit.test.mts scripts/live2d-accessory-capability-audit.test.mts scripts/live2d-action-capability-audit.test.mts scripts/pet-accessory.test.mts scripts/pet-presentation.test.mts scripts/pet-presentation-persistence.test.mts scripts/pet-scale-wheel.test.mts scripts/pet-role-state.test.mts scripts/pet-action-trigger.test.mts scripts/pet-interaction-actions.test.mts scripts/pet-telemetry-contract.test.mts scripts/sandboxed-preload.test.mts scripts/pet-drag-pointer.test.mts scripts/window-motion-detector.test.mts scripts/diagnostic-shortcut.test.mts scripts/pet-lock-shortcut.test.mts scripts/shortcut-preferences.test.mts scripts/topmost-policy.test.mts",
     "test:history": "node --test --experimental-strip-types scripts/history-store.test.mts scripts/history-ipc-policy.test.mts scripts/memory-store.test.mts scripts/chat-context-budget.test.mts scripts/user-profile-store.test.mts scripts/dialogue-mode-store.test.mts scripts/presence-mode-store.test.mts scripts/persona-card.test.mts scripts/dialogue-persona-consistency-cases.test.mts scripts/dialogue-style-mapper.test.mts scripts/dialogue-quality-cases.test.mts scripts/dialogue-relevance-cases.test.mts scripts/dialogue-current-time-common-sense-cases.test.mts scripts/dialogue-affinity-cases.test.mts scripts/dialogue-prompt-template.test.mts scripts/provider-config.test.mts scripts/provider-health.test.mts scripts/openai-compatible-provider.test.mts scripts/local-runtime-diagnostic.test.mts scripts/local-model-quality-matrix.test.mts scripts/llama-cpp-runtime-settings.test.mts scripts/llama-cpp-runtime.test.mts scripts/bundled-llama-cpp-runtime.test.mts scripts/packaged-local-llm-resources.test.mts scripts/offline-local-llm-install-layout.test.mts scripts/electron-builder-local-llm-resources.test.mts scripts/llama-cpp-provider-handoff.test.mts scripts/chat-turn-state.test.mts scripts/partner-presence-presenter.test.mts scripts/interaction-lock.test.mts",

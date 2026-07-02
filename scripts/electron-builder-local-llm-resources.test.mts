@@ -17,22 +17,46 @@ const repoRoot = join(import.meta.dirname, "..");
 const fullPathMarker = "DO_NOT_LEAK_P2_20J_ROOT";
 const stageScript = join(repoRoot, "scripts", "p2-20j-stage-electron-builder-extra-resources.mjs");
 const packageJsonPath = join(repoRoot, "package.json");
+const windowsIconPath = join(repoRoot, "resources", "icons", "app-icon.ico");
 
 test("electron-builder config copies P2-20J staged local-llm as Windows dir extraResources", () => {
   assert.equal(builderConfig.directories.output, ".tmp/p2-20j-package-output");
+  assert.equal(builderConfig.productName, "AI Desktop Pet");
+  assert.equal(builderConfig.appId, "com.ai-desktop-pet.app");
+  assert.match(builderConfig.copyright, /AI Desktop Pet Project/);
+  assert.equal(builderConfig.artifactName, "${productName}-${version}-${arch}.${ext}");
+  assert.equal(builderConfig.win.icon, "resources/icons/app-icon.ico");
   assert.deepEqual(builderConfig.win.target, [
     {
       target: "dir",
       arch: ["x64"]
+    },
+    {
+      target: "portable",
+      arch: ["x64"]
     }
   ]);
-  assert.equal(builderConfig.extraResources.length, 1);
+  assert.equal(builderConfig.extraResources.length, 2);
   assert.equal(builderConfig.extraResources[0].from, ".tmp/p2-20j-extra-resources/local-llm");
   assert.equal(builderConfig.extraResources[0].to, "local-llm");
   assert.notEqual(builderConfig.extraResources[0].from, "resources/local-llm");
   assert.notEqual(builderConfig.extraResources[0].from, "resources\\local-llm");
   assert.equal(builderConfig.extraResources[0].from.startsWith("resources/"), false);
   assert.equal(builderConfig.extraResources[0].from.startsWith("resources\\"), false);
+  assert.equal(builderConfig.extraResources[1].from, "resources/icons/app-icon-256.png");
+  assert.equal(builderConfig.extraResources[1].to, "icons/app-icon-256.png");
+});
+
+test("Windows package metadata and icon are configured without default Electron branding", () => {
+  const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf8"));
+  const icon = readFileSync(windowsIconPath);
+
+  assert.equal(packageJson.author, "AI Desktop Pet Project");
+  assert.equal(packageJson.license, "UNLICENSED");
+  assert.match(packageJson.description, /Windows Live2D AI desktop pet/);
+  assert.equal(icon.subarray(0, 4).toString("hex"), "00000100");
+  assert.equal(icon.length > 1024, true);
+  assert.equal(builderConfig.win.icon.endsWith(".ico"), true);
 });
 
 test("electron-builder staging validates fake pack, copies resources, and prints safe summary", () => {
@@ -131,6 +155,7 @@ test("package commands register P2-20J staging, Windows dir packaging, acceptanc
 
   assert.equal(packageJson.scripts["stage:electron-builder-local-llm"], "node scripts/p2-20j-stage-electron-builder-extra-resources.mjs");
   assert.equal(packageJson.scripts["package:win:dir"], "npm run build && electron-builder --win dir --config electron-builder.config.cjs");
+  assert.equal(packageJson.scripts["package:win:portable"], "npm run build && electron-builder --win portable --config electron-builder.config.cjs");
   assert.equal(packageJson.scripts["accept:electron-builder-local-llm"], "node scripts/p2-20j-packaged-app-extra-resources-real-chat.mjs");
   assert.match(packageJson.scripts["test:history"], /scripts\/electron-builder-local-llm-resources\.test\.mts/);
 });
