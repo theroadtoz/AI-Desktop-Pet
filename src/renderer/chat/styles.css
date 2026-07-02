@@ -32,7 +32,7 @@ body {
   display: grid;
   flex: 1;
   min-width: 0;
-  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.15fr) minmax(0, 0.95fr);
+  grid-template-columns: repeat(auto-fit, minmax(min(190px, 100%), 1fr));
   gap: 8px;
   padding: 6px;
   border: 1px solid #e7dccb;
@@ -63,6 +63,7 @@ body {
 
 .subpage-nav {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   border-bottom: 1px solid #e7dccb;
 }
@@ -543,6 +544,8 @@ body {
   background: #fff4f1;
   color: #8e3021;
   cursor: pointer;
+  font: inherit;
+  white-space: normal;
 }
 
 .button-danger:hover:not(:disabled) {

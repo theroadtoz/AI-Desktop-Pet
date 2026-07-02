@@ -25,11 +25,11 @@ body {
   max-width: min(178px, calc(100vw - 32px));
   box-sizing: border-box;
   padding: 8px 11px;
-  border: 1px solid rgba(92, 58, 92, 0.18);
+  border: 1px solid #e7dccb;
   border-radius: 8px;
-  color: rgba(42, 28, 46, 0.92);
-  background: rgba(255, 250, 253, 0.82);
-  box-shadow: 0 8px 22px rgba(46, 28, 54, 0.16);
+  color: #4b3928;
+  background: #fffaf0;
+  box-shadow: 0 2px 6px rgba(75, 57, 40, 0.08);
   font: 13px/1.45 "Microsoft YaHei", "Segoe UI", sans-serif;
   letter-spacing: 0;
   overflow-wrap: anywhere;

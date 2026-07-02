@@ -25,6 +25,7 @@
     "accept:p2-23c-real-ui-embedded-model": "node scripts/p2-23c-real-ui-embedded-model-conversation.mjs",
     "accept:p2-24b-real-local-model-persona-followup-qa": "node scripts/p2-24b-real-local-model-persona-followup-qa.mjs",
     "accept:p2-24c-proactive-speech-bubble": "node scripts/p2-24c-proactive-speech-bubble-real-ui.mjs",
+    "accept:p2-11h-ui-detail-visual-consistency": "node scripts/p2-11h-ui-detail-visual-consistency-real-ui.mjs",
     "stage:offline-local-llm": "node scripts/p2-20i-stage-offline-local-llm-install-layout.mjs",
     "accept:offline-local-llm-install-layout": "node scripts/p2-20i-install-layout-embedded-runtime-real-chat.mjs",
     "stage:electron-builder-local-llm": "node scripts/p2-20j-stage-electron-builder-extra-resources.mjs",
