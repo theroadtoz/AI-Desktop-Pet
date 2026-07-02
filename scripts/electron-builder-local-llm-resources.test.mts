@@ -42,6 +42,7 @@ test("electron-builder config copies P2-20J staged local-llm as Windows package 
     }
   ]);
   assert.deepEqual(builderConfig.nsis, {
+    artifactName: "${productName}-Setup-${version}-${arch}.${ext}",
     oneClick: false,
     perMachine: false,
     allowToChangeInstallationDirectory: true,
@@ -49,6 +50,9 @@ test("electron-builder config copies P2-20J staged local-llm as Windows package 
     createStartMenuShortcut: true,
     deleteAppDataOnUninstall: false,
     shortcutName: "AI Desktop Pet"
+  });
+  assert.deepEqual(builderConfig.portable, {
+    artifactName: "${productName}-Portable-${version}-${arch}.${ext}"
   });
   assert.equal(builderConfig.extraResources.length, 2);
   assert.equal(builderConfig.extraResources[0].from, ".tmp/p2-20j-extra-resources/local-llm");

@@ -15,6 +15,7 @@
     "diagnose:local-model": "node --no-warnings --experimental-strip-types scripts/p2-20b-local-runtime-diagnostic.mjs",
     "quality:local-models": "node --no-warnings --experimental-strip-types scripts/p2-20c-local-model-quality-matrix.mjs",
     "validate:local-llm": "node scripts/p2-20h-validate-local-llm-resources.mjs",
+    "audit:release-readiness": "node scripts/p2-20n-release-readiness-audit.mjs",
     "prepare:p2-23c-local-llm": "node scripts/p2-23c-prepare-qwen25-15b-local-llm-pack.mjs",
     "accept:packaged-local-llm": "node scripts/p2-20h-packaged-like-embedded-runtime-real-chat.mjs",
     "accept:p2-23c-real-ui-embedded-model": "node scripts/p2-23c-real-ui-embedded-model-conversation.mjs",

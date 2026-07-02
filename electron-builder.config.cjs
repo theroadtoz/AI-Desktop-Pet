@@ -43,6 +43,7 @@ module.exports = {
     ]
   },
   nsis: {
+    artifactName: "${productName}-Setup-${version}-${arch}.${ext}",
     oneClick: false,
     perMachine: false,
     allowToChangeInstallationDirectory: true,
@@ -50,6 +51,9 @@ module.exports = {
     createStartMenuShortcut: true,
     deleteAppDataOnUninstall: false,
     shortcutName: "AI Desktop Pet"
+  },
+  portable: {
+    artifactName: "${productName}-Portable-${version}-${arch}.${ext}"
   },
   npmRebuild: false
 };
