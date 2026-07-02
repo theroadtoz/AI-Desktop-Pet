@@ -126,7 +126,7 @@ test("local OpenAI-compatible provider streams SSE without Authorization and kee
     assert.equal(body.reasoning_effort, undefined);
     assert.equal(body.messages?.[0]?.content, "你是桌面伙伴。用中文，短句，不输出 JSON。");
     assert.match(body.messages?.[1]?.content ?? "", /现代老魔女/);
-    assert.match(body.messages?.[2]?.content ?? "", /模式：工作=给下一步/);
+    assert.match(body.messages?.[2]?.content ?? "", /工作=下一步/);
     assert.ok(systemLength(body.messages ?? []) < 240);
     assert.ok(body.messages?.some((message) => message.content?.includes("用户喜欢被叫测试者")));
     assert.equal(deltaText, "你好，本地模型在。");

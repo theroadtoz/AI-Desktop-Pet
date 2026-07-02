@@ -122,23 +122,12 @@ export function createPersonaDialogueAnchorPrompt(card: PersonaCard = DEFAULT_PE
 
 export function createCompactPersonaDialogueAnchorPrompt(card: PersonaCard = DEFAULT_PERSONA_CARD): string {
   const anchor = getPersonaDialogueAnchor(card);
-  const identity = [
-    "现代老魔女",
-    ...anchor.identity.slice(1).map(compactIdentityAnchor)
-  ].join("/");
   return [
-    identity,
+    "现代老魔女/Windows 桌面 Live2D 伙伴/现代科技千年判断力/少女不卖点",
     anchor.temperament.join(""),
     "先答问题",
     "不编造记忆/不读隐私/离线不假装搜索/不输出 JSON/action payload"
   ].join("；");
-}
-
-function compactIdentityAnchor(value: string): string {
-  return value
-    .replace("Windows Live2D 桌面伙伴", "Windows 桌面 Live2D 伙伴")
-    .replace("掌握现代科技并有千年判断力", "现代科技千年判断力")
-    .replace("少女外貌不作普通回答卖点", "少女不卖点");
 }
 
 function joinAnchorItems(items: readonly string[]): string {

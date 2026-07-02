@@ -5,6 +5,7 @@ import { basename, join } from "node:path";
 const require = createRequire(import.meta.url);
 const sourceRootEnv = "AI_DESKTOP_PET_LOCAL_LLM_SOURCE_ROOT";
 const bundledRootEnv = "AI_DESKTOP_PET_BUNDLED_LLAMA_CPP_ROOT";
+const extraSystemGroundingEnv = "P2_23A_EXTRA_SYSTEM_GROUNDING";
 const runtimeName = "llama.cpp";
 const defaultAlias = "ai-desktop-pet-local";
 const chatTimeoutMs = 120_000;
@@ -20,8 +21,9 @@ const systemMessage = {
     "当前日期是 2026-07-02，星期四。",
     "回答要亲切、简短，并直接对应用户问题。",
     "不能保存或复述 API key、银行卡号、密码等敏感信息。",
-    "遇到需要联网确认的最新消息，要说明本地模型无法离线确认。"
-  ].join("\n")
+    "遇到需要联网确认的最新消息，要说明本地模型无法离线确认。",
+    readNonEmpty(process.env[extraSystemGroundingEnv])
+  ].filter(Boolean).join("\n")
 };
 
 const benchmarkSources = [
@@ -249,6 +251,7 @@ async function main() {
       runtime: runtimeName,
       reason: "missing_source_root",
       benchmarkSources,
+      extraSystemGroundingConfigured: isExtraSystemGroundingConfigured(),
       caseCatalog: dialogueCases.map(toSafeCaseCatalogEntry),
       durationMs: Date.now() - startedAt
     });
@@ -285,6 +288,7 @@ async function main() {
         resourceSource: resolved.safeSummary.resourceSource,
         resourceRootName: resolved.safeSummary.resourceRootName,
         benchmarkSources,
+        extraSystemGroundingConfigured: isExtraSystemGroundingConfigured(),
         caseCatalog: dialogueCases.map(toSafeCaseCatalogEntry),
         durationMs: Date.now() - startedAt
       };
@@ -301,6 +305,7 @@ async function main() {
         modelConfigured: resolved.safeSummary.modelConfigured,
         alias: resolved.safeSummary.alias ?? defaultAlias,
         benchmarkSources,
+        extraSystemGroundingConfigured: isExtraSystemGroundingConfigured(),
         caseCatalog: dialogueCases.map(toSafeCaseCatalogEntry),
         durationMs: Date.now() - startedAt
       };
@@ -343,6 +348,7 @@ async function main() {
         modelsStatus: modelsCheck?.status,
         modelCount: modelsCheck?.modelCount,
         benchmarkSources,
+        extraSystemGroundingConfigured: isExtraSystemGroundingConfigured(),
         caseCatalog: dialogueCases.map(toSafeCaseCatalogEntry),
         cases: caseResults,
         totals,
@@ -356,6 +362,7 @@ async function main() {
       runtime: runtimeName,
       reason: error instanceof Error ? error.name : "unexpected_error",
       benchmarkSources,
+      extraSystemGroundingConfigured: isExtraSystemGroundingConfigured(),
       caseCatalog: dialogueCases.map(toSafeCaseCatalogEntry),
       durationMs: Date.now() - startedAt
     };
@@ -924,6 +931,10 @@ function resolveSourceRoot() {
   return join(process.cwd(), "resources", "local-llm");
 }
 
+function isExtraSystemGroundingConfigured() {
+  return Boolean(readNonEmpty(process.env[extraSystemGroundingEnv]));
+}
+
 function readNonEmpty(value) {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
@@ -981,6 +992,7 @@ main().catch((error) => {
     runtime: runtimeName,
     reason: error instanceof Error ? error.name : "unexpected_error",
     benchmarkSources,
+    extraSystemGroundingConfigured: isExtraSystemGroundingConfigured(),
     caseCatalog: dialogueCases.map(toSafeCaseCatalogEntry)
   });
   process.exitCode = 1;

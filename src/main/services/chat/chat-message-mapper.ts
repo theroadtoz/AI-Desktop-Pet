@@ -119,7 +119,7 @@ function createMemoryMessage(memoryContext?: MemoryInjection): OpenAICompatibleM
 
   return {
     role: "system",
-    content: `以下是用户明确授权保存在本机的事实卡，仅用于当前回复，不要声称拥有其他记忆。\n${lines.join("\n")}`
+    content: `本机事实卡，仅用于当前回复。\n${lines.join("\n")}`
   };
 }
 

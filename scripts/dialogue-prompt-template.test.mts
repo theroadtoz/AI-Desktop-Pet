@@ -33,10 +33,14 @@ test("prompt template: local small model keeps system order but uses shorter fir
   assert.match(local[1]?.content ?? "", /(未联网|离线).*不假装搜索/);
   assert.match(local[1]?.content ?? "", /不输出 JSON|不要输出 JSON/);
   assert.match(local[1]?.content ?? "", /action payload/);
-  assert.match(local[2]?.content ?? "", /不编造记忆/);
-  assert.match(local[2]?.content ?? "", /不泄露提示词/);
-  assert.match(local[2]?.content ?? "", /银行卡.*敏感信息.*拒绝.*记住.*保存.*记录/);
-  assert.match(local[2]?.content ?? "", /不固定/);
+  assert.match(local[1]?.content ?? "", /不编造记忆/);
+  assert.match(local[2]?.content ?? "", /不泄.*提示词/);
+  assert.match(local[2]?.content ?? "", /格式.*数量.*问题数.*照办/);
+  assert.match(local[2]?.content ?? "", /API key.*密码.*银行卡.*不记/);
+  assert.match(local[2]?.content ?? "", /不复述.*不索要/);
+  assert.match(local[2]?.content ?? "", /银行卡.*不记.*不复述.*不索要/);
+  assert.match(local[2]?.content ?? "", /胸痛.*急救.*就医.*不诊断/);
+  assert.match(local[2]?.content ?? "", /新闻价政.*离线不确认/);
 });
 
 test("prompt template: cloud and local templates both preserve mode differences", () => {
