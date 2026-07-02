@@ -183,8 +183,15 @@ const chatReplySustainTrigger = createChatReplySustainTriggerController({
 });
 
 const userDataPathOverride = process.env.AI_DESKTOP_PET_USER_DATA_PATH;
+const allowPackagedUserDataOverride =
+  process.env.AI_DESKTOP_PET_ACCEPTANCE_TELEMETRY === "1" &&
+  process.env.AI_DESKTOP_PET_ALLOW_PACKAGED_USER_DATA_OVERRIDE === "1";
 
-if (!app.isPackaged && userDataPathOverride && isAbsolute(userDataPathOverride)) {
+if (
+  userDataPathOverride &&
+  isAbsolute(userDataPathOverride) &&
+  (!app.isPackaged || allowPackagedUserDataOverride)
+) {
   app.setPath("userData", userDataPathOverride);
 }
 

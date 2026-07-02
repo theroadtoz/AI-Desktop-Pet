@@ -35,8 +35,21 @@ module.exports = {
       {
         target: "portable",
         arch: ["x64"]
+      },
+      {
+        target: "nsis",
+        arch: ["x64"]
       }
     ]
+  },
+  nsis: {
+    oneClick: false,
+    perMachine: false,
+    allowToChangeInstallationDirectory: true,
+    createDesktopShortcut: true,
+    createStartMenuShortcut: true,
+    deleteAppDataOnUninstall: false,
+    shortcutName: "AI Desktop Pet"
   },
   npmRebuild: false
 };

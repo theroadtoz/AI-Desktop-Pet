@@ -18,8 +18,9 @@ const fullPathMarker = "DO_NOT_LEAK_P2_20J_ROOT";
 const stageScript = join(repoRoot, "scripts", "p2-20j-stage-electron-builder-extra-resources.mjs");
 const packageJsonPath = join(repoRoot, "package.json");
 const windowsIconPath = join(repoRoot, "resources", "icons", "app-icon.ico");
+const appMainPath = join(repoRoot, "src", "main", "app.ts");
 
-test("electron-builder config copies P2-20J staged local-llm as Windows dir extraResources", () => {
+test("electron-builder config copies P2-20J staged local-llm as Windows package extraResources", () => {
   assert.equal(builderConfig.directories.output, ".tmp/p2-20j-package-output");
   assert.equal(builderConfig.productName, "AI Desktop Pet");
   assert.equal(builderConfig.appId, "com.ai-desktop-pet.app");
@@ -34,8 +35,21 @@ test("electron-builder config copies P2-20J staged local-llm as Windows dir extr
     {
       target: "portable",
       arch: ["x64"]
+    },
+    {
+      target: "nsis",
+      arch: ["x64"]
     }
   ]);
+  assert.deepEqual(builderConfig.nsis, {
+    oneClick: false,
+    perMachine: false,
+    allowToChangeInstallationDirectory: true,
+    createDesktopShortcut: true,
+    createStartMenuShortcut: true,
+    deleteAppDataOnUninstall: false,
+    shortcutName: "AI Desktop Pet"
+  });
   assert.equal(builderConfig.extraResources.length, 2);
   assert.equal(builderConfig.extraResources[0].from, ".tmp/p2-20j-extra-resources/local-llm");
   assert.equal(builderConfig.extraResources[0].to, "local-llm");
@@ -150,13 +164,65 @@ test("electron-builder P2-20J cleanup removes staging and package output unless 
   cleanupP2_20JTmp();
 });
 
-test("package commands register P2-20J staging, Windows dir packaging, acceptance, and history test", () => {
+test("NSIS lifecycle acceptance keeps packaged launch userData isolated and cleans P2-20M tmp", async () => {
+  const nsisModule = await import("./p2-20m-nsis-installer-lifecycle.mjs");
+  const stageModule = await import("./p2-20j-stage-electron-builder-extra-resources.mjs");
+  const paths = nsisModule.getP2_20MPaths(repoRoot);
+  const p2jPaths = stageModule.getP2_20JPaths(repoRoot);
+  const installMarker = join(paths.installRoot, "marker.txt");
+  const userDataMarker = join(paths.userDataRoot, "config", "marker.json");
+  const stagingMarker = join(p2jPaths.stagingRoot, "local-llm", "manifest.json");
+  const packageMarker = join(p2jPaths.packageOutputRoot, "installer.exe");
+  const appSource = readFileSync(appMainPath, "utf8");
+
+  cleanupP2_20JTmp();
+  rmSync(paths.installParentRoot, { recursive: true, force: true });
+  rmSync(paths.userDataRoot, { recursive: true, force: true });
+  mkdirSync(dirname(installMarker), { recursive: true });
+  mkdirSync(dirname(userDataMarker), { recursive: true });
+  mkdirSync(dirname(stagingMarker), { recursive: true });
+  mkdirSync(dirname(packageMarker), { recursive: true });
+  writeFileSync(installMarker, "installed", "utf8");
+  writeFileSync(userDataMarker, "{}", "utf8");
+  writeFileSync(stagingMarker, "{}", "utf8");
+  writeFileSync(packageMarker, "installer", "utf8");
+
+  assert.match(appSource, /AI_DESKTOP_PET_ALLOW_PACKAGED_USER_DATA_OVERRIDE/);
+  assert.match(appSource, /AI_DESKTOP_PET_ACCEPTANCE_TELEMETRY/);
+  assert.match(appSource, /\(!app\.isPackaged \|\| allowPackagedUserDataOverride\)/);
+  assert.equal(nsisModule.shouldKeepP2_20MTmp({ P2_20M_KEEP_TMP: "1" }), true);
+  assert.equal(nsisModule.cleanupP2_20MTmpOnCompletion(p2jPaths, paths, [], {}).cleanupStatus, "removed");
+  assert.equal(fileExists(installMarker), false);
+  assert.equal(fileExists(userDataMarker), false);
+  assert.equal(fileExists(stagingMarker), false);
+  assert.equal(fileExists(packageMarker), false);
+});
+
+test("NSIS lifecycle locator prefers installer exe and ignores uninstallers", async () => {
+  const nsisModule = await import("./p2-20m-nsis-installer-lifecycle.mjs");
+  const root = mkdtempSync(join(tmpdir(), `ai-pet-nsis-${fullPathMarker}-`));
+  const installer = join(root, "AI Desktop Pet-0.0.0-x64.exe");
+
+  try {
+    writeFileSync(join(root, "Uninstall AI Desktop Pet.exe"), "uninstaller", "utf8");
+    writeFileSync(installer, "installer", "utf8");
+
+    assert.equal(nsisModule.findNsisInstaller(root), installer);
+    assert.equal(nsisModule.findUninstaller(root), join(root, "Uninstall AI Desktop Pet.exe"));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("package commands register P2-20J staging, Windows packaging, NSIS lifecycle, acceptance, and history test", () => {
   const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf8"));
 
   assert.equal(packageJson.scripts["stage:electron-builder-local-llm"], "node scripts/p2-20j-stage-electron-builder-extra-resources.mjs");
   assert.equal(packageJson.scripts["package:win:dir"], "npm run build && electron-builder --win dir --config electron-builder.config.cjs");
   assert.equal(packageJson.scripts["package:win:portable"], "npm run build && electron-builder --win portable --config electron-builder.config.cjs");
+  assert.equal(packageJson.scripts["package:win:nsis"], "npm run build && electron-builder --win nsis --config electron-builder.config.cjs --publish never");
   assert.equal(packageJson.scripts["accept:electron-builder-local-llm"], "node scripts/p2-20j-packaged-app-extra-resources-real-chat.mjs");
+  assert.equal(packageJson.scripts["accept:nsis-installer-lifecycle"], "node scripts/p2-20m-nsis-installer-lifecycle.mjs");
   assert.match(packageJson.scripts["test:history"], /scripts\/electron-builder-local-llm-resources\.test\.mts/);
 });
 
