@@ -97,6 +97,7 @@ const localModelDiagnosticRuntimeStatuses = [
   "not_installed_or_unreachable",
   "model_missing",
   "chat_failed",
+  "missing_resources",
   "env_configured",
   "skipped"
 ] as const;
@@ -137,6 +138,9 @@ type LocalModelDiagnosticSafeSummary = {
     chatCheckMs?: number;
     durationMs?: number;
     managedEnabled?: boolean;
+    bundled?: boolean;
+    resourceSource?: string;
+    manifestFound?: boolean;
     executableConfigured?: boolean;
     modelConfigured?: boolean;
   }>;
@@ -459,6 +463,7 @@ function isProviderConfig(value: unknown): value is ProviderConfig {
       config.model.length > 0 &&
       (
         config.localPresetId === undefined ||
+        config.localPresetId === "embedded-llama-cpp" ||
         config.localPresetId === "ollama" ||
         config.localPresetId === "lm-studio" ||
         config.localPresetId === "custom-local"
@@ -495,6 +500,7 @@ function isProviderHealthCheckRequest(value: unknown): value is ProviderHealthCh
     request.timeoutMs > 0 &&
     (
       request.localPresetId === undefined ||
+      request.localPresetId === "embedded-llama-cpp" ||
       request.localPresetId === "ollama" ||
       request.localPresetId === "lm-studio" ||
       request.localPresetId === "custom-local"
@@ -517,6 +523,7 @@ function isProviderHealthResult(value: unknown): value is ProviderHealthResult {
     (result.baseURLHost === undefined || typeof result.baseURLHost === "string") &&
     (
       result.localPresetId === undefined ||
+      result.localPresetId === "embedded-llama-cpp" ||
       result.localPresetId === "ollama" ||
       result.localPresetId === "lm-studio" ||
       result.localPresetId === "custom-local"
@@ -769,6 +776,9 @@ function parseLocalModelDiagnosticRuntimeSummary(value: unknown): LocalModelDiag
     !isOptionalRuntimeNumber(runtime.chatCheckMs) ||
     !isOptionalRuntimeNumber(runtime.durationMs) ||
     !isOptionalRuntimeBoolean(runtime.managedEnabled) ||
+    !isOptionalRuntimeBoolean(runtime.bundled) ||
+    !isOptionalSafeRuntimeText(runtime.resourceSource) ||
+    !isOptionalRuntimeBoolean(runtime.manifestFound) ||
     !isOptionalRuntimeBoolean(runtime.executableConfigured) ||
     !isOptionalRuntimeBoolean(runtime.modelConfigured)
   ) {
@@ -795,6 +805,9 @@ function parseLocalModelDiagnosticRuntimeSummary(value: unknown): LocalModelDiag
     ...(typeof runtime.chatCheckMs === "number" ? { chatCheckMs: runtime.chatCheckMs } : {}),
     ...(typeof runtime.durationMs === "number" ? { durationMs: runtime.durationMs } : {}),
     ...(typeof runtime.managedEnabled === "boolean" ? { managedEnabled: runtime.managedEnabled } : {}),
+    ...(typeof runtime.bundled === "boolean" ? { bundled: runtime.bundled } : {}),
+    ...(runtime.resourceSource ? { resourceSource: runtime.resourceSource } : {}),
+    ...(typeof runtime.manifestFound === "boolean" ? { manifestFound: runtime.manifestFound } : {}),
     ...(typeof runtime.executableConfigured === "boolean" ? { executableConfigured: runtime.executableConfigured } : {}),
     ...(typeof runtime.modelConfigured === "boolean" ? { modelConfigured: runtime.modelConfigured } : {})
   };

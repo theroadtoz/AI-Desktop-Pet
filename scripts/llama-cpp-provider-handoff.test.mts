@@ -14,12 +14,12 @@ const {
   DEFAULT_PROVIDER_CONFIG
 } = require("../dist/main/services/config/provider-config-store.js") as typeof import("../src/main/services/config/provider-config-store");
 
-const EXPECTED_OLLAMA_DEFAULT = {
+const EXPECTED_EMBEDDED_DEFAULT = {
   providerId: "local-openai-compatible",
-  displayName: "Ollama 本地模型",
-  baseURL: "http://localhost:11434/v1",
-  model: "qwen2.5:3b-instruct",
-  localPresetId: "ollama",
+  displayName: "内置本地模型",
+  baseURL: "http://127.0.0.1:8080/v1",
+  model: "ai-desktop-pet-local",
+  localPresetId: "embedded-llama-cpp",
   temperature: 0.7,
   maxTokens: 240,
   timeoutMs: 60000
@@ -122,12 +122,12 @@ test("handoff output omits unexpected complete-path-like runtime fields", () => 
   assert.equal(JSON.stringify(handoff).includes(FAKE_FULL_PATH_MARKER), false);
 });
 
-test("llama.cpp handoff does not change the default Ollama provider config", () => {
+test("llama.cpp handoff does not change the default embedded provider config", () => {
   const before = JSON.stringify(DEFAULT_PROVIDER_CONFIG);
 
-  assert.deepEqual(DEFAULT_PROVIDER_CONFIG, EXPECTED_OLLAMA_DEFAULT);
+  assert.deepEqual(DEFAULT_PROVIDER_CONFIG, EXPECTED_EMBEDDED_DEFAULT);
   assert.ok(createLlamaCppProviderHandoff(createRuntimeSummary(), "http://127.0.0.1:4321/v1"));
-  assert.deepEqual(DEFAULT_PROVIDER_CONFIG, EXPECTED_OLLAMA_DEFAULT);
+  assert.deepEqual(DEFAULT_PROVIDER_CONFIG, EXPECTED_EMBEDDED_DEFAULT);
   assert.equal(JSON.stringify(DEFAULT_PROVIDER_CONFIG), before);
 });
 

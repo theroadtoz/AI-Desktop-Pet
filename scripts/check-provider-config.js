@@ -7,10 +7,10 @@ const secretsPath = path.join(userDataPath, "secrets", "provider-keys.json");
 
 const recommendedLocalConfig = {
   providerId: "local-openai-compatible",
-  displayName: "Ollama 本地模型",
-  baseURL: "http://localhost:11434/v1",
-  model: "qwen2.5:3b-instruct",
-  localPresetId: "ollama",
+  displayName: "内置本地模型",
+  baseURL: "http://127.0.0.1:8080/v1",
+  model: "ai-desktop-pet-local",
+  localPresetId: "embedded-llama-cpp",
   temperature: 0.7,
   maxTokens: 240,
   timeoutMs: 60000

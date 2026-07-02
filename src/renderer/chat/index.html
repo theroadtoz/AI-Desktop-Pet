@@ -188,7 +188,7 @@
             <label class="field-label">
               Provider
               <select id="provider-id" name="providerId">
-                <option value="local-openai-compatible">Ollama 本地模型（推荐）</option>
+                <option value="local-openai-compatible">内置本地模型（推荐）</option>
                 <option value="openai-compatible">OpenAI-compatible（显式外部模型）</option>
                 <option value="fake">Fake（开发回退）</option>
               </select>
@@ -201,7 +201,8 @@
               <label id="local-provider-preset-field" class="field-label" hidden>
                 本地运行时
                 <select id="local-provider-preset" name="localPresetId">
-                  <option value="ollama">Ollama 推荐 · http://localhost:11434/v1</option>
+                  <option value="embedded-llama-cpp">内置本地模型 · http://127.0.0.1:8080/v1</option>
+                  <option value="ollama">Ollama · http://localhost:11434/v1</option>
                   <option value="lm-studio">LM Studio · http://localhost:1234/v1</option>
                   <option value="custom-local">自定义 OpenAI-compatible 端点</option>
                 </select>
@@ -228,7 +229,7 @@
                   <input id="provider-timeout" name="timeoutMs" type="number" min="1" step="1" required />
                 </label>
               </div>
-              <p id="local-provider-note" class="selection-note" hidden>推荐本地默认：Ollama、http://localhost:11434/v1、qwen2.5:3b-instruct。本地服务不会要求 API Key；如果未安装或未启动 Ollama，连接检查会显示未就绪。缺模型时请手动运行 ollama pull qwen2.5:3b-instruct。</p>
+              <p id="local-provider-note" class="selection-note" hidden>推荐本地默认：内置本地模型、ai-desktop-pet-local。本地服务不会要求 API Key；如果安装包缺少 local-llm 资源，诊断会显示未就绪。Ollama 和 LM Studio 保留为高级兼容选项。</p>
               <section id="local-model-diagnostic-section" class="content-stack" aria-labelledby="local-model-diagnostic-title" hidden>
                 <h3 id="local-model-diagnostic-title" class="settings-section-title">本地模型诊断</h3>
                 <p id="local-model-diagnostic-status" class="status-box" data-state="fallback" aria-live="polite">本地模型诊断尚未运行。</p>

@@ -12,7 +12,7 @@ export type LlamaCppProviderHandoffSafeSummary = {
   executableConfigured: boolean;
   modelConfigured: boolean;
   providerId: "local-openai-compatible";
-  localPresetId: "custom-local";
+  localPresetId: "embedded-llama-cpp" | "custom-local";
   baseURLHost: string;
   alias: string;
 };
@@ -32,7 +32,11 @@ const MANAGED_LLAMA_CPP_LOCAL_PRESET_ID = "custom-local";
 
 export function createLlamaCppProviderHandoff(
   summary: LlamaCppRuntimeSummary,
-  baseURL: string | null | undefined
+  baseURL: string | null | undefined,
+  options: {
+    displayName?: string;
+    localPresetId?: "embedded-llama-cpp" | "custom-local";
+  } = {}
 ): LlamaCppProviderHandoff | null {
   if (summary.status !== "ready") {
     return null;
@@ -48,10 +52,10 @@ export function createLlamaCppProviderHandoff(
   return {
     providerConfig: {
       providerId: "local-openai-compatible",
-      displayName: MANAGED_LLAMA_CPP_DISPLAY_NAME,
+      displayName: options.displayName ?? MANAGED_LLAMA_CPP_DISPLAY_NAME,
       baseURL: normalizedBaseURL.value,
       model: alias,
-      localPresetId: MANAGED_LLAMA_CPP_LOCAL_PRESET_ID,
+      localPresetId: options.localPresetId ?? MANAGED_LLAMA_CPP_LOCAL_PRESET_ID,
       temperature: RECOMMENDED_LOCAL_PROVIDER_CONFIG.temperature,
       maxTokens: RECOMMENDED_LOCAL_PROVIDER_CONFIG.maxTokens,
       timeoutMs: RECOMMENDED_LOCAL_PROVIDER_CONFIG.timeoutMs
@@ -64,7 +68,7 @@ export function createLlamaCppProviderHandoff(
       executableConfigured: summary.executableConfigured,
       modelConfigured: summary.modelConfigured,
       providerId: "local-openai-compatible",
-      localPresetId: MANAGED_LLAMA_CPP_LOCAL_PRESET_ID,
+      localPresetId: options.localPresetId ?? MANAGED_LLAMA_CPP_LOCAL_PRESET_ID,
       baseURLHost: normalizedBaseURL.host,
       alias
     }

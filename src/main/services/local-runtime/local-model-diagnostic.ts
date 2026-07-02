@@ -6,6 +6,10 @@ import type {
   LocalModelDiagnosticRuntimeSummary,
   LocalModelDiagnosticSafeSummary
 } from "../../../shared/local-model-diagnostic";
+import {
+  resolveBundledLlamaCppRuntime,
+  type BundledLlamaCppRuntimeSafeSummary
+} from "./bundled-llama-cpp-runtime";
 
 const execFileAsync = promisify(execFile);
 const defaultModel = "qwen2.5:3b-instruct";
@@ -47,6 +51,7 @@ export type LocalModelDiagnosticOptions = {
   tcpTimeoutMs?: number;
   modelsTimeoutMs?: number;
   chatTimeoutMs?: number;
+  bundledLlamaCpp?: BundledLlamaCppRuntimeSafeSummary;
   managedLlamaCpp?: ManagedLlamaCppDiagnosticConfig;
 };
 
@@ -146,6 +151,8 @@ export async function diagnoseLocalRuntimes(options: LocalModelDiagnosticOptions
   };
   const runtimeSummaries: LocalModelDiagnosticRuntimeSummary[] = [];
 
+  runtimeSummaries.push(diagnoseBundledLlamaCpp(options.bundledLlamaCpp));
+
   for (const runtime of runtimes) {
     runtimeSummaries.push(await diagnoseOpenAICompatibleRuntime(runtime, checks, timing));
   }
@@ -157,7 +164,7 @@ export async function diagnoseLocalRuntimes(options: LocalModelDiagnosticOptions
   return removeUndefined({
     ok: Boolean(readyRuntime),
     status: readyRuntime ? "ready" : "not_ready",
-    recommendedRuntime: readyRuntime?.id ?? "ollama",
+    recommendedRuntime: readyRuntime?.id ?? "llama-cpp-bundled",
     durationMs: Date.now() - startedAt,
     safeSummaryOnly: true,
     runtimes: runtimeSummaries
@@ -229,6 +236,49 @@ async function diagnoseOpenAICompatibleRuntime(
       : runtime.nextActions.chatFailed,
     durationMs: Date.now() - startedAt
   });
+}
+
+function diagnoseBundledLlamaCpp(
+  summary: BundledLlamaCppRuntimeSafeSummary | undefined
+): LocalModelDiagnosticRuntimeSummary {
+  const bundledSummary = summary ?? resolveBundledLlamaCppRuntime().safeSummary;
+  const ready = bundledSummary.status === "ready";
+  const status = ready
+    ? "ready"
+    : bundledSummary.status === "missing_binary" ||
+      bundledSummary.status === "missing_model" ||
+      bundledSummary.status === "missing_root" ||
+      bundledSummary.status === "missing_manifest" ||
+      bundledSummary.status === "invalid_manifest"
+        ? "missing_resources"
+        : bundledSummary.status === "error" ||
+          bundledSummary.status === "timeout" ||
+          bundledSummary.status === "exited"
+            ? "not_installed_or_unreachable"
+            : "skipped";
+
+  return removeUndefined({
+    id: "llama-cpp-bundled",
+    label: "Bundled llama.cpp runtime",
+    status,
+    baseURLHost: bundledSummary.baseURLHost,
+    model: bundledSummary.alias,
+    commandFound: bundledSummary.executableConfigured,
+    processFound: ready,
+    tcpReachable: ready,
+    modelsStatus: ready ? "ready" : "skipped",
+    chatStatus: ready ? "ready" : "skipped",
+    bundled: true,
+    resourceSource: bundledSummary.resourceSource,
+    manifestFound: bundledSummary.manifestFound,
+    executableConfigured: bundledSummary.executableConfigured,
+    modelConfigured: bundledSummary.modelConfigured,
+    reason: bundledSummary.reason ?? bundledSummary.status,
+    nextAction: ready
+      ? "Use the bundled runtime for real embedded local model chat acceptance."
+      : "Ensure the install resources include local-llm/manifest.json, llama-server, and the GGUF model.",
+    durationMs: bundledSummary.durationMs
+  }) as LocalModelDiagnosticRuntimeSummary;
 }
 
 function diagnoseManagedLlamaCpp(

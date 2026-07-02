@@ -489,6 +489,7 @@ function formatLocalModelDiagnosticStatus(status: LocalModelDiagnosticRuntimeSum
     not_installed_or_unreachable: "未安装或不可达",
     model_missing: "缺少模型",
     chat_failed: "聊天探测失败",
+    missing_resources: "缺少资源",
     env_configured: "已配置，待启动",
     skipped: "未配置"
   };
@@ -503,6 +504,10 @@ function formatLocalModelDiagnosticNextAction(runtime: LocalModelDiagnosticRunti
 
   if (runtime.id === "llama-cpp-managed" && runtime.reason === "missing_local_paths") {
     return "先在托管 llama.cpp 区选择运行文件和 GGUF 模型。";
+  }
+
+  if (runtime.id === "llama-cpp-bundled" && runtime.status === "missing_resources") {
+    return runtime.nextAction ?? "安装包需要包含 local-llm 运行时与 GGUF 模型资源。";
   }
 
   if (runtime.reason === "command_missing") {
@@ -2026,7 +2031,10 @@ function isProviderWithOpenAIFieldsSelected(): boolean {
 }
 
 function isLocalProviderPresetId(value: string): value is LocalProviderPresetId {
-  return value === "ollama" || value === "lm-studio" || value === "custom-local";
+  return value === "embedded-llama-cpp" ||
+    value === "ollama" ||
+    value === "lm-studio" ||
+    value === "custom-local";
 }
 
 function getLocalProviderPreset(id: LocalProviderPresetId) {
@@ -2038,7 +2046,7 @@ function getLocalProviderPreset(id: LocalProviderPresetId) {
 
   return {
     id: DEFAULT_LOCAL_OPENAI_CONFIG.localPresetId,
-    label: "Ollama",
+    label: "内置本地模型",
     displayName: DEFAULT_LOCAL_OPENAI_CONFIG.displayName,
     baseURL: DEFAULT_LOCAL_OPENAI_CONFIG.baseURL
   };

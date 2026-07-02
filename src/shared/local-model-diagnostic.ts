@@ -5,6 +5,7 @@ export type LocalModelDiagnosticRuntimeStatus =
   | "not_installed_or_unreachable"
   | "model_missing"
   | "chat_failed"
+  | "missing_resources"
   | "env_configured"
   | "skipped";
 
@@ -36,6 +37,9 @@ export type LocalModelDiagnosticRuntimeSummary = {
   chatCheckMs?: number;
   durationMs?: number;
   managedEnabled?: boolean;
+  bundled?: boolean;
+  resourceSource?: string;
+  manifestFound?: boolean;
   executableConfigured?: boolean;
   modelConfigured?: boolean;
 };
@@ -54,6 +58,7 @@ const runtimeStatuses: readonly LocalModelDiagnosticRuntimeStatus[] = [
   "not_installed_or_unreachable",
   "model_missing",
   "chat_failed",
+  "missing_resources",
   "env_configured",
   "skipped"
 ];
@@ -178,6 +183,9 @@ function parseLocalModelDiagnosticRuntimeSummary(value: unknown): LocalModelDiag
     !isOptionalSafeDiagnosticNumber(runtime.chatCheckMs) ||
     !isOptionalSafeDiagnosticNumber(runtime.durationMs) ||
     !isOptionalBoolean(runtime.managedEnabled) ||
+    !isOptionalBoolean(runtime.bundled) ||
+    !isOptionalSafeDiagnosticText(runtime.resourceSource) ||
+    !isOptionalBoolean(runtime.manifestFound) ||
     !isOptionalBoolean(runtime.executableConfigured) ||
     !isOptionalBoolean(runtime.modelConfigured)
   ) {
@@ -204,6 +212,9 @@ function parseLocalModelDiagnosticRuntimeSummary(value: unknown): LocalModelDiag
     ...(typeof runtime.chatCheckMs === "number" ? { chatCheckMs: runtime.chatCheckMs } : {}),
     ...(typeof runtime.durationMs === "number" ? { durationMs: runtime.durationMs } : {}),
     ...(typeof runtime.managedEnabled === "boolean" ? { managedEnabled: runtime.managedEnabled } : {}),
+    ...(typeof runtime.bundled === "boolean" ? { bundled: runtime.bundled } : {}),
+    ...(runtime.resourceSource ? { resourceSource: runtime.resourceSource } : {}),
+    ...(typeof runtime.manifestFound === "boolean" ? { manifestFound: runtime.manifestFound } : {}),
     ...(typeof runtime.executableConfigured === "boolean" ? { executableConfigured: runtime.executableConfigured } : {}),
     ...(typeof runtime.modelConfigured === "boolean" ? { modelConfigured: runtime.modelConfigured } : {})
   };

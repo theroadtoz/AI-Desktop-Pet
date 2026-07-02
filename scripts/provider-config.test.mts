@@ -32,13 +32,13 @@ const minimalChatRequest = {
   }]
 };
 
-test("default provider config recommends explicit local Ollama path", () => {
+test("default provider config recommends embedded local model path", () => {
   assert.deepEqual(DEFAULT_PROVIDER_CONFIG, {
     providerId: "local-openai-compatible",
-    displayName: "Ollama 本地模型",
-    baseURL: "http://localhost:11434/v1",
-    model: "qwen2.5:3b-instruct",
-    localPresetId: "ollama",
+    displayName: "内置本地模型",
+    baseURL: "http://127.0.0.1:8080/v1",
+    model: "ai-desktop-pet-local",
+    localPresetId: "embedded-llama-cpp",
     temperature: 0.7,
     maxTokens: 240,
     timeoutMs: 60000
@@ -107,6 +107,22 @@ test("local provider telemetry records preset and host without key material", ()
   assert.equal(payload.baseURLHost, "localhost:1234");
   assert.equal("apiKey" in payload, false);
   assert.equal(payload.apiKeyRef, undefined);
+});
+
+test("local OpenAI-compatible provider parser accepts embedded preset id", () => {
+  const config = parseProviderConfig({
+    providerId: "local-openai-compatible",
+    displayName: "内置本地模型",
+    baseURL: "http://127.0.0.1:8080/v1",
+    model: "ai-desktop-pet-local",
+    localPresetId: "embedded-llama-cpp",
+    temperature: 0.7,
+    maxTokens: 240,
+    timeoutMs: 60000
+  });
+
+  assert.equal(config?.providerId, "local-openai-compatible");
+  assert.equal(config?.providerId === "local-openai-compatible" ? config.localPresetId : undefined, "embedded-llama-cpp");
 });
 
 test("local OpenAI-compatible provider parser rejects invalid local config", () => {
@@ -203,8 +219,8 @@ test("diagnostic script reports local recommendation for empty userData", () => 
     assert.match(result.stdout, /configFileExists: false/);
     assert.match(result.stdout, /configSource: default/);
     assert.match(result.stdout, /providerId: local-openai-compatible/);
-    assert.match(result.stdout, /baseURL: http:\/\/localhost:11434\/v1/);
-    assert.match(result.stdout, /model: qwen2\.5:3b-instruct/);
+    assert.match(result.stdout, /baseURL: http:\/\/127\.0\.0\.1:8080\/v1/);
+    assert.match(result.stdout, /model: ai-desktop-pet-local/);
     assert.match(result.stdout, /apiKeyExists: false/);
   } finally {
     rmSync(userDataPath, { recursive: true, force: true });

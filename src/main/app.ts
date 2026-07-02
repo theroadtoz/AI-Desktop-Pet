@@ -106,6 +106,10 @@ import {
   type LlamaCppRuntimeSummary,
   type LlamaCppRuntime
 } from "./services/local-runtime/llama-cpp-runtime";
+import {
+  resolveBundledLlamaCppRuntime,
+  type BundledLlamaCppRuntimeSafeSummary
+} from "./services/local-runtime/bundled-llama-cpp-runtime";
 import { createLlamaCppProviderHandoff } from "./services/local-runtime/llama-cpp-provider-handoff";
 import {
   createLlamaCppRuntimeSettingsStore,
@@ -130,6 +134,7 @@ let chatEngine: ChatEngine | null = null;
 let providerConfigStore: ProviderConfigStore | null = null;
 let secureKeyStore: SecureKeyStore | null = null;
 let envProviderConfig: EnvProviderConfig | null = null;
+let bundledLlamaCppProviderConfig: LocalOpenAICompatibleConfig | null = null;
 let managedLlamaCppProviderConfig: LocalOpenAICompatibleConfig | null = null;
 let petPresentationStore: PetPresentationStore | null = null;
 let petPresentationPersistence: PetPresentationPersistence | null = null;
@@ -141,8 +146,10 @@ let shortcutPreferencesStore: ShortcutPreferencesStore | null = null;
 let userProfileStore: UserProfileStore | null = null;
 let shortcutRegistry: ShortcutRegistry | null = null;
 let llamaCppRuntime: LlamaCppRuntime | null = null;
+let bundledLlamaCppRuntime: LlamaCppRuntime | null = null;
 let llamaCppRuntimeSettingsStore: LlamaCppRuntimeSettingsStore | null = null;
 let latestLlamaCppRuntimeSummary: LlamaCppRuntimeSummary | null = null;
+let latestBundledLlamaCppRuntimeSummary: BundledLlamaCppRuntimeSafeSummary | null = null;
 let refreshCurrentProvider: (() => void) | null = null;
 let currentPetPresentationPreferences: PetPresentationPreferences = DEFAULT_PET_PRESENTATION_PREFERENCES;
 let isChatInteractionActive = false;
@@ -328,6 +335,77 @@ function logTelemetry(type: string, payload: TelemetryPayload = {}): void {
   telemetry?.logEvent(type, payload);
 }
 
+function startBundledLlamaCppRuntimeIfAvailable(options: {
+  refreshProvider?: () => void;
+} = {}): void {
+  void startBundledLlamaCppRuntimeNow(options);
+}
+
+async function startBundledLlamaCppRuntimeNow(options: {
+  refreshProvider?: () => void;
+} = {}): Promise<BundledLlamaCppRuntimeSafeSummary> {
+  const resolved = resolveBundledLlamaCppRuntime();
+  latestBundledLlamaCppRuntimeSummary = resolved.safeSummary;
+  logTelemetry("bundled_llama_cpp_runtime_resolved", resolved.safeSummary);
+
+  if (!resolved.config) {
+    if (bundledLlamaCppProviderConfig) {
+      bundledLlamaCppProviderConfig = null;
+      options.refreshProvider?.();
+    }
+    return resolved.safeSummary;
+  }
+
+  const runtime = createLlamaCppRuntime(resolved.config);
+  bundledLlamaCppRuntime = runtime;
+
+  try {
+    const summary = await runtime.start();
+    const bundledSummary = mergeBundledRuntimeSummary(resolved.safeSummary, summary);
+    latestBundledLlamaCppRuntimeSummary = bundledSummary;
+    logTelemetry("bundled_llama_cpp_runtime_status", bundledSummary);
+
+    if (bundledLlamaCppRuntime !== runtime) {
+      return latestBundledLlamaCppRuntimeSummary;
+    }
+
+    const handoff = createLlamaCppProviderHandoff(summary, runtime.getBaseURL(), {
+      displayName: "内置本地模型",
+      localPresetId: "embedded-llama-cpp"
+    });
+
+    if (!handoff) {
+      if (bundledLlamaCppProviderConfig) {
+        bundledLlamaCppProviderConfig = null;
+        options.refreshProvider?.();
+      }
+      return bundledSummary;
+    }
+
+    bundledLlamaCppProviderConfig = handoff.providerConfig;
+    logTelemetry("bundled_llama_cpp_provider_handoff", handoff.safeSummary);
+    options.refreshProvider?.();
+    return bundledSummary;
+  } catch {
+    if (bundledLlamaCppRuntime === runtime && bundledLlamaCppProviderConfig) {
+      bundledLlamaCppProviderConfig = null;
+      options.refreshProvider?.();
+    }
+
+    const errorSummary = mergeBundledRuntimeSummary(resolved.safeSummary, {
+      runtime: "llama.cpp",
+      enabled: true,
+      status: "error",
+      safeSummaryOnly: true,
+      executableConfigured: true,
+      modelConfigured: true
+    });
+    latestBundledLlamaCppRuntimeSummary = errorSummary;
+    logTelemetry("bundled_llama_cpp_runtime_status", errorSummary);
+    return errorSummary;
+  }
+}
+
 function startLlamaCppRuntimeIfEnabled(options: {
   refreshProvider?: () => void;
 } = {}): void {
@@ -463,6 +541,36 @@ function removeUndefinedRuntimeSummary(summary: LlamaCppRuntimeSummary): LlamaCp
   ) as LlamaCppRuntimeSummary;
 }
 
+function mergeBundledRuntimeSummary(
+  bundledSummary: BundledLlamaCppRuntimeSafeSummary,
+  runtimeSummary: LlamaCppRuntimeSummary
+): BundledLlamaCppRuntimeSafeSummary {
+  return removeUndefinedBundledRuntimeSummary({
+    ...bundledSummary,
+    status: runtimeSummary.status,
+    enabled: runtimeSummary.enabled,
+    executableConfigured: runtimeSummary.executableConfigured,
+    modelConfigured: runtimeSummary.modelConfigured,
+    ...(runtimeSummary.baseURLHost ? { baseURLHost: runtimeSummary.baseURLHost } : {}),
+    ...(runtimeSummary.alias ? { alias: runtimeSummary.alias } : {}),
+    ...(typeof runtimeSummary.durationMs === "number" ? { durationMs: runtimeSummary.durationMs } : {}),
+    ...(typeof runtimeSummary.startupMs === "number" ? { startupMs: runtimeSummary.startupMs } : {}),
+    ...(typeof runtimeSummary.exitCode !== "undefined" ? { exitCode: runtimeSummary.exitCode } : {}),
+    ...(typeof runtimeSummary.signal !== "undefined" ? { signal: runtimeSummary.signal } : {}),
+    ...(typeof runtimeSummary.stdoutBytes === "number" ? { stdoutBytes: runtimeSummary.stdoutBytes } : {}),
+    ...(typeof runtimeSummary.stderrBytes === "number" ? { stderrBytes: runtimeSummary.stderrBytes } : {}),
+    ...(runtimeSummary.reason ? { reason: runtimeSummary.reason } : {})
+  });
+}
+
+function removeUndefinedBundledRuntimeSummary(
+  summary: BundledLlamaCppRuntimeSafeSummary
+): BundledLlamaCppRuntimeSafeSummary {
+  return Object.fromEntries(
+    Object.entries(summary).filter(([, value]) => typeof value !== "undefined")
+  ) as BundledLlamaCppRuntimeSafeSummary;
+}
+
 function getManagedLlamaCppDiagnosticConfig() {
   const settingsView = llamaCppRuntimeSettingsStore?.getSafeSettingsView(latestLlamaCppRuntimeSummary);
 
@@ -476,11 +584,15 @@ function getManagedLlamaCppDiagnosticConfig() {
   };
 }
 
+function getBundledLlamaCppDiagnosticConfig() {
+  return latestBundledLlamaCppRuntimeSummary ?? resolveBundledLlamaCppRuntime().safeSummary;
+}
+
 function createLocalModelDiagnosticFailureSummary(): LocalModelDiagnosticSafeSummary {
   return {
     ok: false,
     status: "script_failed",
-    recommendedRuntime: "ollama",
+    recommendedRuntime: "llama-cpp-bundled",
     durationMs: 0,
     safeSummaryOnly: true,
     runtimes: []
@@ -510,6 +622,9 @@ function logLocalModelDiagnosticSummary(summary: LocalModelDiagnosticSafeSummary
       replyLength: runtime.replyLength,
       durationMs: runtime.durationMs,
       managedEnabled: runtime.managedEnabled,
+      bundled: runtime.bundled,
+      resourceSource: runtime.resourceSource,
+      manifestFound: runtime.manifestFound,
       executableConfigured: runtime.executableConfigured,
       modelConfigured: runtime.modelConfigured
     }))
@@ -925,6 +1040,7 @@ function isProviderHealthCheckRequest(value: unknown): value is ProviderHealthCh
     request.timeoutMs > 0 &&
     (
       request.localPresetId === undefined ||
+      request.localPresetId === "embedded-llama-cpp" ||
       request.localPresetId === "ollama" ||
       request.localPresetId === "lm-studio" ||
       request.localPresetId === "custom-local"
@@ -1157,6 +1273,11 @@ app.whenReady().then(async () => {
   };
   logStartupInfo();
   registerModelAssetProtocol();
+  startBundledLlamaCppRuntimeIfAvailable({
+    refreshProvider() {
+      refreshCurrentProvider?.();
+    }
+  });
   startLlamaCppRuntimeIfEnabled({
     refreshProvider() {
       refreshCurrentProvider?.();
@@ -1234,6 +1355,10 @@ app.whenReady().then(async () => {
         createProviderTelemetryPayload(envProviderConfig.providerConfig, "env")
       );
       return envProviderConfig.providerConfig;
+    }
+
+    if (bundledLlamaCppProviderConfig) {
+      return bundledLlamaCppProviderConfig;
     }
 
     if (managedLlamaCppProviderConfig) {
@@ -1793,6 +1918,7 @@ app.whenReady().then(async () => {
 
     try {
       const parsedSummary = parseLocalModelDiagnosticSafeSummary(await diagnoseLocalRuntimes({
+        bundledLlamaCpp: getBundledLlamaCppDiagnosticConfig(),
         managedLlamaCpp: getManagedLlamaCppDiagnosticConfig()
       }));
       const summary = parsedSummary ?? createLocalModelDiagnosticFailureSummary();
@@ -2292,6 +2418,7 @@ app.on("window-all-closed", () => {
 });
 
 app.on("will-quit", () => {
+  bundledLlamaCppRuntime?.stop();
   stopLlamaCppRuntime();
   petPresentationPersistence?.flush();
   shortcutRegistry?.unregisterAll();

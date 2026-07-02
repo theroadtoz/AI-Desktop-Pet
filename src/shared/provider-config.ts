@@ -1,6 +1,6 @@
 export type ProviderId = "fake" | "openai-compatible" | "local-openai-compatible";
 
-export type LocalProviderPresetId = "ollama" | "lm-studio" | "custom-local";
+export type LocalProviderPresetId = "embedded-llama-cpp" | "ollama" | "lm-studio" | "custom-local";
 
 export type LocalProviderPreset = {
   id: LocalProviderPresetId;
@@ -40,10 +40,10 @@ export type ProviderConfig = FakeProviderConfig | OpenAICompatibleConfig | Local
 
 export const RECOMMENDED_LOCAL_PROVIDER_CONFIG = {
   providerId: "local-openai-compatible",
-  displayName: "Ollama 本地模型",
-  baseURL: "http://localhost:11434/v1",
-  model: "qwen2.5:3b-instruct",
-  localPresetId: "ollama",
+  displayName: "内置本地模型",
+  baseURL: "http://127.0.0.1:8080/v1",
+  model: "ai-desktop-pet-local",
+  localPresetId: "embedded-llama-cpp",
   temperature: 0.7,
   maxTokens: 240,
   timeoutMs: 60_000
@@ -56,10 +56,16 @@ export const FAKE_PROVIDER_CONFIG: FakeProviderConfig = {
 
 export const LOCAL_PROVIDER_PRESETS: readonly LocalProviderPreset[] = [
   {
-    id: "ollama",
-    label: "Ollama（推荐）",
+    id: "embedded-llama-cpp",
+    label: "内置本地模型",
     displayName: RECOMMENDED_LOCAL_PROVIDER_CONFIG.displayName,
     baseURL: RECOMMENDED_LOCAL_PROVIDER_CONFIG.baseURL
+  },
+  {
+    id: "ollama",
+    label: "Ollama",
+    displayName: "Ollama 本地模型",
+    baseURL: "http://localhost:11434/v1"
   },
   {
     id: "lm-studio",

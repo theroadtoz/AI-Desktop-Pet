@@ -37,13 +37,15 @@ test("diagnostic safe-returns not_ready when runtime is unavailable", async () =
 
   assert.equal(result.ok, false);
   assert.equal(result.status, "not_ready");
-  assert.equal(result.recommendedRuntime, "ollama");
-  assert.equal(result.runtimes[0].status, "not_installed_or_unreachable");
-  assert.equal(result.runtimes[0].reason, "command_missing");
-  assert.equal(result.runtimes[0].modelsStatus, "skipped");
-  assert.equal(result.runtimes[0].chatStatus, "skipped");
-  assert.equal(result.runtimes[1].id, "llama-cpp-managed");
-  assert.equal(result.runtimes[1].status, "skipped");
+  assert.equal(result.recommendedRuntime, "llama-cpp-bundled");
+  assert.equal(result.runtimes[0].id, "llama-cpp-bundled");
+  assert.equal(result.runtimes[0].status, "missing_resources");
+  assert.equal(result.runtimes[1].status, "not_installed_or_unreachable");
+  assert.equal(result.runtimes[1].reason, "command_missing");
+  assert.equal(result.runtimes[1].modelsStatus, "skipped");
+  assert.equal(result.runtimes[1].chatStatus, "skipped");
+  assert.equal(result.runtimes[2].id, "llama-cpp-managed");
+  assert.equal(result.runtimes[2].status, "skipped");
 });
 
 test("diagnostic reports model_missing without calling chat", async () => {
@@ -71,10 +73,10 @@ test("diagnostic reports model_missing without calling chat", async () => {
     });
 
     assert.equal(result.ok, false);
-    assert.equal(result.runtimes[0].status, "model_missing");
-    assert.equal(result.runtimes[0].modelsStatus, "model_missing");
-    assert.equal(result.runtimes[0].chatStatus, "skipped");
-    assert.equal(result.runtimes[0].modelCount, 1);
+    assert.equal(result.runtimes[1].status, "model_missing");
+    assert.equal(result.runtimes[1].modelsStatus, "model_missing");
+    assert.equal(result.runtimes[1].chatStatus, "skipped");
+    assert.equal(result.runtimes[1].modelCount, 1);
     assert.equal(chatRequests, 0);
   } finally {
     await close(server);
@@ -111,10 +113,10 @@ test("diagnostic reports ready for OpenAI-compatible models and streaming chat",
     assert.equal(result.ok, true);
     assert.equal(result.status, "ready");
     assert.equal(result.recommendedRuntime, "test-runtime");
-    assert.equal(result.runtimes[0].status, "ready");
-    assert.equal(result.runtimes[0].modelsStatus, "ready");
-    assert.equal(result.runtimes[0].chatStatus, "ready");
-    assert.equal(result.runtimes[0].replyLength, 4);
+    assert.equal(result.runtimes[1].status, "ready");
+    assert.equal(result.runtimes[1].modelsStatus, "ready");
+    assert.equal(result.runtimes[1].chatStatus, "ready");
+    assert.equal(result.runtimes[1].replyLength, 4);
     assert.match(requestBody, /"content":"ping"/);
     assert.doesNotMatch(output, /"content":"ping"/);
     assert.doesNotMatch(output, /pong/);
@@ -225,9 +227,9 @@ test("diagnostic output omits local paths and sensitive bodies", async () => {
   });
   const output = JSON.stringify(result);
 
-  assert.equal(result.runtimes[1].status, "env_configured");
-  assert.equal(result.runtimes[1].executableConfigured, true);
-  assert.equal(result.runtimes[1].modelConfigured, true);
+  assert.equal(result.runtimes[2].status, "env_configured");
+  assert.equal(result.runtimes[2].executableConfigured, true);
+  assert.equal(result.runtimes[2].modelConfigured, true);
   assert.doesNotMatch(output, /C:\\secret/);
   assert.doesNotMatch(output, /D:\\models/);
   assert.doesNotMatch(output, /private-model\.gguf/);
@@ -239,7 +241,7 @@ test("safe diagnostic parser rejects renderer-unsafe fields", () => {
   const safeSummary = {
     ok: false,
     status: "not_ready",
-    recommendedRuntime: "ollama",
+    recommendedRuntime: "llama-cpp-bundled",
     durationMs: 12,
     safeSummaryOnly: true,
     runtimes: [{
@@ -257,6 +259,20 @@ test("safe diagnostic parser rejects renderer-unsafe fields", () => {
   };
 
   assert.ok(parseLocalModelDiagnosticSafeSummary(safeSummary));
+  assert.ok(parseLocalModelDiagnosticSafeSummary({
+    ...safeSummary,
+    runtimes: [{
+      id: "llama-cpp-bundled",
+      label: "Bundled llama.cpp runtime",
+      status: "missing_resources",
+      reason: "manifest_missing",
+      bundled: true,
+      resourceSource: "development",
+      manifestFound: false,
+      executableConfigured: false,
+      modelConfigured: false
+    }]
+  }));
 
   for (const field of ["path", "body", "prompt", "request", "requestBody", "messages", "content", "apiKey", "api_key"]) {
     assert.equal(

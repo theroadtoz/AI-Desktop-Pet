@@ -219,7 +219,12 @@ function isPositiveInteger(value: unknown): value is number {
 }
 
 function parseLocalProviderPresetId(value: unknown): LocalProviderPresetId | null {
-  return value === "ollama" || value === "lm-studio" || value === "custom-local" ? value : null;
+  return value === "embedded-llama-cpp" ||
+    value === "ollama" ||
+    value === "lm-studio" ||
+    value === "custom-local"
+    ? value
+    : null;
 }
 
 function readBaseURLHost(baseURL: string): string | undefined {
