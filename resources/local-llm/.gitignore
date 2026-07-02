@@ -1,0 +1,14 @@
+# Keep heavyweight and generated local LLM resources out of Git.
+manifest.json
+runtime/
+models/
+archives/
+installers/
+generated/
+
+# Keep tracked templates and notes.
+!README.md
+!.gitignore
+!manifest.example.json
+!licenses/
+!licenses/THIRD_PARTY_NOTICES.template.md

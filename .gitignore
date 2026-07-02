@@ -6,6 +6,8 @@ dist-renderer/
 *.tmp
 .env.local
 .tmp-electron-user-data/
+.tmp/p2-20h-source-local-llm/
+.tmp/p2-20h-packaged-like/
 screenshot_*.png
 __pycache__/
 *.pyc

@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "runtime": "llama.cpp",
+  "platforms": {
+    "win32-x64": {
+      "executable": "runtime/win32-x64/llama-server.exe",
+      "sizeBytes": 0,
+      "sha256": "replace-with-runtime-sha256"
+    }
+  },
+  "model": {
+    "path": "models/model.gguf",
+    "alias": "ai-desktop-pet-local",
+    "displayName": "AI Desktop Pet Local",
+    "ctxSize": 2048,
+    "sizeBytes": 0,
+    "sha256": "replace-with-model-sha256"
+  },
+  "startupTimeoutMs": 30000,
+  "stopTimeoutMs": 5000,
+  "healthPollIntervalMs": 200,
+  "licenseNotices": "licenses/THIRD_PARTY_NOTICES.md"
+}
