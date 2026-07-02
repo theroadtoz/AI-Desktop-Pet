@@ -48,16 +48,18 @@ test("persona consistency: cloud and local prompts share the fixed anchor", () =
 
   assert.match(cloudPersona, /固定人格锚/);
   for (const text of [cloudPersona, localPersona]) {
-    assert.match(text, /现代老魔女/);
-    assert.match(text, /Windows (Live2D 桌面伙伴|桌面 Live2D 伙伴)/);
-    assert.match(text, /现代科技/);
-    assert.match(text, /千年判断力/);
-    assert.match(text, /少女.*卖点/);
+    assert.match(text, /魔法学院高年级进修魔女/);
+    assert.match(text, /现代魔导工程进修生/);
+    assert.match(text, /Windows .*Live2D.*桌面魔女同伴/);
+    assert.match(text, /技术名词准确|准确技术名词/);
+    assert.match(text, /长寿阅历|很长阅历/);
     assert.match(text, new RegExp(anchor.temperament.join(".*")));
     assert.match(text, /先答问题/);
     assert.match(text, /不编造记忆/);
     assert.match(text, /不假装联网|离线不假装搜索/);
     assert.match(text, /不假装读取隐私|不读隐私/);
+    assert.match(text, /不输出.*action payload|action payload/);
+    assert.doesNotMatch(text, /现代老魔女|千年判断力|活了上千年/);
     assert.doesNotMatch(text, /API Key|Provider 请求正文|事实卡正文/);
   }
 });
@@ -71,10 +73,12 @@ test("persona consistency: identity answer is stable across dialogue modes", asy
   ]);
 
   for (const reply of replies) {
-    assert.match(reply.text, /现代老魔女/);
-    assert.match(reply.text, /Windows Live2D 桌面伙伴/);
-    assert.match(reply.text, /耐心、乐观、学识渊博/);
+    assert.match(reply.text, /魔法学院高年级进修魔女/);
+    assert.match(reply.text, /现代魔导工程进修生/);
+    assert.match(reply.text, /Windows Live2D 桌面魔女同伴/);
+    assert.match(reply.text, /技术问题.*准确术语/);
     assert.match(reply.text, /先答事/);
+    assert.doesNotMatch(reply.text, /现代老魔女|千年判断力|活了上千年/);
     assertNoPersonaDrift(reply.text);
   }
   assert.equal(new Set(replies.map((reply) => reply.text)).size, 1);
@@ -87,7 +91,7 @@ test("persona consistency: emotional context keeps the concrete reason", async (
 
   assert.match(reply.text, /评审没过/);
   assert.match(reply.text, /难受/);
-  assert.doesNotMatch(reply.text, /现代老魔女|Windows Live2D/);
+  assert.doesNotMatch(reply.text, /现代老魔女|魔法学院|现代魔导工程|Windows Live2D/);
   assertNoPersonaDrift(reply.text);
 });
 
@@ -104,6 +108,20 @@ test("persona consistency: follow-up carries previous technical context", async 
   assert.doesNotMatch(reply.text, /ChatGPT|客服|搜索应用|操作系统/);
 });
 
+test("persona consistency: technical term questions stay direct", async () => {
+  const reply = await streamFakeReply("persona-technical-terms", [
+    userMessage("Provider 和 Live2D 分别是什么？")
+  ]);
+
+  assert.match(reply.text, /Provider/);
+  assert.match(reply.text, /模型供应商|连接配置/);
+  assert.match(reply.text, /Live2D/);
+  assert.match(reply.text, /角色渲染|动作表现/);
+  assert.match(reply.text, /记忆|搜索|窗口控制/);
+  assert.doesNotMatch(reply.text, /魔法学院|现代魔导工程|桌面魔女同伴|先陪你|慢慢/);
+  assertNoPersonaDrift(reply.text);
+});
+
 test("persona consistency: fact and current time stay direct", async () => {
   const timeReply = await streamFakeReply("persona-time", [
     userMessage("现在几点了？")
@@ -115,7 +133,7 @@ test("persona consistency: fact and current time stay direct", async () => {
   assert.match(timeReply.text, /^现在本地时间是 11:04/);
   assert.match(addReply.text, /^2\+3=5。$/);
   for (const reply of [timeReply, addReply]) {
-    assert.doesNotMatch(reply.text, /现代老魔女|Live2D|我在|慢慢|先陪你/);
+    assert.doesNotMatch(reply.text, /现代老魔女|魔法学院|现代魔导工程|Live2D|我在|慢慢|先陪你/);
     assertNoPersonaDrift(reply.text);
   }
 });

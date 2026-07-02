@@ -124,9 +124,12 @@ test("local OpenAI-compatible provider streams SSE without Authorization and kee
     assert.equal(body.model, "qwen2.5:3b-instruct");
     assert.equal(body.stream, true);
     assert.equal(body.reasoning_effort, undefined);
-    assert.match(body.messages?.[0]?.content ?? "", /Windows Live2D 桌宠.*现代老魔女/);
+    assert.match(body.messages?.[0]?.content ?? "", /魔法学院高年级进修魔女\/现代魔导工程进修生\/Windows Live2D 桌面魔女同伴/);
+    assert.match(body.messages?.[0]?.content ?? "", /Provider\/本地模型\/Live2D\/记忆\/窗口.*不魔法化/);
+    assert.doesNotMatch(body.messages?.[0]?.content ?? "", /现代老魔女|千年判断力|活了上千年/);
     assert.match(body.messages?.[0]?.content ?? "", /敏感信息.*必须拒绝保存、记住、复述和索要/);
-    assert.match(body.messages?.[1]?.content ?? "", /现代老魔女/);
+    assert.match(body.messages?.[1]?.content ?? "", /魔法学院高年级进修魔女\/现代魔导工程进修生\/Windows Live2D 桌面魔女同伴/);
+    assert.doesNotMatch(body.messages?.[1]?.content ?? "", /现代老魔女|千年判断力|活了上千年/);
     assert.match(body.messages?.[2]?.content ?? "", /工作=下一步/);
     assert.ok(systemLength(body.messages ?? []) < 520);
     assert.ok(body.messages?.some((message) => message.content?.includes("用户喜欢被叫测试者")));

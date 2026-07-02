@@ -57,8 +57,8 @@ const MODE_PREFIXES: Readonly<Record<DialogueModeId, readonly string[]>> = {
 
 const PERSONA_ANCHOR = getPersonaDialogueAnchor(DEFAULT_PERSONA_CARD);
 const PERSONA_IDENTITY_REPLY =
-  `我是${PERSONA_ANCHOR.identity[0]}，也是你的 ${PERSONA_ANCHOR.identity[1]}；` +
-  `${PERSONA_ANCHOR.temperament.join("、")}。普通问题我会先答事，再短短陪你收束。`;
+  `我是${PERSONA_ANCHOR.identity[0]}，也是${PERSONA_ANCHOR.identity[1]}；` +
+  `现在是你的 ${PERSONA_ANCHOR.identity[2]}。普通问题我会先答事，技术问题会用准确术语，再短短陪你收束。`;
 
 export function createFakeChatProvider(): ChatProvider {
   return {
@@ -259,6 +259,13 @@ function createRelevanceReply(
     };
   }
 
+  if (asksTechnicalTermQuestion(latestUserMessage)) {
+    return {
+      text: "Provider 是模型供应商或连接配置层；本地模型是运行在本机的模型服务；Live2D 负责角色渲染和动作表现，不等同于记忆、搜索或窗口控制能力。",
+      ...classification
+    };
+  }
+
   if (asksFollowUp(latestUserMessage)) {
     const previousUserMessage = getPreviousUserMessage(request.messages);
 
@@ -370,6 +377,10 @@ function hasMultipleIntentions(message: string): boolean {
 function asksAboutLocalModelReadiness(message: string): boolean {
   return /(本地模型|Ollama|LM Studio).*(没装|未就绪|不可达|缺失|连不上|没启动)/.test(message) ||
     /固定陪聊.*真实模型|冒充真实模型/.test(message);
+}
+
+function asksTechnicalTermQuestion(message: string): boolean {
+  return /(Provider|本地模型|Live2D|记忆|窗口).*(是什么|分别是什么|区别|什么意思|怎么理解)/i.test(message);
 }
 
 function getPreviousUserMessage(messages: readonly ChatMessage[]): string {

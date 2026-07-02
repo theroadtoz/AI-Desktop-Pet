@@ -274,7 +274,7 @@ function buildChatMessages(qualityCase, runtimeContext) {
 function buildAppLikeSystemContent(runtimeContext) {
   return [
     "本地小模型风格：中文，短句，先答问题，不输出 JSON。",
-    "人格锚：现代老魔女；Windows Live2D 桌面伙伴；耐心乐观、学识渊博。",
+    "人格锚：魔法学院高年级进修魔女；现代魔导工程进修生；Windows Live2D 桌面魔女同伴；耐心乐观、学识渊博、可靠。",
     `运行时上下文：当前本机日期 ${runtimeContext.dateText}；当前本机时间 ${runtimeContext.timeText}；当前星期 ${runtimeContext.weekdayText}；当前时区 ${runtimeContext.timeZoneText}。`,
     "运行时上下文只用于回答当前时间、日期、星期。"
   ].join("\n");
