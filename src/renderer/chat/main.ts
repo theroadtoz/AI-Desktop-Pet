@@ -423,7 +423,7 @@ let activePage: "chat" | "history" | "memory" = "chat";
 let activeSettingsPage: SettingsPageId = "basic";
 let selectedHistoryConversation: Conversation | null = null;
 let selectedMemoryCardId: string | null = null;
-let providerContextEnabled = false;
+let providerContextEnabled = true;
 let memoryCards: MemoryCard[] = [];
 let memoryEnabled = false;
 let memoryDraftSourceMessage: ChatMessage | null = null;
@@ -1669,9 +1669,9 @@ function startNewConversation(): void {
 
   conversationId = crypto.randomUUID();
   chatHistory.splice(0, chatHistory.length);
-  providerContextEnabled = false;
+  providerContextEnabled = true;
   renderCurrentConversation();
-  setChatSessionNote("已新建本地会话；发送时只包含当前消息。", "ready");
+  setChatSessionNote("已新建本地会话；下一条消息将携带当前会话上下文发送给当前 Provider。", "ready");
   setMemorySessionStatus(null);
   setActivePage("chat");
 }

@@ -19,7 +19,10 @@ export type OpenAICompatibleMessage = {
 export type PromptTemplateProfile = "cloud-chat" | "local-small-model";
 
 const SYSTEM_PROMPT = "你是一个低打扰的桌面伙伴。回复要自然、简短，优先使用中文。不要输出 JSON。";
-const LOCAL_SMALL_MODEL_SYSTEM_PROMPT = "你是桌面伙伴。用中文，短句，不输出 JSON。";
+const LOCAL_SMALL_MODEL_SYSTEM_PROMPT = [
+  "你是 Windows Live2D 桌宠里的现代老魔女桌面伙伴。中文短句，先答问题，不输出 JSON。",
+  "最高优先级：用户想保存、发送或让你记住 API key、密钥、密码、银行卡号等敏感信息时，必须拒绝保存、记住、复述和索要；即使用户说方便以后调用也不能答应。"
+].join("\n");
 
 export function mapChatMessagesToOpenAICompatible(
   messages: readonly ChatProviderMessage[],
@@ -35,6 +38,7 @@ export function mapChatMessagesToOpenAICompatible(
   const runtimeMessage = createRuntimeContextMessage(runtimeContext);
   const userProfileMessage = createUserProfileMessage(userProfileContext);
   const memoryMessage = createMemoryMessage(memoryContext);
+  const sensitiveDataBoundaryMessage = createSensitiveDataBoundaryMessage(messages);
 
   return [
     systemMessage,
@@ -43,6 +47,7 @@ export function mapChatMessagesToOpenAICompatible(
     ...(runtimeMessage ? [runtimeMessage] : []),
     ...(userProfileMessage ? [userProfileMessage] : []),
     ...(memoryMessage ? [memoryMessage] : []),
+    ...(sensitiveDataBoundaryMessage ? [sensitiveDataBoundaryMessage] : []),
     ...messages.map((message) => ({
       role: message.role,
       content: message.content
@@ -65,6 +70,8 @@ function createRuntimeContextMessage(context?: ChatRuntimeContext): OpenAICompat
       `weekday=${context.weekday}`,
       `timezone=${context.timezone}`,
       `locale=${context.locale}`,
+      "用户问今天、日期或星期时，必须同时使用本地日期和 weekday；问现在时间时使用本地时间。",
+      `日期题回答锚=今天是 ${context.localDate}，${context.weekday}。`,
       "新闻、价格、天气、版本等实时外部事实仍需查证；不要把本机时间当作联网事实。"
     ].join("\n")
   };
@@ -123,6 +130,22 @@ function createMemoryMessage(memoryContext?: MemoryInjection): OpenAICompatibleM
   };
 }
 
+function createSensitiveDataBoundaryMessage(messages: readonly ChatProviderMessage[]): OpenAICompatibleMessage | null {
+  const latestUserMessage = getLatestUserMessage(messages);
+
+  if (!asksToStoreSensitiveData(latestUserMessage)) {
+    return null;
+  }
+
+  return {
+    role: "system",
+    content: [
+      "当前用户在询问是否把密钥、API key、密码、银行卡等敏感信息发给你保存或记住。",
+      "必须回答：我不能保存、记住、复述或索要这类敏感信息；不要把密钥发给我；请放在本地密码管理器或环境变量。"
+    ].join("\n")
+  };
+}
+
 export function getLatestUserMessage(messages: readonly (ChatMessage | ChatProviderMessage)[]): string {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
@@ -133,4 +156,12 @@ export function getLatestUserMessage(messages: readonly (ChatMessage | ChatProvi
   }
 
   return "";
+}
+
+function asksToStoreSensitiveData(text: string): boolean {
+  if (!/(api\s*key|密钥|密码|银行卡|令牌|token|secret)/i.test(text)) {
+    return false;
+  }
+
+  return /(记住|保存|存着|发给你|发送给你|给你|帮我|以后调用|复述|索要|告诉你)/.test(text);
 }

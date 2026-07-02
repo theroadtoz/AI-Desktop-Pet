@@ -124,10 +124,11 @@ test("local OpenAI-compatible provider streams SSE without Authorization and kee
     assert.equal(body.model, "qwen2.5:3b-instruct");
     assert.equal(body.stream, true);
     assert.equal(body.reasoning_effort, undefined);
-    assert.equal(body.messages?.[0]?.content, "你是桌面伙伴。用中文，短句，不输出 JSON。");
+    assert.match(body.messages?.[0]?.content ?? "", /Windows Live2D 桌宠.*现代老魔女/);
+    assert.match(body.messages?.[0]?.content ?? "", /敏感信息.*必须拒绝保存、记住、复述和索要/);
     assert.match(body.messages?.[1]?.content ?? "", /现代老魔女/);
     assert.match(body.messages?.[2]?.content ?? "", /工作=下一步/);
-    assert.ok(systemLength(body.messages ?? []) < 240);
+    assert.ok(systemLength(body.messages ?? []) < 520);
     assert.ok(body.messages?.some((message) => message.content?.includes("用户喜欢被叫测试者")));
     assert.equal(deltaText, "你好，本地模型在。");
     assert.equal(result.text, "你好，本地模型在。");

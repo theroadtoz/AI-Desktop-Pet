@@ -29,7 +29,7 @@ test("current time/date case: mapper injects safe runtime context", () => {
   const mapped = mapChatMessagesToOpenAICompatible([
     userMessage("当前日期")
   ], undefined, undefined, undefined, "local-small-model", runtimeContext);
-  const runtimeMessage = mapped.find((message) => message.content.includes("运行时上下文"));
+  const runtimeMessage = mapped.find((message) => message.content.startsWith("运行时上下文"));
 
   assert.equal(runtimeMessage?.role, "system");
   assert.match(runtimeMessage?.content ?? "", /2026-06-28/);

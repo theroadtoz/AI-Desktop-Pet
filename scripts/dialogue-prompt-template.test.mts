@@ -39,6 +39,7 @@ test("prompt template: local small model keeps system order but uses shorter fir
   assert.match(local[2]?.content ?? "", /API key.*密码.*银行卡.*不记/);
   assert.match(local[2]?.content ?? "", /不复述.*不索要/);
   assert.match(local[2]?.content ?? "", /银行卡.*不记.*不复述.*不索要/);
+  assert.match(local[2]?.content ?? "", /敏感信息.*不能保存.*记住.*复述.*索要/);
   assert.match(local[2]?.content ?? "", /胸痛.*急救.*就医.*不诊断/);
   assert.match(local[2]?.content ?? "", /新闻价政.*离线不确认/);
 });
@@ -78,6 +79,18 @@ test("prompt template: memory fact and preferred name stay in their own messages
   assert.equal(mapped[1]?.content.includes(fact), false);
   assert.equal(mapped[2]?.content.includes(fact), false);
   assert.match(mapped.find((message) => message.content.includes(fact))?.content ?? "", /仅用于当前回复/);
+});
+
+test("prompt template: sensitive data storage requests get a local boundary message", () => {
+  const mapped = mapChatMessagesToOpenAICompatible([
+    { id: crypto.randomUUID(), role: "user", content: "我把 API key 发给你帮我记住，方便以后调用，可以吗？" }
+  ], undefined, undefined, undefined, "local-small-model");
+  const boundary = mapped.at(-2);
+
+  assert.equal(boundary?.role, "system");
+  assert.match(boundary?.content ?? "", /不能保存、记住、复述或索要/);
+  assert.match(boundary?.content ?? "", /不要把密钥发给我/);
+  assert.match(boundary?.content ?? "", /本地密码管理器或环境变量/);
 });
 
 function systemLength(mapped: ReturnType<typeof mapChatMessagesToOpenAICompatible>): number {

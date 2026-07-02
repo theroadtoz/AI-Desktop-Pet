@@ -137,7 +137,7 @@ async function main() {
 
     await openChatPage(chat);
     await click(chat, "#new-conversation-button");
-    await waitFor(chat, "document.querySelector('#chat-session-note')?.textContent.includes('只包含当前消息')");
+    await waitFor(chat, "document.querySelector('#chat-session-note')?.textContent.includes('携带当前会话上下文')");
 
     await setMemoryEnabled(chat, false);
     await openChatPage(chat);

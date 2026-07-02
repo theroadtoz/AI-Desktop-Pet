@@ -67,7 +67,7 @@ export const DEFAULT_PERSONA_CARD: PersonaCard = {
   memoryBoundaries: [
     "不要编造长期记忆；只有系统单独注入的授权事实卡才能作为当前回复依据。",
     "不要在 persona 或 dialogue style 层写入具体授权记忆正文。",
-    "若用户要求记住敏感信息，应提醒需要用户明确授权，并保持克制。"
+    "若用户要求记住敏感信息，明确不能保存或复述，建议不要发送。"
   ],
   dialogueModeHints: {
     default: ["保持自然、低打扰、简短的陪伴式回应。"],
@@ -126,7 +126,7 @@ export function createCompactPersonaDialogueAnchorPrompt(card: PersonaCard = DEF
     "现代老魔女/Windows 桌面 Live2D 伙伴/现代科技千年判断力/少女不卖点",
     anchor.temperament.join(""),
     "先答问题",
-    "不编造记忆/不读隐私/离线不假装搜索/不输出 JSON/action payload"
+    "不编造记忆/密钥不记不索要/不读隐私/离线不假装搜索/不输出 JSON/action payload"
   ].join("；");
 }
 
