@@ -85,3 +85,52 @@ npm.cmd run accept:offline-local-llm-install-layout
 
 Do not commit generated `manifest.json`, runtime binaries, DLLs, GGUF models,
 archives, installers, or `.tmp` staging output.
+
+## Electron Builder Directory Package
+
+P2-20J adds a real `electron-builder` Windows directory package check. Stage the
+local-only pack into the builder `extraResources` source first:
+
+```powershell
+$env:AI_DESKTOP_PET_LOCAL_LLM_SOURCE_ROOT = "<local-llm-pack-root>"
+npm.cmd run stage:electron-builder-local-llm
+```
+
+The staging command validates with the P2-20H resource validator, then copies to:
+
+```text
+.tmp/p2-20j-extra-resources/local-llm
+```
+
+`electron-builder.config.cjs` copies that staged directory into the generated app
+resources directory as:
+
+```text
+resources/local-llm
+```
+
+Build a Windows directory package without creating an installer:
+
+```powershell
+npm.cmd run package:win:dir
+```
+
+To run the full packaged-resource acceptance, including staging, `package:win:dir`,
+resolver verification with `resourceSource=packaged`, `/v1/models`, and a short
+chat check:
+
+```powershell
+npm.cmd run build
+npm.cmd run accept:electron-builder-local-llm
+```
+
+The P2-20J acceptance cleans its staging and generated package output by default.
+Keep them only when explicitly debugging:
+
+```powershell
+$env:P2_20J_KEEP_TMP = "1"
+npm.cmd run accept:electron-builder-local-llm
+```
+
+The P2-20J scripts print only safe summaries. They do not print full model paths,
+prompts, request bodies, API keys, full replies, or local fact card contents.
