@@ -1,4 +1,5 @@
 const localLlmExtraResourcesRoot = ".tmp/p2-20j-extra-resources/local-llm";
+const electronDistRoot = "node_modules/electron/dist";
 const windowsIcon = "resources/icons/app-icon.ico";
 
 /** @type {import("electron-builder").Configuration} */
@@ -23,6 +24,20 @@ module.exports = {
     {
       from: "resources/icons/app-icon-256.png",
       to: "icons/app-icon-256.png"
+    }
+  ],
+  extraFiles: [
+    {
+      from: `${electronDistRoot}/version`,
+      to: "version"
+    },
+    {
+      from: `${electronDistRoot}/LICENSE`,
+      to: "LICENSE.electron.txt"
+    },
+    {
+      from: `${electronDistRoot}/LICENSES.chromium.html`,
+      to: "LICENSES.chromium.html"
     }
   ],
   win: {
