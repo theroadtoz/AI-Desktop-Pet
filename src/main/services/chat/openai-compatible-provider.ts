@@ -157,7 +157,8 @@ async function streamChatCompletions(input: {
           input.request.dialogueStyleContext,
           input.request.userProfileContext,
           getPromptTemplateProfile(providerId),
-          input.request.runtimeContext
+          input.request.runtimeContext,
+          input.request.webSearchContext
         ),
         temperature: input.options.temperature,
         max_tokens: input.options.maxTokens,

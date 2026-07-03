@@ -4,6 +4,7 @@ import type { DialogueStyleContext } from "./dialogue-style";
 import type { EmotionClassification } from "./emotion";
 import type { ProviderId } from "./provider-config";
 import type { UserProfilePromptContext } from "./user-profile";
+import type { WebSearchContext } from "./web-search";
 
 export type ChatProviderId = ProviderId;
 
@@ -41,6 +42,7 @@ export type ChatRequest = {
   dialogueStyleContext?: DialogueStyleContext;
   userProfileContext?: UserProfilePromptContext;
   runtimeContext?: ChatRuntimeContext;
+  webSearchContext?: WebSearchContext;
 };
 
 export type ChatStreamDelta = {

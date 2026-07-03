@@ -3,6 +3,8 @@ import type { ChatProviderMessage, ChatRuntimeContext } from "../../../shared/ch
 import type { MemoryInjection } from "../../../shared/chat-memory";
 import type { DialogueStyleContext } from "../../../shared/dialogue-style";
 import type { UserProfilePromptContext } from "../../../shared/user-profile";
+import type { WebSearchContext } from "../../../shared/web-search";
+import { formatWebSearchContextForPrompt } from "../search/web-search-provider";
 import {
   createDefaultDialogueStyleContext,
   createDefaultPersonaPrompt,
@@ -30,7 +32,8 @@ export function mapChatMessagesToOpenAICompatible(
   dialogueStyleContext: DialogueStyleContext = createDefaultDialogueStyleContext(),
   userProfileContext?: UserProfilePromptContext,
   promptTemplateProfile: PromptTemplateProfile = "cloud-chat",
-  runtimeContext?: ChatRuntimeContext
+  runtimeContext?: ChatRuntimeContext,
+  webSearchContext?: WebSearchContext
 ): OpenAICompatibleMessage[] {
   const systemMessage = createSystemMessage(promptTemplateProfile);
   const personaMessage = createPersonaMessage(promptTemplateProfile);
@@ -38,6 +41,7 @@ export function mapChatMessagesToOpenAICompatible(
   const runtimeMessage = createRuntimeContextMessage(runtimeContext);
   const userProfileMessage = createUserProfileMessage(userProfileContext);
   const memoryMessage = createMemoryMessage(memoryContext);
+  const webSearchMessage = createWebSearchMessage(webSearchContext);
   const sensitiveDataBoundaryMessage = createSensitiveDataBoundaryMessage(messages);
 
   return [
@@ -47,12 +51,24 @@ export function mapChatMessagesToOpenAICompatible(
     ...(runtimeMessage ? [runtimeMessage] : []),
     ...(userProfileMessage ? [userProfileMessage] : []),
     ...(memoryMessage ? [memoryMessage] : []),
+    ...(webSearchMessage ? [webSearchMessage] : []),
     ...(sensitiveDataBoundaryMessage ? [sensitiveDataBoundaryMessage] : []),
     ...messages.map((message) => ({
       role: message.role,
       content: message.content
     }))
   ];
+}
+
+function createWebSearchMessage(context?: WebSearchContext): OpenAICompatibleMessage | null {
+  const prompt = formatWebSearchContextForPrompt(context);
+
+  return prompt
+    ? {
+        role: "system",
+        content: prompt
+      }
+    : null;
 }
 
 function createRuntimeContextMessage(context?: ChatRuntimeContext): OpenAICompatibleMessage | null {

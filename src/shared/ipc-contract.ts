@@ -17,6 +17,7 @@ import type { PetActionTrigger } from "./pet-action-trigger";
 import type { LlamaCppRuntimeSafeSummary, LlamaCppRuntimeSettingsUpdate } from "./llama-cpp-runtime";
 import type { LocalModelDiagnosticSafeSummary } from "./local-model-diagnostic";
 import type { ProactiveSpeechBubblePayload } from "./proactive-speech-bubble";
+import type { WebSearchSettings, WebSearchStatus } from "./web-search";
 
 export type { PetTelemetryEvent } from "./pet-telemetry-contract";
 
@@ -234,6 +235,12 @@ export type ShortcutApi = {
   listShortcuts(): Promise<ShortcutPreferenceView[]>;
   updateShortcut(actionId: ShortcutActionId, accelerator: string): Promise<ShortcutUpdateResult>;
   resetShortcut(actionId: ShortcutActionId): Promise<ShortcutUpdateResult>;
+};
+
+export type WebSearchApi = {
+  getSettings(): Promise<WebSearchSettings>;
+  getStatus(): Promise<WebSearchStatus>;
+  setSettings(settings: WebSearchSettings): Promise<WebSearchSettings>;
 };
 
 export function isChatMessage(value: unknown): value is ChatMessage {

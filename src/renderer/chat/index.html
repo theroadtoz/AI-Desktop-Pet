@@ -307,6 +307,43 @@
             <h3 id="shortcut-title" class="settings-section-title">操作方式</h3>
             <div id="shortcut-list" class="shortcut-list content-stack" aria-live="polite"></div>
             <p id="shortcut-status" class="status-box" hidden aria-live="polite"></p>
+            <section class="content-stack" aria-labelledby="web-search-title">
+              <h3 id="web-search-title" class="settings-section-title">联网搜索 / MCP</h3>
+              <p id="web-search-status" class="status-box" data-state="fallback" aria-live="polite">联网搜索默认关闭。</p>
+              <label class="field-label">
+                <span>
+                  <input id="web-search-enabled" type="checkbox" />
+                  启用 MCP 搜索
+                </span>
+              </label>
+              <label class="field-label">
+                MCP 命令
+                <input id="web-search-command" type="text" autocomplete="off" placeholder="例如：node" />
+              </label>
+              <label class="field-label">
+                MCP 参数
+                <input id="web-search-args" type="text" autocomplete="off" placeholder="例如：server.mjs" />
+              </label>
+              <div class="field-grid">
+                <label class="field-label">
+                  工具名
+                  <input id="web-search-tool-name" type="text" autocomplete="off" />
+                </label>
+                <label class="field-label">
+                  超时（毫秒）
+                  <input id="web-search-timeout" type="number" min="1000" max="60000" step="1000" />
+                </label>
+                <label class="field-label">
+                  结果数
+                  <input id="web-search-max-results" type="number" min="1" max="5" step="1" />
+                </label>
+              </div>
+              <p class="selection-note">只会把隐私网关净化后的公开查询词发送给 MCP；完整对话、记忆、事实卡、密钥和本地路径不会用于搜索。</p>
+              <div class="settings-actions">
+                <button id="web-search-save-button" class="button-light" type="button">保存搜索设置</button>
+                <button id="web-search-refresh-button" class="button-light" type="button">刷新状态</button>
+              </div>
+            </section>
             <section class="content-stack" aria-labelledby="advanced-diagnostics-title">
               <h3 id="advanced-diagnostics-title" class="settings-section-title">高级诊断</h3>
               <p class="status-box" data-state="fallback">诊断只显示安全摘要；完整 prompt、Provider 请求正文、API Key 和事实卡正文不会在这里展示。</p>

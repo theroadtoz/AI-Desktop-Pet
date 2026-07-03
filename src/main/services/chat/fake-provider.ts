@@ -81,6 +81,7 @@ function createFakeReply(request: ChatRequest): ChatProviderResult {
   const latestUserMessage = getLatestUserMessage(request.messages);
   const classification = classifyEmotion({ latestUserMessage });
   const commonSenseReply = createCurrentTimeOrCommonSenseReply(request, latestUserMessage, classification);
+  const webSearchReply = createWebSearchGroundedReply(request, latestUserMessage, classification);
   const personaIdentityReply = createPersonaIdentityReply(latestUserMessage, classification);
   const relevanceReply = createRelevanceReply(request, latestUserMessage, classification);
   const qualityReply = createQualityReply(request, latestUserMessage, classification);
@@ -88,6 +89,10 @@ function createFakeReply(request: ChatRequest): ChatProviderResult {
 
   if (commonSenseReply) {
     return commonSenseReply;
+  }
+
+  if (webSearchReply) {
+    return webSearchReply;
   }
 
   if (personaIdentityReply) {
@@ -114,6 +119,27 @@ function createFakeReply(request: ChatRequest): ChatProviderResult {
 
   return {
     text: `${prefix}${variants[variantIndex] ?? REPLIES[classification.emotion]}`,
+    ...classification
+  };
+}
+
+function createWebSearchGroundedReply(
+  request: ChatRequest,
+  latestUserMessage: string,
+  classification: ReturnType<typeof classifyEmotion>
+): ChatProviderResult | null {
+  if (!request.webSearchContext || request.webSearchContext.results.length === 0 || !asksWebSearch(latestUserMessage)) {
+    return null;
+  }
+
+  const firstResult = request.webSearchContext.results[0];
+
+  if (!firstResult) {
+    return null;
+  }
+
+  return {
+    text: `我用已启用的 MCP 搜索看了一眼：${firstResult.title}。${firstResult.snippet} 我会先按这条外部摘要回答，不把它写入本机记忆。`,
     ...classification
   };
 }
@@ -315,6 +341,10 @@ function createRelevanceReply(
 
 function asksForDetail(message: string): boolean {
   return /详细|展开|讲讲|说明|说细/.test(message);
+}
+
+function asksWebSearch(message: string): boolean {
+  return /(联网|上网|网络|网页|web|internet|MCP).{0,8}(搜索|查询|查找|查证|检索|找一下|看一下)|(?:搜索|查一下|查找|检索|查证|搜一下|搜搜|看看网上|网上看看)/i.test(message);
 }
 
 function asksCurrentTime(message: string): boolean {

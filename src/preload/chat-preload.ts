@@ -18,7 +18,8 @@ import type {
   PetPresentationApi,
   PresenceModeApi,
   ShortcutApi,
-  UserProfileApi
+  UserProfileApi,
+  WebSearchApi
 } from "../shared/ipc-contract";
 import type { Conversation, ConversationSummary, HistoryMessage } from "../shared/chat-history";
 import type { MemoryCard, MemoryCardDraft, MemoryCardUpdate } from "../shared/chat-memory";
@@ -34,6 +35,7 @@ import type {
   LlamaCppRuntimeSettingsUpdate,
   LlamaCppRuntimeStatus
 } from "../shared/llama-cpp-runtime";
+import type { WebSearchSettings, WebSearchStatus } from "../shared/web-search";
 
 const petAccessoryPresetIds = ["none", "glasses"] as const;
 const shortcutActionIds = ["togglePetLock", "adjustPetScaleWithWheel"] as const;
@@ -109,6 +111,14 @@ const localModelDiagnosticEndpointStatuses = [
   "chat_failed",
   "skipped"
 ] as const;
+const DEFAULT_WEB_SEARCH_SETTINGS: WebSearchSettings = {
+  enabled: false,
+  command: "",
+  args: [],
+  toolName: "search",
+  timeoutMs: 10_000,
+  maxResults: 3
+};
 
 type LocalModelDiagnosticRuntimeStatus = (typeof localModelDiagnosticRuntimeStatuses)[number];
 type LocalModelDiagnosticEndpointStatus = (typeof localModelDiagnosticEndpointStatuses)[number];
@@ -1189,6 +1199,41 @@ function isConversationSummary(value: unknown): value is ConversationSummary {
   );
 }
 
+function isWebSearchSettings(value: unknown): value is WebSearchSettings {
+  const settings = value as Partial<WebSearchSettings> | null;
+
+  return Boolean(
+    settings &&
+    typeof settings.enabled === "boolean" &&
+    typeof settings.command === "string" &&
+    Array.isArray(settings.args) &&
+    settings.args.every((arg) => typeof arg === "string") &&
+    typeof settings.toolName === "string" &&
+    typeof settings.timeoutMs === "number" &&
+    Number.isSafeInteger(settings.timeoutMs) &&
+    typeof settings.maxResults === "number" &&
+    Number.isSafeInteger(settings.maxResults)
+  );
+}
+
+function isWebSearchStatus(value: unknown): value is WebSearchStatus {
+  const status = value as Partial<WebSearchStatus> | null;
+
+  return Boolean(
+    status &&
+    typeof status.enabled === "boolean" &&
+    typeof status.commandConfigured === "boolean" &&
+    (status.commandName === undefined || typeof status.commandName === "string") &&
+    typeof status.argsCount === "number" &&
+    Number.isSafeInteger(status.argsCount) &&
+    typeof status.toolName === "string" &&
+    typeof status.timeoutMs === "number" &&
+    Number.isSafeInteger(status.timeoutMs) &&
+    typeof status.maxResults === "number" &&
+    Number.isSafeInteger(status.maxResults)
+  );
+}
+
 const api: ChatApi = {
   focusInput() {
     ipcRenderer.once("chat:focus-input", () => {
@@ -1740,6 +1785,40 @@ const userProfileApi: UserProfileApi = {
   }
 };
 
+const webSearchApi: WebSearchApi = {
+  async getSettings() {
+    const settings = await ipcRenderer.invoke("webSearch:get-settings");
+
+    if (!isWebSearchSettings(settings)) {
+      return { ...DEFAULT_WEB_SEARCH_SETTINGS };
+    }
+
+    return { ...settings, args: [...settings.args] };
+  },
+  async getStatus() {
+    const status = await ipcRenderer.invoke("webSearch:get-status");
+
+    if (!isWebSearchStatus(status)) {
+      throw new Error("Invalid web search status response");
+    }
+
+    return status;
+  },
+  async setSettings(settings: WebSearchSettings) {
+    if (!isWebSearchSettings(settings)) {
+      throw new Error("Invalid web search settings");
+    }
+
+    const savedSettings = await ipcRenderer.invoke("webSearch:set-settings", settings);
+
+    if (!isWebSearchSettings(savedSettings)) {
+      throw new Error("Invalid web search settings response");
+    }
+
+    return { ...savedSettings, args: [...savedSettings.args] };
+  }
+};
+
 ipcRenderer.on("chat:focus-input", () => {
   window.dispatchEvent(new CustomEvent("chat:focus-input"));
 });
@@ -1754,3 +1833,4 @@ contextBridge.exposeInMainWorld("shortcutApi", shortcutApi);
 contextBridge.exposeInMainWorld("dialogueModeApi", dialogueModeApi);
 contextBridge.exposeInMainWorld("presenceModeApi", presenceModeApi);
 contextBridge.exposeInMainWorld("userProfileApi", userProfileApi);
+contextBridge.exposeInMainWorld("webSearchApi", webSearchApi);

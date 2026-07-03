@@ -52,6 +52,7 @@ import {
 import type { LocalOpenAICompatibleConfig, ProviderConfig, ProviderStatus } from "../shared/provider-config";
 import type { ProviderHealthCheckRequest } from "../shared/provider-health";
 import type { LlamaCppRuntimeSettingsUpdate } from "../shared/llama-cpp-runtime";
+import type { WebSearchContext, WebSearchReasonCode } from "../shared/web-search";
 import {
   parseLocalModelDiagnosticSafeSummary,
   type LocalModelDiagnosticSafeSummary
@@ -79,9 +80,16 @@ import { createHistoryStore, type HistoryStore } from "./services/chat/history-s
 import { createMemoryStore, type MemoryStore } from "./services/chat/memory-store";
 import { createChatProviderFromConfig } from "./services/chat/provider-factory";
 import { checkProviderHealth } from "./services/chat/provider-health";
+import { createMcpSearchProvider } from "./services/search/mcp-search-client";
+import { createSearchPrivacyDecision } from "./services/search/search-privacy-gateway";
+import { createWebSearchContext } from "./services/search/web-search-provider";
 import { readEnvProviderConfig, type EnvProviderConfig } from "./services/config/env-config";
 import { createDialogueModeStore, type DialogueModeStore } from "./services/config/dialogue-mode-store";
 import { createPresenceModeStore, type PresenceModeStore } from "./services/config/presence-mode-store";
+import {
+  createWebSearchSettingsStore,
+  type WebSearchSettingsStore
+} from "./services/config/web-search-settings-store";
 import {
   createProviderConfigStore,
   createProviderTelemetryPayload,
@@ -145,6 +153,7 @@ let petPresentationStore: PetPresentationStore | null = null;
 let petPresentationPersistence: PetPresentationPersistence | null = null;
 let historyStore: HistoryStore | null = null;
 let memoryStore: MemoryStore | null = null;
+let webSearchSettingsStore: WebSearchSettingsStore | null = null;
 let dialogueModeStore: DialogueModeStore | null = null;
 let presenceModeStore: PresenceModeStore | null = null;
 let shortcutPreferencesStore: ShortcutPreferencesStore | null = null;
@@ -1322,6 +1331,9 @@ app.whenReady().then(async () => {
   petPresentationPersistence = createPetPresentationPersistence(petPresentationStore);
   historyStore = createHistoryStore();
   memoryStore = createMemoryStore();
+  webSearchSettingsStore = createWebSearchSettingsStore({
+    userDataPath: app.getPath("userData")
+  });
   dialogueModeStore = createDialogueModeStore();
   currentDialogueModeId = dialogueModeStore.getMode();
   presenceModeStore = createPresenceModeStore();
@@ -1537,6 +1549,110 @@ app.whenReady().then(async () => {
     });
   }
 
+  type WebSearchResolution = {
+    context?: WebSearchContext;
+    status: "allowed" | "blocked" | "redacted" | "failed";
+    reasonCodes: WebSearchReasonCode[];
+    resultCount: number;
+    errorType?: string;
+  };
+
+  async function resolveWebSearchForLatestMessage(latestUserMessage: string): Promise<WebSearchResolution> {
+    const settings = webSearchSettingsStore?.getSettings();
+    const decision = createSearchPrivacyDecision({
+      text: latestUserMessage,
+      enabled: settings?.enabled === true
+    });
+
+    if (!settings || decision.status === "blocked") {
+      logTelemetry("web_search_blocked", {
+        enabled: settings?.enabled === true,
+        commandConfigured: Boolean(settings?.command),
+        status: decision.status,
+        reasonCodes: decision.reasonCodes
+      });
+      return {
+        status: decision.status,
+        reasonCodes: decision.reasonCodes,
+        resultCount: 0
+      };
+    }
+
+    const startedAt = Date.now();
+    logTelemetry("web_search_started", {
+      status: decision.status,
+      reasonCodes: decision.reasonCodes,
+      toolName: settings.toolName,
+      commandConfigured: Boolean(settings.command),
+      maxResults: settings.maxResults
+    });
+
+    try {
+      const provider = createMcpSearchProvider(settings);
+      const results = await provider.search({
+        query: decision.safeQuery,
+        maxResults: settings.maxResults
+      });
+      logTelemetry("web_search_completed", {
+        status: decision.status,
+        reasonCodes: decision.reasonCodes,
+        toolName: settings.toolName,
+        resultCount: results.length,
+        durationMs: Date.now() - startedAt
+      });
+
+      return {
+        ...(results.length > 0
+          ? {
+              context: createWebSearchContext({
+                query: decision.safeQuery,
+                results,
+                toolName: settings.toolName
+              })
+            }
+          : {}),
+        status: decision.status,
+        reasonCodes: decision.reasonCodes,
+        resultCount: results.length
+      };
+    } catch (error: unknown) {
+      const errorType = getWebSearchErrorType(error);
+      logTelemetry("web_search_failed", {
+        status: decision.status,
+        reasonCodes: decision.reasonCodes,
+        toolName: settings.toolName,
+        resultCount: 0,
+        durationMs: Date.now() - startedAt,
+        errorType
+      });
+
+      return {
+        status: "failed",
+        reasonCodes: decision.reasonCodes,
+        resultCount: 0,
+        errorType
+      };
+    }
+  }
+
+  function getWebSearchErrorType(error: unknown): string {
+    const name = error instanceof Error ? error.name : "mcp_search_failed";
+
+    return [
+      "mcp_search_not_configured",
+      "mcp_search_spawn_failed",
+      "mcp_search_closed",
+      "mcp_search_failed",
+      "mcp_search_not_started",
+      "mcp_search_timeout",
+      "mcp_search_write_failed",
+      "mcp_search_tool_failed",
+      "mcp_search_tool_missing"
+    ].includes(name)
+      ? name
+      : "mcp_search_failed";
+  }
+
   function notifyChatDialogueModeChanged(modeId: DialogueModeId): void {
     if (!chatWindow || chatWindow.isDestroyed()) {
       return;
@@ -1740,13 +1856,14 @@ app.whenReady().then(async () => {
       return;
     }
 
+    const chatEngineForRequest = chatEngine;
     const historyStoreForRequest = historyStore;
     const memoryStoreForRequest = memoryStore;
-    const providerId = chatEngine.getProviderId();
+    const providerId = chatEngineForRequest.getProviderId();
     const startedAt = Date.now();
     let replyLength = 0;
 
-    if (chatEngine.hasActiveStream()) {
+    if (chatEngineForRequest.hasActiveStream()) {
       logTelemetry("chat_stream_failed", {
         providerId,
         conversationId: request.conversationId,
@@ -1840,42 +1957,50 @@ app.whenReady().then(async () => {
     const userProfileContext = createUserProfilePromptContext(userProfileStore?.getProfile() ?? null);
     const runtimeContext = createChatRuntimeContext();
     const contextBudget = budgetChatContext(request.messages);
-    event.sender.send("chat:memory-injection", {
-      requestVersion: request.requestVersion,
-      count: memoryContext.count
-    });
 
-    logTelemetry("chat_stream_started", {
-      providerId,
-      conversationId: request.conversationId,
-      messageCount: request.messages.length,
-      originalMessageCount: contextBudget.summary.originalMessageCount,
-      providerMessageCount: contextBudget.summary.providerMessageCount,
-      compressed: contextBudget.summary.compressed,
-      summaryMessageCount: contextBudget.summary.summaryMessageCount,
-      summarizedMessageCount: contextBudget.summary.summarizedMessageCount,
-      recentMessageCount: contextBudget.summary.recentMessageCount,
-      memoryInjectionCount: memoryContext.count
-    });
+    void resolveWebSearchForLatestMessage(submittedMessage.content).then((webSearchResolution) => {
+      event.sender.send("chat:memory-injection", {
+        requestVersion: request.requestVersion,
+        count: memoryContext.count
+      });
 
-    void chatEngine.startChatStream({
-      ...request,
-      providerMessages: contextBudget.providerMessages,
-      contextBudget: contextBudget.summary,
-      memoryContext,
-      dialogueStyleContext,
-      runtimeContext,
-      ...(userProfileContext ? { userProfileContext } : {})
-    }, {
-      onDelta(delta) {
-        if (!transitionPetRole({ type: "reply:delta", requestVersion: request.requestVersion })) {
-          return;
+      logTelemetry("chat_stream_started", {
+        providerId,
+        conversationId: request.conversationId,
+        messageCount: request.messages.length,
+        originalMessageCount: contextBudget.summary.originalMessageCount,
+        providerMessageCount: contextBudget.summary.providerMessageCount,
+        compressed: contextBudget.summary.compressed,
+        summaryMessageCount: contextBudget.summary.summaryMessageCount,
+        summarizedMessageCount: contextBudget.summary.summarizedMessageCount,
+        recentMessageCount: contextBudget.summary.recentMessageCount,
+        memoryInjectionCount: memoryContext.count,
+        webSearchStatus: webSearchResolution.status,
+        webSearchReasonCodes: webSearchResolution.reasonCodes,
+        webSearchResultCount: webSearchResolution.resultCount,
+        ...(webSearchResolution.errorType ? { webSearchErrorType: webSearchResolution.errorType } : {})
+      });
+
+      return chatEngineForRequest.startChatStream({
+        ...request,
+        providerMessages: contextBudget.providerMessages,
+        contextBudget: contextBudget.summary,
+        memoryContext,
+        dialogueStyleContext,
+        runtimeContext,
+        ...(webSearchResolution.context ? { webSearchContext: webSearchResolution.context } : {}),
+        ...(userProfileContext ? { userProfileContext } : {})
+      }, {
+        onDelta(delta) {
+          if (!transitionPetRole({ type: "reply:delta", requestVersion: request.requestVersion })) {
+            return;
+          }
+
+          replyLength += delta.text.length;
+          scheduleChatReplySustainTrigger(replyLength);
+          event.sender.send("chat:stream-delta", { ...delta, requestVersion: request.requestVersion });
         }
-
-        replyLength += delta.text.length;
-        scheduleChatReplySustainTrigger(replyLength);
-        event.sender.send("chat:stream-delta", { ...delta, requestVersion: request.requestVersion });
-      }
+      });
     }).then((result) => {
       try {
         const historyMessage: HistoryMessage = {
@@ -1979,6 +2104,39 @@ app.whenReady().then(async () => {
     }
 
     return getCurrentProviderConfig();
+  });
+
+  ipcMain.handle("webSearch:get-settings", (event) => {
+    if (!isChatSender(event) || !webSearchSettingsStore) {
+      throw new Error("Unauthorized web search request");
+    }
+
+    return webSearchSettingsStore.getSettings();
+  });
+
+  ipcMain.handle("webSearch:get-status", (event) => {
+    if (!isChatSender(event) || !webSearchSettingsStore) {
+      throw new Error("Unauthorized web search request");
+    }
+
+    return webSearchSettingsStore.getStatus();
+  });
+
+  ipcMain.handle("webSearch:set-settings", (event, update: unknown) => {
+    if (!isChatSender(event) || !webSearchSettingsStore) {
+      throw new Error("Unauthorized web search request");
+    }
+
+    const settings = webSearchSettingsStore.saveSettings(update);
+    logTelemetry("web_search_settings_updated", {
+      enabled: settings.enabled,
+      commandConfigured: Boolean(settings.command),
+      argsCount: settings.args.length,
+      toolName: settings.toolName,
+      timeoutMs: settings.timeoutMs,
+      maxResults: settings.maxResults
+    });
+    return settings;
   });
 
   ipcMain.handle("localRuntime:diagnose-local-model", async (event) => {

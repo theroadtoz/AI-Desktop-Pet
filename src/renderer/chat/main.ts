@@ -25,6 +25,7 @@ import {
 import { isPetAccessoryPresetId, type PetAccessoryPresetId } from "../../shared/pet-accessory";
 import type { ShortcutActionId, ShortcutPreferenceView } from "../../shared/shortcut-preferences";
 import type { UserProfile } from "../../shared/user-profile";
+import { DEFAULT_WEB_SEARCH_SETTINGS, type WebSearchSettings, type WebSearchStatus } from "../../shared/web-search";
 import {
   applyChatTurnDelta,
   createInitialChatTurnState,
@@ -142,6 +143,15 @@ const settingsDialogueModeSummary = document.querySelector<HTMLElement>("#settin
 const settingsPresenceModeSummary = document.querySelector<HTMLElement>("#settings-presence-mode-summary");
 const shortcutList = document.querySelector<HTMLElement>("#shortcut-list");
 const shortcutStatus = document.querySelector<HTMLElement>("#shortcut-status");
+const webSearchStatus = document.querySelector<HTMLElement>("#web-search-status");
+const webSearchEnabled = document.querySelector<HTMLInputElement>("#web-search-enabled");
+const webSearchCommand = document.querySelector<HTMLInputElement>("#web-search-command");
+const webSearchArgs = document.querySelector<HTMLInputElement>("#web-search-args");
+const webSearchToolName = document.querySelector<HTMLInputElement>("#web-search-tool-name");
+const webSearchTimeout = document.querySelector<HTMLInputElement>("#web-search-timeout");
+const webSearchMaxResults = document.querySelector<HTMLInputElement>("#web-search-max-results");
+const webSearchSaveButton = document.querySelector<HTMLButtonElement>("#web-search-save-button");
+const webSearchRefreshButton = document.querySelector<HTMLButtonElement>("#web-search-refresh-button");
 const chatTab = document.querySelector<HTMLButtonElement>("#chat-tab");
 const historyTab = document.querySelector<HTMLButtonElement>("#history-tab");
 const memoryTab = document.querySelector<HTMLButtonElement>("#memory-tab");
@@ -206,6 +216,8 @@ if (
   !savePetAccessoryButton || !petLockStatus || !togglePetLockButton || !userProfileSummary ||
   !settingsUserDisplayName || !settingsUserPreferredName || !saveUserProfileButton || !clearUserProfileButton ||
   !settingsDialogueModeSummary || !settingsPresenceModeSummary || !shortcutList || !shortcutStatus ||
+  !webSearchStatus || !webSearchEnabled || !webSearchCommand || !webSearchArgs || !webSearchToolName ||
+  !webSearchTimeout || !webSearchMaxResults || !webSearchSaveButton || !webSearchRefreshButton ||
   !chatTab || !historyTab || !memoryTab || !chatPage || !companionControlShelf || !dialogueModeControls || !presenceModeControls ||
   !shelfAccessoryButton || !shelfScaleButton || !shelfLockButton || !shelfActionEcho || !historyPage ||
   !memoryPage || !chatSessionNote || !memoryDraftPanel || !memoryDraftTitle || !memoryDraftContent || !memoryDraftTags ||
@@ -300,6 +312,15 @@ const settingsDialogueModeSummaryBox = settingsDialogueModeSummary;
 const settingsPresenceModeSummaryBox = settingsPresenceModeSummary;
 const shortcutListElement = shortcutList;
 const shortcutStatusBox = shortcutStatus;
+const webSearchStatusBox = webSearchStatus;
+const webSearchEnabledField = webSearchEnabled;
+const webSearchCommandField = webSearchCommand;
+const webSearchArgsField = webSearchArgs;
+const webSearchToolNameField = webSearchToolName;
+const webSearchTimeoutField = webSearchTimeout;
+const webSearchMaxResultsField = webSearchMaxResults;
+const webSearchSaveAction = webSearchSaveButton;
+const webSearchRefreshAction = webSearchRefreshButton;
 const chatTabAction = chatTab;
 const historyTabAction = historyTab;
 const memoryTabAction = memoryTab;
@@ -453,6 +474,85 @@ let pendingWheelModifierRecordTimeout: number | null = null;
 function setProviderStatus(status: ProviderStatus): void {
   providerStatusBox.textContent = formatProviderStatus(status);
   providerStatusBox.dataset.state = status.isFallback ? "fallback" : "ready";
+}
+
+function setWebSearchStatus(status: WebSearchStatus): void {
+  webSearchStatusBox.dataset.state = status.enabled ? "ready" : "fallback";
+  webSearchStatusBox.textContent = status.enabled
+    ? `MCP 搜索已启用 · 工具 ${status.toolName} · 结果 ${status.maxResults} 条 · 超时 ${status.timeoutMs}ms`
+    : status.commandConfigured
+      ? `MCP 搜索未启用 · 已配置 ${status.commandName ?? "命令"}`
+      : "联网搜索默认关闭；配置 MCP 命令后可显式启用。";
+}
+
+function setWebSearchFields(settings: WebSearchSettings): void {
+  webSearchEnabledField.checked = settings.enabled;
+  webSearchCommandField.value = settings.command;
+  webSearchArgsField.value = settings.args.join(" ");
+  webSearchToolNameField.value = settings.toolName;
+  webSearchTimeoutField.value = String(settings.timeoutMs);
+  webSearchMaxResultsField.value = String(settings.maxResults);
+}
+
+async function refreshWebSearchSettings(): Promise<void> {
+  if (!window.webSearchApi) {
+    webSearchStatusBox.dataset.state = "fallback";
+    webSearchStatusBox.textContent = "MCP 搜索设置不可用。";
+    setWebSearchFields(DEFAULT_WEB_SEARCH_SETTINGS);
+    return;
+  }
+
+  try {
+    const [settings, status] = await Promise.all([
+      window.webSearchApi.getSettings(),
+      window.webSearchApi.getStatus()
+    ]);
+    setWebSearchFields(settings);
+    setWebSearchStatus(status);
+  } catch {
+    webSearchStatusBox.dataset.state = "fallback";
+    webSearchStatusBox.textContent = "无法读取 MCP 搜索设置。";
+  }
+}
+
+function buildWebSearchSettings(): WebSearchSettings | null {
+  const timeoutMs = parsePositiveInteger(webSearchTimeoutField, "搜索超时时间");
+  const maxResults = parsePositiveInteger(webSearchMaxResultsField, "搜索结果数");
+
+  if (timeoutMs === null || maxResults === null) {
+    return null;
+  }
+
+  return {
+    enabled: webSearchEnabledField.checked,
+    command: webSearchCommandField.value.trim(),
+    args: webSearchArgsField.value.split(/\s+/).map((arg) => arg.trim()).filter((arg) => arg.length > 0),
+    toolName: webSearchToolNameField.value.trim() || DEFAULT_WEB_SEARCH_SETTINGS.toolName,
+    timeoutMs,
+    maxResults
+  };
+}
+
+async function saveWebSearchSettings(): Promise<void> {
+  if (!window.webSearchApi) {
+    setSettingsFeedback("MCP 搜索设置不可用。");
+    return;
+  }
+
+  const settings = buildWebSearchSettings();
+
+  if (!settings) {
+    return;
+  }
+
+  try {
+    const savedSettings = await window.webSearchApi.setSettings(settings);
+    setWebSearchFields(savedSettings);
+    setWebSearchStatus(await window.webSearchApi.getStatus());
+    setSettingsFeedback(savedSettings.enabled ? "MCP 搜索设置已启用。" : "MCP 搜索设置已保存，当前仍关闭。", "ready");
+  } catch {
+    setSettingsFeedback("无法保存 MCP 搜索设置，请检查命令、工具名和参数。");
+  }
 }
 
 function resetProviderHealthStatus(): void {
@@ -1173,6 +1273,8 @@ function setSettingsPage(page: SettingsPageId): void {
     void refreshProviderStatus();
   } else if (page === "model-detail") {
     void refreshLlamaCppRuntimeStatus();
+  } else if (page === "advanced") {
+    void refreshWebSearchSettings();
   }
 }
 
@@ -2614,6 +2716,16 @@ llamaCppRuntimeRefreshAction.addEventListener("click", () => {
   void refreshLlamaCppRuntimeStatus();
 });
 
+webSearchSaveAction.addEventListener("click", () => {
+  if (!chatTurnState.isReplying) {
+    void saveWebSearchSettings();
+  }
+});
+
+webSearchRefreshAction.addEventListener("click", () => {
+  void refreshWebSearchSettings();
+});
+
 chatTabAction.addEventListener("click", () => {
   setActivePage("chat");
 });
@@ -3012,6 +3124,7 @@ void refreshDialogueMode();
 void refreshPresenceMode();
 void refreshUserProfile();
 void refreshProviderStatus();
+void refreshWebSearchSettings();
 void refreshMemory();
 setPetScaleValue(DEFAULT_PET_PRESENTATION_PREFERENCES.petScale);
 setPetAccessoryValue(DEFAULT_PET_PRESENTATION_PREFERENCES.accessoryPresetId);
