@@ -32,6 +32,7 @@
     "accept:packaged-local-llm": "node scripts/p2-20h-packaged-like-embedded-runtime-real-chat.mjs",
     "accept:p2-23c-real-ui-embedded-model": "node scripts/p2-23c-real-ui-embedded-model-conversation.mjs",
     "accept:p2-24b-real-local-model-persona-followup-qa": "node scripts/p2-24b-real-local-model-persona-followup-qa.mjs",
+    "accept:p2-24d-persona-relevance-regression": "node scripts/p2-24d-persona-relevance-regression-real-ui.mjs",
     "accept:p2-24c-proactive-speech-bubble": "node scripts/p2-24c-proactive-speech-bubble-real-ui.mjs",
     "accept:p2-29a-privacy-safe-mcp-web-search": "node scripts/p2-29a-privacy-safe-mcp-web-search-real-ui.mjs",
     "accept:p2-20x-electron-version-installer-notices": "node scripts/p2-20x-electron-version-installer-notices-acceptance.mjs",
