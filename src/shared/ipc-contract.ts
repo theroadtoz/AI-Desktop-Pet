@@ -116,6 +116,25 @@ export type ChatMemoryActivityPayload = {
   };
 };
 
+export type ChatContextTransparencyPayload = {
+  requestVersion: number;
+  contextBudget: {
+    originalMessageCount: number;
+    providerMessageCount: number;
+    compressed: boolean;
+    summaryMessageCount: number;
+    summarizedMessageCount: number;
+    recentMessageCount: number;
+  };
+  memory: {
+    injectionCount: number;
+  };
+  webSearch: {
+    included: boolean;
+    citationCount: number;
+  };
+};
+
 export type ConfigApiKeyRequest = {
   apiKeyRef: string;
 };
@@ -200,6 +219,7 @@ export type ChatApi = {
   onReplyError(handler: (error: ChatStreamErrorPayload) => void): () => void;
   onMemoryInjection(handler: (payload: ChatMemoryInjectionPayload) => void): () => void;
   onMemoryActivity(handler: (payload: ChatMemoryActivityPayload) => void): () => void;
+  onContextTransparency(handler: (payload: ChatContextTransparencyPayload) => void): () => void;
   onPetActivityEcho(handler: (echo: PetActivityEcho) => void): () => void;
   setInteractionActive(isActive: boolean): void;
 };

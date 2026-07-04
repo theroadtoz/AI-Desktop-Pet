@@ -1,5 +1,5 @@
 import type { DialogueModeId } from "../../shared/dialogue-style";
-import type { ChatMemoryActivityPayload } from "../../shared/ipc-contract";
+import type { ChatContextTransparencyPayload, ChatMemoryActivityPayload } from "../../shared/ipc-contract";
 import type { PresenceModeId } from "../../shared/presence-mode";
 import type { ProviderHealthResult } from "../../shared/provider-health";
 import type { ProviderStatus } from "../../shared/provider-config";
@@ -12,6 +12,8 @@ export const ACTIVITY_ECHO_FADING_MESSAGE = "在旁边陪着";
 export const ACTIVITY_ECHO_ACTIVE_MS = 5_000;
 export const ACTIVITY_ECHO_FADING_MS = 4_000;
 export const ACTIVITY_ECHO_DEDUPE_MS = 2_500;
+const HISTORY_CONTEXT_SUMMARY_TRIGGER = 12;
+const HISTORY_CONTEXT_RECENT_MESSAGE_BUDGET = 8;
 
 const DIALOGUE_MODE_LABELS: Readonly<Record<DialogueModeId, string>> = {
   default: "默认陪伴",
@@ -199,6 +201,71 @@ export function formatMemoryActivity(payload: ChatMemoryActivityPayload): {
   return {
     text: parts.join("；"),
     state
+  };
+}
+
+export function formatContextTransparency(payload: ChatContextTransparencyPayload): {
+  text: string;
+  state: StatusDatasetState;
+} {
+  const parts: string[] = [];
+  const budget = payload.contextBudget;
+
+  if (budget.compressed) {
+    parts.push(`长会话已收束：${budget.summarizedMessageCount} 条较早消息变成安全摘要，保留最近 ${budget.recentMessageCount} 条`);
+  } else {
+    parts.push("这轮只发送当前短上下文；不需要安全摘要");
+  }
+
+  if (payload.memory.injectionCount > 0) {
+    parts.push(`她这轮会带上 ${payload.memory.injectionCount} 条已允许记忆`);
+  } else {
+    parts.push("这轮没有带入记忆");
+  }
+
+  if (payload.webSearch.included) {
+    parts.push(`联网搜索只带入 ${payload.webSearch.citationCount} 条引用线索`);
+  } else {
+    parts.push("这轮没有带入联网搜索引用");
+  }
+
+  parts.push("打开历史只是本机查看；继续发送后才会交给当前 Provider");
+
+  return {
+    text: parts.join("；"),
+    state: budget.compressed || payload.memory.injectionCount > 0 || payload.webSearch.included
+      ? "ready"
+      : "fallback"
+  };
+}
+
+export function formatHistoryContextPreview(input: {
+  messageCount: number;
+  summaryTrigger?: number;
+  recentMessageBudget?: number;
+}): {
+  text: string;
+  state: StatusDatasetState;
+} {
+  const messageCount = Math.max(0, Math.floor(input.messageCount));
+  const summaryTrigger = input.summaryTrigger ?? HISTORY_CONTEXT_SUMMARY_TRIGGER;
+  const recentMessageBudget = input.recentMessageBudget ?? HISTORY_CONTEXT_RECENT_MESSAGE_BUDGET;
+
+  const nextMessageCount = messageCount + 1;
+
+  if (nextMessageCount > summaryTrigger) {
+    const recentCount = Math.min(nextMessageCount, recentMessageBudget);
+    const summarizedCount = Math.max(0, nextMessageCount - recentCount);
+
+    return {
+      text: `本地查看：${messageCount} 条消息不会自动发送；继续发送下一条后，预计 ${summarizedCount} 条较早消息会先变成安全摘要，保留最近 ${recentCount} 条。`,
+      state: "ready"
+    };
+  }
+
+  return {
+    text: `本地查看：${messageCount} 条消息不会自动发送；继续发送下一条后，会携带这段短上下文，预计不需要安全摘要。`,
+    state: "fallback"
   };
 }
 

@@ -14,6 +14,7 @@ import { release as getOsRelease } from "node:os";
 import { isAbsolute } from "node:path";
 import type { ChatContextBudgetSummary, ChatRequest, ChatRuntimeContext } from "../shared/chat-provider";
 import type {
+  ChatContextTransparencyPayload,
   ConfigApiKeyRequest,
   ConfigSetApiKeyRequest,
   ChatMemoryActivityPayload,
@@ -1289,6 +1290,33 @@ function createChatMemoryActivityPayload(input: {
   };
 }
 
+function createChatContextTransparencyPayload(input: {
+  requestVersion: number;
+  contextBudgetSummary: ChatContextBudgetSummary;
+  memoryInjectionCount: number;
+  webSearchIncluded: boolean;
+  webSearchCitationCount: number;
+}): ChatContextTransparencyPayload {
+  return {
+    requestVersion: input.requestVersion,
+    contextBudget: {
+      originalMessageCount: input.contextBudgetSummary.originalMessageCount,
+      providerMessageCount: input.contextBudgetSummary.providerMessageCount,
+      compressed: input.contextBudgetSummary.compressed,
+      summaryMessageCount: input.contextBudgetSummary.summaryMessageCount,
+      summarizedMessageCount: input.contextBudgetSummary.summarizedMessageCount,
+      recentMessageCount: input.contextBudgetSummary.recentMessageCount
+    },
+    memory: {
+      injectionCount: input.memoryInjectionCount
+    },
+    webSearch: {
+      included: input.webSearchIncluded,
+      citationCount: input.webSearchCitationCount
+    }
+  };
+}
+
 function isConfigApiKeyRequest(value: unknown): value is ConfigApiKeyRequest {
   const request = value as Partial<ConfigApiKeyRequest> | null;
 
@@ -2190,6 +2218,15 @@ app.whenReady().then(async () => {
     const contextBudget = budgetChatContext(request.messages);
 
     void resolveWebSearchForLatestMessage(submittedMessage.content).then((webSearchResolution) => {
+      const webSearchCitation = createWebSearchCitationPayload(webSearchResolution.context);
+
+      event.sender.send("chat:context-transparency", createChatContextTransparencyPayload({
+        requestVersion: request.requestVersion,
+        contextBudgetSummary: contextBudget.summary,
+        memoryInjectionCount: memoryContext.count,
+        webSearchIncluded: Boolean(webSearchResolution.context?.results.length),
+        webSearchCitationCount: webSearchCitation?.citations.length ?? 0
+      }));
       event.sender.send("chat:memory-injection", {
         requestVersion: request.requestVersion,
         count: memoryContext.count
@@ -2230,8 +2267,6 @@ app.whenReady().then(async () => {
         ...(webSearchResolution.context ? { webSearchContext: webSearchResolution.context } : {}),
         ...(userProfileContext ? { userProfileContext } : {})
       };
-
-      const webSearchCitation = createWebSearchCitationPayload(webSearchResolution.context);
 
       return chatEngineForRequest.startChatStream(providerRequest, {
         onDelta(delta) {

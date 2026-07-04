@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import test from "node:test";
-import type { ChatMemoryActivityPayload } from "../src/shared/ipc-contract.ts";
+import type { ChatContextTransparencyPayload, ChatMemoryActivityPayload } from "../src/shared/ipc-contract.ts";
 
 const require = createRequire(import.meta.url);
 const {
@@ -68,6 +68,34 @@ test("chat context budget summarizes older messages without copying their text",
     recentMessageCount: CHAT_CONTEXT_RECENT_MESSAGE_BUDGET
   });
   assert.doesNotMatch(JSON.stringify(activityContextBudget), /old-private-context-that-must-not-appear|content|prompt|providerMessages/);
+
+  const transparencyPayload: ChatContextTransparencyPayload = {
+    requestVersion: 1,
+    contextBudget: result.summary,
+    memory: {
+      injectionCount: 2
+    },
+    webSearch: {
+      included: true,
+      citationCount: 1
+    }
+  };
+
+  assert.deepEqual(Object.keys(transparencyPayload).sort(), ["contextBudget", "memory", "requestVersion", "webSearch"].sort());
+  assert.deepEqual(Object.keys(transparencyPayload.memory), ["injectionCount"]);
+  assert.deepEqual(Object.keys(transparencyPayload.webSearch).sort(), ["citationCount", "included"].sort());
+  assert.deepEqual(Object.keys(transparencyPayload.contextBudget).sort(), [
+    "compressed",
+    "originalMessageCount",
+    "providerMessageCount",
+    "recentMessageCount",
+    "summarizedMessageCount",
+    "summaryMessageCount"
+  ].sort());
+  assert.doesNotMatch(
+    JSON.stringify(transparencyPayload),
+    /old-private-context-that-must-not-appear|message-0|content|prompt|providerMessages|safeQuery|snippet|result body/
+  );
   assert.deepEqual(
     recentMessages.map((message) => message.content),
     messages.slice(-CHAT_CONTEXT_RECENT_MESSAGE_BUDGET).map((message) => message.content)

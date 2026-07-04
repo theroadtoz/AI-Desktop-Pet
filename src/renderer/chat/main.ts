@@ -2,7 +2,7 @@ import "./styles.css";
 import type { ChatMessage, ChatRole } from "../../shared/chat";
 import type { Conversation, ConversationSummary } from "../../shared/chat-history";
 import type { DialogueModeId, DialogueModeView } from "../../shared/dialogue-style";
-import type { ChatMemoryActivityPayload } from "../../shared/ipc-contract";
+import type { ChatContextTransparencyPayload, ChatMemoryActivityPayload } from "../../shared/ipc-contract";
 import type { PresenceModeId, PresenceModeView } from "../../shared/presence-mode";
 import type { MemoryCard, MemorySummary } from "../../shared/chat-memory";
 import {
@@ -50,6 +50,8 @@ import {
   ACTIVITY_ECHO_FADING_MS,
   ACTIVITY_ECHO_IDLE_MESSAGE,
   formatCompanionShelf,
+  formatContextTransparency,
+  formatHistoryContextPreview,
   formatMemoryActivity,
   formatMemoryRibbon,
   formatModeLabel,
@@ -478,6 +480,8 @@ let currentUserProfile: UserProfile | null = null;
 let currentMemoryInjectionCount: number | null = null;
 let latestMemoryActivity: ReturnType<typeof formatMemoryActivity> | null = null;
 let latestMemoryActivityRequestVersion: number | null = null;
+let latestContextTransparency: ReturnType<typeof formatContextTransparency> | null = null;
+let latestContextTransparencyRequestVersion: number | null = null;
 let latestLocalModelDiagnosticSummary: LocalModelDiagnosticSafeSummary | null = null;
 let isLocalModelDiagnosticRunning = false;
 
@@ -1260,6 +1264,12 @@ function setMemoryActivity(payload: ChatMemoryActivityPayload): void {
   renderLatestMemoryActivityFeedback();
 }
 
+function setContextTransparency(payload: ChatContextTransparencyPayload): void {
+  latestContextTransparency = formatContextTransparency(payload);
+  latestContextTransparencyRequestVersion = payload.requestVersion;
+  setChatSessionNote(latestContextTransparency.text, latestContextTransparency.state);
+}
+
 function formatMessageRoleLabel(role: ChatRole): string {
   return role === "user" ? "你" : "真央";
 }
@@ -1883,6 +1893,14 @@ function renderHistoryDetail(): void {
   const boundary = document.createElement("p");
   boundary.className = "selection-note";
   boundary.textContent = "打开历史只恢复本地界面；只有选择“继续发送给当前 Provider”后，下一条消息才会携带此会话上下文。";
+  const contextPreview = document.createElement("p");
+  const contextPreviewPresentation = formatHistoryContextPreview({
+    messageCount: selectedHistoryConversation.messages.length
+  });
+  contextPreview.id = "history-context-preview";
+  contextPreview.className = "status-box";
+  contextPreview.dataset.state = contextPreviewPresentation.state;
+  contextPreview.textContent = contextPreviewPresentation.text;
   const messageItems = document.createElement("ol");
   messageItems.className = "history-message-list";
 
@@ -1941,7 +1959,7 @@ function renderHistoryDetail(): void {
     confirmation.hidden = false;
   });
   actions.append(openButton, continueButton, deleteButton);
-  historyDetailElement.append(title, boundary, messageItems, actions, confirmation);
+  historyDetailElement.append(title, boundary, contextPreview, messageItems, actions, confirmation);
 }
 
 async function refreshHistoryList(): Promise<void> {
@@ -2090,6 +2108,8 @@ function finishReplying(requestVersion: number, activityEcho: ChatTurnLifecycleE
   setChatSessionNote(result.sessionNote, result.sessionNoteState);
   if (activityEcho === "回复完成" && latestMemoryActivity && latestMemoryActivityRequestVersion === requestVersion) {
     setChatSessionNote(latestMemoryActivity.text, latestMemoryActivity.state);
+  } else if (activityEcho === "回复完成" && latestContextTransparency && latestContextTransparencyRequestVersion === requestVersion) {
+    setChatSessionNote(latestContextTransparency.text, latestContextTransparency.state);
   }
   chatInput.focus();
 }
@@ -2763,6 +2783,14 @@ window.chatApi?.onMemoryActivity((payload) => {
   }
 
   setMemoryActivity(payload);
+});
+
+window.chatApi?.onContextTransparency((payload) => {
+  if (!shouldAcceptChatTurnEvent(chatTurnState, payload.requestVersion)) {
+    return;
+  }
+
+  setContextTransparency(payload);
 });
 
 window.chatApi?.onPetActivityEcho((echo) => {

@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type {
   ChatApi,
+  ChatContextTransparencyPayload,
   ChatMemoryActivityPayload,
   ChatMemoryInjectionPayload,
   ChatSendRequest,
@@ -545,6 +546,46 @@ function isChatMemoryActivityPayload(value: unknown): value is ChatMemoryActivit
     isNonNegativeSafeInteger(contextBudget.summaryMessageCount) &&
     isNonNegativeSafeInteger(contextBudget.summarizedMessageCount) &&
     isNonNegativeSafeInteger(contextBudget.recentMessageCount)
+  );
+}
+
+function isChatContextTransparencyPayload(value: unknown): value is ChatContextTransparencyPayload {
+  if (!hasExactKeys(value, ["requestVersion", "contextBudget", "memory", "webSearch"])) {
+    return false;
+  }
+
+  const requestVersion = value.requestVersion;
+  const contextBudget = value.contextBudget;
+  const memory = value.memory;
+  const webSearch = value.webSearch;
+
+  if (!hasExactKeys(contextBudget, [
+    "originalMessageCount",
+    "providerMessageCount",
+    "compressed",
+    "summaryMessageCount",
+    "summarizedMessageCount",
+    "recentMessageCount"
+  ]) || !hasExactKeys(memory, ["injectionCount"]) || !hasExactKeys(webSearch, [
+    "included",
+    "citationCount"
+  ])) {
+    return false;
+  }
+
+  return Boolean(
+    typeof requestVersion === "number" &&
+    Number.isSafeInteger(requestVersion) &&
+    requestVersion > 0 &&
+    isNonNegativeSafeInteger(contextBudget.originalMessageCount) &&
+    isNonNegativeSafeInteger(contextBudget.providerMessageCount) &&
+    typeof contextBudget.compressed === "boolean" &&
+    isNonNegativeSafeInteger(contextBudget.summaryMessageCount) &&
+    isNonNegativeSafeInteger(contextBudget.summarizedMessageCount) &&
+    isNonNegativeSafeInteger(contextBudget.recentMessageCount) &&
+    isNonNegativeSafeInteger(memory.injectionCount) &&
+    typeof webSearch.included === "boolean" &&
+    isNonNegativeSafeInteger(webSearch.citationCount)
   );
 }
 
@@ -1520,6 +1561,18 @@ const api: ChatApi = {
     ipcRenderer.on("chat:memory-activity", listener);
     return () => {
       ipcRenderer.removeListener("chat:memory-activity", listener);
+    };
+  },
+  onContextTransparency(handler) {
+    const listener = (_event: Electron.IpcRendererEvent, payload: unknown): void => {
+      if (isChatContextTransparencyPayload(payload)) {
+        handler(payload);
+      }
+    };
+
+    ipcRenderer.on("chat:context-transparency", listener);
+    return () => {
+      ipcRenderer.removeListener("chat:context-transparency", listener);
     };
   },
   onPetActivityEcho(handler) {

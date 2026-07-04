@@ -3,6 +3,8 @@ import test from "node:test";
 import {
   ACTIVITY_ECHO_IDLE_MESSAGE,
   formatCompanionShelf,
+  formatContextTransparency,
+  formatHistoryContextPreview,
   formatMemoryActivity,
   formatMemoryRibbon,
   formatModeLabel,
@@ -11,7 +13,7 @@ import {
   formatProviderHealthResult,
   formatProviderStatus
 } from "../src/renderer/chat/partner-presence-presenter.ts";
-import type { ChatMemoryActivityPayload } from "../src/shared/ipc-contract.ts";
+import type { ChatContextTransparencyPayload, ChatMemoryActivityPayload } from "../src/shared/ipc-contract.ts";
 
 function createMemoryActivity(overrides: Partial<ChatMemoryActivityPayload> = {}): ChatMemoryActivityPayload {
   const base: ChatMemoryActivityPayload = {
@@ -53,6 +55,44 @@ function createMemoryActivity(overrides: Partial<ChatMemoryActivityPayload> = {}
     contextBudget: {
       ...base.contextBudget,
       ...overrides.contextBudget
+    }
+  };
+}
+
+function createContextTransparency(overrides: Partial<ChatContextTransparencyPayload> = {}): ChatContextTransparencyPayload {
+  const base: ChatContextTransparencyPayload = {
+    requestVersion: 1,
+    contextBudget: {
+      originalMessageCount: 1,
+      providerMessageCount: 1,
+      compressed: false,
+      summaryMessageCount: 0,
+      summarizedMessageCount: 0,
+      recentMessageCount: 1
+    },
+    memory: {
+      injectionCount: 0
+    },
+    webSearch: {
+      included: false,
+      citationCount: 0
+    }
+  };
+
+  return {
+    ...base,
+    ...overrides,
+    contextBudget: {
+      ...base.contextBudget,
+      ...overrides.contextBudget
+    },
+    memory: {
+      ...base.memory,
+      ...overrides.memory
+    },
+    webSearch: {
+      ...base.webSearch,
+      ...overrides.webSearch
     }
   };
 }
@@ -225,6 +265,56 @@ test("memory activity presenter keeps companion wording and safe fields only", (
 
   assert.equal(sensitive.text, "她跳过了敏感内容；这轮没有带入记忆");
   assert.doesNotMatch(sensitive.text, /SECRET_SENTINEL|capturedCount|skippedReason|memoryContext|providerMessages|prompt/);
+});
+
+test("context transparency presenter describes short and compressed turns without debug fields", () => {
+  const short = formatContextTransparency(createContextTransparency());
+
+  assert.equal(short.state, "fallback");
+  assert.match(short.text, /当前短上下文/);
+  assert.match(short.text, /不需要安全摘要/);
+  assert.match(short.text, /没有带入记忆/);
+  assert.match(short.text, /打开历史只是本机查看/);
+  assert.doesNotMatch(short.text, /requestVersion|originalMessageCount|providerMessages|prompt|SECRET_SENTINEL/);
+
+  const compressed = formatContextTransparency(createContextTransparency({
+    contextBudget: {
+      originalMessageCount: 13,
+      providerMessageCount: 9,
+      compressed: true,
+      summaryMessageCount: 1,
+      summarizedMessageCount: 5,
+      recentMessageCount: 8
+    },
+    memory: {
+      injectionCount: 2
+    },
+    webSearch: {
+      included: true,
+      citationCount: 3
+    }
+  }));
+
+  assert.equal(compressed.state, "ready");
+  assert.match(compressed.text, /5 条较早消息变成安全摘要/);
+  assert.match(compressed.text, /保留最近 8 条/);
+  assert.match(compressed.text, /2 条已允许记忆/);
+  assert.match(compressed.text, /3 条引用线索/);
+  assert.doesNotMatch(compressed.text, /safeQuery|snippet|result body|providerMessages|requestVersion|prompt/);
+});
+
+test("history context preview only estimates count and boundary", () => {
+  const short = formatHistoryContextPreview({ messageCount: 3 });
+  assert.equal(short.state, "fallback");
+  assert.match(short.text, /3 条消息不会自动发送/);
+  assert.match(short.text, /预计不需要安全摘要/);
+
+  const long = formatHistoryContextPreview({ messageCount: 12, summaryTrigger: 12, recentMessageBudget: 8 });
+  assert.equal(long.state, "ready");
+  assert.match(long.text, /12 条消息不会自动发送/);
+  assert.match(long.text, /5 条较早消息/);
+  assert.match(long.text, /保留最近 8 条/);
+  assert.doesNotMatch(long.text, /providerMessages|content|prompt|SECRET_SENTINEL|用户原文/);
 });
 
 test("companion shelf presenter keeps action echo and lock wording", () => {
