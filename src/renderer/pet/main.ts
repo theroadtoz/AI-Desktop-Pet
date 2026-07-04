@@ -31,7 +31,10 @@ import {
   type EmotionPresentation
 } from "../../shared/emotion-presentation";
 import type { PetPresentationIntent } from "../../shared/pet-role-state";
-import { getPetActionTriggerActionType } from "../../shared/pet-action-trigger";
+import {
+  getPetActionStateActionType,
+  getPetActionStateForReason
+} from "../../shared/pet-action-state-machine";
 import { getPetAccessoryPreset, type PetAccessoryPresetId } from "../../shared/pet-accessory";
 import {
   clampProactiveSpeechBubbleDuration,
@@ -668,9 +671,17 @@ const removeActionTriggerListener = window.petApi?.onActionTrigger((trigger) => 
     clearProactiveSpeechBubble();
   }
 
+  const state = getPetActionStateForReason(trigger.reason);
+  const actionType = getPetActionStateActionType(state.stateId);
   interactionActionPlayer.playAction(
-    getPetInteractionAction(getPetActionTriggerActionType(trigger.reason)),
-    trigger.reason
+    getPetInteractionAction(actionType),
+    trigger.reason,
+    {
+      stateId: state.stateId,
+      modeId: currentDialogueModeId,
+      presenceModeId: currentPresenceModeId,
+      candidateActionTypes: [actionType]
+    }
   );
 }) ?? null;
 const removeProactiveSpeechBubbleListener = window.petApi?.onProactiveSpeechBubble((payload) => {

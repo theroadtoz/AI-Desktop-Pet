@@ -75,6 +75,7 @@ import {
   isPetNearWorkAreaEdge,
   type PetActionTriggerReason
 } from "../shared/pet-action-trigger";
+import { selectPetActionStateForModeChange } from "../shared/pet-action-state-machine";
 import { ChatEngineBusyError, createChatEngine, type ChatEngine } from "./services/chat/chat-engine";
 import { budgetChatContext } from "./services/chat/chat-context-budget";
 import { createChatReplySustainTriggerController } from "./services/chat/chat-reply-sustain-trigger";
@@ -177,6 +178,7 @@ let currentPresenceModeId: PresenceModeId = "default";
 let performanceHeartbeat: NodeJS.Timeout | null = null;
 let isPetLocked = false;
 let initialEdgeGlanceTimer: NodeJS.Timeout | null = null;
+let pendingModeActionStateTriggerTimer: NodeJS.Timeout | null = null;
 let startupProactiveSpeechBubbleTimer: NodeJS.Timeout | null = null;
 let idleProactiveSpeechBubbleTimer: NodeJS.Timeout | null = null;
 let hasHandledStartupProactiveSpeechBubble = false;
@@ -189,6 +191,7 @@ const DEFAULT_API_KEY_REF = "openai-compatible-default";
 const PET_RENDERER_MAX_RECOVERIES = 3;
 const PET_WINDOW_TITLE = "Desktop Pet";
 const PET_ACTION_TRIGGER_THROTTLE_MS = 700;
+const PET_MODE_ACTION_STATE_TRIGGER_DELAY_MS = 2_000;
 const PET_INITIAL_EDGE_GLANCE_DELAY_MS = 2_350;
 const PET_DRAG_END_EDGE_GLANCE_DELAY_MS = 100;
 const PET_CHAT_REPLY_SUSTAIN_MIN_CHARS = 42;
@@ -697,6 +700,23 @@ function sendPetActionTrigger(reason: PetActionTriggerReason): boolean {
   lastPetActionTriggerAtByReason[reason] = now;
   petWindow.webContents.send("pet:action-trigger", { reason });
   return true;
+}
+
+function cancelPendingModeActionStateTrigger(): void {
+  if (!pendingModeActionStateTriggerTimer) {
+    return;
+  }
+
+  clearTimeout(pendingModeActionStateTriggerTimer);
+  pendingModeActionStateTriggerTimer = null;
+}
+
+function schedulePetModeActionStateTrigger(reason: PetActionTriggerReason): void {
+  cancelPendingModeActionStateTrigger();
+  pendingModeActionStateTriggerTimer = setTimeout(() => {
+    pendingModeActionStateTriggerTimer = null;
+    sendPetActionTrigger(reason);
+  }, PET_MODE_ACTION_STATE_TRIGGER_DELAY_MS);
 }
 
 function getProactiveSpeechBubbleSkipReason(): string | null {
@@ -2529,6 +2549,10 @@ app.whenReady().then(async () => {
       });
       notifyChatDialogueModeChanged(currentDialogueModeId);
       notifyPetDialogueModeChanged(currentDialogueModeId);
+      const dialogueActionState = selectPetActionStateForModeChange({ dialogueModeId: currentDialogueModeId });
+      if (dialogueActionState && dialogueActionState.stateId !== "idle") {
+        schedulePetModeActionStateTrigger(dialogueActionState.triggerReason);
+      }
       nextIdleProactiveSpeechBubbleReason = "mode_presence";
       scheduleIdleProactiveSpeechBubble();
     }
@@ -2573,6 +2597,10 @@ app.whenReady().then(async () => {
       });
       notifyChatPresenceModeChanged(currentPresenceModeId);
       notifyPetPresenceModeChanged(currentPresenceModeId);
+      const presenceActionState = selectPetActionStateForModeChange({ presenceModeId: currentPresenceModeId });
+      if (presenceActionState) {
+        schedulePetModeActionStateTrigger(presenceActionState.triggerReason);
+      }
       if (currentPresenceModeId !== "sleep") {
         nextIdleProactiveSpeechBubbleReason = "mode_presence";
         scheduleIdleProactiveSpeechBubble();
@@ -2794,6 +2822,7 @@ app.on("window-all-closed", () => {
 });
 
 app.on("will-quit", () => {
+  cancelPendingModeActionStateTrigger();
   cancelStartupProactiveSpeechBubbleTimer();
   bundledLlamaCppRuntime?.stop();
   stopLlamaCppRuntime();

@@ -85,6 +85,7 @@ test("pet interaction action started keeps only safe action summary fields", () 
       type: "thinking",
       reason: "click_body",
       durationMs: 1400,
+      stateId: "work",
       modeId: "work",
       presenceModeId: "quiet",
       candidateActionTypes: ["thinking", "focus"],
@@ -100,15 +101,16 @@ test("pet interaction action started keeps only safe action summary fields", () 
   });
 
   assert.deepEqual(event, {
-    type: "pet_interaction_action_started",
-    payload: {
-      type: "thinking",
-      reason: "click_body",
-      durationMs: 1400,
-      modeId: "work",
-      presenceModeId: "quiet",
-      candidateActionTypes: ["thinking", "focus"],
-      selectedActionType: "thinking"
+      type: "pet_interaction_action_started",
+      payload: {
+        type: "thinking",
+        reason: "click_body",
+        durationMs: 1400,
+        stateId: "work",
+        modeId: "work",
+        presenceModeId: "quiet",
+        candidateActionTypes: ["thinking", "focus"],
+        selectedActionType: "thinking"
     }
   });
   assertNoForbiddenKeys(event?.payload);
@@ -156,6 +158,30 @@ test("action trigger telemetry keeps only fixed safe trigger reasons", () => {
       messages: ["sentinel"]
     }
   });
+  const stateWork = parsePetRendererTelemetryEvent({
+    type: "pet_interaction_action_started",
+    payload: {
+      type: "workFocus",
+      reason: "state_work",
+      stateId: "work",
+      durationMs: 1600,
+      modeId: "work",
+      presenceModeId: "focus",
+      prompt: "sentinel",
+      providerRequestBody: "sentinel",
+      factCardBody: "sentinel"
+    }
+  });
+  const unsafeStateId = parsePetRendererTelemetryEvent({
+    type: "pet_interaction_action_started",
+    payload: {
+      type: "replyThinking",
+      reason: "state_local_model_busy",
+      stateId: "C:\\private\\model.gguf",
+      durationMs: 1250,
+      content: "sentinel"
+    }
+  });
   const unsafeAction = parsePetRendererTelemetryEvent({
     type: "pet_interaction_action_started",
     payload: {
@@ -196,6 +222,25 @@ test("action trigger telemetry keeps only fixed safe trigger reasons", () => {
       durationMs: 1100
     }
   });
+  assert.deepEqual(stateWork, {
+    type: "pet_interaction_action_started",
+    payload: {
+      type: "workFocus",
+      reason: "state_work",
+      stateId: "work",
+      durationMs: 1600,
+      modeId: "work",
+      presenceModeId: "focus"
+    }
+  });
+  assert.deepEqual(unsafeStateId, {
+    type: "pet_interaction_action_started",
+    payload: {
+      type: "replyThinking",
+      reason: "state_local_model_busy",
+      durationMs: 1250
+    }
+  });
   assert.deepEqual(unsafeAction, {
     type: "pet_interaction_action_started",
     payload: {
@@ -207,6 +252,8 @@ test("action trigger telemetry keeps only fixed safe trigger reasons", () => {
   assertNoForbiddenKeys(unsafeReason?.payload);
   assertNoForbiddenKeys(rapidTouchCombo?.payload);
   assertNoForbiddenKeys(replySustain?.payload);
+  assertNoForbiddenKeys(stateWork?.payload);
+  assertNoForbiddenKeys(unsafeStateId?.payload);
   assertNoForbiddenKeys(unsafeAction?.payload);
 });
 

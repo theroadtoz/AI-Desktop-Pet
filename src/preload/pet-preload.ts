@@ -49,7 +49,19 @@ const petActionTriggerReasons = [
   "chat_reply_waiting",
   "pet_edge_settled",
   "rapid_touch_combo",
-  "chat_reply_sustain"
+  "chat_reply_sustain",
+  "state_idle",
+  "state_greet",
+  "state_listen",
+  "state_think",
+  "state_reply_sustain",
+  "state_sleep",
+  "state_work",
+  "state_game",
+  "state_read",
+  "state_edge",
+  "state_flustered",
+  "state_local_model_busy"
 ] as const;
 const scaleWheelModifierPattern = /^(Ctrl|Alt|Shift|Meta)(\+(Ctrl|Alt|Shift|Meta))*$/;
 

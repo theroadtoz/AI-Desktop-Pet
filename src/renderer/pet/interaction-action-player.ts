@@ -1,6 +1,8 @@
 import type { DialogueModeId } from "../../shared/dialogue-style";
 import type { EmotionPresentation } from "../../shared/emotion-presentation";
 import type { PetAccessoryPresetId } from "../../shared/pet-accessory";
+import type { PetActionStateId } from "../../shared/pet-action-state-machine";
+import type { PetActionTriggerReason } from "../../shared/pet-action-trigger";
 import type { PresenceModeId } from "../../shared/presence-mode";
 import type {
   InteractionActionCooldownSkipReason,
@@ -18,17 +20,13 @@ export type InteractionActionReason =
   | "click_head"
   | "click_body"
   | "window_shake_feedback"
-  | "chat_opened"
-  | "chat_input_focus"
-  | "chat_reply_waiting"
-  | "pet_edge_settled"
-  | "rapid_touch_combo"
-  | "chat_reply_sustain";
+  | PetActionTriggerReason;
 
 export type InteractionActionStrategy = {
-  modeId: DialogueModeId;
+  stateId?: PetActionStateId;
+  modeId?: DialogueModeId;
   presenceModeId?: PresenceModeId;
-  candidateActionTypes: readonly PetInteractionActionType[];
+  candidateActionTypes?: readonly PetInteractionActionType[];
 };
 
 type PersistentPresentation = {
@@ -121,6 +119,22 @@ export function createInteractionActionPlayer({
   let lastWindowShakeFeedbackStartedAtMs: number | undefined;
   const lastStrongInteractionActionFinishedAtMsByType: Partial<Record<PetInteractionActionType, number>> = {};
 
+  function createStrategyTelemetry(strategy: InteractionActionStrategy | undefined, action: PetInteractionAction): Record<string, unknown> {
+    if (!strategy) {
+      return {};
+    }
+
+    return {
+      ...(strategy.stateId ? { stateId: strategy.stateId } : {}),
+      ...(strategy.modeId ? { modeId: strategy.modeId } : {}),
+      ...(strategy.presenceModeId ? { presenceModeId: strategy.presenceModeId } : {}),
+      ...(strategy.candidateActionTypes ? {
+        candidateActionTypes: strategy.candidateActionTypes,
+        selectedActionType: action.type
+      } : {})
+    };
+  }
+
   function finishActiveAction(action: PetInteractionAction): boolean {
     if (activeInteractionAction?.action !== action) {
       return false;
@@ -173,8 +187,7 @@ export function createInteractionActionPlayer({
         type: action.type,
         reason,
         skipReason,
-        ...(strategy ? { modeId: strategy.modeId } : {}),
-        ...(strategy?.presenceModeId ? { presenceModeId: strategy.presenceModeId } : {}),
+        ...createStrategyTelemetry(strategy, action),
         ...(activeInteractionAction ? { activeType: activeInteractionAction.action.type } : {})
       });
       return false;
@@ -184,12 +197,7 @@ export function createInteractionActionPlayer({
       type: action.type,
       reason,
       durationMs: action.durationMs,
-      ...(strategy ? {
-        modeId: strategy.modeId,
-        ...(strategy.presenceModeId ? { presenceModeId: strategy.presenceModeId } : {}),
-        candidateActionTypes: strategy.candidateActionTypes,
-        selectedActionType: action.type
-      } : {})
+      ...createStrategyTelemetry(strategy, action)
     });
     boostInteraction(action.durationMs + 250);
     if (action.lookTarget) {

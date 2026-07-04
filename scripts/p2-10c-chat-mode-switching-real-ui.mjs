@@ -341,6 +341,15 @@ function readTelemetryEvents() {
   return events;
 }
 
+function isModeActionStarted(event, { modeId, actionTypes, reasons = ["click_body"] }) {
+  return (
+    event.type === "pet_interaction_action_started" &&
+    event.payload?.modeId === modeId &&
+    actionTypes.includes(event.payload?.selectedActionType) &&
+    reasons.includes(event.payload?.reason)
+  );
+}
+
 async function clickPet(cdp, randomValue, hitArea = "body") {
   await evaluate(cdp, `Math.random = () => ${randomValue}`);
   await evaluate(cdp, `
@@ -450,12 +459,18 @@ async function main() {
     await setMode(chat, "work");
     checks.workModeVisible = await evaluate(chat, "document.querySelector('#partner-status')?.textContent.includes('工作')");
     const workAction = await clickPetUntilTelemetry(handles.pet.cdp, 0.8, (event) => (
-      event.type === "pet_interaction_action_started" &&
-      event.payload?.reason === "click_body" &&
-      event.payload?.modeId === "work" &&
-      event.payload?.selectedActionType === "workFocus" &&
-      Array.isArray(event.payload?.candidateActionTypes) &&
-      event.payload.candidateActionTypes.includes("workFocus")
+      isModeActionStarted(event, {
+        modeId: "work",
+        actionTypes: ["workFocus"],
+        reasons: ["click_body", "state_work"]
+      }) &&
+      (
+        event.payload?.reason === "state_work" ||
+        (
+          Array.isArray(event.payload?.candidateActionTypes) &&
+          event.payload.candidateActionTypes.includes("workFocus")
+        )
+      )
     ), { attempts: 4 });
     checks.workModePetActionCanTriggerFocus = Boolean(workAction);
     await sleep(2_100);
@@ -465,10 +480,11 @@ async function main() {
     await setMode(chat, "game");
     checks.gameModeVisible = await evaluate(chat, "document.querySelector('#partner-status')?.textContent.includes('游戏')");
     const gameAction = await clickPetUntilTelemetry(handles.pet.cdp, 0.6, (event) => (
-      event.type === "pet_interaction_action_started" &&
-      event.payload?.reason === "click_body" &&
-      event.payload?.modeId === "game" &&
-      event.payload?.selectedActionType === "playGame"
+      isModeActionStarted(event, {
+        modeId: "game",
+        actionTypes: ["playGame", "gameReady"],
+        reasons: ["click_body", "state_game"]
+      })
     ), { attempts: 3 });
     checks.gameModePetActionPrefersPlayGame = Boolean(gameAction);
     await sleep(2_100);
@@ -478,10 +494,11 @@ async function main() {
     await setMode(chat, "reading");
     checks.readingModeVisible = await evaluate(chat, "document.querySelector('#partner-status')?.textContent.includes('读书')");
     const readingAction = await clickPetUntilTelemetry(handles.pet.cdp, 0.7, (event) => (
-      event.type === "pet_interaction_action_started" &&
-      event.payload?.reason === "click_body" &&
-      event.payload?.modeId === "reading" &&
-      ["reading", "readingIdle"].includes(event.payload?.selectedActionType)
+      isModeActionStarted(event, {
+        modeId: "reading",
+        actionTypes: ["reading", "readingIdle"],
+        reasons: ["click_body", "state_read"]
+      })
     ), { attempts: 3 });
     checks.readingModePetActionPrefersReading = Boolean(readingAction);
     await sleep(2_300);

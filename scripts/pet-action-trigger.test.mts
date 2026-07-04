@@ -9,10 +9,130 @@ import {
   isPetNearWorkAreaEdge,
   parsePetActionTrigger
 } from "../src/shared/pet-action-trigger.ts";
+import {
+  PET_ACTION_STATE_CATALOG,
+  PET_ACTION_STATE_IDS,
+  getPetActionState,
+  getPetActionStateActionType,
+  getPetActionStateForReason,
+  isPetActionStateId,
+  selectPetActionStateForModeChange
+} from "../src/shared/pet-action-state-machine.ts";
 import { createChatReplySustainTriggerController } from "../src/main/services/chat/chat-reply-sustain-trigger.ts";
 import { calculateInitialPetBounds } from "../src/shared/pet-presentation.ts";
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const EXPECTED_STATE_ACTIONS = {
+  idle: { triggerReason: "state_idle", actionType: "softSmile" },
+  greet: { triggerReason: "state_greet", actionType: "greeting" },
+  listen: { triggerReason: "state_listen", actionType: "listen" },
+  think: { triggerReason: "state_think", actionType: "replyThinking" },
+  "reply-sustain": { triggerReason: "state_reply_sustain", actionType: "replySustain" },
+  sleep: { triggerReason: "state_sleep", actionType: "doze" },
+  work: { triggerReason: "state_work", actionType: "workFocus" },
+  game: { triggerReason: "state_game", actionType: "gameReady" },
+  read: { triggerReason: "state_read", actionType: "readingIdle" },
+  edge: { triggerReason: "state_edge", actionType: "edgeGlance" },
+  flustered: { triggerReason: "state_flustered", actionType: "flusteredGlance" },
+  "local-model-busy": { triggerReason: "state_local_model_busy", actionType: "replyThinking" }
+} as const;
+
+const EXPECTED_ACTIONS_BY_REASON = {
+  chat_opened: "listen",
+  chat_input_focus: "listen",
+  chat_reply_waiting: "replyThinking",
+  pet_edge_settled: "edgeGlance",
+  rapid_touch_combo: "flusteredGlance",
+  chat_reply_sustain: "replySustain",
+  state_idle: "softSmile",
+  state_greet: "greeting",
+  state_listen: "listen",
+  state_think: "replyThinking",
+  state_reply_sustain: "replySustain",
+  state_sleep: "doze",
+  state_work: "workFocus",
+  state_game: "gameReady",
+  state_read: "readingIdle",
+  state_edge: "edgeGlance",
+  state_flustered: "flusteredGlance",
+  state_local_model_busy: "replyThinking"
+} as const;
+
+test("pet action state catalog maps every state to a fixed safe body action", () => {
+  assert.deepEqual(PET_ACTION_STATE_IDS, [
+    "idle",
+    "greet",
+    "listen",
+    "think",
+    "reply-sustain",
+    "sleep",
+    "work",
+    "game",
+    "read",
+    "edge",
+    "flustered",
+    "local-model-busy"
+  ]);
+
+  for (const stateId of PET_ACTION_STATE_IDS) {
+    const state = getPetActionState(stateId);
+    const expected = EXPECTED_STATE_ACTIONS[stateId];
+
+    assert.equal(isPetActionStateId(stateId), true);
+    assert.equal(state.stateId, stateId);
+    assert.equal(state.triggerReason, expected.triggerReason);
+    assert.equal(state.actionType, expected.actionType);
+    assert.equal(getPetActionStateActionType(stateId), expected.actionType);
+    assert.equal(state.priority > 0, true);
+    assert.equal(state.minimumIntervalMs >= 0, true);
+    assert.equal(state.safeSummaryLabel.length > 0, true);
+  }
+
+  assert.equal(isPetActionStateId("provider_selected_motion"), false);
+  assert.deepEqual(Object.keys(PET_ACTION_STATE_CATALOG), [...PET_ACTION_STATE_IDS]);
+});
+
+test("pet action state machine keeps legacy trigger reasons as compatibility entries", () => {
+  const expectedStatesByReason = {
+    chat_opened: "listen",
+    chat_input_focus: "listen",
+    chat_reply_waiting: "think",
+    pet_edge_settled: "edge",
+    rapid_touch_combo: "flustered",
+    chat_reply_sustain: "reply-sustain",
+    state_idle: "idle",
+    state_greet: "greet",
+    state_listen: "listen",
+    state_think: "think",
+    state_reply_sustain: "reply-sustain",
+    state_sleep: "sleep",
+    state_work: "work",
+    state_game: "game",
+    state_read: "read",
+    state_edge: "edge",
+    state_flustered: "flustered",
+    state_local_model_busy: "local-model-busy"
+  } as const;
+
+  for (const reason of PET_ACTION_TRIGGER_REASONS) {
+    const state = getPetActionStateForReason(reason);
+    assert.equal(state.stateId, expectedStatesByReason[reason]);
+    assert.equal(state.actionType, EXPECTED_ACTIONS_BY_REASON[reason]);
+  }
+});
+
+test("pet action state selector maps mode changes to fixed state reasons", () => {
+  assert.equal(selectPetActionStateForModeChange({ dialogueModeId: "default" })?.stateId, "idle");
+  assert.equal(selectPetActionStateForModeChange({ dialogueModeId: "work" })?.triggerReason, "state_work");
+  assert.equal(selectPetActionStateForModeChange({ dialogueModeId: "game" })?.triggerReason, "state_game");
+  assert.equal(selectPetActionStateForModeChange({ dialogueModeId: "reading" })?.triggerReason, "state_read");
+  assert.equal(selectPetActionStateForModeChange({ presenceModeId: "sleep" })?.triggerReason, "state_sleep");
+  assert.equal(
+    selectPetActionStateForModeChange({ dialogueModeId: "game", presenceModeId: "sleep" })?.triggerReason,
+    "state_sleep"
+  );
+});
 
 test("pet action trigger allowlist only exposes fixed action and reason combinations", () => {
   assert.deepEqual(PET_ACTION_TRIGGER_REASONS, [
@@ -21,16 +141,21 @@ test("pet action trigger allowlist only exposes fixed action and reason combinat
     "chat_reply_waiting",
     "pet_edge_settled",
     "rapid_touch_combo",
-    "chat_reply_sustain"
+    "chat_reply_sustain",
+    "state_idle",
+    "state_greet",
+    "state_listen",
+    "state_think",
+    "state_reply_sustain",
+    "state_sleep",
+    "state_work",
+    "state_game",
+    "state_read",
+    "state_edge",
+    "state_flustered",
+    "state_local_model_busy"
   ]);
-  assert.deepEqual(PET_ACTION_TRIGGER_ACTION_BY_REASON, {
-    chat_opened: "listen",
-    chat_input_focus: "listen",
-    chat_reply_waiting: "replyThinking",
-    pet_edge_settled: "edgeGlance",
-    rapid_touch_combo: "flusteredGlance",
-    chat_reply_sustain: "replySustain"
-  });
+  assert.deepEqual(PET_ACTION_TRIGGER_ACTION_BY_REASON, EXPECTED_ACTIONS_BY_REASON);
 
   for (const reason of PET_ACTION_TRIGGER_REASONS) {
     assert.deepEqual(parsePetActionTrigger({ reason }), { reason });
@@ -43,6 +168,35 @@ test("pet action trigger parser rejects arbitrary action payloads and unsafe rea
   assert.equal(parsePetActionTrigger({ reason: "chat_opened", type: "headPat" })?.reason, "chat_opened");
   assert.equal(parsePetActionTrigger({ action: "replyThinking" }), null);
   assert.equal(parsePetActionTrigger(null), null);
+});
+
+test("pet preload mirrors the fixed action trigger reason allowlist without accepting action payloads", async () => {
+  const source = await readFile(new URL("../src/preload/pet-preload.ts", import.meta.url), "utf8");
+  const parserStart = source.indexOf("function parsePetActionTrigger");
+  const parserEnd = source.indexOf("function parseProactiveSpeechBubblePayload", parserStart);
+  const parserSource = source.slice(parserStart, parserEnd);
+
+  for (const reason of PET_ACTION_TRIGGER_REASONS) {
+    assert.match(source, new RegExp(JSON.stringify(reason)));
+  }
+
+  assert.match(parserSource, /return typeof reason === "string" && petActionTriggerReasons\.includes/);
+  assert.doesNotMatch(parserSource, /actionType|expressionName|motion|payload\.type/);
+});
+
+test("main mode changes trigger only fixed state reasons and preserve bubble suppression", async () => {
+  const source = await readFile(new URL("../src/main/app.ts", import.meta.url), "utf8");
+
+  assert.match(source, /selectPetActionStateForModeChange/);
+  assert.match(source, /PET_MODE_ACTION_STATE_TRIGGER_DELAY_MS = 2_000/);
+  assert.match(source, /function schedulePetModeActionStateTrigger\(reason: PetActionTriggerReason\)/);
+  assert.match(source, /cancelPendingModeActionStateTrigger\(\);[\s\S]*sendPetActionTrigger\(reason\);/);
+  assert.match(source, /dialogueActionState\.stateId !== "idle"/);
+  assert.match(source, /schedulePetModeActionStateTrigger\(dialogueActionState\.triggerReason\)/);
+  assert.match(source, /schedulePetModeActionStateTrigger\(presenceActionState\.triggerReason\)/);
+  assert.match(source, /will-quit[\s\S]*cancelPendingModeActionStateTrigger\(\);/);
+  assert.match(source, /currentPresenceModeId === "sleep"[\s\S]*cancelStartupProactiveSpeechBubbleTimer\(\);[\s\S]*cancelIdleProactiveSpeechBubbleTimer\(\);/);
+  assert.doesNotMatch(source, /sendPetActionTrigger\([^)]*actionType|pet:action-trigger",\s*\{\s*reason,\s*type/);
 });
 
 test("pet edge helper detects settled visible edges without exposing bounds", () => {

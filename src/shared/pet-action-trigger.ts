@@ -14,14 +14,32 @@ export const PET_ACTION_TRIGGER_REASONS = [
   "chat_reply_waiting",
   "pet_edge_settled",
   "rapid_touch_combo",
-  "chat_reply_sustain"
+  "chat_reply_sustain",
+  "state_idle",
+  "state_greet",
+  "state_listen",
+  "state_think",
+  "state_reply_sustain",
+  "state_sleep",
+  "state_work",
+  "state_game",
+  "state_read",
+  "state_edge",
+  "state_flustered",
+  "state_local_model_busy"
 ] as const;
 
 export type PetActionTriggerReason = typeof PET_ACTION_TRIGGER_REASONS[number];
 
 export type PetActionTriggerActionType =
+  | "greeting"
   | "listen"
+  | "softSmile"
   | "replyThinking"
+  | "gameReady"
+  | "readingIdle"
+  | "workFocus"
+  | "doze"
   | "edgeGlance"
   | "flusteredGlance"
   | "replySustain";
@@ -36,7 +54,19 @@ export const PET_ACTION_TRIGGER_ACTION_BY_REASON: Readonly<Record<PetActionTrigg
   chat_reply_waiting: "replyThinking",
   pet_edge_settled: "edgeGlance",
   rapid_touch_combo: "flusteredGlance",
-  chat_reply_sustain: "replySustain"
+  chat_reply_sustain: "replySustain",
+  state_idle: "softSmile",
+  state_greet: "greeting",
+  state_listen: "listen",
+  state_think: "replyThinking",
+  state_reply_sustain: "replySustain",
+  state_sleep: "doze",
+  state_work: "workFocus",
+  state_game: "gameReady",
+  state_read: "readingIdle",
+  state_edge: "edgeGlance",
+  state_flustered: "flusteredGlance",
+  state_local_model_busy: "replyThinking"
 };
 
 export const PET_EDGE_SETTLED_THRESHOLD_PX = 72;

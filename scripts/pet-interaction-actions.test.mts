@@ -36,6 +36,8 @@ import {
   getPetWindowMotionFeedbackSafeEchoMessage
 } from "../src/shared/interaction-action-catalog.ts";
 import {
+  PET_ACTION_STATE_CATALOG as SCRIPT_ACTION_STATE_CATALOG,
+  PET_ACTION_STATE_IDS as SCRIPT_ACTION_STATE_IDS,
   PET_BODY_POOL_ACTION_TYPES as SCRIPT_BODY_POOL_ACTION_TYPES,
   PET_INTERACTION_ACTION_CATALOG as SCRIPT_INTERACTION_ACTION_CATALOG,
   PET_STRONG_ACCESSORY_ACTION_TYPES as SCRIPT_STRONG_ACCESSORY_ACTION_TYPES,
@@ -45,6 +47,11 @@ import {
   PET_ACTION_TRIGGER_REASONS,
   getPetActionTriggerActionType
 } from "../src/shared/pet-action-trigger.ts";
+import {
+  PET_ACTION_STATE_CATALOG,
+  PET_ACTION_STATE_IDS,
+  getPetActionStateForReason
+} from "../src/shared/pet-action-state-machine.ts";
 import type { EmotionPresentation } from "../src/shared/emotion-presentation.ts";
 import type { PetAccessoryPresetId } from "../src/shared/pet-accessory.ts";
 
@@ -212,7 +219,19 @@ test("action trigger reasons map to fixed actions and emit safe started telemetr
     chat_reply_waiting: "replyThinking",
     pet_edge_settled: "edgeGlance",
     rapid_touch_combo: "flusteredGlance",
-    chat_reply_sustain: "replySustain"
+    chat_reply_sustain: "replySustain",
+    state_idle: "softSmile",
+    state_greet: "greeting",
+    state_listen: "listen",
+    state_think: "replyThinking",
+    state_reply_sustain: "replySustain",
+    state_sleep: "doze",
+    state_work: "workFocus",
+    state_game: "gameReady",
+    state_read: "readingIdle",
+    state_edge: "edgeGlance",
+    state_flustered: "flusteredGlance",
+    state_local_model_busy: "replyThinking"
   } as const;
 
   for (const reason of PET_ACTION_TRIGGER_REASONS) {
@@ -230,6 +249,34 @@ test("action trigger reasons map to fixed actions and emit safe started telemetr
       }
     });
   }
+});
+
+test("state action triggers can emit safe state telemetry without arbitrary payloads", () => {
+  const harness = createFakeInteractionActionPlayer();
+  const state = getPetActionStateForReason("state_work");
+  const action = getPetInteractionAction(state.actionType);
+
+  assert.equal(harness.player.playAction(action, state.triggerReason, {
+    stateId: state.stateId,
+    modeId: "work",
+    presenceModeId: "focus",
+    candidateActionTypes: [state.actionType]
+  }), true);
+
+  assert.deepEqual(harness.telemetry[0], {
+    type: "pet_interaction_action_started",
+    payload: {
+      type: "workFocus",
+      reason: "state_work",
+      stateId: "work",
+      durationMs: action.durationMs,
+      modeId: "work",
+      presenceModeId: "focus",
+      candidateActionTypes: ["workFocus"],
+      selectedActionType: "workFocus"
+    }
+  });
+  assert.deepEqual(parsePetRendererTelemetryEvent(harness.telemetry[0]), harness.telemetry[0]);
 });
 
 test("main pet activity echo delegates safe messages to the shared catalog helpers", async () => {
@@ -250,9 +297,25 @@ test("real UI script action constants stay aligned with the shared catalog", () 
     Object.keys(SCRIPT_INTERACTION_ACTION_CATALOG).sort(),
     Object.keys(PET_INTERACTION_ACTION_CATALOG).sort()
   );
+  assert.deepEqual([...SCRIPT_ACTION_STATE_IDS].sort(), [...PET_ACTION_STATE_IDS].sort());
   assert.deepEqual([...SCRIPT_BODY_POOL_ACTION_TYPES].sort(), [...PET_BODY_POOL_ACTION_TYPES].sort());
   assert.deepEqual([...SCRIPT_STRONG_ACCESSORY_ACTION_TYPES].sort(), [...PET_STRONG_ACCESSORY_ACTION_TYPES].sort());
   assert.equal(SCRIPT_WINDOW_SHAKE_SAFE_ECHO_MESSAGE, PET_WINDOW_SHAKE_SAFE_ECHO_MESSAGE);
+
+  for (const stateId of PET_ACTION_STATE_IDS) {
+    assert.equal(
+      SCRIPT_ACTION_STATE_CATALOG[stateId]?.triggerReason,
+      PET_ACTION_STATE_CATALOG[stateId].triggerReason
+    );
+    assert.equal(
+      SCRIPT_ACTION_STATE_CATALOG[stateId]?.actionType,
+      PET_ACTION_STATE_CATALOG[stateId].actionType
+    );
+    assert.equal(
+      SCRIPT_ACTION_STATE_CATALOG[stateId]?.safeSummaryLabel,
+      PET_ACTION_STATE_CATALOG[stateId].safeSummaryLabel
+    );
+  }
 
   for (const type of PET_INTERACTION_ACTION_TYPES) {
     assert.equal(

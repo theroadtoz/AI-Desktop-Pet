@@ -117,6 +117,71 @@ export const PET_STRONG_ACCESSORY_ACTION_TYPES = PET_INTERACTION_ACTION_TYPES.fi
   PET_INTERACTION_ACTION_CATALOG[type].strongAccessory
 ));
 
+export const PET_ACTION_STATE_CATALOG = {
+  idle: {
+    triggerReason: "state_idle",
+    actionType: "softSmile",
+    safeSummaryLabel: "idle soft smile"
+  },
+  greet: {
+    triggerReason: "state_greet",
+    actionType: "greeting",
+    safeSummaryLabel: "greeting"
+  },
+  listen: {
+    triggerReason: "state_listen",
+    actionType: "listen",
+    safeSummaryLabel: "listen"
+  },
+  think: {
+    triggerReason: "state_think",
+    actionType: "replyThinking",
+    safeSummaryLabel: "thinking"
+  },
+  "reply-sustain": {
+    triggerReason: "state_reply_sustain",
+    actionType: "replySustain",
+    safeSummaryLabel: "reply sustain"
+  },
+  sleep: {
+    triggerReason: "state_sleep",
+    actionType: "doze",
+    safeSummaryLabel: "sleep doze"
+  },
+  work: {
+    triggerReason: "state_work",
+    actionType: "workFocus",
+    safeSummaryLabel: "work focus"
+  },
+  game: {
+    triggerReason: "state_game",
+    actionType: "gameReady",
+    safeSummaryLabel: "game ready"
+  },
+  read: {
+    triggerReason: "state_read",
+    actionType: "readingIdle",
+    safeSummaryLabel: "reading idle"
+  },
+  edge: {
+    triggerReason: "state_edge",
+    actionType: "edgeGlance",
+    safeSummaryLabel: "edge glance"
+  },
+  flustered: {
+    triggerReason: "state_flustered",
+    actionType: "flusteredGlance",
+    safeSummaryLabel: "flustered glance"
+  },
+  "local-model-busy": {
+    triggerReason: "state_local_model_busy",
+    actionType: "replyThinking",
+    safeSummaryLabel: "local model busy"
+  }
+};
+
+export const PET_ACTION_STATE_IDS = Object.keys(PET_ACTION_STATE_CATALOG);
+
 export const PET_WINDOW_SHAKE_FEEDBACK_REASON = "window_shake_feedback";
 export const PET_WINDOW_SHAKE_SAFE_ECHO_MESSAGE = "刚刚被晃了一下";
 

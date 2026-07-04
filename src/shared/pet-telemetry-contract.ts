@@ -43,6 +43,7 @@ export const PET_TELEMETRY_ALLOWED_FIELDS = [
   "result",
   "skipReason",
   "cooldownState",
+  "stateId",
   "modeId",
   "presenceModeId",
   "candidateActionTypes",
@@ -130,6 +131,20 @@ const PET_INTERACTION_ACTION_TYPES = [
   "flusteredGlance",
   "replySustain"
 ] as const;
+const PET_ACTION_STATE_IDS = [
+  "idle",
+  "greet",
+  "listen",
+  "think",
+  "reply-sustain",
+  "sleep",
+  "work",
+  "game",
+  "read",
+  "edge",
+  "flustered",
+  "local-model-busy"
+] as const;
 
 const DIALOGUE_MODE_IDS = ["default", "work", "game", "reading"] as const;
 const PRESENCE_MODE_IDS = ["default", "focus", "quiet", "sleep"] as const;
@@ -144,7 +159,19 @@ const PET_INTERACTION_REASONS = [
   "chat_reply_waiting",
   "pet_edge_settled",
   "rapid_touch_combo",
-  "chat_reply_sustain"
+  "chat_reply_sustain",
+  "state_idle",
+  "state_greet",
+  "state_listen",
+  "state_think",
+  "state_reply_sustain",
+  "state_sleep",
+  "state_work",
+  "state_game",
+  "state_read",
+  "state_edge",
+  "state_flustered",
+  "state_local_model_busy"
 ] as const;
 const PET_INTERACTION_SKIP_REASONS = [
   "active_action",
@@ -351,6 +378,7 @@ function sanitizeInteractionActionPayload(payload: Record<string, unknown>): Pet
   const safe: PetTelemetryPayload = {};
   putString(safe, payload, "type", PET_INTERACTION_ACTION_TYPES);
   putString(safe, payload, "reason", PET_INTERACTION_REASONS);
+  putString(safe, payload, "stateId", PET_ACTION_STATE_IDS);
   putNumber(safe, payload, "durationMs");
   putDialogueModeId(safe, payload, "modeId");
   putPresenceModeId(safe, payload, "presenceModeId");
