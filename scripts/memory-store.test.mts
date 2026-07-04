@@ -135,6 +135,93 @@ test("memory cards require explicit enablement and deletion survives restart", a
   }
 });
 
+test("memory summary is safe and does not update injection metadata", async () => {
+  const userDataPath = await mkdtemp(join(tmpdir(), "desktop-pet-memory-"));
+
+  try {
+    const store = createMemoryStore({ userDataPath });
+    store.setEnabled(true);
+
+    for (let index = 0; index < MEMORY_INJECTION_BUDGET + 3; index += 1) {
+      store.createCard({
+        title: `P2-26 private title ${index}`,
+        content: `P2-26 private content ${index}`,
+        tags: [`p2-26-private-tag-${index}`],
+        sourceConversationId: crypto.randomUUID()
+      });
+    }
+
+    const beforeCards = store.listCards();
+    const summary = store.getSummary();
+    const afterCards = store.listCards();
+    const serializedSummary = JSON.stringify(summary);
+
+    assert.equal(summary.enabled, true);
+    assert.equal(summary.totalCards, MEMORY_INJECTION_BUDGET + 3);
+    assert.equal(summary.enabledCards, MEMORY_INJECTION_BUDGET + 3);
+    assert.equal(summary.disabledCards, 0);
+    assert.equal(summary.injectableCount, MEMORY_INJECTION_BUDGET);
+    assert.equal(summary.injectableCount <= summary.injectionBudget, true);
+    assert.equal(beforeCards.every((card) => card.injectionCount === 0 && card.lastInjectedAt === null), true);
+    assert.equal(afterCards.every((card) => card.injectionCount === 0 && card.lastInjectedAt === null), true);
+    assert.equal(afterCards.every((card) => card.compressionState === "raw"), true);
+    assert.equal(serializedSummary.includes("P2-26 private title"), false);
+    assert.equal(serializedSummary.includes("P2-26 private content"), false);
+    assert.equal(serializedSummary.includes("p2-26-private-tag"), false);
+  } finally {
+    await rm(userDataPath, { recursive: true, force: true });
+  }
+});
+
+test("memory summary reports injectable zero while disabled and counts safe metadata", async () => {
+  const userDataPath = await mkdtemp(join(tmpdir(), "desktop-pet-memory-"));
+
+  try {
+    const store = createMemoryStore({ userDataPath });
+    const manualCard = store.createCard(createDraft());
+    let summary = store.getSummary();
+
+    assert.equal(summary.enabled, false);
+    assert.equal(summary.totalCards, 1);
+    assert.equal(summary.enabledCards, 1);
+    assert.equal(summary.disabledCards, 0);
+    assert.equal(summary.injectableCount, 0);
+    assert.equal(summary.sourceTypeCounts["manual-chat"], 1);
+    assert.equal(summary.importanceCounts.key, 1);
+
+    store.setEnabled(true);
+    store.captureAutoMemoriesFromLatestUserMessage({
+      conversationId: crypto.randomUUID(),
+      messageId: crypto.randomUUID(),
+      content: "请用简体中文回复我"
+    });
+    store.captureAutoMemoriesFromLatestUserMessage({
+      conversationId: crypto.randomUUID(),
+      messageId: crypto.randomUUID(),
+      content: "回复短一点"
+    });
+    assert.equal(store.updateCard(manualCard.id, { enabled: false })?.enabled, false);
+    summary = store.getSummary();
+
+    assert.equal(summary.enabled, true);
+    assert.equal(summary.totalCards, 3);
+    assert.equal(summary.enabledCards, 2);
+    assert.equal(summary.disabledCards, 1);
+    assert.equal(summary.injectableCount, 2);
+    assert.equal(summary.sourceTypeCounts["manual-chat"], 1);
+    assert.equal(summary.sourceTypeCounts["auto-local-heuristic"], 2);
+    assert.equal(summary.sourceTypeCounts["auto-local-model"], 0);
+    assert.equal(summary.importanceCounts.key, 2);
+    assert.equal(summary.importanceCounts.general, 1);
+    assert.equal(summary.compressionStateCounts.raw, 3);
+    assert.equal(summary.categoryCounts.manual, 1);
+    assert.equal(summary.categoryCounts.language, 1);
+    assert.equal(summary.categoryCounts.interaction, 1);
+  } finally {
+    await rm(userDataPath, { recursive: true, force: true });
+  }
+});
+
 test("auto heuristic memory is gated by the memory switch and skips sensitive messages", async () => {
   const userDataPath = await mkdtemp(join(tmpdir(), "desktop-pet-memory-"));
 

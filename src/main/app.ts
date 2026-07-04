@@ -12,7 +12,7 @@ import {
 } from "electron";
 import { release as getOsRelease } from "node:os";
 import { isAbsolute } from "node:path";
-import type { ChatRuntimeContext } from "../shared/chat-provider";
+import type { ChatRequest, ChatRuntimeContext } from "../shared/chat-provider";
 import type {
   ConfigApiKeyRequest,
   ConfigSetApiKeyRequest,
@@ -2138,8 +2138,10 @@ app.whenReady().then(async () => {
         ...(webSearchResolution.errorType ? { webSearchErrorType: webSearchResolution.errorType } : {})
       });
 
-      return chatEngineForRequest.startChatStream({
-        ...request,
+      const providerRequest: ChatRequest = {
+        requestVersion: request.requestVersion,
+        conversationId: request.conversationId,
+        messages: request.messages,
         providerMessages: contextBudget.providerMessages,
         contextBudget: contextBudget.summary,
         memoryContext,
@@ -2147,7 +2149,9 @@ app.whenReady().then(async () => {
         runtimeContext,
         ...(webSearchResolution.context ? { webSearchContext: webSearchResolution.context } : {}),
         ...(userProfileContext ? { userProfileContext } : {})
-      }, {
+      };
+
+      return chatEngineForRequest.startChatStream(providerRequest, {
         onDelta(delta) {
           if (!transitionPetRole({ type: "reply:delta", requestVersion: request.requestVersion })) {
             return;
@@ -2455,6 +2459,14 @@ app.whenReady().then(async () => {
     }
 
     return memoryStore.getSettings();
+  });
+
+  ipcMain.handle("memory:get-summary", (event) => {
+    if (!isChatSender(event) || !memoryStore) {
+      throw new Error("Unauthorized memory request");
+    }
+
+    return memoryStore.getSummary();
   });
 
   ipcMain.handle("memory:set-enabled", (event, enabled: unknown) => {

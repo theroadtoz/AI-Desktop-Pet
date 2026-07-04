@@ -108,7 +108,17 @@
               <button id="clear-memory-button" class="button-danger" type="button">清空全部记忆</button>
             </div>
             <p id="memory-feedback" class="selection-note" aria-live="polite">记忆默认关闭；开启后才会在本机提取短事实，已启用事实卡才会临时加入 Provider 请求。</p>
+            <p id="memory-overview-status" class="status-box" data-state="fallback" aria-live="polite">记忆关闭；下次不会带入记忆。</p>
             <p id="memory-next-injection-status" class="status-box" data-state="fallback" aria-live="polite">下次发送会注入 0 条。</p>
+            <div id="memory-safe-stats" class="memory-safe-stats status-box" data-state="fallback" aria-live="polite"></div>
+            <nav id="memory-filter-nav" class="subpage-nav" aria-label="记忆筛选">
+              <button class="subpage-tab is-active" type="button" data-memory-filter="all">全部</button>
+              <button class="subpage-tab" type="button" data-memory-filter="key">关键</button>
+              <button class="subpage-tab" type="button" data-memory-filter="general">一般</button>
+              <button class="subpage-tab" type="button" data-memory-filter="auto">自动</button>
+              <button class="subpage-tab" type="button" data-memory-filter="manual">手动</button>
+              <button class="subpage-tab" type="button" data-memory-filter="disabled">已停用</button>
+            </nav>
             <p id="memory-session-status" class="status-box ribbon-echo" aria-live="polite">这轮没有带入记忆 · 她安静待着</p>
             <div id="clear-memory-confirmation" class="status-box delete-confirmation" hidden>
               <span>清空后无法恢复，是否继续？</span>

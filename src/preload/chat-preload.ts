@@ -22,7 +22,7 @@ import type {
   WebSearchApi
 } from "../shared/ipc-contract";
 import type { Conversation, ConversationSummary, HistoryMessage } from "../shared/chat-history";
-import type { MemoryCard, MemoryCardDraft, MemoryCardUpdate } from "../shared/chat-memory";
+import type { MemoryCard, MemoryCardDraft, MemoryCardUpdate, MemorySummary } from "../shared/chat-memory";
 import type { DialogueModeId, DialogueModeView } from "../shared/dialogue-style";
 import type { PresenceModeId, PresenceModeView } from "../shared/presence-mode";
 import type { ProviderConfig, ProviderStatus } from "../shared/provider-config";
@@ -1152,6 +1152,74 @@ function parseMemoryCard(value: unknown): MemoryCard | null {
   };
 }
 
+function parseCountMap(value: unknown, expectedKeys?: readonly string[]): Record<string, number> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const entries = Object.entries(value);
+
+  if (
+    entries.some(([key, count]) => (
+      typeof key !== "string" ||
+      typeof count !== "number" ||
+      !Number.isSafeInteger(count) ||
+      count < 0
+    ))
+  ) {
+    return null;
+  }
+
+  if (expectedKeys && expectedKeys.some((key) => !Object.prototype.hasOwnProperty.call(value, key))) {
+    return null;
+  }
+
+  return Object.fromEntries(entries) as Record<string, number>;
+}
+
+function parseMemorySummary(value: unknown): MemorySummary | null {
+  const summary = value as Partial<MemorySummary> | null;
+  const sourceTypeCounts = parseCountMap(summary?.sourceTypeCounts, ["manual-chat", "auto-local-heuristic", "auto-local-model"]);
+  const importanceCounts = parseCountMap(summary?.importanceCounts, ["key", "general"]);
+  const compressionStateCounts = parseCountMap(summary?.compressionStateCounts, ["raw", "merged", "deduplicated", "budgeted"]);
+  const categoryCounts = parseCountMap(summary?.categoryCounts);
+
+  if (
+    !summary ||
+    typeof summary.enabled !== "boolean" ||
+    !isNonNegativeSafeInteger(summary.totalCards) ||
+    !isNonNegativeSafeInteger(summary.enabledCards) ||
+    !isNonNegativeSafeInteger(summary.disabledCards) ||
+    !isNonNegativeSafeInteger(summary.injectableCount) ||
+    !isNonNegativeSafeInteger(summary.injectionBudget) ||
+    !isNonNegativeSafeInteger(summary.compressionThreshold) ||
+    !sourceTypeCounts ||
+    !importanceCounts ||
+    !compressionStateCounts ||
+    !categoryCounts
+  ) {
+    return null;
+  }
+
+  return {
+    enabled: summary.enabled,
+    totalCards: summary.totalCards,
+    enabledCards: summary.enabledCards,
+    disabledCards: summary.disabledCards,
+    injectableCount: summary.injectableCount,
+    injectionBudget: summary.injectionBudget,
+    compressionThreshold: summary.compressionThreshold,
+    sourceTypeCounts: sourceTypeCounts as MemorySummary["sourceTypeCounts"],
+    importanceCounts: importanceCounts as MemorySummary["importanceCounts"],
+    compressionStateCounts: compressionStateCounts as MemorySummary["compressionStateCounts"],
+    categoryCounts
+  };
+}
+
+function isNonNegativeSafeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
 function isHistoryMessage(value: unknown): value is HistoryMessage {
   const message = value as Partial<HistoryMessage> | null;
 
@@ -1462,6 +1530,15 @@ const memoryApi: MemoryApi = {
     }
 
     return { enabled: settings.enabled };
+  },
+  async getSummary() {
+    const summary = parseMemorySummary(await ipcRenderer.invoke("memory:get-summary"));
+
+    if (!summary) {
+      throw new Error("Invalid memory summary response");
+    }
+
+    return summary;
   },
   async setEnabled(enabled) {
     const settings = await ipcRenderer.invoke("memory:set-enabled", Boolean(enabled));

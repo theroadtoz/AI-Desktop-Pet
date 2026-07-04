@@ -1,6 +1,6 @@
 import type { EmotionPresentation } from "./emotion-presentation";
 import type { ChatMessage } from "./chat";
-import type { MemoryCard, MemoryCardDraft, MemoryCardUpdate, MemorySettings } from "./chat-memory";
+import type { MemoryCard, MemoryCardDraft, MemoryCardUpdate, MemorySettings, MemorySummary } from "./chat-memory";
 import type { Conversation, ConversationSummary } from "./chat-history";
 import type { ChatProviderResult, ChatRequest, ChatStreamDelta } from "./chat-provider";
 import type { ProviderHealthCheckRequest, ProviderHealthResult } from "./provider-health";
@@ -45,7 +45,7 @@ export type ChatWindowCommand =
   | { type: "presenceMode:changed"; payload: PresenceModeId }
   | { type: "pet-activity:echo"; payload: PetActivityEcho };
 
-export type ChatSendRequest = ChatRequest;
+export type ChatSendRequest = Pick<ChatRequest, "requestVersion" | "conversationId" | "messages">;
 
 export type ChatStreamDeltaPayload = ChatStreamDelta & { requestVersion: number };
 
@@ -193,6 +193,7 @@ export type HistoryApi = {
 
 export type MemoryApi = {
   getSettings(): Promise<MemorySettings>;
+  getSummary(): Promise<MemorySummary>;
   setEnabled(enabled: boolean): Promise<MemorySettings>;
   listCards(): Promise<MemoryCard[]>;
   getCard(id: string): Promise<MemoryCard | null>;

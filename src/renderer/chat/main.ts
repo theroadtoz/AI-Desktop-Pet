@@ -3,7 +3,7 @@ import type { ChatMessage, ChatRole } from "../../shared/chat";
 import type { Conversation, ConversationSummary } from "../../shared/chat-history";
 import type { DialogueModeId, DialogueModeView } from "../../shared/dialogue-style";
 import type { PresenceModeId, PresenceModeView } from "../../shared/presence-mode";
-import type { MemoryCard } from "../../shared/chat-memory";
+import type { MemoryCard, MemorySummary } from "../../shared/chat-memory";
 import {
   LOCAL_PROVIDER_PRESETS,
   RECOMMENDED_LOCAL_PROVIDER_CONFIG,
@@ -186,7 +186,10 @@ const clearMemoryConfirmation = document.querySelector<HTMLElement>("#clear-memo
 const cancelClearMemoryButton = document.querySelector<HTMLButtonElement>("#cancel-clear-memory-button");
 const confirmClearMemoryButton = document.querySelector<HTMLButtonElement>("#confirm-clear-memory-button");
 const memoryFeedback = document.querySelector<HTMLElement>("#memory-feedback");
+const memoryOverviewStatus = document.querySelector<HTMLElement>("#memory-overview-status");
 const memoryNextInjectionStatus = document.querySelector<HTMLElement>("#memory-next-injection-status");
+const memorySafeStats = document.querySelector<HTMLElement>("#memory-safe-stats");
+const memoryFilterTabs = [...document.querySelectorAll<HTMLButtonElement>("[data-memory-filter]")];
 const memorySearch = document.querySelector<HTMLInputElement>("#memory-search");
 const memoryList = document.querySelector<HTMLElement>("#memory-list");
 const userWelcomePanel = document.querySelector<HTMLElement>("#user-welcome-panel");
@@ -224,7 +227,7 @@ if (
   !cancelMemoryDraftButton || !saveMemoryDraftButton || !newConversationButton || !clearHistoryButton || !clearHistoryConfirmation ||
   !cancelClearHistoryButton || !confirmClearHistoryButton || !historyFeedback || !conversationList || !historyDetail ||
   !enableMemoryButton || !clearMemoryButton || !clearMemoryConfirmation || !cancelClearMemoryButton ||
-  !confirmClearMemoryButton || !memoryFeedback || !memoryNextInjectionStatus || !memorySearch || !memoryList || !userWelcomePanel ||
+  !confirmClearMemoryButton || !memoryFeedback || !memoryOverviewStatus || !memoryNextInjectionStatus || !memorySafeStats || !memorySearch || !memoryList || !userWelcomePanel ||
   !welcomeUserDisplayName || !welcomeUserPreferredName || !welcomeSaveUserProfileButton || !userWelcomeFeedback
 ) {
   throw new Error("chat elements missing");
@@ -355,7 +358,9 @@ const clearMemoryConfirmationBox = clearMemoryConfirmation;
 const cancelClearMemoryAction = cancelClearMemoryButton;
 const confirmClearMemoryAction = confirmClearMemoryButton;
 const memoryFeedbackBox = memoryFeedback;
+const memoryOverviewStatusBox = memoryOverviewStatus;
 const memoryNextInjectionStatusBox = memoryNextInjectionStatus;
+const memorySafeStatsBox = memorySafeStats;
 const memorySearchField = memorySearch;
 const memoryListElement = memoryList;
 const userWelcomePanelBox = userWelcomePanel;
@@ -418,6 +423,7 @@ const DEFAULT_LOCAL_OPENAI_CONFIG = {
 type SettingsRootPageId = "basic" | "memory" | "history" | "appearance" | "model" | "advanced";
 type SettingsNestedPageId = "memory-detail" | "history-detail" | "model-detail";
 type SettingsPageId = SettingsRootPageId | SettingsNestedPageId;
+type MemoryFilter = "all" | "key" | "general" | "auto" | "manual" | "disabled";
 
 const settingsNestedParents: Record<SettingsNestedPageId, SettingsRootPageId> = {
   "memory-detail": "memory",
@@ -446,7 +452,9 @@ let selectedHistoryConversation: Conversation | null = null;
 let selectedMemoryCardId: string | null = null;
 let providerContextEnabled = true;
 let memoryCards: MemoryCard[] = [];
+let memorySummary: MemorySummary | null = null;
 let memoryEnabled = false;
+let activeMemoryFilter: MemoryFilter = "all";
 let memoryDraftSourceMessage: ChatMessage | null = null;
 let isPetLocked = false;
 let currentPetScale = DEFAULT_PET_PRESENTATION_PREFERENCES.petScale;
@@ -1302,16 +1310,81 @@ function setMemoryFeedback(message: string): void {
   memoryFeedbackBox.textContent = message;
 }
 
-function getNextMemoryInjectionCount(): number {
-  return memoryEnabled ? memoryCards.filter((card) => card.enabled).length : 0;
-}
-
 function renderMemoryInjectionPreview(): void {
-  const count = getNextMemoryInjectionCount();
-  memoryNextInjectionStatusBox.textContent = memoryEnabled
-    ? `下次发送会注入 ${count} 条已启用记忆。`
+  const count = memorySummary?.injectableCount ?? 0;
+  const budget = memorySummary?.injectionBudget ?? 0;
+  memoryNextInjectionStatusBox.textContent = memorySummary?.enabled
+    ? `下次发送最多带入 ${count}/${budget} 条已启用记忆。`
     : "下次发送会注入 0 条（记忆关闭）。";
   memoryNextInjectionStatusBox.dataset.state = count > 0 ? "ready" : "fallback";
+}
+
+function renderMemoryOverview(): void {
+  const summary = memorySummary;
+
+  if (!summary) {
+    memoryOverviewStatusBox.textContent = "记忆状态暂不可用。";
+    memoryOverviewStatusBox.dataset.state = "fallback";
+    return;
+  }
+
+  memoryOverviewStatusBox.dataset.state = summary.injectableCount > 0 ? "ready" : "fallback";
+
+  if (!summary.enabled) {
+    memoryOverviewStatusBox.textContent = `记忆关闭；本机保留 ${summary.totalCards} 条事实卡，下次不会带入记忆。`;
+    return;
+  }
+
+  if (summary.totalCards === 0) {
+    memoryOverviewStatusBox.textContent = "记忆已开启；目前没有事实卡，下次不会带入记忆。";
+    return;
+  }
+
+  if (summary.enabledCards === 0) {
+    memoryOverviewStatusBox.textContent = `记忆已开启；${summary.totalCards} 条事实卡均已停用，下次不会带入记忆。`;
+    return;
+  }
+
+  memoryOverviewStatusBox.textContent = `记忆已开启；${summary.totalCards} 条事实卡，${summary.enabledCards} 条启用，下次最多带入 ${summary.injectableCount} 条。`;
+}
+
+function renderMemorySafeStats(): void {
+  const summary = memorySummary;
+  memorySafeStatsBox.replaceChildren();
+
+  if (!summary) {
+    memorySafeStatsBox.dataset.state = "fallback";
+    memorySafeStatsBox.textContent = "安全统计暂不可用。";
+    return;
+  }
+
+  memorySafeStatsBox.dataset.state = summary.injectableCount > 0 ? "ready" : "fallback";
+  const autoCount = summary.sourceTypeCounts["auto-local-heuristic"] + summary.sourceTypeCounts["auto-local-model"];
+  const compressedCount = summary.compressionStateCounts.merged +
+    summary.compressionStateCounts.deduplicated +
+    summary.compressionStateCounts.budgeted;
+  const stats = [
+    `关键 ${summary.importanceCounts.key}`,
+    `一般 ${summary.importanceCounts.general}`,
+    `自动 ${autoCount}`,
+    `手动 ${summary.sourceTypeCounts["manual-chat"]}`,
+    `已停用 ${summary.disabledCards}`,
+    `预算排序 ${summary.compressionStateCounts.budgeted}`,
+    `压缩状态 ${compressedCount}`,
+    `阈值 ${summary.compressionThreshold}`
+  ];
+
+  stats.forEach((text) => {
+    const pill = document.createElement("span");
+    pill.textContent = text;
+    memorySafeStatsBox.append(pill);
+  });
+}
+
+function renderMemoryFilterTabs(): void {
+  memoryFilterTabs.forEach((tab) => {
+    tab.classList.toggle("is-active", tab.dataset.memoryFilter === activeMemoryFilter);
+  });
 }
 
 function parseTagsInput(value: string): string[] {
@@ -1350,21 +1423,25 @@ async function refreshMemory(): Promise<void> {
   }
 
   try {
-    const [settings, cards] = await Promise.all([
+    const [settings, summary, cards] = await Promise.all([
       window.memoryApi.getSettings(),
+      window.memoryApi.getSummary(),
       window.memoryApi.listCards()
     ]);
     memoryEnabled = settings.enabled;
+    memorySummary = summary;
     memoryCards = cards;
     enableMemoryAction.textContent = memoryEnabled ? "关闭记忆" : "开启记忆";
+    renderMemoryOverview();
     renderMemoryInjectionPreview();
+    renderMemorySafeStats();
+    renderMemoryFilterTabs();
     renderMemoryList();
     renderMemoryDetail();
-    const enabledCount = cards.filter((card) => card.enabled).length;
     setMemoryFeedback(
       memoryEnabled
-        ? enabledCount > 0
-          ? `记忆已开启；本机会从最新用户消息提取短事实，当前可注入 ${enabledCount} 条。`
+        ? summary.injectableCount > 0
+          ? `记忆已开启；本机会从最新用户消息提取短事实，下次最多带入 ${summary.injectableCount} 条。`
           : "记忆已开启；当前没有已启用事实卡，发送时不会加入记忆。"
         : "记忆默认关闭；关闭时不会自动生成事实卡。"
     );
@@ -1376,6 +1453,10 @@ async function refreshMemory(): Promise<void> {
 function renderMemoryList(): void {
   const query = memorySearchField.value.trim().toLowerCase();
   const cards = memoryCards.filter((card) => {
+    if (!matchesMemoryFilter(card)) {
+      return false;
+    }
+
     if (!query) {
       return true;
     }
@@ -1395,7 +1476,11 @@ function renderMemoryList(): void {
   if (cards.length === 0) {
     const empty = document.createElement("p");
     empty.className = "selection-note";
-    empty.textContent = memoryCards.length === 0 ? "暂无事实卡。" : "没有匹配的事实卡。";
+    empty.textContent = memoryCards.length === 0
+      ? "暂无事实卡。"
+      : query
+        ? "没有匹配的事实卡。"
+        : "当前筛选下没有事实卡。";
     memoryListElement.append(empty);
     return;
   }
@@ -1407,6 +1492,24 @@ function renderMemoryList(): void {
   if (selectedMemoryCardId && !cards.some((card) => card.id === selectedMemoryCardId)) {
     selectedMemoryCardId = null;
     renderMemoryDetail();
+  }
+}
+
+function matchesMemoryFilter(card: MemoryCard): boolean {
+  switch (activeMemoryFilter) {
+    case "key":
+      return card.importance === "key";
+    case "general":
+      return card.importance === "general";
+    case "auto":
+      return card.sourceType === "auto-local-heuristic" || card.sourceType === "auto-local-model";
+    case "manual":
+      return card.sourceType === "manual-chat";
+    case "disabled":
+      return !card.enabled;
+    case "all":
+    default:
+      return true;
   }
 }
 
@@ -2849,6 +2952,24 @@ confirmClearMemoryAction.addEventListener("click", () => {
 
 memorySearchField.addEventListener("input", () => {
   renderMemoryList();
+});
+
+memoryFilterTabs.forEach((tab) => {
+  tab.addEventListener("click", () => {
+    const filter = tab.dataset.memoryFilter;
+    if (
+      filter === "all" ||
+      filter === "key" ||
+      filter === "general" ||
+      filter === "auto" ||
+      filter === "manual" ||
+      filter === "disabled"
+    ) {
+      activeMemoryFilter = filter;
+      renderMemoryFilterTabs();
+      renderMemoryList();
+    }
+  });
 });
 
 settingsCloseAction.addEventListener("click", () => {

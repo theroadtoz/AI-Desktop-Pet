@@ -351,6 +351,22 @@ body {
   gap: 10px;
 }
 
+.memory-safe-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.memory-safe-stats span {
+  padding: 4px 8px;
+  border: 1px solid #e7dccb;
+  border-radius: 8px;
+  background: #fffdf8;
+  color: #5b4635;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .history-layout {
   display: grid;
   grid-template-columns: minmax(130px, 0.75fr) minmax(0, 1.25fr);

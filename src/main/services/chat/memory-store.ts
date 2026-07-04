@@ -12,6 +12,7 @@ import {
   type MemoryCompressionState,
   type MemoryImportance,
   type MemoryCardUpdate,
+  type MemorySummary,
   type MemoryInjection,
   type MemorySettings,
   type MemorySourceType,
@@ -54,6 +55,7 @@ export type AutoMemoryCaptureSummary = {
 
 export type MemoryStore = {
   getSettings(): MemorySettings;
+  getSummary(): MemorySummary;
   setEnabled(enabled: boolean): MemorySettings;
   listCards(): MemoryCard[];
   getCard(id: string): MemoryCard | null;
@@ -114,6 +116,9 @@ export function createMemoryStore(options: { userDataPath?: string } = {}): Memo
   return {
     getSettings() {
       return { enabled: readStorage().enabled };
+    },
+    getSummary() {
+      return createMemorySummary(readStorage());
     },
     setEnabled(enabled) {
       const storage = readStorage();
@@ -322,6 +327,51 @@ function createAutoMemoryCaptureSummary(enabled: boolean, totalCards: number): A
     injectionBudget: MEMORY_INJECTION_BUDGET,
     safeCategories: []
   };
+}
+
+function createMemorySummary(storage: MemoryStorage): MemorySummary {
+  const enabledCards = storage.cards.filter((card) => card.enabled);
+  const injectableCount = storage.enabled
+    ? Math.min(rankCardsForInjection(enabledCards).length, MEMORY_INJECTION_BUDGET)
+    : 0;
+
+  return {
+    enabled: storage.enabled,
+    totalCards: storage.cards.length,
+    enabledCards: enabledCards.length,
+    disabledCards: storage.cards.length - enabledCards.length,
+    injectableCount,
+    injectionBudget: MEMORY_INJECTION_BUDGET,
+    compressionThreshold: MEMORY_CONTEXT_COMPRESSION_THRESHOLD,
+    sourceTypeCounts: countKnownValues(storage.cards, ["manual-chat", "auto-local-heuristic", "auto-local-model"], "sourceType"),
+    importanceCounts: countKnownValues(storage.cards, ["key", "general"], "importance"),
+    compressionStateCounts: countKnownValues(storage.cards, ["raw", "merged", "deduplicated", "budgeted"], "compressionState"),
+    categoryCounts: countStringValues(storage.cards.map((card) => card.category))
+  };
+}
+
+function countKnownValues<T extends string, K extends keyof MemoryCard>(
+  cards: MemoryCard[],
+  values: readonly T[],
+  key: K
+): Record<T, number> {
+  const counts = Object.fromEntries(values.map((value) => [value, 0])) as Record<T, number>;
+
+  for (const card of cards) {
+    const value = card[key];
+    if (typeof value === "string" && values.includes(value as unknown as T)) {
+      counts[value as unknown as T] += 1;
+    }
+  }
+
+  return counts;
+}
+
+function countStringValues(values: string[]): Record<string, number> {
+  return values.reduce<Record<string, number>>((counts, value) => {
+    counts[value] = (counts[value] ?? 0) + 1;
+    return counts;
+  }, {});
 }
 
 function createAutoMemoryCard(

@@ -38,6 +38,20 @@ export type MemorySettings = {
   enabled: boolean;
 };
 
+export type MemorySummary = {
+  enabled: boolean;
+  totalCards: number;
+  enabledCards: number;
+  disabledCards: number;
+  injectableCount: number;
+  injectionBudget: number;
+  compressionThreshold: number;
+  sourceTypeCounts: Record<MemorySourceType, number>;
+  importanceCounts: Record<MemoryImportance, number>;
+  compressionStateCounts: Record<MemoryCompressionState, number>;
+  categoryCounts: Record<string, number>;
+};
+
 export type MemoryInjection = {
   count: number;
   cards: Array<Pick<MemoryCard, "id" | "title" | "content" | "tags">>;
