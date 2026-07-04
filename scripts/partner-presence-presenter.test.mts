@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   ACTIVITY_ECHO_IDLE_MESSAGE,
   formatCompanionShelf,
+  formatMemoryActivity,
   formatMemoryRibbon,
   formatModeLabel,
   formatPartnerStatus,
@@ -10,6 +11,51 @@ import {
   formatProviderHealthResult,
   formatProviderStatus
 } from "../src/renderer/chat/partner-presence-presenter.ts";
+import type { ChatMemoryActivityPayload } from "../src/shared/ipc-contract.ts";
+
+function createMemoryActivity(overrides: Partial<ChatMemoryActivityPayload> = {}): ChatMemoryActivityPayload {
+  const base: ChatMemoryActivityPayload = {
+    requestVersion: 1,
+    autoCapture: {
+      enabled: true,
+      skippedReason: "no_candidate",
+      capturedCount: 0,
+      keyCount: 0,
+      generalCount: 0,
+      mergedCount: 0,
+      deduplicatedCount: 0,
+      compressionTriggered: false,
+      totalCards: 0,
+      injectionBudget: 8
+    },
+    injection: {
+      count: 0
+    },
+    contextBudget: {
+      compressed: false,
+      summaryMessageCount: 0,
+      summarizedMessageCount: 0,
+      recentMessageCount: 1
+    }
+  };
+
+  return {
+    ...base,
+    ...overrides,
+    autoCapture: {
+      ...base.autoCapture,
+      ...overrides.autoCapture
+    },
+    injection: {
+      ...base.injection,
+      ...overrides.injection
+    },
+    contextBudget: {
+      ...base.contextBudget,
+      ...overrides.contextBudget
+    }
+  };
+}
 
 test("provider status keeps fake, cloud, local, and fallback wording", () => {
   assert.equal(formatProviderStatus({
@@ -114,6 +160,71 @@ test("memory ribbon handles 0, 1, and many memory counts", () => {
     text: "这轮没有带入记忆 · 她暂时没接上模型",
     state: "fallback"
   });
+});
+
+test("memory activity presenter keeps companion wording and safe fields only", () => {
+  assert.deepEqual(formatMemoryActivity(createMemoryActivity({
+    autoCapture: {
+      enabled: false,
+      skippedReason: "disabled",
+      capturedCount: 0,
+      keyCount: 0,
+      generalCount: 0,
+      mergedCount: 0,
+      deduplicatedCount: 0,
+      compressionTriggered: false,
+      totalCards: 2,
+      injectionBudget: 8
+    }
+  })), {
+    text: "记忆关闭；她不会替你保存，也没有带入记忆",
+    state: "fallback"
+  });
+
+  assert.deepEqual(formatMemoryActivity(createMemoryActivity({
+    autoCapture: {
+      enabled: true,
+      skippedReason: null,
+      capturedCount: 1,
+      keyCount: 1,
+      generalCount: 0,
+      mergedCount: 1,
+      deduplicatedCount: 0,
+      compressionTriggered: false,
+      totalCards: 3,
+      injectionBudget: 8
+    },
+    injection: {
+      count: 2
+    },
+    contextBudget: {
+      compressed: true,
+      summaryMessageCount: 1,
+      summarizedMessageCount: 12,
+      recentMessageCount: 8
+    }
+  })), {
+    text: "她刚记下 1 条关键记忆；她整理了 1 条相近记忆；她这轮带上了 2 条已允许的记忆；长会话已收束成安全摘要",
+    state: "ready"
+  });
+
+  const sensitive = formatMemoryActivity(createMemoryActivity({
+    autoCapture: {
+      enabled: true,
+      skippedReason: "sensitive",
+      capturedCount: 0,
+      keyCount: 0,
+      generalCount: 0,
+      mergedCount: 0,
+      deduplicatedCount: 0,
+      compressionTriggered: false,
+      totalCards: 1,
+      injectionBudget: 8
+    }
+  }));
+
+  assert.equal(sensitive.text, "她跳过了敏感内容；这轮没有带入记忆");
+  assert.doesNotMatch(sensitive.text, /SECRET_SENTINEL|capturedCount|skippedReason|memoryContext|providerMessages|prompt/);
 });
 
 test("companion shelf presenter keeps action echo and lock wording", () => {

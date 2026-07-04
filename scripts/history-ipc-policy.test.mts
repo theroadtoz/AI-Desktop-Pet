@@ -19,10 +19,16 @@ test("history, memory, mode and user profile IPC are restricted and expose no fi
   assert.match(appSource, /ipcMain\.handle\("presenceMode:list", \(event\) => \{\s+if \(!isChatSender\(event\)\)/);
   assert.match(appSource, /ipcMain\.handle\("presenceMode:get", \(event\) => \{\s+if \(!isChatSender\(event\) && !isPetSender\(event\)\)/);
   assert.match(appSource, /ipcMain\.handle\("presenceMode:set", \(event, modeId: unknown\) => \{\s+if \(!isChatSender\(event\) \|\| !presenceModeStore \|\| !isPresenceModeId\(modeId\)\)/);
+  assert.match(appSource, /event\.sender\.send\("chat:memory-activity", createChatMemoryActivityPayload\(\{/);
   assert.match(preloadSource, /exposeInMainWorld\("historyApi", historyApi\)/);
   assert.match(preloadSource, /exposeInMainWorld\("memoryApi", memoryApi\)/);
   assert.match(preloadSource, /exposeInMainWorld\("userProfileApi", userProfileApi\)/);
   assert.match(preloadSource, /exposeInMainWorld\("presenceModeApi", presenceModeApi\)/);
+  assert.match(preloadSource, /onMemoryActivity\(handler\) \{/);
+  assert.match(preloadSource, /ipcRenderer\.on\("chat:memory-activity", listener\)/);
+  assert.match(preloadSource, /hasExactKeys\(value, \["requestVersion", "autoCapture", "injection", "contextBudget"\]\)/);
+  assert.match(preloadSource, /hasExactKeys\(autoCapture, \[[\s\S]*"injectionBudget"[\s\S]*\]\)/);
   assert.doesNotMatch(preloadSource, /exposeInMainWorld\("ipcRenderer"/);
   assert.doesNotMatch(preloadSource, /historyPath|memoryPath|profilePath|presenceModePath|readFile|writeFile/);
+  assert.doesNotMatch(preloadSource, /chat:memory-activity[\s\S]{0,800}(content|cards|prompt|providerMessages|apiKey|memoryPath)/);
 });

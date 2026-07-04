@@ -1,4 +1,5 @@
 import type { DialogueModeId } from "../../shared/dialogue-style";
+import type { ChatMemoryActivityPayload } from "../../shared/ipc-contract";
 import type { PresenceModeId } from "../../shared/presence-mode";
 import type { ProviderHealthResult } from "../../shared/provider-health";
 import type { ProviderStatus } from "../../shared/provider-config";
@@ -142,6 +143,62 @@ export function formatMemoryRibbon(input: {
   return {
     text: `${memoryText} · ${companionState}`,
     state: usedMemory ? "ready" : "fallback"
+  };
+}
+
+export function formatMemoryActivity(payload: ChatMemoryActivityPayload): {
+  text: string;
+  state: StatusDatasetState;
+} {
+  const parts: string[] = [];
+  const autoCapture = payload.autoCapture;
+
+  if (!autoCapture.enabled || autoCapture.skippedReason === "disabled") {
+    parts.push("记忆关闭；她不会替你保存，也没有带入记忆");
+  } else if (autoCapture.skippedReason === "sensitive") {
+    parts.push("她跳过了敏感内容");
+  } else if (autoCapture.skippedReason === "capture_failed") {
+    parts.push("她暂时没能整理记忆");
+  } else if (autoCapture.capturedCount > 0) {
+    parts.push(`她刚记下 ${autoCapture.capturedCount} 条${autoCapture.keyCount > 0 ? "关键" : "一般"}记忆`);
+  } else if (autoCapture.mergedCount + autoCapture.deduplicatedCount > 0) {
+    parts.push(`她整理了 ${autoCapture.mergedCount + autoCapture.deduplicatedCount} 条相近记忆`);
+  } else {
+    parts.push("这轮没有新的可记内容");
+  }
+
+  if (autoCapture.enabled && autoCapture.mergedCount + autoCapture.deduplicatedCount > 0 && autoCapture.capturedCount > 0) {
+    parts.push(`她整理了 ${autoCapture.mergedCount + autoCapture.deduplicatedCount} 条相近记忆`);
+  }
+
+  if (autoCapture.enabled && autoCapture.compressionTriggered && autoCapture.mergedCount + autoCapture.deduplicatedCount === 0) {
+    parts.push("她收束了重复记忆");
+  }
+
+  if (autoCapture.enabled && payload.injection.count > 0) {
+    parts.push(`她这轮带上了 ${payload.injection.count} 条已允许的记忆`);
+  } else if (autoCapture.enabled) {
+    parts.push("这轮没有带入记忆");
+  }
+
+  if (payload.contextBudget.compressed) {
+    parts.push("长会话已收束成安全摘要");
+  }
+
+  const state = autoCapture.enabled &&
+    (
+      autoCapture.capturedCount > 0 ||
+      autoCapture.mergedCount + autoCapture.deduplicatedCount > 0 ||
+      autoCapture.compressionTriggered ||
+      payload.injection.count > 0 ||
+      payload.contextBudget.compressed
+    )
+    ? "ready"
+    : "fallback";
+
+  return {
+    text: parts.join("；"),
+    state
   };
 }
 

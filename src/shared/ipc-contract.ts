@@ -84,6 +84,38 @@ export type ChatMemoryInjectionPayload = {
   count: number;
 };
 
+export type ChatMemoryActivitySkippedReason =
+  | "disabled"
+  | "sensitive"
+  | "no_candidate"
+  | "capture_failed"
+  | null;
+
+export type ChatMemoryActivityPayload = {
+  requestVersion: number;
+  autoCapture: {
+    enabled: boolean;
+    skippedReason: ChatMemoryActivitySkippedReason;
+    capturedCount: number;
+    keyCount: number;
+    generalCount: number;
+    mergedCount: number;
+    deduplicatedCount: number;
+    compressionTriggered: boolean;
+    totalCards: number;
+    injectionBudget: number;
+  };
+  injection: {
+    count: number;
+  };
+  contextBudget: {
+    compressed: boolean;
+    summaryMessageCount: number;
+    summarizedMessageCount: number;
+    recentMessageCount: number;
+  };
+};
+
 export type ConfigApiKeyRequest = {
   apiKeyRef: string;
 };
@@ -167,6 +199,7 @@ export type ChatApi = {
   onReplyDone(handler: (result: ChatStreamDonePayload) => void): () => void;
   onReplyError(handler: (error: ChatStreamErrorPayload) => void): () => void;
   onMemoryInjection(handler: (payload: ChatMemoryInjectionPayload) => void): () => void;
+  onMemoryActivity(handler: (payload: ChatMemoryActivityPayload) => void): () => void;
   onPetActivityEcho(handler: (echo: PetActivityEcho) => void): () => void;
   setInteractionActive(isActive: boolean): void;
 };

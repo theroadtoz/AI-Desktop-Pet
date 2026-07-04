@@ -12,10 +12,11 @@ import {
 } from "electron";
 import { release as getOsRelease } from "node:os";
 import { isAbsolute } from "node:path";
-import type { ChatRequest, ChatRuntimeContext } from "../shared/chat-provider";
+import type { ChatContextBudgetSummary, ChatRequest, ChatRuntimeContext } from "../shared/chat-provider";
 import type {
   ConfigApiKeyRequest,
   ConfigSetApiKeyRequest,
+  ChatMemoryActivityPayload,
   ChatStreamErrorType,
   ChatSendRequest,
   PetActivityEcho,
@@ -80,7 +81,7 @@ import { ChatEngineBusyError, createChatEngine, type ChatEngine } from "./servic
 import { budgetChatContext } from "./services/chat/chat-context-budget";
 import { createChatReplySustainTriggerController } from "./services/chat/chat-reply-sustain-trigger";
 import { createHistoryStore, type HistoryStore } from "./services/chat/history-store";
-import { createMemoryStore, type MemoryStore } from "./services/chat/memory-store";
+import { createMemoryStore, type AutoMemoryCaptureSummary, type MemoryStore } from "./services/chat/memory-store";
 import { createChatProviderFromConfig } from "./services/chat/provider-factory";
 import { checkProviderHealth } from "./services/chat/provider-health";
 import { createMcpSearchProvider, testMcpSearchConnection } from "./services/search/mcp-search-client";
@@ -1220,6 +1221,74 @@ function isChatSendRequest(value: unknown): value is ChatSendRequest {
   );
 }
 
+function toChatMemoryActivityAutoCapture(summary: AutoMemoryCaptureSummary): ChatMemoryActivityPayload["autoCapture"] {
+  return {
+    enabled: summary.enabled,
+    skippedReason: summary.skippedReason,
+    capturedCount: summary.capturedCount,
+    keyCount: summary.keyCount,
+    generalCount: summary.generalCount,
+    mergedCount: summary.mergedCount,
+    deduplicatedCount: summary.deduplicatedCount,
+    compressionTriggered: summary.compressionTriggered,
+    totalCards: summary.totalCards,
+    injectionBudget: summary.injectionBudget
+  };
+}
+
+function createFailedMemoryActivityAutoCapture(memoryStoreForRequest: MemoryStore): ChatMemoryActivityPayload["autoCapture"] {
+  try {
+    const summary = memoryStoreForRequest.getSummary();
+
+    return {
+      enabled: summary.enabled,
+      skippedReason: summary.enabled ? "capture_failed" : "disabled",
+      capturedCount: 0,
+      keyCount: 0,
+      generalCount: 0,
+      mergedCount: 0,
+      deduplicatedCount: 0,
+      compressionTriggered: false,
+      totalCards: summary.totalCards,
+      injectionBudget: summary.injectionBudget
+    };
+  } catch {
+    return {
+      enabled: false,
+      skippedReason: "capture_failed",
+      capturedCount: 0,
+      keyCount: 0,
+      generalCount: 0,
+      mergedCount: 0,
+      deduplicatedCount: 0,
+      compressionTriggered: false,
+      totalCards: 0,
+      injectionBudget: 0
+    };
+  }
+}
+
+function createChatMemoryActivityPayload(input: {
+  requestVersion: number;
+  autoCapture: ChatMemoryActivityPayload["autoCapture"];
+  memoryInjectionCount: number;
+  contextBudgetSummary: ChatContextBudgetSummary;
+}): ChatMemoryActivityPayload {
+  return {
+    requestVersion: input.requestVersion,
+    autoCapture: input.autoCapture,
+    injection: {
+      count: input.memoryInjectionCount
+    },
+    contextBudget: {
+      compressed: input.contextBudgetSummary.compressed,
+      summaryMessageCount: input.contextBudgetSummary.summaryMessageCount,
+      summarizedMessageCount: input.contextBudgetSummary.summarizedMessageCount,
+      recentMessageCount: input.contextBudgetSummary.recentMessageCount
+    }
+  };
+}
+
 function isConfigApiKeyRequest(value: unknown): value is ConfigApiKeyRequest {
   const request = value as Partial<ConfigApiKeyRequest> | null;
 
@@ -2046,6 +2115,8 @@ app.whenReady().then(async () => {
     clearChatReplySustainTimer();
     sendPetActionTrigger("chat_reply_waiting");
     const submittedMessage = request.messages.at(-1);
+    let autoMemoryCaptureForActivity: ChatMemoryActivityPayload["autoCapture"] =
+      createFailedMemoryActivityAutoCapture(memoryStoreForRequest);
 
     if (!submittedMessage) {
       return;
@@ -2077,6 +2148,7 @@ app.whenReady().then(async () => {
           messageId: submittedMessage.id,
           content: submittedMessage.content
         });
+        autoMemoryCaptureForActivity = toChatMemoryActivityAutoCapture(autoMemoryCapture);
         logTelemetry("memory_auto_capture", {
           enabled: autoMemoryCapture.enabled,
           skippedReason: autoMemoryCapture.skippedReason,
@@ -2091,6 +2163,7 @@ app.whenReady().then(async () => {
           safeCategories: autoMemoryCapture.safeCategories
         });
       } catch {
+        autoMemoryCaptureForActivity = createFailedMemoryActivityAutoCapture(memoryStoreForRequest);
         logTelemetry("memory_auto_capture_failed", {
           conversationId: request.conversationId,
           errorType: "failed"
@@ -2121,6 +2194,12 @@ app.whenReady().then(async () => {
         requestVersion: request.requestVersion,
         count: memoryContext.count
       });
+      event.sender.send("chat:memory-activity", createChatMemoryActivityPayload({
+        requestVersion: request.requestVersion,
+        autoCapture: autoMemoryCaptureForActivity,
+        memoryInjectionCount: memoryContext.count,
+        contextBudgetSummary: contextBudget.summary
+      }));
 
       logTelemetry("chat_stream_started", {
         providerId,

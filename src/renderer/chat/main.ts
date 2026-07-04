@@ -2,6 +2,7 @@ import "./styles.css";
 import type { ChatMessage, ChatRole } from "../../shared/chat";
 import type { Conversation, ConversationSummary } from "../../shared/chat-history";
 import type { DialogueModeId, DialogueModeView } from "../../shared/dialogue-style";
+import type { ChatMemoryActivityPayload } from "../../shared/ipc-contract";
 import type { PresenceModeId, PresenceModeView } from "../../shared/presence-mode";
 import type { MemoryCard, MemorySummary } from "../../shared/chat-memory";
 import {
@@ -49,6 +50,7 @@ import {
   ACTIVITY_ECHO_FADING_MS,
   ACTIVITY_ECHO_IDLE_MESSAGE,
   formatCompanionShelf,
+  formatMemoryActivity,
   formatMemoryRibbon,
   formatModeLabel,
   formatPartnerStatus,
@@ -474,6 +476,8 @@ let presenceModes: PresenceModeView[] = [];
 let currentPresenceModeId: PresenceModeId = "default";
 let currentUserProfile: UserProfile | null = null;
 let currentMemoryInjectionCount: number | null = null;
+let latestMemoryActivity: ReturnType<typeof formatMemoryActivity> | null = null;
+let latestMemoryActivityRequestVersion: number | null = null;
 let latestLocalModelDiagnosticSummary: LocalModelDiagnosticSafeSummary | null = null;
 let isLocalModelDiagnosticRunning = false;
 
@@ -1239,6 +1243,23 @@ function setMemorySessionStatus(count: number | null): void {
   renderRibbonEcho();
 }
 
+function renderLatestMemoryActivityFeedback(): void {
+  if (!latestMemoryActivity) {
+    return;
+  }
+
+  memoryFeedbackBox.textContent = `最近活动：${latestMemoryActivity.text}`;
+  memoryFeedbackBox.dataset.state = latestMemoryActivity.state;
+}
+
+function setMemoryActivity(payload: ChatMemoryActivityPayload): void {
+  latestMemoryActivity = formatMemoryActivity(payload);
+  latestMemoryActivityRequestVersion = payload.requestVersion;
+  setMemorySessionStatus(payload.injection.count);
+  setChatSessionNote(latestMemoryActivity.text, latestMemoryActivity.state);
+  renderLatestMemoryActivityFeedback();
+}
+
 function formatMessageRoleLabel(role: ChatRole): string {
   return role === "user" ? "你" : "真央";
 }
@@ -1561,6 +1582,7 @@ async function refreshMemory(): Promise<void> {
           : "记忆已开启；当前没有已启用事实卡，发送时不会加入记忆。"
         : "记忆默认关闭；关闭时不会自动生成事实卡。"
     );
+    renderLatestMemoryActivityFeedback();
   } catch {
     setMemoryFeedback("无法读取本地记忆，请稍后重试。");
   }
@@ -2066,6 +2088,9 @@ function finishReplying(requestVersion: number, activityEcho: ChatTurnLifecycleE
   setReplying(false);
   setChatLifecycleEcho(result.lifecycleEcho);
   setChatSessionNote(result.sessionNote, result.sessionNoteState);
+  if (activityEcho === "回复完成" && latestMemoryActivity && latestMemoryActivityRequestVersion === requestVersion) {
+    setChatSessionNote(latestMemoryActivity.text, latestMemoryActivity.state);
+  }
   chatInput.focus();
 }
 
@@ -2730,6 +2755,14 @@ window.chatApi?.onMemoryInjection((payload) => {
   }
 
   setMemorySessionStatus(payload.count);
+});
+
+window.chatApi?.onMemoryActivity((payload) => {
+  if (!shouldAcceptChatTurnEvent(chatTurnState, payload.requestVersion)) {
+    return;
+  }
+
+  setMemoryActivity(payload);
 });
 
 window.chatApi?.onPetActivityEcho((echo) => {

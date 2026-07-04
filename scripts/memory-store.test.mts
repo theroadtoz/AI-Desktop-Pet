@@ -283,6 +283,45 @@ test("auto heuristic memory stores short facts without full user text", async ()
   }
 });
 
+test("auto heuristic memory summary stays safe for activity feedback", async () => {
+  const userDataPath = await mkdtemp(join(tmpdir(), "desktop-pet-memory-"));
+
+  try {
+    const store = createMemoryStore({ userDataPath });
+    const conversationId = crypto.randomUUID();
+    store.setEnabled(true);
+    const summary = store.captureAutoMemoriesFromLatestUserMessage({
+      conversationId,
+      messageId: crypto.randomUUID(),
+      content: "以后请叫我P227小夏，这段完整原文不能出现在活动反馈"
+    });
+    const sensitive = store.captureAutoMemoriesFromLatestUserMessage({
+      conversationId,
+      messageId: crypto.randomUUID(),
+      content: "我的 API Key 是 sk-p227-memory-activity-secret"
+    });
+
+    assert.deepEqual(Object.keys(summary).sort(), [
+      "capturedCount",
+      "compressionTriggered",
+      "deduplicatedCount",
+      "enabled",
+      "generalCount",
+      "injectionBudget",
+      "keyCount",
+      "mergedCount",
+      "safeCategories",
+      "skippedReason",
+      "totalCards"
+    ]);
+    assert.equal(summary.capturedCount, 1);
+    assert.equal(sensitive.skippedReason, "sensitive");
+    assert.doesNotMatch(JSON.stringify([summary, sensitive]), /完整原文|sk-p227-memory-activity-secret|content|title|tags|prompt|providerMessages/);
+  } finally {
+    await rm(userDataPath, { recursive: true, force: true });
+  }
+});
+
 test("auto heuristic memory distinguishes key and general facts", async () => {
   const userDataPath = await mkdtemp(join(tmpdir(), "desktop-pet-memory-"));
 

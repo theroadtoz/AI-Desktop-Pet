@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import test from "node:test";
+import type { ChatMemoryActivityPayload } from "../src/shared/ipc-contract.ts";
 
 const require = createRequire(import.meta.url);
 const {
@@ -54,6 +55,19 @@ test("chat context budget summarizes older messages without copying their text",
   assert.match(summaryMessage?.content ?? "", /summarizedUserMessageCount=3/);
   assert.match(summaryMessage?.content ?? "", /summarizedAssistantMessageCount=2/);
   assert.equal(summaryMessage?.content.includes(oldPrivateText), false);
+  const activityContextBudget: ChatMemoryActivityPayload["contextBudget"] = {
+    compressed: result.summary.compressed,
+    summaryMessageCount: result.summary.summaryMessageCount,
+    summarizedMessageCount: result.summary.summarizedMessageCount,
+    recentMessageCount: result.summary.recentMessageCount
+  };
+  assert.deepEqual(activityContextBudget, {
+    compressed: true,
+    summaryMessageCount: 1,
+    summarizedMessageCount: messages.length - CHAT_CONTEXT_RECENT_MESSAGE_BUDGET,
+    recentMessageCount: CHAT_CONTEXT_RECENT_MESSAGE_BUDGET
+  });
+  assert.doesNotMatch(JSON.stringify(activityContextBudget), /old-private-context-that-must-not-appear|content|prompt|providerMessages/);
   assert.deepEqual(
     recentMessages.map((message) => message.content),
     messages.slice(-CHAT_CONTEXT_RECENT_MESSAGE_BUDGET).map((message) => message.content)

@@ -480,8 +480,10 @@ async function main() {
         const noteElement = document.querySelector("#chat-session-note");
         const note = noteElement?.textContent ?? "";
         const memory = document.querySelector("#memory-session-status")?.textContent ?? "";
+        const completionNote = note.includes("她刚说完，可以继续聊") ||
+          note.includes("她这轮带上了 1 条已允许的记忆");
         return noteElement?.hidden === false &&
-          note.includes("她刚说完，可以继续聊") &&
+          completionNote &&
           memory.includes("她带上了 1 条已允许的记忆");
       })()
     `);
@@ -491,8 +493,10 @@ async function main() {
         const note = noteElement?.textContent ?? "";
         const memory = document.querySelector("#memory-session-status")?.textContent ?? "";
         const messages = [...document.querySelectorAll(".message")];
+        const completionNote = note.includes("她刚说完，可以继续聊") ||
+          note.includes("她这轮带上了 1 条已允许的记忆");
         return noteElement?.hidden === false &&
-          note.includes("她刚说完，可以继续聊") &&
+          completionNote &&
           memory.includes("她带上了 1 条已允许的记忆") &&
           messages.some((node) => node.classList.contains("message-user")) &&
           messages.some((node) => node.classList.contains("message-pet"));
@@ -528,7 +532,9 @@ async function main() {
     checks.abortOrCompleteState = await evaluate(chat, `
       (() => {
         const note = document.querySelector("#chat-session-note")?.textContent ?? "";
-        return note.includes("这轮先停在这里") || note.includes("她刚说完");
+        return note.includes("这轮先停在这里") ||
+          note.includes("她刚说完") ||
+          note.includes("她这轮带上了");
       })()
     `);
 
@@ -537,7 +543,7 @@ async function main() {
       (() => {
         const feedback = document.querySelector("#memory-feedback")?.textContent ?? "";
         return document.querySelector("#memory-page")?.hidden === false &&
-          (feedback.includes("Provider 请求") || feedback.includes("最新用户消息"));
+          (feedback.includes("Provider 请求") || feedback.includes("最新用户消息") || feedback.includes("最近活动"));
       })()
     `);
     await click(chat, "#history-tab");

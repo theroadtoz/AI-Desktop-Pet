@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type {
   ChatApi,
+  ChatMemoryActivityPayload,
   ChatMemoryInjectionPayload,
   ChatSendRequest,
   ChatStreamDeltaPayload,
@@ -67,6 +68,7 @@ const chatStreamErrorTypes = [
   "network_error",
   "failed"
 ] as const;
+const chatMemoryActivitySkippedReasons = ["disabled", "sensitive", "no_candidate", "capture_failed"] as const;
 const providerHealthStatuses: readonly ProviderHealthStatus[] = [
   "ready",
   "model_missing",
@@ -475,6 +477,74 @@ function isChatMemoryInjectionPayload(value: unknown): value is ChatMemoryInject
     typeof payload.count === "number" &&
     Number.isSafeInteger(payload.count) &&
     payload.count >= 0
+  );
+}
+
+function hasExactKeys(value: unknown, keys: readonly string[]): value is Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const objectKeys = Object.keys(value);
+  return objectKeys.length === keys.length &&
+    objectKeys.every((key) => keys.includes(key)) &&
+    keys.every((key) => Object.prototype.hasOwnProperty.call(value, key));
+}
+
+function isChatMemoryActivitySkippedReason(value: unknown): value is ChatMemoryActivityPayload["autoCapture"]["skippedReason"] {
+  return value === null ||
+    (typeof value === "string" && chatMemoryActivitySkippedReasons.includes(value as (typeof chatMemoryActivitySkippedReasons)[number]));
+}
+
+function isChatMemoryActivityPayload(value: unknown): value is ChatMemoryActivityPayload {
+  if (!hasExactKeys(value, ["requestVersion", "autoCapture", "injection", "contextBudget"])) {
+    return false;
+  }
+
+  const autoCapture = value.autoCapture;
+  const injection = value.injection;
+  const contextBudget = value.contextBudget;
+  const requestVersion = value.requestVersion;
+
+  if (!hasExactKeys(autoCapture, [
+    "enabled",
+    "skippedReason",
+    "capturedCount",
+    "keyCount",
+    "generalCount",
+    "mergedCount",
+    "deduplicatedCount",
+    "compressionTriggered",
+    "totalCards",
+    "injectionBudget"
+  ]) || !hasExactKeys(injection, ["count"]) || !hasExactKeys(contextBudget, [
+    "compressed",
+    "summaryMessageCount",
+    "summarizedMessageCount",
+    "recentMessageCount"
+  ])) {
+    return false;
+  }
+
+  return Boolean(
+    typeof requestVersion === "number" &&
+    Number.isSafeInteger(requestVersion) &&
+    requestVersion > 0 &&
+    typeof autoCapture.enabled === "boolean" &&
+    isChatMemoryActivitySkippedReason(autoCapture.skippedReason) &&
+    isNonNegativeSafeInteger(autoCapture.capturedCount) &&
+    isNonNegativeSafeInteger(autoCapture.keyCount) &&
+    isNonNegativeSafeInteger(autoCapture.generalCount) &&
+    isNonNegativeSafeInteger(autoCapture.mergedCount) &&
+    isNonNegativeSafeInteger(autoCapture.deduplicatedCount) &&
+    typeof autoCapture.compressionTriggered === "boolean" &&
+    isNonNegativeSafeInteger(autoCapture.totalCards) &&
+    isNonNegativeSafeInteger(autoCapture.injectionBudget) &&
+    isNonNegativeSafeInteger(injection.count) &&
+    typeof contextBudget.compressed === "boolean" &&
+    isNonNegativeSafeInteger(contextBudget.summaryMessageCount) &&
+    isNonNegativeSafeInteger(contextBudget.summarizedMessageCount) &&
+    isNonNegativeSafeInteger(contextBudget.recentMessageCount)
   );
 }
 
@@ -1438,6 +1508,18 @@ const api: ChatApi = {
     ipcRenderer.on("chat:memory-injection", listener);
     return () => {
       ipcRenderer.removeListener("chat:memory-injection", listener);
+    };
+  },
+  onMemoryActivity(handler) {
+    const listener = (_event: Electron.IpcRendererEvent, payload: unknown): void => {
+      if (isChatMemoryActivityPayload(payload)) {
+        handler(payload);
+      }
+    };
+
+    ipcRenderer.on("chat:memory-activity", listener);
+    return () => {
+      ipcRenderer.removeListener("chat:memory-activity", listener);
     };
   },
   onPetActivityEcho(handler) {
