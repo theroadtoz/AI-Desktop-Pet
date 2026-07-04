@@ -29,9 +29,20 @@ const presenceModeIds = ["default", "focus", "quiet", "sleep"] as const;
 const proactiveSpeechBubbleLineIds = [
   "startup_presence_ready",
   "startup_presence_soft",
-  "startup_presence_focus"
+  "startup_presence_focus",
+  "idle_presence_soft",
+  "idle_presence_default",
+  "idle_presence_focus",
+  "idle_presence_quiet",
+  "idle_presence_work",
+  "idle_presence_game",
+  "idle_presence_reading",
+  "mode_presence_focus",
+  "mode_presence_work",
+  "mode_presence_game",
+  "mode_presence_reading"
 ] as const;
-const proactiveSpeechBubbleReasons = ["startup_presence"] as const;
+const proactiveSpeechBubbleReasons = ["startup_presence", "idle_presence", "mode_presence"] as const;
 const petActionTriggerReasons = [
   "chat_opened",
   "chat_input_focus",

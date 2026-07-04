@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
   DEFAULT_PROACTIVE_SPEECH_BUBBLE_DURATION_MS,
@@ -10,7 +11,8 @@ import {
   clampProactiveSpeechBubbleDuration,
   getProactiveSpeechBubbleLine,
   isProactiveSpeechBubbleLineId,
-  isProactiveSpeechBubbleReason
+  isProactiveSpeechBubbleReason,
+  selectProactiveSpeechBubbleLineId
 } from "../src/shared/proactive-speech-bubble.ts";
 
 const FORBIDDEN_TEXTS = [
@@ -42,8 +44,10 @@ test("proactive speech bubble rejects arbitrary ids and reasons", () => {
   assert.equal(isProactiveSpeechBubbleLineId("chat_reply"), false);
   assert.equal(isProactiveSpeechBubbleLineId("private_memory"), false);
 
-  assert.deepEqual(PROACTIVE_SPEECH_BUBBLE_REASONS, ["startup_presence"]);
+  assert.deepEqual(PROACTIVE_SPEECH_BUBBLE_REASONS, ["startup_presence", "idle_presence", "mode_presence"]);
   assert.equal(isProactiveSpeechBubbleReason("startup_presence"), true);
+  assert.equal(isProactiveSpeechBubbleReason("idle_presence"), true);
+  assert.equal(isProactiveSpeechBubbleReason("mode_presence"), true);
   assert.equal(isProactiveSpeechBubbleReason("chat_done"), false);
   assert.equal(isProactiveSpeechBubbleReason("model_generated"), false);
 });
@@ -53,4 +57,55 @@ test("proactive speech bubble duration is clamped to low-interruption bounds", (
   assert.equal(clampProactiveSpeechBubbleDuration(1), MIN_PROACTIVE_SPEECH_BUBBLE_DURATION_MS);
   assert.equal(clampProactiveSpeechBubbleDuration(12_000), MAX_PROACTIVE_SPEECH_BUBBLE_DURATION_MS);
   assert.equal(clampProactiveSpeechBubbleDuration(4_234.7), 4_235);
+});
+
+test("proactive speech bubble selection is mode-aware but stays allowlisted", () => {
+  assert.equal(selectProactiveSpeechBubbleLineId({
+    reason: "idle_presence",
+    presenceModeId: "default",
+    dialogueModeId: "default",
+    tick: 0
+  }), "idle_presence_soft");
+
+  assert.equal(selectProactiveSpeechBubbleLineId({
+    reason: "idle_presence",
+    presenceModeId: "focus",
+    dialogueModeId: "game",
+    tick: 0
+  }), "idle_presence_focus");
+
+  assert.equal(selectProactiveSpeechBubbleLineId({
+    reason: "idle_presence",
+    presenceModeId: "default",
+    dialogueModeId: "work",
+    tick: 0
+  }), "idle_presence_work");
+
+  assert.equal(selectProactiveSpeechBubbleLineId({
+    reason: "mode_presence",
+    presenceModeId: "default",
+    dialogueModeId: "reading",
+    tick: 0
+  }), "mode_presence_reading");
+
+  assert.equal(selectProactiveSpeechBubbleLineId({
+    reason: "mode_presence",
+    presenceModeId: "quiet",
+    dialogueModeId: "reading",
+    tick: 0
+  }), "mode_presence_focus");
+});
+
+test("pet preload keeps proactive speech bubble allowlists aligned", () => {
+  const preloadSource = readFileSync("src/preload/pet-preload.ts", "utf8");
+
+  for (const lineId of Object.keys(PROACTIVE_SPEECH_BUBBLE_LINE_CATALOG)) {
+    assert.match(preloadSource, new RegExp(JSON.stringify(lineId)));
+  }
+
+  for (const reason of PROACTIVE_SPEECH_BUBBLE_REASONS) {
+    assert.match(preloadSource, new RegExp(JSON.stringify(reason)));
+  }
+
+  assert.doesNotMatch(preloadSource, /textContent|messageText|promptText|factCard/);
 });

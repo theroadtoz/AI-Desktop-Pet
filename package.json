@@ -34,6 +34,7 @@
     "accept:p2-24b-real-local-model-persona-followup-qa": "node scripts/p2-24b-real-local-model-persona-followup-qa.mjs",
     "accept:p2-24d-persona-relevance-regression": "node scripts/p2-24d-persona-relevance-regression-real-ui.mjs",
     "accept:p2-24c-proactive-speech-bubble": "node scripts/p2-24c-proactive-speech-bubble-real-ui.mjs",
+    "accept:p2-24e-proactive-speech-bubble-v2": "node scripts/p2-24e-proactive-speech-bubble-v2-real-ui.mjs",
     "accept:p2-29a-privacy-safe-mcp-web-search": "node scripts/p2-29a-privacy-safe-mcp-web-search-real-ui.mjs",
     "accept:p2-20x-electron-version-installer-notices": "node scripts/p2-20x-electron-version-installer-notices-acceptance.mjs",
     "accept:p2-11h-ui-detail-visual-consistency": "node scripts/p2-11h-ui-detail-visual-consistency-real-ui.mjs",
