@@ -25,7 +25,13 @@ import {
 import { isPetAccessoryPresetId, type PetAccessoryPresetId } from "../../shared/pet-accessory";
 import type { ShortcutActionId, ShortcutPreferenceView } from "../../shared/shortcut-preferences";
 import type { UserProfile } from "../../shared/user-profile";
-import { DEFAULT_WEB_SEARCH_SETTINGS, type WebSearchSettings, type WebSearchStatus } from "../../shared/web-search";
+import {
+  DEFAULT_WEB_SEARCH_SETTINGS,
+  type WebSearchCitationPayload,
+  type WebSearchConnectionTestResult,
+  type WebSearchSettings,
+  type WebSearchStatus
+} from "../../shared/web-search";
 import {
   applyChatTurnDelta,
   createInitialChatTurnState,
@@ -152,6 +158,7 @@ const webSearchTimeout = document.querySelector<HTMLInputElement>("#web-search-t
 const webSearchMaxResults = document.querySelector<HTMLInputElement>("#web-search-max-results");
 const webSearchSaveButton = document.querySelector<HTMLButtonElement>("#web-search-save-button");
 const webSearchRefreshButton = document.querySelector<HTMLButtonElement>("#web-search-refresh-button");
+const webSearchTestButton = document.querySelector<HTMLButtonElement>("#web-search-test-button");
 const chatTab = document.querySelector<HTMLButtonElement>("#chat-tab");
 const historyTab = document.querySelector<HTMLButtonElement>("#history-tab");
 const memoryTab = document.querySelector<HTMLButtonElement>("#memory-tab");
@@ -220,7 +227,7 @@ if (
   !settingsUserDisplayName || !settingsUserPreferredName || !saveUserProfileButton || !clearUserProfileButton ||
   !settingsDialogueModeSummary || !settingsPresenceModeSummary || !shortcutList || !shortcutStatus ||
   !webSearchStatus || !webSearchEnabled || !webSearchCommand || !webSearchArgs || !webSearchToolName ||
-  !webSearchTimeout || !webSearchMaxResults || !webSearchSaveButton || !webSearchRefreshButton ||
+  !webSearchTimeout || !webSearchMaxResults || !webSearchSaveButton || !webSearchRefreshButton || !webSearchTestButton ||
   !chatTab || !historyTab || !memoryTab || !chatPage || !companionControlShelf || !dialogueModeControls || !presenceModeControls ||
   !shelfAccessoryButton || !shelfScaleButton || !shelfLockButton || !shelfActionEcho || !historyPage ||
   !memoryPage || !chatSessionNote || !memoryDraftPanel || !memoryDraftTitle || !memoryDraftContent || !memoryDraftTags ||
@@ -324,6 +331,7 @@ const webSearchTimeoutField = webSearchTimeout;
 const webSearchMaxResultsField = webSearchMaxResults;
 const webSearchSaveAction = webSearchSaveButton;
 const webSearchRefreshAction = webSearchRefreshButton;
+const webSearchTestAction = webSearchTestButton;
 const chatTabAction = chatTab;
 const historyTabAction = historyTab;
 const memoryTabAction = memoryTab;
@@ -560,6 +568,58 @@ async function saveWebSearchSettings(): Promise<void> {
     setSettingsFeedback(savedSettings.enabled ? "MCP 搜索设置已启用。" : "MCP 搜索设置已保存，当前仍关闭。", "ready");
   } catch {
     setSettingsFeedback("无法保存 MCP 搜索设置，请检查命令、工具名和参数。");
+  }
+}
+
+async function testWebSearchConnection(): Promise<void> {
+  if (!window.webSearchApi) {
+    setSettingsFeedback("MCP 搜索设置不可用。");
+    return;
+  }
+
+  const settings = buildWebSearchSettings();
+
+  if (!settings) {
+    return;
+  }
+
+  webSearchTestAction.disabled = true;
+  webSearchStatusBox.dataset.state = "fallback";
+  webSearchStatusBox.textContent = "正在测试 MCP 工具...";
+
+  try {
+    const result = await window.webSearchApi.testConnection(settings);
+    webSearchStatusBox.textContent = formatWebSearchConnectionTestResult(result);
+    webSearchStatusBox.dataset.state = result.status === "tool_available" ? "ready" : "fallback";
+    setSettingsFeedback(
+      result.status === "tool_available" ? "MCP 工具可用。" : "MCP 连接测试完成，请查看状态摘要。",
+      result.status === "tool_available" ? "ready" : "fallback"
+    );
+  } catch {
+    webSearchStatusBox.dataset.state = "fallback";
+    webSearchStatusBox.textContent = "MCP 连接测试失败。";
+    setSettingsFeedback("MCP 连接测试失败；未发送用户消息或搜索查询。");
+  } finally {
+    webSearchTestAction.disabled = false;
+  }
+}
+
+function formatWebSearchConnectionTestResult(result: WebSearchConnectionTestResult): string {
+  switch (result.status) {
+    case "not_configured":
+      return "未配置 MCP 命令。";
+    case "configured_disabled":
+      return `已配置 ${result.commandName ?? "MCP 命令"}，当前未启用。`;
+    case "tool_available":
+      return `工具可用 · ${result.toolName} · 已发现 ${result.toolCount} 个工具。`;
+    case "tool_missing":
+      return `找不到工具 · ${result.toolName} · 已发现 ${result.toolCount} 个工具。`;
+    case "spawn_failed":
+      return "启动失败；请检查 MCP 命令是否可运行。";
+    case "timeout":
+      return "连接超时；请检查 MCP server 是否能响应 initialize/tools/list。";
+    case "failed":
+      return "测试失败；只运行了 initialize 和 tools/list。";
   }
 }
 
@@ -1204,6 +1264,62 @@ function appendMessage(message: ChatMessage): HTMLElement {
   messageList.append(item);
   messageList.scrollTop = messageList.scrollHeight;
   return item;
+}
+
+function appendWebSearchCitations(messageElement: HTMLElement, payload?: WebSearchCitationPayload): void {
+  if (!payload || payload.citations.length === 0) {
+    return;
+  }
+
+  messageElement.querySelector(".message-citations")?.remove();
+
+  const wrapper = document.createElement("span");
+  wrapper.className = "message-citations selection-note";
+  wrapper.dataset.state = "ready";
+
+  const heading = document.createElement("span");
+  heading.className = "message-citations-heading";
+  heading.textContent = "资料来源";
+  wrapper.append(heading);
+
+  for (const citation of payload.citations.slice(0, 5)) {
+    const item = document.createElement("span");
+    item.className = "message-citation-item";
+
+    const title = document.createElement(citation.url ? "a" : "span");
+    title.className = "message-citation-title";
+    title.textContent = citation.title;
+    if (citation.url && title instanceof HTMLAnchorElement) {
+      title.href = citation.url;
+      title.target = "_blank";
+      title.rel = "noreferrer";
+    }
+
+    const meta = document.createElement("span");
+    meta.className = "message-citation-meta";
+    meta.textContent = citation.domain;
+
+    item.append(title, meta);
+
+    if (citation.snippet) {
+      const snippet = document.createElement("span");
+      snippet.className = "message-citation-snippet";
+      snippet.textContent = citation.snippet;
+      item.append(snippet);
+    }
+
+    if (citation.url) {
+      const urlText = document.createElement("span");
+      urlText.className = "message-citation-url";
+      urlText.textContent = citation.url;
+      item.append(urlText);
+    }
+
+    wrapper.append(item);
+  }
+
+  messageElement.append(wrapper);
+  messageList.scrollTop = messageList.scrollHeight;
 }
 
 function createMessage(role: ChatRole, content: string): ChatMessage {
@@ -2578,6 +2694,10 @@ window.chatApi?.onReplyDone((reply) => {
     return;
   }
 
+  if (activeReplyElement) {
+    appendWebSearchCitations(activeReplyElement, reply.webSearchCitation);
+  }
+
   finishReplying(reply.requestVersion);
 });
 
@@ -2827,6 +2947,12 @@ webSearchSaveAction.addEventListener("click", () => {
 
 webSearchRefreshAction.addEventListener("click", () => {
   void refreshWebSearchSettings();
+});
+
+webSearchTestAction.addEventListener("click", () => {
+  if (!chatTurnState.isReplying) {
+    void testWebSearchConnection();
+  }
 });
 
 chatTabAction.addEventListener("click", () => {

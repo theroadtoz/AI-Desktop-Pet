@@ -17,7 +17,12 @@ import type { PetActionTrigger } from "./pet-action-trigger";
 import type { LlamaCppRuntimeSafeSummary, LlamaCppRuntimeSettingsUpdate } from "./llama-cpp-runtime";
 import type { LocalModelDiagnosticSafeSummary } from "./local-model-diagnostic";
 import type { ProactiveSpeechBubblePayload } from "./proactive-speech-bubble";
-import type { WebSearchSettings, WebSearchStatus } from "./web-search";
+import type {
+  WebSearchCitationPayload,
+  WebSearchConnectionTestResult,
+  WebSearchSettings,
+  WebSearchStatus
+} from "./web-search";
 
 export type { PetTelemetryEvent } from "./pet-telemetry-contract";
 
@@ -49,7 +54,10 @@ export type ChatSendRequest = Pick<ChatRequest, "requestVersion" | "conversation
 
 export type ChatStreamDeltaPayload = ChatStreamDelta & { requestVersion: number };
 
-export type ChatStreamDonePayload = ChatProviderResult & { requestVersion: number };
+export type ChatStreamDonePayload = ChatProviderResult & {
+  requestVersion: number;
+  webSearchCitation?: WebSearchCitationPayload;
+};
 
 export type ChatStreamErrorType =
   | "aborted"
@@ -242,6 +250,7 @@ export type WebSearchApi = {
   getSettings(): Promise<WebSearchSettings>;
   getStatus(): Promise<WebSearchStatus>;
   setSettings(settings: WebSearchSettings): Promise<WebSearchSettings>;
+  testConnection(settings?: WebSearchSettings): Promise<WebSearchConnectionTestResult>;
 };
 
 export function isChatMessage(value: unknown): value is ChatMessage {

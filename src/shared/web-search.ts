@@ -25,6 +25,7 @@ export type WebSearchResult = {
   title: string;
   snippet: string;
   url?: string;
+  date?: string;
 };
 
 export type WebSearchContext = {
@@ -33,6 +34,19 @@ export type WebSearchContext = {
   provider: "mcp";
   toolName: string;
   generatedAt: string;
+};
+
+export type WebSearchCitation = {
+  title: string;
+  domain: string;
+  url?: string;
+  snippet?: string;
+  generatedAt: string;
+  toolName: string;
+};
+
+export type WebSearchCitationPayload = {
+  citations: WebSearchCitation[];
 };
 
 export type WebSearchSettings = {
@@ -52,6 +66,25 @@ export type WebSearchStatus = {
   toolName: string;
   timeoutMs: number;
   maxResults: number;
+};
+
+export type WebSearchConnectionTestStatus =
+  | "not_configured"
+  | "configured_disabled"
+  | "tool_available"
+  | "tool_missing"
+  | "spawn_failed"
+  | "timeout"
+  | "failed";
+
+export type WebSearchConnectionTestResult = {
+  status: WebSearchConnectionTestStatus;
+  commandConfigured: boolean;
+  enabled: boolean;
+  toolName: string;
+  toolFound: boolean;
+  toolCount: number;
+  commandName?: string;
 };
 
 export const DEFAULT_WEB_SEARCH_SETTINGS: WebSearchSettings = {
@@ -95,5 +128,32 @@ export function isWebSearchStatus(value: unknown): value is WebSearchStatus {
     Number.isSafeInteger(status.timeoutMs) &&
     typeof status.maxResults === "number" &&
     Number.isSafeInteger(status.maxResults)
+  );
+}
+
+export function isWebSearchConnectionTestResult(value: unknown): value is WebSearchConnectionTestResult {
+  const result = value as Partial<WebSearchConnectionTestResult> | null;
+  const statuses: readonly WebSearchConnectionTestStatus[] = [
+    "not_configured",
+    "configured_disabled",
+    "tool_available",
+    "tool_missing",
+    "spawn_failed",
+    "timeout",
+    "failed"
+  ];
+
+  return Boolean(
+    result &&
+    typeof result.status === "string" &&
+    statuses.includes(result.status as WebSearchConnectionTestStatus) &&
+    typeof result.commandConfigured === "boolean" &&
+    typeof result.enabled === "boolean" &&
+    typeof result.toolName === "string" &&
+    typeof result.toolFound === "boolean" &&
+    typeof result.toolCount === "number" &&
+    Number.isSafeInteger(result.toolCount) &&
+    result.toolCount >= 0 &&
+    (result.commandName === undefined || typeof result.commandName === "string")
   );
 }

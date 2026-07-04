@@ -1,6 +1,11 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createInterface } from "node:readline";
-import type { WebSearchSettings, WebSearchResult } from "../../../shared/web-search";
+import { basename } from "node:path";
+import type {
+  WebSearchConnectionTestResult,
+  WebSearchSettings,
+  WebSearchResult
+} from "../../../shared/web-search";
 import type { WebSearchProvider, WebSearchRequest } from "./web-search-provider";
 
 type JsonRpcMessage = {
@@ -24,6 +29,7 @@ const MAX_STDERR_BYTES = 4096;
 const MAX_RESULT_TITLE_LENGTH = 96;
 const MAX_RESULT_SNIPPET_LENGTH = 360;
 const MAX_RESULT_URL_LENGTH = 240;
+const MAX_RESULT_DATE_LENGTH = 40;
 
 export type McpSearchClientConfig = Pick<
   WebSearchSettings,
@@ -78,6 +84,63 @@ export async function callMcpSearchTool(
   }
 }
 
+export async function testMcpSearchConnection(config: WebSearchSettings): Promise<WebSearchConnectionTestResult> {
+  const baseResult = {
+    commandConfigured: config.command.trim().length > 0,
+    enabled: config.enabled,
+    toolName: config.toolName,
+    toolFound: false,
+    toolCount: 0,
+    ...(config.command ? { commandName: basename(config.command) } : {})
+  };
+
+  if (!baseResult.commandConfigured) {
+    return { ...baseResult, status: "not_configured" };
+  }
+
+  if (!config.enabled) {
+    return { ...baseResult, status: "configured_disabled" };
+  }
+
+  const session = createMcpJsonRpcSession(config);
+
+  try {
+    await session.start();
+    await session.request("initialize", {
+      protocolVersion: MCP_PROTOCOL_VERSION,
+      capabilities: {},
+      clientInfo: {
+        name: "ai-desktop-pet",
+        version: "0.0.0"
+      }
+    });
+    session.notify("notifications/initialized", {});
+
+    const tools = await session.request("tools/list", {});
+    const toolSummaries = readToolSummaries(tools);
+    const toolFound = toolSummaries.some((tool) => tool.name === config.toolName);
+
+    return {
+      ...baseResult,
+      status: toolFound ? "tool_available" : "tool_missing",
+      toolFound,
+      toolCount: toolSummaries.length
+    };
+  } catch (error: unknown) {
+    const errorType = error instanceof Error ? error.name : "mcp_search_failed";
+    return {
+      ...baseResult,
+      status: errorType === "mcp_search_timeout"
+        ? "timeout"
+        : errorType === "mcp_search_spawn_failed"
+          ? "spawn_failed"
+          : "failed"
+    };
+  } finally {
+    session.close();
+  }
+}
+
 function createMcpJsonRpcSession(config: McpSearchClientConfig): {
   start(): Promise<void>;
   request(method: string, params: unknown): Promise<unknown>;
@@ -104,7 +167,7 @@ function createMcpJsonRpcSession(config: McpSearchClientConfig): {
           shell: false,
           windowsHide: true,
           stdio: ["pipe", "pipe", "pipe"],
-          env: createSafeMcpChildEnv()
+          env: createSafeMcpChildEnv(config)
         });
         child = process;
 
@@ -222,24 +285,48 @@ function handleJsonRpcLine(line: string, pending: Map<number, PendingRequest>): 
 }
 
 function assertToolExists(value: unknown, toolName: string): void {
-  const tools = (value as { tools?: Array<{ name?: unknown }> } | null)?.tools;
+  const tools = readToolSummaries(value);
 
-  if (!Array.isArray(tools) || !tools.some((tool) => tool.name === toolName)) {
+  if (!tools.some((tool) => tool.name === toolName)) {
     throw createMcpSearchError("mcp_search_tool_missing");
   }
 }
 
-function parseMcpToolResults(value: unknown, maxResults: number): WebSearchResult[] {
+function readToolSummaries(value: unknown): Array<{ name: string }> {
+  const tools = (value as { tools?: Array<{ name?: unknown }> } | null)?.tools;
+
+  if (!Array.isArray(tools)) {
+    return [];
+  }
+
+  return tools
+    .map((tool) => typeof tool.name === "string" ? { name: tool.name } : null)
+    .filter((tool): tool is { name: string } => tool !== null);
+}
+
+export function parseMcpToolResults(value: unknown, maxResults: number): WebSearchResult[] {
   const textParts = readMcpTextParts(value);
-  const parsedFromJson = parseResultJson(textParts.join("\n"));
-  const candidates = parsedFromJson.length > 0
-    ? parsedFromJson
+  const structuredResults = readStructuredResults(value);
+  const parsedFromJson = textParts.flatMap(parseResultJson);
+  const candidates = [...structuredResults, ...parsedFromJson];
+  const fallbackCandidates = candidates.length > 0
+    ? candidates
     : textParts.map((text) => ({ title: "搜索结果", snippet: text }));
 
-  return candidates
+  return fallbackCandidates
     .map(sanitizeSearchResult)
     .filter((result): result is WebSearchResult => result !== null)
     .slice(0, maxResults);
+}
+
+function readStructuredResults(value: unknown): Array<Record<string, unknown>> {
+  const results = (value as { structuredContent?: { results?: unknown } } | null)?.structuredContent?.results;
+
+  if (!Array.isArray(results)) {
+    return [];
+  }
+
+  return results.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object"));
 }
 
 function readMcpTextParts(value: unknown): string[] {
@@ -280,8 +367,12 @@ function parseResultJson(text: string): Array<Record<string, unknown>> {
 
 function sanitizeSearchResult(value: Record<string, unknown>): WebSearchResult | null {
   const title = sanitizeText(value.title, MAX_RESULT_TITLE_LENGTH) || "搜索结果";
-  const snippet = sanitizeText(value.snippet ?? value.content ?? value.text, MAX_RESULT_SNIPPET_LENGTH);
-  const url = sanitizeUrl(value.url);
+  const snippet = sanitizeText(
+    value.snippet ?? value.description ?? value.content ?? value.text,
+    MAX_RESULT_SNIPPET_LENGTH
+  );
+  const url = sanitizeUrl(value.url ?? value.link);
+  const date = sanitizeText(value.date ?? value.publishedAt, MAX_RESULT_DATE_LENGTH);
 
   if (!snippet) {
     return null;
@@ -290,7 +381,8 @@ function sanitizeSearchResult(value: Record<string, unknown>): WebSearchResult |
   return {
     title,
     snippet,
-    ...(url ? { url } : {})
+    ...(url ? { url } : {}),
+    ...(date ? { date } : {})
   };
 }
 
@@ -312,13 +404,15 @@ function sanitizeUrl(value: unknown): string | null {
     if (url.protocol !== "http:" && url.protocol !== "https:") {
       return null;
     }
+    url.search = "";
+    url.hash = "";
     return url.toString().slice(0, MAX_RESULT_URL_LENGTH);
   } catch {
     return null;
   }
 }
 
-function createSafeMcpChildEnv(): NodeJS.ProcessEnv {
+function createSafeMcpChildEnv(config: McpSearchClientConfig): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
   for (const key of ["PATH", "Path", "SystemRoot", "COMSPEC", "ComSpec", "TEMP", "TMP"]) {
     const value = process.env[key];
@@ -326,7 +420,15 @@ function createSafeMcpChildEnv(): NodeJS.ProcessEnv {
       env[key] = value;
     }
   }
+  const braveApiKey = process.env.BRAVE_API_KEY;
+  if (braveApiKey && isBraveSearchMcpConfig(config)) {
+    env.BRAVE_API_KEY = braveApiKey;
+  }
   return env;
+}
+
+function isBraveSearchMcpConfig(config: McpSearchClientConfig): boolean {
+  return config.args.some((arg) => arg.toLowerCase().includes("@brave/brave-search-mcp-server"));
 }
 
 function normalizeTimeoutMs(value: number): number {

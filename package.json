@@ -39,6 +39,7 @@
     "accept:p2-25b-edge-positioning-half-body-presence": "npm run build && node scripts/p2-25b-edge-positioning-half-body-presence-real-ui.mjs",
     "accept:p2-26-memory-v2-v3-productization": "npm run build && node scripts/p2-26-memory-v2-v3-productization-real-ui.mjs",
     "accept:p2-29a-privacy-safe-mcp-web-search": "node scripts/p2-29a-privacy-safe-mcp-web-search-real-ui.mjs",
+    "accept:p2-29b-real-mcp-server-compatibility-search-citation-ui": "npm run build && node scripts/p2-29b-real-mcp-server-compatibility-search-citation-ui.mjs",
     "accept:p2-20x-electron-version-installer-notices": "node scripts/p2-20x-electron-version-installer-notices-acceptance.mjs",
     "accept:p2-11h-ui-detail-visual-consistency": "node scripts/p2-11h-ui-detail-visual-consistency-real-ui.mjs",
     "stage:offline-local-llm": "node scripts/p2-20i-stage-offline-local-llm-install-layout.mjs",

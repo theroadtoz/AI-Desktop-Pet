@@ -715,6 +715,57 @@ body {
   opacity: 0.72;
 }
 
+.message-citations {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 9px 10px;
+  border: 1px solid #e7dccb;
+  border-radius: 8px;
+  background: #fffaf0;
+}
+
+.message-citations-heading,
+.message-citation-title,
+.message-citation-meta,
+.message-citation-snippet,
+.message-citation-url {
+  display: block;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.message-citations-heading {
+  font-size: 12px;
+  font-weight: 700;
+  color: #48633e;
+}
+
+.message-citation-item {
+  display: grid;
+  gap: 3px;
+}
+
+.message-citation-title {
+  color: #4b3928;
+  font-size: 13px;
+  font-weight: 700;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+
+.message-citation-meta,
+.message-citation-url {
+  color: #806b56;
+  font-size: 12px;
+}
+
+.message-citation-snippet {
+  color: #6b5745;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
 .message-content {
   display: block;
   min-height: 1.5em;

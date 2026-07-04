@@ -54,7 +54,7 @@ import {
 import type { LocalOpenAICompatibleConfig, ProviderConfig, ProviderStatus } from "../shared/provider-config";
 import type { ProviderHealthCheckRequest } from "../shared/provider-health";
 import type { LlamaCppRuntimeSettingsUpdate } from "../shared/llama-cpp-runtime";
-import type { WebSearchContext, WebSearchReasonCode } from "../shared/web-search";
+import type { WebSearchCitationPayload, WebSearchContext, WebSearchReasonCode } from "../shared/web-search";
 import {
   parseLocalModelDiagnosticSafeSummary,
   type LocalModelDiagnosticSafeSummary
@@ -83,14 +83,15 @@ import { createHistoryStore, type HistoryStore } from "./services/chat/history-s
 import { createMemoryStore, type MemoryStore } from "./services/chat/memory-store";
 import { createChatProviderFromConfig } from "./services/chat/provider-factory";
 import { checkProviderHealth } from "./services/chat/provider-health";
-import { createMcpSearchProvider } from "./services/search/mcp-search-client";
+import { createMcpSearchProvider, testMcpSearchConnection } from "./services/search/mcp-search-client";
 import { createSearchPrivacyDecision } from "./services/search/search-privacy-gateway";
-import { createWebSearchContext } from "./services/search/web-search-provider";
+import { createWebSearchCitationPayload, createWebSearchContext } from "./services/search/web-search-provider";
 import { readEnvProviderConfig, type EnvProviderConfig } from "./services/config/env-config";
 import { createDialogueModeStore, type DialogueModeStore } from "./services/config/dialogue-mode-store";
 import { createPresenceModeStore, type PresenceModeStore } from "./services/config/presence-mode-store";
 import {
   createWebSearchSettingsStore,
+  normalizeWebSearchSettings,
   type WebSearchSettingsStore
 } from "./services/config/web-search-settings-store";
 import {
@@ -2151,6 +2152,8 @@ app.whenReady().then(async () => {
         ...(userProfileContext ? { userProfileContext } : {})
       };
 
+      const webSearchCitation = createWebSearchCitationPayload(webSearchResolution.context);
+
       return chatEngineForRequest.startChatStream(providerRequest, {
         onDelta(delta) {
           if (!transitionPetRole({ type: "reply:delta", requestVersion: request.requestVersion })) {
@@ -2161,8 +2164,11 @@ app.whenReady().then(async () => {
           scheduleChatReplySustainTrigger(replyLength);
           event.sender.send("chat:stream-delta", { ...delta, requestVersion: request.requestVersion });
         }
-      });
-    }).then((result) => {
+      }).then((result) => ({ result, webSearchCitation }));
+    }).then(({ result, webSearchCitation }: {
+      result: Awaited<ReturnType<ChatEngine["startChatStream"]>>;
+      webSearchCitation: WebSearchCitationPayload | null;
+    }) => {
       try {
         const historyMessage: HistoryMessage = {
           id: crypto.randomUUID(),
@@ -2209,7 +2215,11 @@ app.whenReady().then(async () => {
         presentationMode: expression.mode,
         emphasisExpressionTriggered: expression.mode === "emphasis"
       });
-      event.sender.send("chat:stream-done", { ...result, requestVersion: request.requestVersion });
+      event.sender.send("chat:stream-done", {
+        ...result,
+        requestVersion: request.requestVersion,
+        ...(webSearchCitation ? { webSearchCitation } : {})
+      });
     }).catch((error: unknown) => {
       const errorType = getChatErrorType(error);
       const eventType = errorType === "aborted" ? "chat_stream_aborted" : "chat_stream_failed";
@@ -2281,6 +2291,26 @@ app.whenReady().then(async () => {
     }
 
     return webSearchSettingsStore.getStatus();
+  });
+
+  ipcMain.handle("webSearch:test-connection", async (event, update: unknown) => {
+    if (!isChatSender(event) || !webSearchSettingsStore) {
+      throw new Error("Unauthorized web search request");
+    }
+
+    const settings = update === undefined
+      ? webSearchSettingsStore.getSettings()
+      : normalizeWebSearchSettings(update);
+    const result = await testMcpSearchConnection(settings);
+    logTelemetry("web_search_connection_tested", {
+      enabled: result.enabled,
+      commandConfigured: result.commandConfigured,
+      status: result.status,
+      toolName: result.toolName,
+      toolFound: result.toolFound,
+      toolCount: result.toolCount
+    });
+    return result;
   });
 
   ipcMain.handle("webSearch:set-settings", (event, update: unknown) => {

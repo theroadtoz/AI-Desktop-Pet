@@ -35,7 +35,7 @@ import type {
   LlamaCppRuntimeSettingsUpdate,
   LlamaCppRuntimeStatus
 } from "../shared/llama-cpp-runtime";
-import type { WebSearchSettings, WebSearchStatus } from "../shared/web-search";
+import type { WebSearchConnectionTestResult, WebSearchSettings, WebSearchStatus } from "../shared/web-search";
 
 const petAccessoryPresetIds = ["none", "glasses"] as const;
 const shortcutActionIds = ["togglePetLock", "adjustPetScaleWithWheel"] as const;
@@ -401,8 +401,55 @@ function isChatStreamDonePayload(value: unknown): value is ChatStreamDonePayload
     result && typeof result.requestVersion === "number" && Number.isSafeInteger(result.requestVersion) && result.requestVersion > 0 &&
     typeof result.text === "string" &&
     isEmotionTag(result.emotion) &&
-    isEmotionIntensity(result.intensity)
+    isEmotionIntensity(result.intensity) &&
+    (result.webSearchCitation === undefined || isWebSearchCitationPayload(result.webSearchCitation))
   );
+}
+
+function isWebSearchCitationPayload(value: unknown): boolean {
+  const payload = value as { citations?: unknown } | null;
+
+  if (!payload || !Array.isArray(payload.citations)) {
+    return false;
+  }
+
+  return payload.citations.length <= 5 && payload.citations.every((citation) => {
+    const item = citation as {
+      title?: unknown;
+      domain?: unknown;
+      url?: unknown;
+      snippet?: unknown;
+      generatedAt?: unknown;
+      toolName?: unknown;
+    } | null;
+
+    if (
+      !item ||
+      typeof item.title !== "string" ||
+      typeof item.domain !== "string" ||
+      typeof item.generatedAt !== "string" ||
+      typeof item.toolName !== "string" ||
+      item.title.length > 96 ||
+      item.domain.length > 80 ||
+      item.generatedAt.length > 40 ||
+      item.toolName.length > 80 ||
+      (item.snippet !== undefined && (typeof item.snippet !== "string" || item.snippet.length > 220)) ||
+      (item.url !== undefined && (typeof item.url !== "string" || item.url.length > 240))
+    ) {
+      return false;
+    }
+
+    if (item.url !== undefined) {
+      try {
+        const url = new URL(item.url);
+        return (url.protocol === "http:" || url.protocol === "https:") && !url.search && !url.hash;
+      } catch {
+        return false;
+      }
+    }
+
+    return true;
+  });
 }
 
 function isChatStreamErrorPayload(value: unknown): value is ChatStreamErrorPayload {
@@ -1302,6 +1349,33 @@ function isWebSearchStatus(value: unknown): value is WebSearchStatus {
   );
 }
 
+function isWebSearchConnectionTestResult(value: unknown): value is WebSearchConnectionTestResult {
+  const result = value as Partial<WebSearchConnectionTestResult> | null;
+  const statuses = [
+    "not_configured",
+    "configured_disabled",
+    "tool_available",
+    "tool_missing",
+    "spawn_failed",
+    "timeout",
+    "failed"
+  ];
+
+  return Boolean(
+    result &&
+    typeof result.status === "string" &&
+    statuses.includes(result.status) &&
+    typeof result.commandConfigured === "boolean" &&
+    typeof result.enabled === "boolean" &&
+    typeof result.toolName === "string" &&
+    typeof result.toolFound === "boolean" &&
+    typeof result.toolCount === "number" &&
+    Number.isSafeInteger(result.toolCount) &&
+    result.toolCount >= 0 &&
+    (result.commandName === undefined || typeof result.commandName === "string")
+  );
+}
+
 const api: ChatApi = {
   focusInput() {
     ipcRenderer.once("chat:focus-input", () => {
@@ -1893,6 +1967,19 @@ const webSearchApi: WebSearchApi = {
     }
 
     return { ...savedSettings, args: [...savedSettings.args] };
+  },
+  async testConnection(settings?: WebSearchSettings) {
+    if (settings !== undefined && !isWebSearchSettings(settings)) {
+      throw new Error("Invalid web search settings");
+    }
+
+    const result = await ipcRenderer.invoke("webSearch:test-connection", settings);
+
+    if (!isWebSearchConnectionTestResult(result)) {
+      throw new Error("Invalid web search test response");
+    }
+
+    return result;
   }
 };
 
