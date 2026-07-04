@@ -19,7 +19,11 @@ import {
   selectPetActionStateForModeChange
 } from "../src/shared/pet-action-state-machine.ts";
 import { createChatReplySustainTriggerController } from "../src/main/services/chat/chat-reply-sustain-trigger.ts";
-import { calculateInitialPetBounds } from "../src/shared/pet-presentation.ts";
+import {
+  PET_WAIST_BOTTOM_OVERHANG_PX,
+  calculateInitialPetBounds,
+  calculatePetVisibleRegion
+} from "../src/shared/pet-presentation.ts";
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -202,13 +206,21 @@ test("main mode changes trigger only fixed state reasons and preserve bubble sup
 test("pet edge helper detects settled visible edges without exposing bounds", () => {
   const workArea = { x: 0, y: 0, width: 1920, height: 1080 };
   const initial = calculateInitialPetBounds(1, workArea);
+  const initialRegion = calculatePetVisibleRegion(initial);
 
   assert.equal(isPetNearWorkAreaEdge(initial, workArea), true);
+  assert.ok(
+    Math.abs(initial.y + initialRegion.waistY - (
+      workArea.y + workArea.height + PET_WAIST_BOTTOM_OVERHANG_PX
+    )) <= 1
+  );
   assert.equal(isPetNearWorkAreaEdge({ x: 720, y: 240, width: 420, height: 600 }, workArea), false);
   assert.equal(isPetNearWorkAreaEdge({ x: -42, y: 240, width: 420, height: 600 }, workArea), true);
   assert.equal(isPetNearWorkAreaEdge({ x: 1542, y: 240, width: 420, height: 600 }, workArea), true);
   assert.equal(isPetNearWorkAreaEdge({ x: 720, y: -60, width: 420, height: 600 }, workArea), true);
   assert.equal(isPetNearWorkAreaEdge({ x: 720, y: 741, width: 420, height: 600 }, workArea), true);
+  assert.equal(isPetNearWorkAreaEdge({ x: 720, y: 838, width: 420, height: 600 }, workArea), true);
+  assert.equal(isPetNearWorkAreaEdge({ x: 720, y: 920, width: 420, height: 600 }, workArea), false);
   assert.equal(isPetNearWorkAreaEdge({ x: Number.NaN, y: 0, width: 420, height: 600 }, workArea), false);
 });
 

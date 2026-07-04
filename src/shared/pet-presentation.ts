@@ -15,6 +15,7 @@ export const PET_SCALE_STEP = 0.05;
 export const PET_VISIBLE_INSET_RATIO = 0.1;
 export const PET_WAIST_RATIO = 0.58;
 export const PET_INITIAL_RIGHT_MARGIN_PX = 50;
+export const PET_WAIST_BOTTOM_OVERHANG_PX = 96;
 
 export type PetPresentationPreferences = {
   petScale: number;
@@ -137,7 +138,7 @@ export function calculateInitialPetBounds(scale: number, workArea: PetWindowBoun
   const { width, height } = calculatePetWindowSize(scale, workArea);
   const visibleRegion = calculatePetVisibleRegion({ width, height });
   const x = workArea.x + workArea.width - PET_INITIAL_RIGHT_MARGIN_PX - visibleRegion.visibleRight;
-  const y = workArea.y + workArea.height - visibleRegion.waistY;
+  const y = workArea.y + workArea.height + PET_WAIST_BOTTOM_OVERHANG_PX - visibleRegion.waistY;
 
   return clampPetBounds({ x, y, width, height }, workArea);
 }
@@ -154,7 +155,7 @@ export function clampPetBounds(bounds: PetWindowBounds, workArea: PetWindowBound
     y: clampToRange(
       bounds.y,
       workArea.y - visibleRegion.visibleTop,
-      workArea.y + workArea.height - visibleRegion.waistY
+      workArea.y + workArea.height + PET_WAIST_BOTTOM_OVERHANG_PX - visibleRegion.waistY
     ),
     width: bounds.width,
     height: bounds.height

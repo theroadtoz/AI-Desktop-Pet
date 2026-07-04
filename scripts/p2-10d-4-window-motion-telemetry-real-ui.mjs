@@ -383,7 +383,7 @@ async function main() {
     await waitForJson(`http://127.0.0.1:${port}/json/version`, 30_000);
     pet = await connectTarget("renderer/pet/index.html");
     await waitForFirstFrame();
-    await sleep(2_000);
+    await sleep(3_200);
 
     log("check:ordinary-drag");
     const ordinaryStartIndex = readTelemetryEvents().events.length;

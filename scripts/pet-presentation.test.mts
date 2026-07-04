@@ -10,6 +10,7 @@ import {
   getAdjustedPetScale,
   normalizePetScale,
   PET_INITIAL_RIGHT_MARGIN_PX,
+  PET_WAIST_BOTTOM_OVERHANG_PX,
   parsePetScaleAdjustmentIntent,
   parsePetPresentationPreferences,
   parseStoredPetPresentationPreferences
@@ -131,7 +132,7 @@ test("clampPetBounds lets the visible side edges touch the work area", () => {
   assertApproximatelyEqual(right.x + rightRegion.visibleRight, workArea.x + workArea.width);
 });
 
-test("clampPetBounds lets the visible top edge and waist line touch the work area", () => {
+test("clampPetBounds lets the visible top edge touch and allows the waist line to sink below the work area", () => {
   const workArea = { x: 0, y: 0, width: 1920, height: 1080 };
   const top = clampPetBounds({ x: 100, y: -999, width: 420, height: 600 }, workArea);
   const bottom = clampPetBounds({ x: 100, y: 9999, width: 420, height: 600 }, workArea);
@@ -139,7 +140,11 @@ test("clampPetBounds lets the visible top edge and waist line touch the work are
   const bottomRegion = calculatePetVisibleRegion(bottom);
 
   assertApproximatelyEqual(top.y + topRegion.visibleTop, workArea.y);
-  assertApproximatelyEqual(bottom.y + bottomRegion.waistY, workArea.y + workArea.height);
+  assertApproximatelyEqual(
+    bottom.y + bottomRegion.waistY,
+    workArea.y + workArea.height + PET_WAIST_BOTTOM_OVERHANG_PX
+  );
+  assert.ok(bottom.y + bottom.height > workArea.y + workArea.height);
 });
 
 test("calculateInitialPetBounds places the pet half-body with an approximately 50px right margin", () => {
@@ -147,12 +152,43 @@ test("calculateInitialPetBounds places the pet half-body with an approximately 5
   const bounds = calculateInitialPetBounds(1, workArea);
   const region = calculatePetVisibleRegion(bounds);
 
-  assert.deepEqual(bounds, { x: 1492, y: 741, width: 420, height: 600 });
+  assert.deepEqual(bounds, { x: 1492, y: 837, width: 420, height: 600 });
   assertApproximatelyEqual(
     workArea.x + workArea.width - (bounds.x + region.visibleRight),
     PET_INITIAL_RIGHT_MARGIN_PX
   );
-  assertApproximatelyEqual(bounds.y + region.waistY, workArea.y + workArea.height);
+  assertApproximatelyEqual(
+    bounds.y + region.waistY,
+    workArea.y + workArea.height + PET_WAIST_BOTTOM_OVERHANG_PX
+  );
+  assert.ok(bounds.y + bounds.height > workArea.y + workArea.height);
+});
+
+test("calculateInitialPetBounds keeps the half-body placement across scales and work areas", () => {
+  const workAreas = [
+    { x: 0, y: 0, width: 1920, height: 1080 },
+    { x: 0, y: 0, width: 1366, height: 768 },
+    { x: -1280, y: 0, width: 1280, height: 900 }
+  ];
+
+  for (const workArea of workAreas) {
+    for (const scale of [0.7, 1, 1.35]) {
+      const bounds = calculateInitialPetBounds(scale, workArea);
+      const region = calculatePetVisibleRegion(bounds);
+
+      assertApproximatelyEqual(
+        workArea.x + workArea.width - (bounds.x + region.visibleRight),
+        PET_INITIAL_RIGHT_MARGIN_PX
+      );
+      assertApproximatelyEqual(
+        bounds.y + region.waistY,
+        workArea.y + workArea.height + PET_WAIST_BOTTOM_OVERHANG_PX
+      );
+      assert.ok(bounds.x + region.visibleLeft >= workArea.x);
+      assert.ok(bounds.y + region.visibleTop >= workArea.y);
+      assert.ok(bounds.y + bounds.height > workArea.y + workArea.height);
+    }
+  }
 });
 
 test("parsePetPresentationPreferences rejects missing and invalid scales", () => {

@@ -1,5 +1,4 @@
-const PET_VISIBLE_INSET_RATIO = 0.1;
-const PET_WAIST_RATIO = 0.58;
+import { PET_WAIST_BOTTOM_OVERHANG_PX, calculatePetVisibleRegion } from "./pet-presentation.ts";
 
 export type PetActionTriggerWindowBounds = {
   x: number;
@@ -97,37 +96,23 @@ export function isPetNearWorkAreaEdge(
     return false;
   }
 
-  const visibleRegion = calculateVisibleRegion(bounds);
+  const visibleRegion = calculatePetVisibleRegion(bounds);
   const visibleLeft = bounds.x + visibleRegion.visibleLeft;
   const visibleRight = bounds.x + visibleRegion.visibleRight;
   const visibleTop = bounds.y + visibleRegion.visibleTop;
   const waistY = bounds.y + visibleRegion.waistY;
+  const workAreaBottom = workArea.y + workArea.height;
+  const isNearBottomEdge = (
+    waistY >= workAreaBottom - thresholdPx &&
+    waistY <= workAreaBottom + PET_WAIST_BOTTOM_OVERHANG_PX + thresholdPx
+  );
 
   return (
     Math.abs(visibleLeft - workArea.x) <= thresholdPx ||
     Math.abs(visibleRight - (workArea.x + workArea.width)) <= thresholdPx ||
     Math.abs(visibleTop - workArea.y) <= thresholdPx ||
-    Math.abs(waistY - (workArea.y + workArea.height)) <= thresholdPx
+    isNearBottomEdge
   );
-}
-
-function calculateVisibleRegion(bounds: Pick<PetActionTriggerWindowBounds, "width" | "height">): {
-  visibleLeft: number;
-  visibleRight: number;
-  visibleTop: number;
-  waistY: number;
-} {
-  const visibleLeft = bounds.width * PET_VISIBLE_INSET_RATIO;
-  const visibleRight = bounds.width * (1 - PET_VISIBLE_INSET_RATIO);
-  const visibleTop = bounds.height * PET_VISIBLE_INSET_RATIO;
-  const visibleBottom = bounds.height * (1 - PET_VISIBLE_INSET_RATIO);
-
-  return {
-    visibleLeft,
-    visibleRight,
-    visibleTop,
-    waistY: visibleTop + (visibleBottom - visibleTop) * PET_WAIST_RATIO
-  };
 }
 
 function isFiniteBounds(bounds: PetActionTriggerWindowBounds): boolean {
