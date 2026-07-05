@@ -1,5 +1,9 @@
 import type { DialogueModeId } from "../../shared/dialogue-style";
 import type { EmotionPresentation } from "../../shared/emotion-presentation";
+import {
+  getPetExpressionPresetExpressionName,
+  type PetExpressionPresetId
+} from "../../shared/interaction-action-catalog.ts";
 import type { PetAccessoryPresetId } from "../../shared/pet-accessory";
 import type { PetActionStateId } from "../../shared/pet-action-state-machine";
 import type { PetActionTriggerReason } from "../../shared/pet-action-trigger";
@@ -26,6 +30,7 @@ export type InteractionActionStrategy = {
   stateId?: PetActionStateId;
   modeId?: DialogueModeId;
   presenceModeId?: PresenceModeId;
+  expressionPresetId?: PetExpressionPresetId;
   candidateActionTypes?: readonly PetInteractionActionType[];
 };
 
@@ -132,6 +137,7 @@ export function createInteractionActionPlayer({
       ...(strategy.stateId ? { stateId: strategy.stateId } : {}),
       ...(strategy.modeId ? { modeId: strategy.modeId } : {}),
       ...(strategy.presenceModeId ? { presenceModeId: strategy.presenceModeId } : {}),
+      ...(strategy.expressionPresetId ? { expressionPresetId: strategy.expressionPresetId } : {}),
       ...(strategy.candidateActionTypes ? {
         candidateActionTypes: strategy.candidateActionTypes,
         selectedActionType: action.type
@@ -224,6 +230,8 @@ export function createInteractionActionPlayer({
 
     if (action.expressionName) {
       setExpression(action.expressionName);
+    } else if (strategy?.expressionPresetId) {
+      setExpression(getPetExpressionPresetExpressionName(strategy.expressionPresetId));
     } else {
       applyPresentation(action.presentation, getPersistentPresentation().accessoryPresetId);
     }

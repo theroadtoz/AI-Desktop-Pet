@@ -35,6 +35,7 @@ import {
   getPetActionStateActionType,
   getPetActionStateForReason
 } from "../../shared/pet-action-state-machine";
+import { resolvePetExpressionStateLinkage } from "../../shared/pet-expression-state-linkage";
 import { getPetAccessoryPreset, type PetAccessoryPresetId } from "../../shared/pet-accessory";
 import {
   clampProactiveSpeechBubbleDuration,
@@ -679,6 +680,11 @@ const removeActionTriggerListener = window.petApi?.onActionTrigger((trigger) => 
 
   const state = getPetActionStateForReason(trigger.reason);
   const actionType = getPetActionStateActionType(state.stateId);
+  const expressionLinkage = resolvePetExpressionStateLinkage({
+    stateId: state.stateId,
+    dialogueModeId: currentDialogueModeId,
+    presenceModeId: currentPresenceModeId
+  });
   interactionActionPlayer.playAction(
     getPetInteractionAction(actionType),
     trigger.reason,
@@ -686,6 +692,7 @@ const removeActionTriggerListener = window.petApi?.onActionTrigger((trigger) => 
       stateId: state.stateId,
       modeId: currentDialogueModeId,
       presenceModeId: currentPresenceModeId,
+      ...(expressionLinkage.status === "selected" ? { expressionPresetId: expressionLinkage.expressionPresetId } : {}),
       candidateActionTypes: [actionType]
     }
   );
@@ -1041,6 +1048,11 @@ canvas.addEventListener("pointerup", (event) => {
   if (isHit && !wasDragging && hitArea) {
     if (currentPresenceModeId !== "sleep" && rapidTouchComboDetector.record(event.timeStamp)) {
       const rapidTouchState = getPetActionStateForReason("rapid_touch_combo");
+      const expressionLinkage = resolvePetExpressionStateLinkage({
+        stateId: rapidTouchState.stateId,
+        dialogueModeId: currentDialogueModeId,
+        presenceModeId: currentPresenceModeId
+      });
       cancelClickInteractionAction();
       interactionActionPlayer.playAction(
         getPetInteractionAction(rapidTouchState.actionType),
@@ -1049,6 +1061,7 @@ canvas.addEventListener("pointerup", (event) => {
           stateId: rapidTouchState.stateId,
           modeId: currentDialogueModeId,
           presenceModeId: currentPresenceModeId,
+          ...(expressionLinkage.status === "selected" ? { expressionPresetId: expressionLinkage.expressionPresetId } : {}),
           candidateActionTypes: [rapidTouchState.actionType]
         }
       );

@@ -55,6 +55,7 @@ import {
   PET_ACTION_STATE_IDS,
   getPetActionStateForReason
 } from "../src/shared/pet-action-state-machine.ts";
+import { resolvePetExpressionStateLinkage } from "../src/shared/pet-expression-state-linkage.ts";
 import type { EmotionPresentation } from "../src/shared/emotion-presentation.ts";
 import type { PetAccessoryPresetId } from "../src/shared/pet-accessory.ts";
 
@@ -335,6 +336,45 @@ test("state action triggers can emit safe state telemetry without arbitrary payl
       selectedActionType: "workFocus"
     }
   });
+  assert.deepEqual(parsePetRendererTelemetryEvent(harness.telemetry[0]), harness.telemetry[0]);
+});
+
+test("state expression linkage drives only safe preset ids into player telemetry", () => {
+  const harness = createFakeInteractionActionPlayer();
+  const state = getPetActionStateForReason("state_work");
+  const action = getPetInteractionAction(state.actionType);
+  const expressionLinkage = resolvePetExpressionStateLinkage({
+    stateId: state.stateId,
+    dialogueModeId: "work",
+    presenceModeId: "focus"
+  });
+
+  assert.equal(expressionLinkage.status, "selected");
+  assert.equal(expressionLinkage.expressionPresetId, "glasses");
+  assert.equal(harness.player.playAction(action, state.triggerReason, {
+    stateId: state.stateId,
+    modeId: "work",
+    presenceModeId: "focus",
+    expressionPresetId: expressionLinkage.expressionPresetId,
+    candidateActionTypes: [state.actionType]
+  }), true);
+
+  assert.equal(harness.calls.includes("setExpression:glasses"), true);
+  assert.deepEqual(harness.telemetry[0], {
+    type: "pet_interaction_action_started",
+    payload: {
+      type: "workFocus",
+      reason: "state_work",
+      stateId: "work",
+      durationMs: action.durationMs,
+      modeId: "work",
+      presenceModeId: "focus",
+      expressionPresetId: "glasses",
+      candidateActionTypes: ["workFocus"],
+      selectedActionType: "workFocus"
+    }
+  });
+  assert.equal("expressionName" in harness.telemetry[0]?.payload, false);
   assert.deepEqual(parsePetRendererTelemetryEvent(harness.telemetry[0]), harness.telemetry[0]);
 });
 
