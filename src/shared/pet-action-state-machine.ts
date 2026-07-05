@@ -1,3 +1,4 @@
+import type { ChatProviderId } from "./chat-provider";
 import type { DialogueModeId } from "./dialogue-style";
 import type { PetActionTriggerActionType, PetActionTriggerReason } from "./pet-action-trigger";
 import type { PresenceModeId } from "./presence-mode";
@@ -221,4 +222,10 @@ export function selectPetActionStateForModeChange({
   }
 
   return null;
+}
+
+export function selectPetActionTriggerForChatReplyWaiting(providerId: ChatProviderId): PetActionTriggerReason {
+  return providerId === "local-openai-compatible"
+    ? "state_local_model_busy"
+    : "chat_reply_waiting";
 }

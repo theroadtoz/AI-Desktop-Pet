@@ -378,6 +378,45 @@ test("state expression linkage drives only safe preset ids into player telemetry
   assert.deepEqual(parsePetRendererTelemetryEvent(harness.telemetry[0]), harness.telemetry[0]);
 });
 
+test("local model busy linkage drives dark preset through safe state telemetry", () => {
+  const harness = createFakeInteractionActionPlayer();
+  const state = getPetActionStateForReason("state_local_model_busy");
+  const action = getPetInteractionAction(state.actionType);
+  const expressionLinkage = resolvePetExpressionStateLinkage({
+    stateId: state.stateId,
+    dialogueModeId: "default",
+    presenceModeId: "default"
+  });
+
+  assert.equal(expressionLinkage.status, "selected");
+  assert.equal(expressionLinkage.expressionPresetId, "dark");
+  assert.equal(harness.player.playAction(action, state.triggerReason, {
+    stateId: state.stateId,
+    modeId: "default",
+    presenceModeId: "default",
+    expressionPresetId: expressionLinkage.expressionPresetId,
+    candidateActionTypes: [state.actionType]
+  }), true);
+
+  assert.equal(harness.calls.includes("setExpression:dark"), true);
+  assert.deepEqual(harness.telemetry[0], {
+    type: "pet_interaction_action_started",
+    payload: {
+      type: "replyThinking",
+      reason: "state_local_model_busy",
+      stateId: "local-model-busy",
+      durationMs: action.durationMs,
+      modeId: "default",
+      presenceModeId: "default",
+      expressionPresetId: "dark",
+      candidateActionTypes: ["replyThinking"],
+      selectedActionType: "replyThinking"
+    }
+  });
+  assert.equal("expressionName" in harness.telemetry[0]?.payload, false);
+  assert.deepEqual(parsePetRendererTelemetryEvent(harness.telemetry[0]), harness.telemetry[0]);
+});
+
 test("main pet activity echo delegates safe messages to the shared catalog helpers", async () => {
   const source = await readFile(new URL("../src/main/app.ts", import.meta.url), "utf8");
   const createEchoStart = source.indexOf("function createPetActivityEcho");

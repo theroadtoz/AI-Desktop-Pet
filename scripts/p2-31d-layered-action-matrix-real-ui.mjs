@@ -58,7 +58,7 @@ const visibleMatrixExpectations = [
   { reason: "rapid_touch_combo", stateId: "flustered", actionType: "flusteredGlance" }
 ];
 
-const catalogOnlyStates = ["idle", "greet", "local-model-busy"];
+const catalogOnlyStates = ["idle", "greet"];
 const telemetryAllowedFields = new Set(PET_TELEMETRY_ALLOWED_FIELDS);
 
 const forbiddenOutputPatterns = [

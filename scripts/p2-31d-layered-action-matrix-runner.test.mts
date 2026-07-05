@@ -75,9 +75,11 @@ test("p2-31d runner declares the expected visible action-state matrix", () => {
     assert.match(runnerSource, new RegExp(escapeRegExp(token)));
   }
 
-  for (const token of ["idle", "greet", "local-model-busy"]) {
+  for (const token of ["idle", "greet"]) {
     assert.match(runnerSource, new RegExp(`catalogOnlyStates[\\s\\S]*${escapeRegExp(token)}`));
   }
+
+  assert.doesNotMatch(runnerSource, /catalogOnlyStates[\s\S]*local-model-busy/);
 });
 
 test("p2-31d runner keeps output to safe summaries instead of raw resources or private text", () => {

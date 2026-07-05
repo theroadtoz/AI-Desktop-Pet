@@ -16,6 +16,7 @@ import {
   getPetActionStateActionType,
   getPetActionStateForReason,
   isPetActionStateId,
+  selectPetActionTriggerForChatReplyWaiting,
   selectPetActionStateForModeChange
 } from "../src/shared/pet-action-state-machine.ts";
 import { createChatReplySustainTriggerController } from "../src/main/services/chat/chat-reply-sustain-trigger.ts";
@@ -136,6 +137,12 @@ test("pet action state selector maps mode changes to fixed state reasons", () =>
     selectPetActionStateForModeChange({ dialogueModeId: "game", presenceModeId: "sleep" })?.triggerReason,
     "state_sleep"
   );
+});
+
+test("chat reply waiting selector uses local-model-busy only for local providers", () => {
+  assert.equal(selectPetActionTriggerForChatReplyWaiting("fake"), "chat_reply_waiting");
+  assert.equal(selectPetActionTriggerForChatReplyWaiting("openai-compatible"), "chat_reply_waiting");
+  assert.equal(selectPetActionTriggerForChatReplyWaiting("local-openai-compatible"), "state_local_model_busy");
 });
 
 test("pet action trigger allowlist only exposes fixed action and reason combinations", () => {

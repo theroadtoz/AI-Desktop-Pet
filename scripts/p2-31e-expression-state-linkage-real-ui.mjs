@@ -76,13 +76,6 @@ async function main() {
     await evaluate(chat, "document.querySelector('#chat-input')?.blur()");
 
     deferredCases.push({
-      caseId: "chat-input-focus-listen-happy",
-      reason: "chat_input_focus",
-      stateId: "listen",
-      actionType: "listen",
-      expressionPresetId: "happy"
-    });
-    deferredCases.push({
       caseId: "chat-reply-waiting-think-dark",
       reason: "chat_reply_waiting",
       stateId: "think",
@@ -91,7 +84,22 @@ async function main() {
     });
     await sleep(2_300);
 
-    for (const definition of [
+    cases.push(await runCase({
+      caseId: "chat-input-focus-listen-happy",
+      reason: "chat_input_focus",
+      stateId: "listen",
+      actionType: "listen",
+      expressionPresetId: "happy",
+      timeoutMs: 6_000,
+      trigger: async () => {
+        await evaluate(chat, "document.querySelector('#chat-input')?.blur()");
+        await sleep(250);
+        await evaluate(chat, "document.querySelector('#chat-input')?.focus()");
+      }
+    }));
+    await sleep(2_300);
+
+    const modeCaseDefinitions = [
       {
         caseId: "state-work-glasses",
         reason: "state_work",
@@ -116,13 +124,18 @@ async function main() {
         expressionPresetId: "glasses",
         modeId: "reading"
       }
-    ]) {
+    ];
+    for (const [index, definition] of modeCaseDefinitions.entries()) {
       cases.push(await runCase({
         ...definition,
-        timeoutMs: 7_000,
+        timeoutMs: 10_000,
         trigger: () => setDialogueMode(chat, definition.modeId)
       }));
       await sleep(2_300);
+      if (index < modeCaseDefinitions.length - 1) {
+        await setDialogueMode(chat, "default");
+        await sleep(3_000);
+      }
     }
 
     cases.push(await runCase({

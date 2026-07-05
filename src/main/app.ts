@@ -77,7 +77,10 @@ import {
   isPetNearWorkAreaEdge,
   type PetActionTriggerReason
 } from "../shared/pet-action-trigger";
-import { selectPetActionStateForModeChange } from "../shared/pet-action-state-machine";
+import {
+  selectPetActionStateForModeChange,
+  selectPetActionTriggerForChatReplyWaiting
+} from "../shared/pet-action-state-machine";
 import { ChatEngineBusyError, createChatEngine, type ChatEngine } from "./services/chat/chat-engine";
 import { budgetChatContext } from "./services/chat/chat-context-budget";
 import { createChatReplySustainTriggerController } from "./services/chat/chat-reply-sustain-trigger";
@@ -2141,7 +2144,7 @@ app.whenReady().then(async () => {
 
     activeChatRequestVersion = request.requestVersion;
     clearChatReplySustainTimer();
-    sendPetActionTrigger("chat_reply_waiting");
+    sendPetActionTrigger(selectPetActionTriggerForChatReplyWaiting(providerId));
     const submittedMessage = request.messages.at(-1);
     let autoMemoryCaptureForActivity: ChatMemoryActivityPayload["autoCapture"] =
       createFailedMemoryActivityAutoCapture(memoryStoreForRequest);
