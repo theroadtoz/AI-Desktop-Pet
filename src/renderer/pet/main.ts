@@ -1040,8 +1040,18 @@ canvas.addEventListener("pointerup", (event) => {
 
   if (isHit && !wasDragging && hitArea) {
     if (currentPresenceModeId !== "sleep" && rapidTouchComboDetector.record(event.timeStamp)) {
+      const rapidTouchState = getPetActionStateForReason("rapid_touch_combo");
       cancelClickInteractionAction();
-      interactionActionPlayer.playAction(getPetInteractionAction("flusteredGlance"), "rapid_touch_combo");
+      interactionActionPlayer.playAction(
+        getPetInteractionAction(rapidTouchState.actionType),
+        "rapid_touch_combo",
+        {
+          stateId: rapidTouchState.stateId,
+          modeId: currentDialogueModeId,
+          presenceModeId: currentPresenceModeId,
+          candidateActionTypes: [rapidTouchState.actionType]
+        }
+      );
       return;
     }
 

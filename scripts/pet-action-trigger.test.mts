@@ -203,6 +203,20 @@ test("main mode changes trigger only fixed state reasons and preserve bubble sup
   assert.doesNotMatch(source, /sendPetActionTrigger\([^)]*actionType|pet:action-trigger",\s*\{\s*reason,\s*type/);
 });
 
+test("pet renderer rapid touch combo annotates the fixed flustered state", async () => {
+  const source = await readFile(new URL("../src/renderer/pet/main.ts", import.meta.url), "utf8");
+  const marker = source.indexOf('rapidTouchComboDetector.record(event.timeStamp)');
+  const block = source.slice(marker, source.indexOf("scheduleClickInteractionAction(hitArea)", marker));
+
+  assert.notEqual(marker, -1);
+  assert.match(block, /getPetActionStateForReason\("rapid_touch_combo"\)/);
+  assert.match(block, /getPetInteractionAction\(rapidTouchState\.actionType\)/);
+  assert.match(block, /stateId: rapidTouchState\.stateId/);
+  assert.match(block, /modeId: currentDialogueModeId/);
+  assert.match(block, /presenceModeId: currentPresenceModeId/);
+  assert.match(block, /candidateActionTypes: \[rapidTouchState\.actionType\]/);
+});
+
 test("pet edge helper detects settled visible edges without exposing bounds", () => {
   const workArea = { x: 0, y: 0, width: 1920, height: 1080 };
   const initial = calculateInitialPetBounds(1, workArea);

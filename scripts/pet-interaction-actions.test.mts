@@ -1145,7 +1145,8 @@ test("pet pointer clicks route head and body actions without changing drag or do
   assert.match(source, /modeId/);
   assert.match(source, /scheduleClickInteractionAction\(hitArea\)/);
   assert.match(source, /rapidTouchComboDetector\.record/);
-  assert.match(source, /getPetInteractionAction\("flusteredGlance"\)/);
+  assert.match(source, /getPetActionStateForReason\("rapid_touch_combo"\)/);
+  assert.match(source, /getPetInteractionAction\(rapidTouchState\.actionType\)/);
   assert.match(source, /"rapid_touch_combo"/);
   assert.match(source, /!pointerDown \|\| pointerDown\.pointerId !== event\.pointerId/);
   assert.match(source, /!wasDragging && hitArea/);
