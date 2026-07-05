@@ -229,6 +229,15 @@ export function auditWitchActionCapabilities(repositoryRoot = REPOSITORY_ROOT): 
       implementationRecommendation: "使用视线/头部小幅抬起和 neutral 微表情表现倾听，不绑定新 motion。",
       risk: "只有参数层反馈，动作差异依赖真实 UI 截图和 telemetry 复核。"
     }),
+    actionEntry("curiousTilt", "expression-parameter-composition", {
+      nativeMotions: [],
+      expressions: [],
+      parameters: [...faceParameters, ...bodyParameters].slice(0, 8),
+      parts: [],
+      hitAreas: bodyHitArea,
+      implementationRecommendation: "使用低幅 look target 与 poseTarget 表现好奇侧头；不要写成原生侧头 motion。",
+      risk: "单个姿态目标不是完整侧头动画，视觉语义需要真实 UI 观察确认。"
+    }),
     actionEntry("softSmile", "expression-parameter-composition", {
       nativeMotions: [],
       expressions: [expressionReference("happy", manifest, modelDirectory, repositoryRoot)],
@@ -237,6 +246,24 @@ export function auditWitchActionCapabilities(repositoryRoot = REPOSITORY_ROOT): 
       hitAreas: bodyHitArea,
       implementationRecommendation: "使用 happy 微表情参数做轻微开心，避免高强度强调表情常态化。",
       risk: "如果 happy 资产过强，运行时应保留微表情降级而不是强表情。"
+    }),
+    actionEntry("quietNod", "expression-parameter-composition", {
+      nativeMotions: [],
+      expressions: [],
+      parameters: [...faceParameters, ...bodyParameters].slice(0, 8),
+      parts: [],
+      hitAreas: bodyHitArea,
+      implementationRecommendation: "使用短时低幅姿态变化表达听懂后的轻点头；文案与验收不得宣称原生点头 motion。",
+      risk: "当前 action 模型不是多关键帧点头序列，动作幅度必须保持克制。"
+    }),
+    actionEntry("shySmile", "expression-parameter-composition", {
+      nativeMotions: [],
+      expressions: [expressionReference("happy", manifest, modelDirectory, repositoryRoot)],
+      parameters: [...faceParameters, ...bodyParameters].slice(0, 8),
+      parts: [],
+      hitAreas: bodyHitArea,
+      implementationRecommendation: "使用低强度 happy、侧下方视线和轻微躲闪姿态做浅笑候选；不替代 rapid_touch_combo 的 flusteredGlance。",
+      risk: "happy 资产可能偏强，必须受普通 body pool 权重和 quiet/sleep 过滤约束。"
     }),
     actionEntry("lookAway", "expression-parameter-composition", {
       nativeMotions: [],
@@ -283,6 +310,15 @@ export function auditWitchActionCapabilities(repositoryRoot = REPOSITORY_ROOT): 
       implementationRecommendation: "复用 gestureGame/手柄部件做短促准备动作，并受强配件 cooldown 保护。",
       risk: "没有单独准备动作 motion，只能作为 playGame 的轻量变体。"
     }),
+    actionEntry("gameCheerLite", "accessory-enhanced", {
+      nativeMotions: [],
+      expressions: [expressionReference("gestureGame", manifest, modelDirectory, repositoryRoot)],
+      parameters: bodyParameters.slice(0, 8),
+      parts: gameParts,
+      hitAreas: bodyHitArea,
+      implementationRecommendation: "复用 gestureGame/手柄部件和小幅身体姿态，作为游戏模式轻庆祝候选，并受强配件 cooldown 保护。",
+      risk: "gestureGame 不是庆祝 motion；只能记录为游戏配件增强的降级表现。"
+    }),
     actionEntry("reading", "accessory-enhanced", {
       nativeMotions: [],
       expressions: [expressionReference("glasses", manifest, modelDirectory, repositoryRoot)],
@@ -300,6 +336,15 @@ export function auditWitchActionCapabilities(repositoryRoot = REPOSITORY_ROOT): 
       hitAreas: bodyHitArea,
       implementationRecommendation: "复用 glasses 和低幅视线下移，作为读书模式的安静 idle 变体。",
       risk: "仍没有翻页/书本资产，必须记录为眼镜加注视的降级实现。"
+    }),
+    actionEntry("readingThink", "accessory-enhanced", {
+      nativeMotions: [],
+      expressions: [expressionReference("glasses", manifest, modelDirectory, repositoryRoot)],
+      parameters: [...faceParameters, ...bodyParameters].slice(0, 8),
+      parts: glassesParts,
+      hitAreas: bodyHitArea,
+      implementationRecommendation: "复用 glasses、低头视线和小幅身体姿态，作为资料/读书模式下的思考候选。",
+      risk: "无书本或翻页 motion，不能宣称完整阅读动作。"
     }),
     actionEntry("focus", "expression-parameter-composition", {
       nativeMotions: [],
@@ -327,6 +372,15 @@ export function auditWitchActionCapabilities(repositoryRoot = REPOSITORY_ROOT): 
       hitAreas: bodyHitArea,
       implementationRecommendation: "使用低打扰 neutral + 视线下移表现小憩，不使用未验证闭眼 motion。",
       risk: "当前无睡眠 motion 或闭眼专用资产，只能作为低幅参数降级。"
+    }),
+    actionEntry("sleepySettle", "expression-parameter-composition", {
+      nativeMotions: [],
+      expressions: [],
+      parameters: [...faceParameters, ...bodyParameters].slice(0, 8),
+      parts: [],
+      hitAreas: bodyHitArea,
+      implementationRecommendation: "使用低幅视线下移和身体收束姿态，作为安静/睡前收束候选。",
+      risk: "无睡眠 motion 或闭眼资产，sleep/quiet 下必须保持低频低幅。"
     }),
     actionEntry("edgeGlance", "expression-parameter-composition", {
       nativeMotions: [],

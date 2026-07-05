@@ -1,5 +1,12 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, relative, resolve } from "node:path";
+import {
+  PET_EXPRESSION_PRESET_CATALOG,
+  type PetExpressionPresetCategory,
+  type PetExpressionPresetIntensity,
+  type PetExpressionPresetRestorePolicy,
+  type PetExpressionPresetVisualRisk
+} from "../src/shared/interaction-action-catalog.ts";
 
 const REPOSITORY_ROOT = resolve(import.meta.dirname, "..");
 const MANIFEST_PATH = "resources/models/witch/model-manifest.json";
@@ -39,6 +46,17 @@ export type ExpressionAuditEntry = {
   visualReviewRequired: true;
 };
 
+export type ExpressionPresetAuditEntry = {
+  expressionName: string;
+  category: PetExpressionPresetCategory;
+  intensity: PetExpressionPresetIntensity;
+  allowedPresenceModes: string[];
+  allowedDialogueModes: string[];
+  suggestedActionTypes: string[];
+  visualRisk: PetExpressionPresetVisualRisk;
+  restorePolicy: PetExpressionPresetRestorePolicy;
+};
+
 export type ExpressionAuditResult = {
   auditVersion: 1;
   manifestPath: string;
@@ -47,6 +65,7 @@ export type ExpressionAuditResult = {
   expressionAssetCount: number;
   mappedEmotionCount: number;
   entries: ExpressionAuditEntry[];
+  expressionPresets: ExpressionPresetAuditEntry[];
   microExpressionParameterCandidates: Array<{
     id: string;
     name: string;
@@ -285,6 +304,23 @@ export function auditWitchExpressionAssets(repositoryRoot = REPOSITORY_ROOT): Ex
     throw new Error("表达式审计条目与 manifest 路径不一致");
   }
 
+  const expressionPresets = Object.values(PET_EXPRESSION_PRESET_CATALOG).map((preset) => {
+    if (!(preset.expressionName in expressions)) {
+      throw new Error(`expression preset 引用了不存在的表达式：${preset.expressionName}`);
+    }
+
+    return {
+      expressionName: preset.expressionName,
+      category: preset.category,
+      intensity: preset.intensity,
+      allowedPresenceModes: [...preset.allowedPresenceModes],
+      allowedDialogueModes: [...preset.allowedDialogueModes],
+      suggestedActionTypes: [...preset.suggestedActionTypes],
+      visualRisk: preset.visualRisk,
+      restorePolicy: preset.restorePolicy
+    };
+  });
+
   return {
     auditVersion: 1,
     manifestPath: relativePath(repositoryRoot, manifestPath),
@@ -293,6 +329,7 @@ export function auditWitchExpressionAssets(repositoryRoot = REPOSITORY_ROOT): Ex
     expressionAssetCount: entries.length,
     mappedEmotionCount: EMOTIONS.length,
     entries,
+    expressionPresets,
     microExpressionParameterCandidates: [
       {
         id: "ParamEyeLSmile",

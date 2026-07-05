@@ -49,6 +49,7 @@ export const PET_TELEMETRY_ALLOWED_FIELDS = [
   "candidateActionTypes",
   "selectedActionType",
   "activeType",
+  "expressionPresetId",
   "restoredAccessoryPresetId",
   "isLocked",
   "isDragging",
@@ -116,17 +117,23 @@ const PET_INTERACTION_ACTION_TYPES = [
   "headPat",
   "greeting",
   "listen",
+  "curiousTilt",
   "softSmile",
+  "quietNod",
+  "shySmile",
   "lookAway",
   "thinking",
   "replyThinking",
   "playGame",
   "gameReady",
+  "gameCheerLite",
   "reading",
   "readingIdle",
+  "readingThink",
   "focus",
   "workFocus",
   "doze",
+  "sleepySettle",
   "edgeGlance",
   "flusteredGlance",
   "replySustain"
@@ -144,6 +151,20 @@ const PET_ACTION_STATE_IDS = [
   "edge",
   "flustered",
   "local-model-busy"
+] as const;
+const PET_EXPRESSION_PRESET_IDS = [
+  "dark",
+  "staff",
+  "ghost",
+  "angry",
+  "hat",
+  "sad",
+  "bow",
+  "glasses",
+  "excited",
+  "happy",
+  "gestureGame",
+  "gestureMic"
 ] as const;
 
 const DIALOGUE_MODE_IDS = ["default", "work", "game", "reading"] as const;
@@ -385,6 +406,7 @@ function sanitizeInteractionActionPayload(payload: Record<string, unknown>): Pet
   putActionTypes(safe, payload, "candidateActionTypes");
   putString(safe, payload, "selectedActionType", PET_INTERACTION_ACTION_TYPES);
   putString(safe, payload, "activeType", PET_INTERACTION_ACTION_TYPES);
+  putString(safe, payload, "expressionPresetId", PET_EXPRESSION_PRESET_IDS);
   putString(safe, payload, "restoredAccessoryPresetId", PET_ACCESSORY_PRESET_IDS);
   putString(safe, payload, "skipReason", PET_INTERACTION_SKIP_REASONS);
   return safe;

@@ -48,7 +48,14 @@ const FORBIDDEN_KEYS = [
   "url",
   "path",
   "request",
-  "response"
+  "response",
+  "expressionName",
+  "expressionPath",
+  "resourcePath",
+  "motion",
+  "motionPresetId",
+  "partId",
+  "payload"
 ] as const;
 
 function assertNoForbiddenKeys(payload: Record<string, unknown> | undefined): void {
@@ -90,6 +97,9 @@ test("pet interaction action started keeps only safe action summary fields", () 
       presenceModeId: "quiet",
       candidateActionTypes: ["thinking", "focus"],
       selectedActionType: "thinking",
+      expressionPresetId: "happy",
+      expressionName: "happy",
+      expressionPath: "resources/models/witch/happy.exp3.json",
       apiKey: "sentinel",
       content: "sentinel",
       prompt: "sentinel",
@@ -110,7 +120,8 @@ test("pet interaction action started keeps only safe action summary fields", () 
         modeId: "work",
         presenceModeId: "quiet",
         candidateActionTypes: ["thinking", "focus"],
-        selectedActionType: "thinking"
+        selectedActionType: "thinking",
+        expressionPresetId: "happy"
     }
   });
   assertNoForbiddenKeys(event?.payload);
@@ -156,6 +167,33 @@ test("action trigger telemetry keeps only fixed safe trigger reasons", () => {
       durationMs: 1100,
       providerRequestBody: "sentinel",
       messages: ["sentinel"]
+    }
+  });
+  const expressionPresetAction = parsePetRendererTelemetryEvent({
+    type: "pet_interaction_action_started",
+    payload: {
+      type: "gameCheerLite",
+      reason: "click_body",
+      durationMs: 1300,
+      modeId: "game",
+      candidateActionTypes: ["gameReady", "gameCheerLite"],
+      selectedActionType: "gameCheerLite",
+      expressionPresetId: "gestureGame",
+      expressionName: "gestureGame",
+      partId: "Part17",
+      path: "C:\\private\\gestureGame.exp3.json",
+      motion: "unsafe.motion3.json",
+      content: "sentinel"
+    }
+  });
+  const unsafeExpressionPreset = parsePetRendererTelemetryEvent({
+    type: "pet_interaction_action_started",
+    payload: {
+      type: "shySmile",
+      reason: "click_body",
+      durationMs: 1200,
+      expressionPresetId: "C:\\private\\happy.exp3.json",
+      expressionName: "happy"
     }
   });
   const stateWork = parsePetRendererTelemetryEvent({
@@ -222,6 +260,26 @@ test("action trigger telemetry keeps only fixed safe trigger reasons", () => {
       durationMs: 1100
     }
   });
+  assert.deepEqual(expressionPresetAction, {
+    type: "pet_interaction_action_started",
+    payload: {
+      type: "gameCheerLite",
+      reason: "click_body",
+      durationMs: 1300,
+      modeId: "game",
+      candidateActionTypes: ["gameReady", "gameCheerLite"],
+      selectedActionType: "gameCheerLite",
+      expressionPresetId: "gestureGame"
+    }
+  });
+  assert.deepEqual(unsafeExpressionPreset, {
+    type: "pet_interaction_action_started",
+    payload: {
+      type: "shySmile",
+      reason: "click_body",
+      durationMs: 1200
+    }
+  });
   assert.deepEqual(stateWork, {
     type: "pet_interaction_action_started",
     payload: {
@@ -252,6 +310,8 @@ test("action trigger telemetry keeps only fixed safe trigger reasons", () => {
   assertNoForbiddenKeys(unsafeReason?.payload);
   assertNoForbiddenKeys(rapidTouchCombo?.payload);
   assertNoForbiddenKeys(replySustain?.payload);
+  assertNoForbiddenKeys(expressionPresetAction?.payload);
+  assertNoForbiddenKeys(unsafeExpressionPreset?.payload);
   assertNoForbiddenKeys(stateWork?.payload);
   assertNoForbiddenKeys(unsafeStateId?.payload);
   assertNoForbiddenKeys(unsafeAction?.payload);

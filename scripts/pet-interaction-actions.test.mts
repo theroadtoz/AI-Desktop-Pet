@@ -29,9 +29,11 @@ import {
 } from "../src/shared/pet-telemetry-contract.ts";
 import {
   PET_BODY_POOL_ACTION_TYPES,
+  PET_EXPRESSION_PRESET_CATALOG,
   PET_INTERACTION_ACTION_CATALOG,
   PET_STRONG_ACCESSORY_ACTION_TYPES,
   PET_WINDOW_SHAKE_SAFE_ECHO_MESSAGE,
+  getPetExpressionPresetExpressionName,
   getPetInteractionActionSafeEchoMessage,
   getPetWindowMotionFeedbackSafeEchoMessage
 } from "../src/shared/interaction-action-catalog.ts";
@@ -39,6 +41,7 @@ import {
   PET_ACTION_STATE_CATALOG as SCRIPT_ACTION_STATE_CATALOG,
   PET_ACTION_STATE_IDS as SCRIPT_ACTION_STATE_IDS,
   PET_BODY_POOL_ACTION_TYPES as SCRIPT_BODY_POOL_ACTION_TYPES,
+  PET_EXPRESSION_PRESET_CATALOG as SCRIPT_EXPRESSION_PRESET_CATALOG,
   PET_INTERACTION_ACTION_CATALOG as SCRIPT_INTERACTION_ACTION_CATALOG,
   PET_STRONG_ACCESSORY_ACTION_TYPES as SCRIPT_STRONG_ACCESSORY_ACTION_TYPES,
   PET_WINDOW_SHAKE_SAFE_ECHO_MESSAGE as SCRIPT_WINDOW_SHAKE_SAFE_ECHO_MESSAGE
@@ -171,19 +174,25 @@ test("pet interaction action catalog owns body pool eligibility and strong acces
   assert.deepEqual(
     [...PET_BODY_POOL_ACTION_TYPES].sort(),
     [
+      "curiousTilt",
       "doze",
       "edgeGlance",
       "flusteredGlance",
       "focus",
+      "gameCheerLite",
       "gameReady",
       "greeting",
       "listen",
       "lookAway",
       "playGame",
+      "quietNod",
       "reading",
       "readingIdle",
+      "readingThink",
       "replySustain",
       "replyThinking",
+      "shySmile",
+      "sleepySettle",
       "softSmile",
       "thinking",
       "workFocus"
@@ -191,12 +200,56 @@ test("pet interaction action catalog owns body pool eligibility and strong acces
   );
   assert.equal(PET_INTERACTION_ACTION_CATALOG.appearance.bodyPoolEligible, false);
   assert.equal(PET_INTERACTION_ACTION_CATALOG.headPat.bodyPoolEligible, false);
-  assert.deepEqual([...PET_STRONG_ACCESSORY_ACTION_TYPES].sort(), ["gameReady", "playGame", "reading", "readingIdle"].sort());
+  assert.deepEqual(
+    [...PET_STRONG_ACCESSORY_ACTION_TYPES].sort(),
+    ["gameCheerLite", "gameReady", "playGame", "reading", "readingIdle", "readingThink"].sort()
+  );
+  assert.equal(PET_INTERACTION_ACTION_CATALOG.gameCheerLite.strongAccessory, true);
   assert.equal(PET_INTERACTION_ACTION_CATALOG.gameReady.strongAccessory, true);
   assert.equal(PET_INTERACTION_ACTION_CATALOG.playGame.strongAccessory, true);
   assert.equal(PET_INTERACTION_ACTION_CATALOG.reading.strongAccessory, true);
   assert.equal(PET_INTERACTION_ACTION_CATALOG.readingIdle.strongAccessory, true);
+  assert.equal(PET_INTERACTION_ACTION_CATALOG.readingThink.strongAccessory, true);
   assert.equal(PET_INTERACTION_ACTION_CATALOG.greeting.strongAccessory, false);
+});
+
+test("expression preset catalog classifies safe expression resources without paths", () => {
+  assert.deepEqual(Object.keys(PET_EXPRESSION_PRESET_CATALOG).sort(), [
+    "angry",
+    "bow",
+    "dark",
+    "excited",
+    "gestureGame",
+    "gestureMic",
+    "ghost",
+    "glasses",
+    "happy",
+    "hat",
+    "sad",
+    "staff"
+  ].sort());
+
+  assert.equal(PET_EXPRESSION_PRESET_CATALOG.happy.category, "emotion");
+  assert.equal(PET_EXPRESSION_PRESET_CATALOG.dark.category, "emotion");
+  assert.equal(PET_EXPRESSION_PRESET_CATALOG.glasses.category, "prop-or-appearance");
+  assert.equal(PET_EXPRESSION_PRESET_CATALOG.bow.category, "prop-or-appearance");
+  assert.equal(PET_EXPRESSION_PRESET_CATALOG.gestureGame.category, "gesture-like");
+  assert.equal(PET_EXPRESSION_PRESET_CATALOG.ghost.category, "uncertain-or-needs-visual-check");
+  assert.equal(PET_EXPRESSION_PRESET_CATALOG.ghost.visualRisk, "needs-visual-check");
+  assert.deepEqual(PET_EXPRESSION_PRESET_CATALOG.glasses.suggestedActionTypes, ["reading", "readingIdle", "readingThink"]);
+  assert.deepEqual(PET_EXPRESSION_PRESET_CATALOG.gestureGame.suggestedActionTypes, ["playGame", "gameReady", "gameCheerLite"]);
+
+  for (const [presetId, preset] of Object.entries(PET_EXPRESSION_PRESET_CATALOG)) {
+    assert.equal(preset.presetId, presetId);
+    assert.equal(getPetExpressionPresetExpressionName(presetId as keyof typeof PET_EXPRESSION_PRESET_CATALOG), preset.expressionName);
+    assert.equal(/[/\\]|\.exp3|\.json|resources|model/i.test(preset.expressionName), false);
+    assert.equal(preset.allowedPresenceModes.length > 0, true);
+    assert.equal(preset.allowedDialogueModes.length > 0, true);
+    assert.equal(preset.restorePolicy, "restore-persistent-expression");
+    for (const actionType of preset.suggestedActionTypes) {
+      assert.equal(PET_INTERACTION_ACTION_TYPES.includes(actionType), true);
+    }
+  }
 });
 
 test("safe echo helpers reject unknown actions and strip window shake payload detail", () => {
@@ -300,6 +353,7 @@ test("real UI script action constants stay aligned with the shared catalog", () 
   assert.deepEqual([...SCRIPT_ACTION_STATE_IDS].sort(), [...PET_ACTION_STATE_IDS].sort());
   assert.deepEqual([...SCRIPT_BODY_POOL_ACTION_TYPES].sort(), [...PET_BODY_POOL_ACTION_TYPES].sort());
   assert.deepEqual([...SCRIPT_STRONG_ACCESSORY_ACTION_TYPES].sort(), [...PET_STRONG_ACCESSORY_ACTION_TYPES].sort());
+  assert.deepEqual(Object.keys(SCRIPT_EXPRESSION_PRESET_CATALOG).sort(), Object.keys(PET_EXPRESSION_PRESET_CATALOG).sort());
   assert.equal(SCRIPT_WINDOW_SHAKE_SAFE_ECHO_MESSAGE, PET_WINDOW_SHAKE_SAFE_ECHO_MESSAGE);
 
   for (const stateId of PET_ACTION_STATE_IDS) {
@@ -327,15 +381,49 @@ test("real UI script action constants stay aligned with the shared catalog", () 
       PET_INTERACTION_ACTION_CATALOG[type].defaultDurationMs
     );
   }
+
+  for (const presetId of Object.keys(PET_EXPRESSION_PRESET_CATALOG)) {
+    const preset = PET_EXPRESSION_PRESET_CATALOG[presetId as keyof typeof PET_EXPRESSION_PRESET_CATALOG];
+    const scriptPreset = SCRIPT_EXPRESSION_PRESET_CATALOG[presetId];
+
+    assert.equal(scriptPreset?.expressionName, preset.expressionName);
+    assert.equal(scriptPreset?.category, preset.category);
+    assert.equal(scriptPreset?.intensity, preset.intensity);
+    assert.deepEqual(scriptPreset?.allowedPresenceModes, [...preset.allowedPresenceModes]);
+    assert.deepEqual(scriptPreset?.allowedDialogueModes, [...preset.allowedDialogueModes]);
+    assert.deepEqual(scriptPreset?.suggestedActionTypes, [...preset.suggestedActionTypes]);
+    assert.equal(scriptPreset?.visualRisk, preset.visualRisk);
+    assert.equal(scriptPreset?.restorePolicy, preset.restorePolicy);
+  }
 });
 
 test("pet interaction action manifest includes audited expression and accessory candidates", () => {
   const byType = new Map(PET_INTERACTION_ACTIONS.map((action) => [action.type, action]));
+  const expectedExpressionPresets = {
+    appearance: "excited",
+    headPat: "happy",
+    shySmile: "happy",
+    playGame: "gestureGame",
+    gameReady: "gestureGame",
+    gameCheerLite: "gestureGame",
+    reading: "glasses",
+    readingIdle: "glasses",
+    readingThink: "glasses"
+  } as const;
 
   assert.equal(byType.get("greeting")?.expressionName, undefined);
   assert.equal(byType.get("listen")?.expressionName, undefined);
   assert.deepEqual(byType.get("listen")?.lookTarget, { x: 0, y: 0.18 });
+  assert.equal(byType.get("curiousTilt")?.expressionName, undefined);
+  assert.deepEqual(byType.get("curiousTilt")?.lookTarget, { x: 0.22, y: 0.12 });
+  assert.deepEqual(byType.get("curiousTilt")?.poseTarget, { bodyAngleX: 2, bodyAngleZ: -1, angleZ: 2 });
   assert.equal(byType.get("softSmile")?.presentation.emotion, "happy");
+  assert.equal(byType.get("quietNod")?.expressionName, undefined);
+  assert.deepEqual(byType.get("quietNod")?.lookTarget, { x: 0, y: 0.08 });
+  assert.deepEqual(byType.get("quietNod")?.poseTarget, { bodyAngleY: -1.5, bodyAngleZ: 0.8 });
+  assert.equal(byType.get("shySmile")?.expressionName, "happy");
+  assert.deepEqual(byType.get("shySmile")?.lookTarget, { x: -0.22, y: -0.06 });
+  assert.deepEqual(byType.get("shySmile")?.poseTarget, { bodyAngleX: -2.5, bodyAngleZ: 1.5, angleZ: -2 });
   assert.equal(byType.get("lookAway")?.expressionName, undefined);
   assert.deepEqual(byType.get("lookAway")?.lookTarget, { x: -0.45, y: 0.02 });
   assert.equal(byType.get("thinking")?.expressionName, undefined);
@@ -362,25 +450,55 @@ test("pet interaction action manifest includes audited expression and accessory 
   assert.deepEqual(byType.get("playGame")?.accessoryPartIds, ["Part17", "Part21"]);
   assert.equal(byType.get("gameReady")?.expressionName, "gestureGame");
   assert.deepEqual(byType.get("gameReady")?.accessoryPartIds, ["Part17", "Part21"]);
+  assert.equal(byType.get("gameCheerLite")?.expressionName, "gestureGame");
+  assert.deepEqual(byType.get("gameCheerLite")?.accessoryPartIds, ["Part17", "Part21"]);
+  assert.deepEqual(byType.get("gameCheerLite")?.poseTarget, { bodyAngleX: 3, bodyAngleZ: -1.5 });
+  assert.equal(byType.get("readingThink")?.expressionName, "glasses");
+  assert.deepEqual(byType.get("readingThink")?.accessoryPartIds, ["Part53"]);
+  assert.deepEqual(byType.get("readingThink")?.lookTarget, { x: -0.08, y: -0.16 });
+  assert.equal(byType.get("sleepySettle")?.expressionName, undefined);
+  assert.deepEqual(byType.get("sleepySettle")?.lookTarget, { x: 0, y: -0.25 });
+
+  for (const [type, expressionPresetId] of Object.entries(expectedExpressionPresets)) {
+    const action = byType.get(type as keyof typeof expectedExpressionPresets);
+
+    assert.equal(action?.expressionPresetId, expressionPresetId);
+    assert.equal(action?.expressionName, getPetExpressionPresetExpressionName(expressionPresetId));
+  }
+
+  for (const action of PET_INTERACTION_ACTIONS) {
+    if (action.expressionName) {
+      assert.equal(action.expressionPresetId !== undefined, true);
+      continue;
+    }
+
+    assert.equal(action.expressionPresetId, undefined);
+  }
 });
 
 test("ordinary random interaction pool excludes startup and head-only actions", () => {
   assert.deepEqual(
     PET_RANDOM_INTERACTION_ACTIONS.map((action) => action.type).sort(),
     [
+      "curiousTilt",
       "doze",
       "edgeGlance",
       "flusteredGlance",
       "focus",
+      "gameCheerLite",
       "gameReady",
       "greeting",
       "listen",
       "lookAway",
       "playGame",
+      "quietNod",
       "reading",
       "readingIdle",
+      "readingThink",
       "replySustain",
       "replyThinking",
+      "shySmile",
+      "sleepySettle",
       "softSmile",
       "thinking",
       "workFocus"
@@ -388,17 +506,25 @@ test("ordinary random interaction pool excludes startup and head-only actions", 
   );
   assert.equal(selectRandomPetInteractionAction(() => 0).type, "greeting");
   assert.equal(selectRandomPetInteractionAction(() => 0.2).type, "listen");
-  assert.equal(selectRandomPetInteractionAction(() => 0.35).type, "softSmile");
-  assert.equal(selectRandomPetInteractionAction(() => 0.43).type, "lookAway");
+  assert.equal(selectRandomPetInteractionAction(() => 0.255).type, "curiousTilt");
+  assert.equal(selectRandomPetInteractionAction(() => 0.315).type, "softSmile");
+  assert.equal(selectRandomPetInteractionAction(() => 0.375).type, "quietNod");
+  assert.equal(selectRandomPetInteractionAction(() => 0.41).type, "shySmile");
+  assert.equal(selectRandomPetInteractionAction(() => 0.44).type, "lookAway");
   assert.equal(selectRandomPetInteractionAction(() => 0.5).type, "thinking");
-  assert.equal(selectRandomPetInteractionAction(() => 0.6).type, "replyThinking");
-  assert.equal(selectRandomPetInteractionAction(() => 0.69).type, "gameReady");
-  assert.equal(selectRandomPetInteractionAction(() => 0.73).type, "reading");
-  assert.equal(selectRandomPetInteractionAction(() => 0.77).type, "readingIdle");
-  assert.equal(selectRandomPetInteractionAction(() => 0.84).type, "workFocus");
-  assert.equal(selectRandomPetInteractionAction(() => 0.885).type, "doze");
-  assert.equal(selectRandomPetInteractionAction(() => 0.91).type, "edgeGlance");
-  assert.equal(selectRandomPetInteractionAction(() => 0.95).type, "flusteredGlance");
+  assert.equal(selectRandomPetInteractionAction(() => 0.58).type, "replyThinking");
+  assert.equal(selectRandomPetInteractionAction(() => 0.63).type, "playGame");
+  assert.equal(selectRandomPetInteractionAction(() => 0.662).type, "gameReady");
+  assert.equal(selectRandomPetInteractionAction(() => 0.691).type, "gameCheerLite");
+  assert.equal(selectRandomPetInteractionAction(() => 0.72).type, "reading");
+  assert.equal(selectRandomPetInteractionAction(() => 0.755).type, "readingIdle");
+  assert.equal(selectRandomPetInteractionAction(() => 0.792).type, "readingThink");
+  assert.equal(selectRandomPetInteractionAction(() => 0.825).type, "focus");
+  assert.equal(selectRandomPetInteractionAction(() => 0.86).type, "workFocus");
+  assert.equal(selectRandomPetInteractionAction(() => 0.887).type, "doze");
+  assert.equal(selectRandomPetInteractionAction(() => 0.905).type, "sleepySettle");
+  assert.equal(selectRandomPetInteractionAction(() => 0.93).type, "edgeGlance");
+  assert.equal(selectRandomPetInteractionAction(() => 0.96).type, "flusteredGlance");
   assert.equal(selectRandomPetInteractionAction(() => 0.999).type, "replySustain");
   assert.equal(getPetInteractionAction("appearance").type, "appearance");
   assert.equal(getPetInteractionAction("headPat").type, "headPat");
@@ -412,17 +538,23 @@ test("dialogue modes adjust ordinary body action weights without changing the de
   assert.deepEqual(weightsFor("default"), {
     greeting: 3,
     listen: 3,
+    curiousTilt: 1.1,
     softSmile: 2,
+    quietNod: 1.1,
+    shySmile: 0.6,
     lookAway: 1,
     thinking: 2,
     replyThinking: 2,
     playGame: 0.8,
     gameReady: 0.8,
+    gameCheerLite: 0.7,
     reading: 0.8,
     readingIdle: 1,
+    readingThink: 0.9,
     focus: 0.8,
     workFocus: 1,
     doze: 0.4,
+    sleepySettle: 0.5,
     edgeGlance: 0.8,
     flusteredGlance: 0.7,
     replySustain: 0.7
@@ -430,19 +562,25 @@ test("dialogue modes adjust ordinary body action weights without changing the de
   assert.deepEqual(
     getRandomPetInteractionActionsForMode("default").map((action) => action.type).sort(),
     [
+      "curiousTilt",
       "doze",
       "edgeGlance",
       "flusteredGlance",
       "focus",
+      "gameCheerLite",
       "gameReady",
       "greeting",
       "listen",
       "lookAway",
       "playGame",
+      "quietNod",
       "reading",
       "readingIdle",
+      "readingThink",
       "replySustain",
       "replyThinking",
+      "shySmile",
+      "sleepySettle",
       "softSmile",
       "thinking",
       "workFocus"
@@ -450,13 +588,17 @@ test("dialogue modes adjust ordinary body action weights without changing the de
   );
   assert.equal(weightsFor("game").gameReady, 4);
   assert.equal(weightsFor("game").playGame, 3);
+  assert.equal(weightsFor("game").gameCheerLite, 2.4);
   assert.equal(weightsFor("game").focus, 0);
   assert.equal(weightsFor("game").workFocus, 0);
   assert.equal(weightsFor("reading").readingIdle, 4);
   assert.equal(weightsFor("reading").reading, 3);
+  assert.equal(weightsFor("reading").readingThink, 3.2);
   assert.equal(weightsFor("reading").focus, 1.5);
   assert.equal(weightsFor("work").replyThinking, 3.5);
   assert.equal(weightsFor("work").workFocus, 4);
+  assert.equal(weightsFor("work").curiousTilt, 1.8);
+  assert.equal(weightsFor("work").quietNod, 1.8);
   assert.equal(weightsFor("work").playGame, 0.2);
   assert.equal(getRandomPetInteractionActionsForMode("game").some((action) => action.type === "appearance" || action.type === "headPat"), false);
 });
@@ -465,8 +607,10 @@ test("dialogue mode body action selection follows mode weights", () => {
   assert.equal(selectRandomPetInteractionAction(() => 0.6, getRandomPetInteractionActionsForMode("default")).type, "replyThinking");
   assert.equal(selectRandomPetInteractionAction(() => 0.55, getRandomPetInteractionActionsForMode("game")).type, "playGame");
   assert.equal(selectRandomPetInteractionAction(() => 0.75, getRandomPetInteractionActionsForMode("game")).type, "gameReady");
-  assert.equal(selectRandomPetInteractionAction(() => 0.55, getRandomPetInteractionActionsForMode("reading")).type, "reading");
-  assert.equal(selectRandomPetInteractionAction(() => 0.7, getRandomPetInteractionActionsForMode("reading")).type, "readingIdle");
+  assert.equal(selectRandomPetInteractionAction(() => 0.84, getRandomPetInteractionActionsForMode("game")).type, "gameCheerLite");
+  assert.equal(selectRandomPetInteractionAction(() => 0.48, getRandomPetInteractionActionsForMode("reading")).type, "reading");
+  assert.equal(selectRandomPetInteractionAction(() => 0.64, getRandomPetInteractionActionsForMode("reading")).type, "readingIdle");
+  assert.equal(selectRandomPetInteractionAction(() => 0.74, getRandomPetInteractionActionsForMode("reading")).type, "readingThink");
   assert.equal(selectRandomPetInteractionAction(() => 0.8, getRandomPetInteractionActionsForMode("work")).type, "workFocus");
   assert.notEqual(selectRandomPetInteractionAction(() => 0.68, getRandomPetInteractionActionsForMode("work")).type, "playGame");
 });
@@ -485,6 +629,7 @@ test("presence modes filter ordinary body actions without changing default or he
   assert.deepEqual(
     quietActions.map((action) => action.type).sort(),
     [
+      "curiousTilt",
       "doze",
       "edgeGlance",
       "flusteredGlance",
@@ -492,8 +637,11 @@ test("presence modes filter ordinary body actions without changing default or he
       "greeting",
       "listen",
       "lookAway",
+      "quietNod",
       "replySustain",
       "replyThinking",
+      "shySmile",
+      "sleepySettle",
       "softSmile",
       "thinking",
       "workFocus"
@@ -501,7 +649,7 @@ test("presence modes filter ordinary body actions without changing default or he
   );
   assert.deepEqual(
     sleepActions.map((action) => action.type).sort(),
-    ["doze", "focus", "replySustain", "replyThinking", "thinking", "workFocus"].sort()
+    ["doze", "focus", "replySustain", "replyThinking", "sleepySettle", "thinking", "workFocus"].sort()
   );
   assert.equal(quietActions.some((action) => isStrongInteractionAction(action.type)), false);
   assert.equal(sleepActions.some((action) => isStrongInteractionAction(action.type)), false);

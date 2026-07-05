@@ -23,11 +23,29 @@ export const PET_INTERACTION_ACTION_CATALOG = {
     strongAccessory: false,
     defaultDurationMs: 1_350
   },
+  curiousTilt: {
+    safeEchoMessage: "刚刚好奇地歪了歪头",
+    bodyPoolEligible: true,
+    strongAccessory: false,
+    defaultDurationMs: 1_250
+  },
   softSmile: {
     safeEchoMessage: "刚刚微笑",
     bodyPoolEligible: true,
     strongAccessory: false,
     defaultDurationMs: 1_300
+  },
+  quietNod: {
+    safeEchoMessage: "刚刚轻轻应了一下",
+    bodyPoolEligible: true,
+    strongAccessory: false,
+    defaultDurationMs: 1_050
+  },
+  shySmile: {
+    safeEchoMessage: "刚刚浅浅笑了一下",
+    bodyPoolEligible: true,
+    strongAccessory: false,
+    defaultDurationMs: 1_200
   },
   lookAway: {
     safeEchoMessage: "刚刚移开视线",
@@ -59,6 +77,12 @@ export const PET_INTERACTION_ACTION_CATALOG = {
     strongAccessory: true,
     defaultDurationMs: 1_500
   },
+  gameCheerLite: {
+    safeEchoMessage: "刚刚轻轻庆祝了一下",
+    bodyPoolEligible: true,
+    strongAccessory: true,
+    defaultDurationMs: 1_300
+  },
   reading: {
     safeEchoMessage: "刚刚读书",
     bodyPoolEligible: true,
@@ -70,6 +94,12 @@ export const PET_INTERACTION_ACTION_CATALOG = {
     bodyPoolEligible: true,
     strongAccessory: true,
     defaultDurationMs: 1_600
+  },
+  readingThink: {
+    safeEchoMessage: "刚刚低头想了想",
+    bodyPoolEligible: true,
+    strongAccessory: true,
+    defaultDurationMs: 1_500
   },
   focus: {
     safeEchoMessage: "刚刚专注",
@@ -88,6 +118,12 @@ export const PET_INTERACTION_ACTION_CATALOG = {
     bodyPoolEligible: true,
     strongAccessory: false,
     defaultDurationMs: 1_450
+  },
+  sleepySettle: {
+    safeEchoMessage: "刚刚安静地放松下来",
+    bodyPoolEligible: true,
+    strongAccessory: false,
+    defaultDurationMs: 1_250
   },
   edgeGlance: {
     safeEchoMessage: "刚刚看向屏幕内侧",
@@ -116,6 +152,131 @@ export const PET_BODY_POOL_ACTION_TYPES = PET_INTERACTION_ACTION_TYPES.filter((t
 export const PET_STRONG_ACCESSORY_ACTION_TYPES = PET_INTERACTION_ACTION_TYPES.filter((type) => (
   PET_INTERACTION_ACTION_CATALOG[type].strongAccessory
 ));
+
+export const PET_EXPRESSION_PRESET_CATALOG = {
+  dark: {
+    expressionName: "dark",
+    category: "emotion",
+    intensity: "medium",
+    allowedPresenceModes: ["default", "focus"],
+    allowedDialogueModes: ["default", "work", "reading"],
+    suggestedActionTypes: ["thinking", "replyThinking"],
+    visualRisk: "needs-visual-check",
+    restorePolicy: "restore-persistent-expression"
+  },
+  staff: {
+    expressionName: "staff",
+    category: "prop-or-appearance",
+    intensity: "high",
+    allowedPresenceModes: ["default"],
+    allowedDialogueModes: ["default"],
+    suggestedActionTypes: ["appearance"],
+    visualRisk: "medium",
+    restorePolicy: "restore-persistent-expression"
+  },
+  ghost: {
+    expressionName: "ghost",
+    category: "uncertain-or-needs-visual-check",
+    intensity: "high",
+    allowedPresenceModes: ["default"],
+    allowedDialogueModes: ["default"],
+    suggestedActionTypes: [],
+    visualRisk: "needs-visual-check",
+    restorePolicy: "restore-persistent-expression"
+  },
+  angry: {
+    expressionName: "angry",
+    category: "emotion",
+    intensity: "high",
+    allowedPresenceModes: ["default"],
+    allowedDialogueModes: ["default"],
+    suggestedActionTypes: [],
+    visualRisk: "medium",
+    restorePolicy: "restore-persistent-expression"
+  },
+  hat: {
+    expressionName: "hat",
+    category: "prop-or-appearance",
+    intensity: "medium",
+    allowedPresenceModes: ["default"],
+    allowedDialogueModes: ["default"],
+    suggestedActionTypes: [],
+    visualRisk: "medium",
+    restorePolicy: "restore-persistent-expression"
+  },
+  sad: {
+    expressionName: "sad",
+    category: "emotion",
+    intensity: "high",
+    allowedPresenceModes: ["default"],
+    allowedDialogueModes: ["default"],
+    suggestedActionTypes: [],
+    visualRisk: "medium",
+    restorePolicy: "restore-persistent-expression"
+  },
+  bow: {
+    expressionName: "bow",
+    category: "prop-or-appearance",
+    intensity: "medium",
+    allowedPresenceModes: ["default"],
+    allowedDialogueModes: ["default"],
+    suggestedActionTypes: ["greeting"],
+    visualRisk: "needs-visual-check",
+    restorePolicy: "restore-persistent-expression"
+  },
+  glasses: {
+    expressionName: "glasses",
+    category: "prop-or-appearance",
+    intensity: "low",
+    allowedPresenceModes: ["default", "focus"],
+    allowedDialogueModes: ["default", "work", "reading"],
+    suggestedActionTypes: ["reading", "readingIdle", "readingThink"],
+    visualRisk: "medium",
+    restorePolicy: "restore-persistent-expression"
+  },
+  excited: {
+    expressionName: "excited",
+    category: "emotion",
+    intensity: "high",
+    allowedPresenceModes: ["default"],
+    allowedDialogueModes: ["default", "game"],
+    suggestedActionTypes: ["appearance"],
+    visualRisk: "medium",
+    restorePolicy: "restore-persistent-expression"
+  },
+  happy: {
+    expressionName: "happy",
+    category: "emotion",
+    intensity: "medium",
+    allowedPresenceModes: ["default", "focus"],
+    allowedDialogueModes: ["default", "work", "game", "reading"],
+    suggestedActionTypes: ["headPat", "softSmile", "shySmile"],
+    visualRisk: "medium",
+    restorePolicy: "restore-persistent-expression"
+  },
+  gestureGame: {
+    expressionName: "gestureGame",
+    category: "gesture-like",
+    intensity: "medium",
+    allowedPresenceModes: ["default"],
+    allowedDialogueModes: ["game"],
+    suggestedActionTypes: ["playGame", "gameReady", "gameCheerLite"],
+    visualRisk: "needs-visual-check",
+    restorePolicy: "restore-persistent-expression"
+  },
+  gestureMic: {
+    expressionName: "gestureMic",
+    category: "gesture-like",
+    intensity: "medium",
+    allowedPresenceModes: ["default"],
+    allowedDialogueModes: ["default"],
+    suggestedActionTypes: ["greeting"],
+    visualRisk: "needs-visual-check",
+    restorePolicy: "restore-persistent-expression"
+  }
+};
+
+export const PET_EXPRESSION_PRESET_IDS = Object.keys(PET_EXPRESSION_PRESET_CATALOG);
 
 export const PET_ACTION_STATE_CATALOG = {
   idle: {
