@@ -4,6 +4,7 @@ import {
   getPetExpressionPresetExpressionName,
   type PetExpressionPresetId
 } from "../../shared/interaction-action-catalog.ts";
+import type { PetMotionPresetId } from "../../shared/pet-motion-presets.ts";
 import type { PresenceModeId } from "../../shared/presence-mode";
 
 export const PET_INTERACTION_ACTION_TYPES = [
@@ -54,6 +55,7 @@ export type PetInteractionAction = {
   presentation: EmotionPresentation;
   expressionPresetId?: PetExpressionPresetId;
   expressionName?: string;
+  motionPresetId?: PetMotionPresetId;
   accessoryPartIds?: readonly string[];
   lookTarget?: PetInteractionLookTarget;
   poseTarget?: PetInteractionPoseTarget;

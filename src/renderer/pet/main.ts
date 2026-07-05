@@ -357,6 +357,12 @@ const interactionActionPlayer = createInteractionActionPlayer({
   resetPoseTarget: () => {
     live2DModel?.resetTemporaryPoseTarget();
   },
+  playMotionPreset: (motionPresetId) => {
+    void live2DModel?.playMotionPreset(motionPresetId);
+  },
+  stopMotion: () => {
+    live2DModel?.stopMotion();
+  },
   applyTemporaryPartOpacities: (partIds) => {
     live2DModel?.applyTemporaryPartOpacities(partIds, 1);
   },

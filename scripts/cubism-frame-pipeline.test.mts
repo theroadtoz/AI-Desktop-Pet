@@ -11,6 +11,7 @@ test("updateCubismFrame applies parameter layers in the fixed order", () => {
   };
 
   updateCubismFrame(model as never, 1 / 60, {
+    applyMotion: () => calls.push("motion"),
     applyPhysicsInputs: () => calls.push("physics-inputs"),
     evaluatePhysics: () => calls.push("physics"),
     applyExpression: () => calls.push("expression"),
@@ -20,6 +21,7 @@ test("updateCubismFrame applies parameter layers in the fixed order", () => {
 
   assert.deepEqual(calls, [
     "load",
+    "motion",
     "physics-inputs",
     "save",
     "physics",

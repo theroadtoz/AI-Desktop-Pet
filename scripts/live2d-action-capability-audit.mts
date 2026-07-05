@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, relative, resolve } from "node:path";
 import { PET_INTERACTION_ACTION_TYPES, type PetInteractionActionType } from "../src/renderer/pet/interaction-actions.ts";
+import { auditWitchMotionAssets } from "./live2d-motion-asset-audit.mts";
 
 const REPOSITORY_ROOT = resolve(import.meta.dirname, "..");
 const MANIFEST_PATH = "resources/models/witch/model-manifest.json";
@@ -49,6 +50,11 @@ export type ActionCapabilityAuditResult = {
     durationSeconds: number;
     parameterIds: string[];
   };
+  semanticMotionPresetCount: number;
+  motionSafeSkip: {
+    status: "expected-safe-skip";
+    reason: "no-semantic-motion-presets";
+  } | null;
   expressionNames: string[];
   targetActions: ActionCapabilityEntry[];
 };
@@ -143,6 +149,7 @@ function actionEntry(
 }
 
 export function auditWitchActionCapabilities(repositoryRoot = REPOSITORY_ROOT): ActionCapabilityAuditResult {
+  const motionAudit = auditWitchMotionAssets(repositoryRoot);
   const manifestPath = resolve(repositoryRoot, MANIFEST_PATH);
   const manifest = readJson(manifestPath) as Manifest;
   const modelDirectory = resolve(dirname(manifestPath), requireString(manifest.sourceDir, "manifest.sourceDir"));
@@ -435,6 +442,8 @@ export function auditWitchActionCapabilities(repositoryRoot = REPOSITORY_ROOT): 
         return requireString(item.Id, `idleMotion.Curves[${index}].Id`);
       })
     },
+    semanticMotionPresetCount: motionAudit.semanticMotionPresetCount,
+    motionSafeSkip: motionAudit.safeSkip,
     expressionNames,
     targetActions
   };

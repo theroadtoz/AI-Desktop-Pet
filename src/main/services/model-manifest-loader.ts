@@ -61,6 +61,24 @@ function addManifestPathMap(allowedPaths: Set<string>, value: unknown, fieldName
   });
 }
 
+function addManifestMotionPresetPaths(allowedPaths: Set<string>, value: unknown, fieldName: string): void {
+  if (value === undefined) {
+    return;
+  }
+
+  if (!Array.isArray(value)) {
+    throw new Error(`invalid model manifest field: ${fieldName}`);
+  }
+
+  value.forEach((entry, index) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      throw new Error(`invalid model manifest field: ${fieldName}[${index}]`);
+    }
+
+    addManifestPath(allowedPaths, (entry as { path?: unknown }).path, `${fieldName}[${index}].path`);
+  });
+}
+
 function getManifestPath(modelId: string): string {
   if (!/^[a-z0-9-]+$/u.test(modelId)) {
     throw new Error(`invalid model id: ${modelId}`);
@@ -82,6 +100,7 @@ export function loadModelManifest(modelId: string): LoadedModelManifest {
   addManifestPath(allowedRelativePaths, manifest.physics, "physics");
   addManifestPath(allowedRelativePaths, manifest.displayInfo, "displayInfo");
   addManifestPath(allowedRelativePaths, manifest.idleMotion, "idleMotion");
+  addManifestMotionPresetPaths(allowedRelativePaths, manifest.motionPresets, "motionPresets");
   addManifestPathList(allowedRelativePaths, manifest.textures, "textures");
   addManifestPathMap(allowedRelativePaths, manifest.expressions, "expressions");
 

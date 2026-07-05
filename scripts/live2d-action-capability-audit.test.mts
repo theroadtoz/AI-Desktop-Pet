@@ -19,6 +19,11 @@ test("action capability audit records that the current model has no native seman
   assert.deepEqual(audit.model3DeclaredMotionGroups, []);
   assert.deepEqual(audit.physicalMotionFiles, ["model/Scene1.motion3.json"]);
   assert.equal(audit.idleMotion.loop, true);
+  assert.equal(audit.semanticMotionPresetCount, 0);
+  assert.deepEqual(audit.motionSafeSkip, {
+    status: "expected-safe-skip",
+    reason: "no-semantic-motion-presets"
+  });
   assert.equal(audit.targetActions.every((entry) => entry.supportLevel !== "native-motion"), true);
 });
 

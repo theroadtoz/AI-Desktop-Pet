@@ -1,5 +1,6 @@
 import type { DialogueModeId } from "./dialogue-style";
 import type { PresenceModeId } from "./presence-mode";
+import { PET_MOTION_PRESET_IDS } from "./pet-motion-presets.ts";
 
 export const PET_TELEMETRY_EVENT_TYPES = [
   "pet_health",
@@ -50,6 +51,7 @@ export const PET_TELEMETRY_ALLOWED_FIELDS = [
   "selectedActionType",
   "activeType",
   "expressionPresetId",
+  "motionPresetId",
   "restoredAccessoryPresetId",
   "isLocked",
   "isDragging",
@@ -407,6 +409,7 @@ function sanitizeInteractionActionPayload(payload: Record<string, unknown>): Pet
   putString(safe, payload, "selectedActionType", PET_INTERACTION_ACTION_TYPES);
   putString(safe, payload, "activeType", PET_INTERACTION_ACTION_TYPES);
   putString(safe, payload, "expressionPresetId", PET_EXPRESSION_PRESET_IDS);
+  putString(safe, payload, "motionPresetId", PET_MOTION_PRESET_IDS);
   putString(safe, payload, "restoredAccessoryPresetId", PET_ACCESSORY_PRESET_IDS);
   putString(safe, payload, "skipReason", PET_INTERACTION_SKIP_REASONS);
   return safe;

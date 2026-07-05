@@ -81,6 +81,8 @@ export type InteractionActionPlayerOptions = {
   resetLookTarget(): void;
   setPoseTarget(target: NonNullable<PetInteractionAction["poseTarget"]>): void;
   resetPoseTarget(): void;
+  playMotionPreset(motionPresetId: NonNullable<PetInteractionAction["motionPresetId"]>): void;
+  stopMotion(): void;
   applyTemporaryPartOpacities(partIds: readonly string[]): void;
   restoreTemporaryPartOpacities(): void;
   setExpression(expressionName: string): void;
@@ -105,6 +107,8 @@ export function createInteractionActionPlayer({
   resetLookTarget,
   setPoseTarget,
   resetPoseTarget,
+  playMotionPreset,
+  stopMotion,
   applyTemporaryPartOpacities,
   restoreTemporaryPartOpacities,
   setExpression,
@@ -143,6 +147,9 @@ export function createInteractionActionPlayer({
     const reason = activeInteractionAction.reason;
     activeInteractionAction = null;
     restoreTemporaryPartOpacities();
+    if (action.motionPresetId) {
+      stopMotion();
+    }
     clearExpression();
     resetLookTarget();
     if (action.poseTarget) {
@@ -209,6 +216,9 @@ export function createInteractionActionPlayer({
     }
     if (action.poseTarget) {
       setPoseTarget(action.poseTarget);
+    }
+    if (action.motionPresetId) {
+      playMotionPreset(action.motionPresetId);
     }
     applyTemporaryPartOpacities(action.accessoryPartIds ?? []);
 
@@ -281,6 +291,9 @@ export function createInteractionActionPlayer({
       }
 
       clearScheduledTimeout(activeInteractionAction.timeoutId);
+      if (activeInteractionAction.action.motionPresetId) {
+        stopMotion();
+      }
       activeInteractionAction = null;
     }
   };

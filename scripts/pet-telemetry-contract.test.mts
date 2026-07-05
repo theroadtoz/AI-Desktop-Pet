@@ -53,7 +53,6 @@ const FORBIDDEN_KEYS = [
   "expressionPath",
   "resourcePath",
   "motion",
-  "motionPresetId",
   "partId",
   "payload"
 ] as const;
@@ -183,6 +182,7 @@ test("action trigger telemetry keeps only fixed safe trigger reasons", () => {
       partId: "Part17",
       path: "C:\\private\\gestureGame.exp3.json",
       motion: "unsafe.motion3.json",
+      motionPresetId: "C:\\private\\wave.motion3.json",
       content: "sentinel"
     }
   });

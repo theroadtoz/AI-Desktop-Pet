@@ -108,6 +108,12 @@ function createFakeInteractionActionPlayer() {
     resetPoseTarget: () => {
       calls.push("resetPoseTarget");
     },
+    playMotionPreset: (motionPresetId) => {
+      calls.push(`playMotionPreset:${motionPresetId}`);
+    },
+    stopMotion: () => {
+      calls.push("stopMotion");
+    },
     applyTemporaryPartOpacities: (partIds) => {
       calls.push(`temporaryParts:${partIds.join(",")}`);
     },
@@ -900,6 +906,36 @@ test("interaction action player applies manifest pose targets and restores them 
     "clearExpression",
     "resetLookTarget",
     "resetPoseTarget",
+    "resumeLook",
+    "applyPresentation:neutral:none"
+  ]);
+});
+
+test("interaction action player routes motion preset ids without raw motion paths", () => {
+  const harness = createFakeInteractionActionPlayer();
+  const motionAction = {
+    ...getPetInteractionAction("thinking"),
+    motionPresetId: "future-wave"
+  };
+
+  assert.equal(harness.player.playAction(motionAction, "click_body"), true);
+  assert.deepEqual(harness.calls, [
+    `boost:${motionAction.durationMs + 250}`,
+    "pauseLook",
+    "resetLookTarget",
+    "playMotionPreset:future-wave",
+    "temporaryParts:",
+    "applyPresentation:confused:none"
+  ]);
+
+  harness.setNow(1_000 + motionAction.durationMs);
+  harness.timers[0]?.callback();
+
+  assert.deepEqual(harness.calls.slice(6), [
+    "restoreParts",
+    "stopMotion",
+    "clearExpression",
+    "resetLookTarget",
     "resumeLook",
     "applyPresentation:neutral:none"
   ]);

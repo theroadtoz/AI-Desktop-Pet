@@ -12,6 +12,7 @@ import {
 } from "./cubism-drag-physics";
 import { updateCubismFrame } from "./cubism-frame-pipeline";
 import { CubismLookController } from "./cubism-look";
+import { createCubismMotionController, type CubismMotionController } from "./cubism-motion";
 import { CubismPoseTargetController, type CubismPoseTarget } from "./cubism-pose-target";
 import { WITCH_MODEL3_URL, type Live2DUpdateSample, type LoadedLive2DModel, type Model3Json } from "./types";
 import { CubismFramework } from "./vendor/framework/live2dcubismframework";
@@ -88,6 +89,7 @@ export async function loadWitchLive2DModel(
   let poseTargetController: CubismPoseTargetController | null = null;
   let breathController: CubismBreathController | null = null;
   let microExpressionController: CubismMicroExpressionController | null = null;
+  let motionController: CubismMotionController | null = null;
   let dragPhysicsController: DragPhysicsController | null = null;
   let temporaryPartOpacitySnapshot: Map<number, number> | null = null;
 
@@ -101,6 +103,9 @@ export async function loadWitchLive2DModel(
       };
 
       updateCubismFrame(model, deltaSeconds, {
+        applyMotion: () => {
+          motionController?.update(model, deltaSeconds);
+        },
         applyPhysicsInputs: () => {
           lookController?.update(model, deltaSeconds);
           poseTargetController?.update(model, deltaSeconds);
@@ -143,6 +148,7 @@ export async function loadWitchLive2DModel(
   poseTargetController = new CubismPoseTargetController(userModel.getModel());
   breathController = await createCubismBreathController(userModel.getModel());
   microExpressionController = createCubismMicroExpressionController(userModel.getModel());
+  motionController = await createCubismMotionController();
 
   const physicsPath = model3.FileReferences?.Physics;
 
@@ -237,6 +243,15 @@ export async function loadWitchLive2DModel(
     getAvailableExpressions(): string[] {
       return expressionController.getAvailableExpressions();
     },
+    playMotionPreset(motionPresetId) {
+      return motionController?.playMotionPreset(motionPresetId) ?? Promise.resolve({
+        status: "skipped",
+        skipReason: "no_semantic_motion_presets"
+      });
+    },
+    stopMotion(): void {
+      motionController?.stop();
+    },
     applyTemporaryPartOpacities,
     restoreTemporaryPartOpacities,
     setLookTarget(x: number, y: number): void {
@@ -264,6 +279,8 @@ export async function loadWitchLive2DModel(
       restoreTemporaryPartOpacities();
       poseTargetController?.reset();
       expressionController.release();
+      motionController?.release();
+      motionController = null;
       microExpressionController?.release();
       microExpressionController = null;
       breathController?.release();

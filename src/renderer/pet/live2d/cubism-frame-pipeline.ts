@@ -3,6 +3,7 @@ import type { CubismModel } from "./vendor/framework/model/cubismmodel";
 type CubismFrameModel = Pick<CubismModel, "loadParameters" | "saveParameters" | "update">;
 
 export type CubismFrameLayers = Partial<{
+  applyMotion(deltaSeconds: number): void;
   applyPhysicsInputs(deltaSeconds: number): void;
   evaluatePhysics(deltaSeconds: number): void;
   applyExpression(deltaSeconds: number): void;
@@ -22,6 +23,7 @@ export function updateCubismFrame(
   layers: CubismFrameLayers
 ): void {
   model.loadParameters();
+  layers.applyMotion?.(deltaSeconds);
   layers.applyPhysicsInputs?.(deltaSeconds);
   model.saveParameters();
   layers.evaluatePhysics?.(deltaSeconds);

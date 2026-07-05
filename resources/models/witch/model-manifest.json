@@ -8,6 +8,7 @@
   "physics": "魔女.physics3.json",
   "displayInfo": "魔女.cdi3.json",
   "idleMotion": "Scene1.motion3.json",
+  "motionPresets": [],
   "textures": [
     "魔女.8192/texture_00.png",
     "魔女.8192/texture_01.png"
