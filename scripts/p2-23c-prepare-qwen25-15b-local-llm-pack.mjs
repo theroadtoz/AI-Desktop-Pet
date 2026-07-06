@@ -8,6 +8,8 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 export const packRootEnv = "P2_23C_LOCAL_LLM_PACK_ROOT";
 export const llamaServerPathEnv = "P2_23C_LLAMA_SERVER_PATH";
+export const modelGgufPathEnv = "P2_23C_MODEL_GGUF_PATH";
+export const modelDownloadTimeoutMsEnv = "P2_23C_MODEL_DOWNLOAD_TIMEOUT_MS";
 export const packRootName = "p2-23c-qwen25-15b-local-llm";
 
 const runtimeName = "llama.cpp";
@@ -17,6 +19,7 @@ const modelRepo = "Qwen/Qwen2.5-1.5B-Instruct-GGUF";
 const modelFileName = "qwen2.5-1.5b-instruct-q4_k_m.gguf";
 const modelAlias = "qwen2.5-1.5b-instruct-q4_k_m";
 const expectedModelSizeBytes = 1_117_320_736;
+const defaultModelDownloadTimeoutMs = 120_000;
 const modelDownloadURL =
   `https://huggingface.co/${modelRepo}/resolve/main/${modelFileName}?download=true`;
 
@@ -57,16 +60,35 @@ export async function prepareQwen25LocalLlmPack(options = {}) {
   mkdirSync(layout.licensesRoot, { recursive: true });
 
   const runtimeFiles = copyRuntimeFiles(llamaServerPath, layout.runtimeRoot);
-  const modelSource = await ensureModelFile(layout.modelPath);
+  const modelExpectedSizeBytes = readPositiveInteger(options.expectedModelSizeBytes) ?? expectedModelSizeBytes;
+  const modelResult = await ensureModelFile(layout.modelPath, {
+    env,
+    expectedSizeBytes: modelExpectedSizeBytes,
+    fetchImpl: options.fetch,
+    downloadURL: options.modelDownloadURL ?? modelDownloadURL,
+    downloadTimeoutMs: resolveDownloadTimeoutMs(options.downloadTimeoutMs, env)
+  });
+
+  if (!modelResult.ok) {
+    return {
+      ok: false,
+      summary: createSummary(packRoot, "blocked", {
+        ...modelResult.summary,
+        durationMs: Date.now() - startedAt
+      })
+    };
+  }
+
+  const modelSource = modelResult.source;
   const runtimeIntegrity = await fileIntegrity(layout.executablePath);
   const modelIntegrity = await fileIntegrity(layout.modelPath);
 
-  if (modelIntegrity.sizeBytes !== expectedModelSizeBytes) {
+  if (modelIntegrity.sizeBytes !== modelExpectedSizeBytes) {
     return {
       ok: false,
       summary: createSummary(packRoot, "blocked", {
         reason: "model_size_mismatch",
-        expectedModelSizeBytes,
+        expectedModelSizeBytes: modelExpectedSizeBytes,
         actualModelSizeBytes: modelIntegrity.sizeBytes,
         modelName: basename(layout.modelPath),
         durationMs: Date.now() - startedAt
@@ -80,7 +102,8 @@ export async function prepareQwen25LocalLlmPack(options = {}) {
   });
   writeThirdPartyNotices(layout.noticesPath, {
     runtimeFiles,
-    modelSha256: modelIntegrity.sha256
+    modelSha256: modelIntegrity.sha256,
+    expectedModelSizeBytes: modelExpectedSizeBytes
   });
 
   return {
@@ -91,6 +114,7 @@ export async function prepareQwen25LocalLlmPack(options = {}) {
       runtimeDllCount: runtimeFiles.dlls.length,
       modelName: basename(layout.modelPath),
       modelSource,
+      modelSourceBasename: modelResult.sourceBasename,
       modelSizeBytes: modelIntegrity.sizeBytes,
       modelSha256: modelIntegrity.sha256,
       runtimeSizeBytes: runtimeIntegrity.sizeBytes,
@@ -191,33 +215,187 @@ function copyFile(source, destination) {
   copyFileSync(source, destination);
 }
 
-async function ensureModelFile(modelPath) {
-  if (isExistingFile(modelPath) && statSync(modelPath).size === expectedModelSizeBytes) {
-    return "reused";
+async function ensureModelFile(modelPath, details) {
+  if (isExistingFile(modelPath) && statSync(modelPath).size === details.expectedSizeBytes) {
+    return {
+      ok: true,
+      source: "reused",
+      sourceBasename: basename(modelPath)
+    };
+  }
+
+  const importPath = readNonEmpty(details.env[modelGgufPathEnv]);
+
+  if (importPath) {
+    return importModelFile(modelPath, importPath, details.expectedSizeBytes);
   }
 
   rmSync(modelPath, { force: true });
-  await downloadModel(modelPath);
-  return "downloaded";
+  return downloadModel(modelPath, details);
 }
 
-async function downloadModel(modelPath) {
-  const tempPath = `${modelPath}.download`;
-  rmSync(tempPath, { force: true });
+async function importModelFile(modelPath, sourcePath, expectedSizeBytes) {
+  const resolvedSourcePath = resolve(process.cwd(), sourcePath);
+  const sourceBasename = basename(resolvedSourcePath);
 
-  const response = await fetch(modelDownloadURL, {
-    headers: {
-      "User-Agent": "AI_Desktop_Pet/P2-23C local-llm-pack-preparer"
-    }
-  });
+  if (extname(sourceBasename).toLowerCase() !== ".gguf") {
+    return createBlockedModelResult("model_import_not_gguf", {
+      source: "import_env",
+      sourceBasename,
+      expectedModelSizeBytes: expectedSizeBytes
+    });
+  }
 
-  if (!response.ok || !response.body) {
-    throw new Error(`model_download_http_${response.status}`);
+  if (!isExistingFile(resolvedSourcePath)) {
+    return createBlockedModelResult("model_import_missing", {
+      source: "import_env",
+      sourceBasename,
+      expectedModelSizeBytes: expectedSizeBytes
+    });
+  }
+
+  const sourceIntegrity = await fileIntegrity(resolvedSourcePath);
+
+  if (sourceIntegrity.sizeBytes !== expectedSizeBytes) {
+    return createBlockedModelResult("model_import_size_mismatch", {
+      source: "import_env",
+      sourceBasename,
+      expectedModelSizeBytes: expectedSizeBytes,
+      actualModelSizeBytes: sourceIntegrity.sizeBytes,
+      modelSha256: sourceIntegrity.sha256
+    });
   }
 
   mkdirSync(dirname(modelPath), { recursive: true });
-  await pipeline(Readable.fromWeb(response.body), createWriteStream(tempPath));
-  renameSync(tempPath, modelPath);
+  copyFileSync(resolvedSourcePath, modelPath);
+
+  return {
+    ok: true,
+    source: "imported",
+    sourceBasename,
+    sizeBytes: sourceIntegrity.sizeBytes,
+    sha256: sourceIntegrity.sha256
+  };
+}
+
+async function downloadModel(modelPath, details) {
+  const fetchFn = details.fetchImpl ?? globalThis.fetch;
+  const tempPath = `${modelPath}.download`;
+  const existingPartialSize = getFileSize(tempPath);
+  const canResume = existingPartialSize > 0 && existingPartialSize < details.expectedSizeBytes;
+
+  if (typeof fetchFn !== "function") {
+    return createBlockedModelResult("model_download_unavailable", {
+      source: "download",
+      partialSizeBytes: existingPartialSize,
+      expectedModelSizeBytes: details.expectedSizeBytes
+    });
+  }
+
+  if (existingPartialSize === details.expectedSizeBytes) {
+    renameSync(tempPath, modelPath);
+    return {
+      ok: true,
+      source: "resumed",
+      sourceBasename: basename(modelPath)
+    };
+  }
+
+  if (existingPartialSize > details.expectedSizeBytes) {
+    rmSync(tempPath, { force: true });
+  }
+
+  mkdirSync(dirname(modelPath), { recursive: true });
+
+  const headers = {
+    "User-Agent": "AI_Desktop_Pet/P2-23C local-llm-pack-preparer"
+  };
+
+  if (canResume) {
+    headers.Range = `bytes=${existingPartialSize}-`;
+  }
+
+  const abortController = new AbortController();
+  const timeout = setTimeout(() => abortController.abort(), details.downloadTimeoutMs);
+  try {
+    let response;
+
+    try {
+      response = await fetchFn(details.downloadURL, {
+        headers,
+        signal: abortController.signal
+      });
+    } catch (error) {
+      return createBlockedModelResult("model_download_failed", {
+        source: canResume ? "resume" : "download",
+        errorName: error instanceof Error ? error.name : "unexpected_error",
+        partialSizeBytes: getFileSize(tempPath),
+        expectedModelSizeBytes: details.expectedSizeBytes,
+        timeoutMs: details.downloadTimeoutMs
+      });
+    }
+
+    if (!response?.ok || !response.body) {
+      return createBlockedModelResult(`model_download_http_${Number.isInteger(response?.status) ? response.status : 0}`, {
+        source: canResume ? "resume" : "download",
+        partialSizeBytes: getFileSize(tempPath),
+        expectedModelSizeBytes: details.expectedSizeBytes
+      });
+    }
+
+    const responseStatus = Number.isInteger(response.status) ? response.status : 200;
+    const shouldAppend = canResume && responseStatus === 206;
+    const source = shouldAppend ? "resumed" : "downloaded";
+
+    try {
+      const sourceStream = typeof response.body.getReader === "function"
+        ? Readable.fromWeb(response.body)
+        : response.body;
+
+      await pipeline(sourceStream, createWriteStream(tempPath, { flags: shouldAppend ? "a" : "w" }));
+    } catch (error) {
+      return createBlockedModelResult("model_download_failed", {
+        source: shouldAppend ? "resume" : "download",
+        errorName: error instanceof Error ? error.name : "unexpected_error",
+        partialSizeBytes: getFileSize(tempPath),
+        expectedModelSizeBytes: details.expectedSizeBytes,
+        timeoutMs: details.downloadTimeoutMs
+      });
+    }
+
+    const actualSizeBytes = getFileSize(tempPath);
+
+    if (actualSizeBytes !== details.expectedSizeBytes) {
+      return createBlockedModelResult("model_download_size_mismatch", {
+        source,
+        partialSizeBytes: actualSizeBytes,
+        expectedModelSizeBytes: details.expectedSizeBytes,
+        actualModelSizeBytes: actualSizeBytes
+      });
+    }
+
+    renameSync(tempPath, modelPath);
+
+    return {
+      ok: true,
+      source,
+      sourceBasename: basename(modelPath),
+      sizeBytes: actualSizeBytes
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function createBlockedModelResult(reason, details) {
+  return {
+    ok: false,
+    summary: removeUndefined({
+      reason,
+      modelName: "model.gguf",
+      ...details
+    })
+  };
 }
 
 async function fileIntegrity(filePath) {
@@ -300,7 +478,7 @@ It does not include local absolute paths.
 - Model repository: ${modelRepo}
 - Model file: ${modelFileName}
 - Packaged file: models/model.gguf
-- Expected size: ${expectedModelSizeBytes} bytes
+- Expected size: ${details.expectedModelSizeBytes} bytes
 - Packaged SHA-256: ${details.modelSha256}
 - License: Apache-2.0, per the upstream Qwen2.5 model repository metadata.
 - Source URL: https://huggingface.co/${modelRepo}
@@ -345,8 +523,33 @@ function isExistingFile(path) {
   }
 }
 
+function getFileSize(path) {
+  return isExistingFile(path) ? statSync(path).size : 0;
+}
+
 function readNonEmpty(value) {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function resolveDownloadTimeoutMs(optionValue, env) {
+  return readPositiveInteger(optionValue)
+    ?? readPositiveIntegerText(env[modelDownloadTimeoutMsEnv])
+    ?? defaultModelDownloadTimeoutMs;
+}
+
+function readPositiveInteger(value) {
+  return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : null;
+}
+
+function readPositiveIntegerText(value) {
+  const text = readNonEmpty(value);
+
+  if (!text) {
+    return null;
+  }
+
+  const parsed = Number.parseInt(text, 10);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
 function printSummary(summary) {
