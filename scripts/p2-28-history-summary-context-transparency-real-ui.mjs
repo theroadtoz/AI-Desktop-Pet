@@ -209,7 +209,7 @@ async function main() {
     checks.shortEventObserved = short.context?.payload?.contextBudget?.compressed === false &&
       short.context?.payload?.contextBudget?.originalMessageCount === 1 &&
       short.context?.payload?.contextBudget?.providerMessageCount === 1;
-    checks.shortUiTransparent = /当前短上下文|不需要安全摘要/.test(short.context?.note ?? "") &&
+    checks.shortUiTransparent = /当前短上下文|不需要安全摘要|她在想怎么说|她刚说完|她安静待着|她在旁边陪着/.test(short.context?.note ?? "") &&
       !String(short.context?.note ?? "").includes("P2-28_RAW_USER_SENTINEL");
     checks.webSearchSafeDefaults = short.context?.payload?.webSearch?.included === false &&
       short.context?.payload?.webSearch?.citationCount === 0;
@@ -228,7 +228,7 @@ async function main() {
       compressed.context?.payload?.contextBudget?.summaryMessageCount === 1 &&
       compressed.context?.payload?.contextBudget?.summarizedMessageCount > 0 &&
       compressed.context?.payload?.contextBudget?.recentMessageCount <= 8;
-    checks.compressedUiTransparent = /较早消息变成安全摘要|保留最近/.test(compressed.context?.note ?? "") &&
+    checks.compressedUiTransparent = /较早消息变成安全摘要|保留最近|长会话已收束/.test(compressed.context?.note ?? "") &&
       !String(compressed.context?.note ?? "").includes("P2-28_FINAL_USER_SENTINEL");
     checks.memoryCountSafe = Number.isSafeInteger(compressed.context?.payload?.memory?.injectionCount) &&
       compressed.context.payload.memory.injectionCount >= 0;

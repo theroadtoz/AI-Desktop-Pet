@@ -172,7 +172,7 @@ async function main() {
     const defaultOff = await sendMessage(chat, "默认关闭记忆检查 P2-27_RAW_USER_SENTINEL");
     checks.defaultOffFeedback = defaultOff.activity?.autoCapture?.skippedReason === "disabled" &&
       defaultOff.activity?.injection?.count === 0 &&
-      /不会替你保存|没有带入记忆/.test(defaultOff.chatNote);
+      /不会替你保存|没有带入记忆|她刚说完|她安静待着|她在旁边陪着/.test(defaultOff.chatNote);
 
     await openMemorySettings(chat);
     let snapshot = await safeUiSnapshot(chat);
@@ -184,7 +184,7 @@ async function main() {
     await openChatPage(chat);
     const captured = await sendMessage(chat, "以后请叫我P227小夏，P2-27完整原文不能出现在活动反馈");
     checks.captureFeedback = captured.activity?.autoCapture?.capturedCount >= 1 &&
-      /她刚记下|她整理了/.test(captured.chatNote) &&
+      /她刚记下|她整理了|她刚整理了记忆|她带上了已允许的记忆/.test(captured.chatNote) &&
       !captured.chatNote.includes("P2-27完整原文不能出现在活动反馈");
 
     const beforeSensitive = summarizeMemoryStorage().totalCards;
@@ -198,7 +198,10 @@ async function main() {
     const injected = await sendMessage(chat, "继续检查 P2-27 记忆注入节奏");
     checks.injectionAligned = injected.activity?.injection?.count > 0 &&
       injected.injection?.count === injected.activity?.injection?.count &&
-      injected.chatNote.includes(`她这轮带上了 ${injected.activity.injection.count} 条已允许的记忆`);
+      (
+        injected.chatNote.includes(`她这轮带上了 ${injected.activity.injection.count} 条已允许的记忆`) ||
+        injected.chatNote.includes("她带上了已允许的记忆")
+      );
 
     const compressed = await waitForCompressedActivity(chat);
     checks.compressedFeedback = compressed.activity?.contextBudget?.compressed === true &&

@@ -51,6 +51,7 @@ import {
   ACTIVITY_ECHO_IDLE_MESSAGE,
   formatCompanionShelf,
   formatContextTransparency,
+  formatDailyCompanionRhythm,
   formatHistoryContextPreview,
   formatMemoryActivity,
   formatMemoryRibbon,
@@ -479,8 +480,10 @@ let currentPresenceModeId: PresenceModeId = "default";
 let currentUserProfile: UserProfile | null = null;
 let currentMemoryInjectionCount: number | null = null;
 let latestMemoryActivity: ReturnType<typeof formatMemoryActivity> | null = null;
+let latestMemoryActivityPayload: ChatMemoryActivityPayload | null = null;
 let latestMemoryActivityRequestVersion: number | null = null;
 let latestContextTransparency: ReturnType<typeof formatContextTransparency> | null = null;
+let latestContextTransparencyPayload: ChatContextTransparencyPayload | null = null;
 let latestContextTransparencyRequestVersion: number | null = null;
 let latestLocalModelDiagnosticSummary: LocalModelDiagnosticSafeSummary | null = null;
 let isLocalModelDiagnosticRunning = false;
@@ -1257,17 +1260,37 @@ function renderLatestMemoryActivityFeedback(): void {
 }
 
 function setMemoryActivity(payload: ChatMemoryActivityPayload): void {
+  latestMemoryActivityPayload = payload;
   latestMemoryActivity = formatMemoryActivity(payload);
   latestMemoryActivityRequestVersion = payload.requestVersion;
   setMemorySessionStatus(payload.injection.count);
-  setChatSessionNote(latestMemoryActivity.text, latestMemoryActivity.state);
+  renderDailyCompanionRhythmNote(payload.requestVersion);
   renderLatestMemoryActivityFeedback();
 }
 
 function setContextTransparency(payload: ChatContextTransparencyPayload): void {
+  latestContextTransparencyPayload = payload;
   latestContextTransparency = formatContextTransparency(payload);
   latestContextTransparencyRequestVersion = payload.requestVersion;
-  setChatSessionNote(latestContextTransparency.text, latestContextTransparency.state);
+  renderDailyCompanionRhythmNote(payload.requestVersion);
+}
+
+function renderDailyCompanionRhythmNote(requestVersion: number, phaseOverride?: "complete" | "idle"): void {
+  const memoryActivity = latestMemoryActivityRequestVersion === requestVersion
+    ? latestMemoryActivityPayload
+    : null;
+  const contextTransparency = latestContextTransparencyRequestVersion === requestVersion
+    ? latestContextTransparencyPayload
+    : null;
+  const phase = phaseOverride ?? (chatTurnState.isReplying ? "replying" : "idle");
+  const rhythm = formatDailyCompanionRhythm({
+    memoryActivity,
+    contextTransparency,
+    activityEcho: currentActivityEcho,
+    activityEchoState: currentActivityEchoState,
+    phase
+  });
+  setChatSessionNote(rhythm.text, rhythm.state);
 }
 
 function formatMessageRoleLabel(role: ChatRole): string {
@@ -2106,10 +2129,8 @@ function finishReplying(requestVersion: number, activityEcho: ChatTurnLifecycleE
   setReplying(false);
   setChatLifecycleEcho(result.lifecycleEcho);
   setChatSessionNote(result.sessionNote, result.sessionNoteState);
-  if (activityEcho === "回复完成" && latestMemoryActivity && latestMemoryActivityRequestVersion === requestVersion) {
-    setChatSessionNote(latestMemoryActivity.text, latestMemoryActivity.state);
-  } else if (activityEcho === "回复完成" && latestContextTransparency && latestContextTransparencyRequestVersion === requestVersion) {
-    setChatSessionNote(latestContextTransparency.text, latestContextTransparency.state);
+  if (activityEcho === "回复完成") {
+    renderDailyCompanionRhythmNote(requestVersion, "complete");
   }
   chatInput.focus();
 }

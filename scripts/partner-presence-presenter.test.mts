@@ -4,6 +4,7 @@ import {
   ACTIVITY_ECHO_IDLE_MESSAGE,
   formatCompanionShelf,
   formatContextTransparency,
+  formatDailyCompanionRhythm,
   formatHistoryContextPreview,
   formatMemoryActivity,
   formatMemoryRibbon,
@@ -301,6 +302,100 @@ test("context transparency presenter describes short and compressed turns withou
   assert.match(compressed.text, /2 条已允许记忆/);
   assert.match(compressed.text, /3 条引用线索/);
   assert.doesNotMatch(compressed.text, /safeQuery|snippet|result body|providerMessages|requestVersion|prompt/);
+});
+
+test("daily companion rhythm merges low-value context and memory into quiet reply status", () => {
+  const rhythm = formatDailyCompanionRhythm({
+    phase: "replying",
+    activityEcho: "正在回复",
+    memoryActivity: createMemoryActivity(),
+    contextTransparency: createContextTransparency()
+  });
+
+  assert.deepEqual(rhythm, {
+    primaryText: "她在想怎么说",
+    secondaryText: null,
+    text: "她在想怎么说",
+    state: "ready",
+    kind: "chat-replying"
+  });
+  assert.doesNotMatch(rhythm.text, /compressed|injection|webSearch|requestVersion|providerMessages|prompt|SECRET_SENTINEL/);
+});
+
+test("daily companion rhythm prioritizes sensitive skip, compression, injection, memory activity, and search", () => {
+  const sensitive = formatDailyCompanionRhythm({
+    phase: "complete",
+    memoryActivity: createMemoryActivity({
+      autoCapture: { enabled: true, skippedReason: "sensitive" }
+    }),
+    contextTransparency: createContextTransparency({
+      contextBudget: { compressed: true }
+    })
+  });
+  assert.equal(sensitive.text, "她跳过了敏感内容");
+  assert.equal(sensitive.kind, "memory-sensitive-skip");
+
+  const compressed = formatDailyCompanionRhythm({
+    phase: "complete",
+    memoryActivity: createMemoryActivity({
+      injection: { count: 3 }
+    }),
+    contextTransparency: createContextTransparency({
+      contextBudget: { compressed: true, summarizedMessageCount: 9, recentMessageCount: 8 }
+    })
+  });
+  assert.equal(compressed.text, "长会话已收束，保留近期上下文");
+  assert.equal(compressed.kind, "context-compressed");
+
+  const injected = formatDailyCompanionRhythm({
+    phase: "complete",
+    memoryActivity: createMemoryActivity({
+      injection: { count: 2 }
+    })
+  });
+  assert.equal(injected.text, "她带上了已允许的记忆");
+  assert.equal(injected.kind, "memory-injected");
+
+  const captured = formatDailyCompanionRhythm({
+    phase: "complete",
+    memoryActivity: createMemoryActivity({
+      autoCapture: { enabled: true, capturedCount: 1, keyCount: 1 }
+    }),
+    contextTransparency: createContextTransparency({
+      webSearch: { included: true, citationCount: 2 }
+    })
+  });
+  assert.equal(captured.text, "她刚整理了记忆");
+  assert.equal(captured.kind, "memory-captured");
+
+  const search = formatDailyCompanionRhythm({
+    phase: "complete",
+    contextTransparency: createContextTransparency({
+      webSearch: { included: true, citationCount: 2 }
+    })
+  });
+  assert.equal(search.text, "这轮带上联网引用线索");
+  assert.equal(search.kind, "search-cited");
+});
+
+test("daily companion rhythm keeps important context as a short secondary line while replying", () => {
+  const rhythm = formatDailyCompanionRhythm({
+    phase: "replying",
+    activityEcho: "正在回复",
+    contextTransparency: createContextTransparency({
+      contextBudget: {
+        compressed: true,
+        summarizedMessageCount: 6,
+        recentMessageCount: 8
+      }
+    })
+  });
+
+  assert.equal(rhythm.primaryText, "她在想怎么说");
+  assert.equal(rhythm.secondaryText, "长会话已收束，保留近期上下文");
+  assert.equal(rhythm.text, "她在想怎么说 · 长会话已收束，保留近期上下文");
+  assert.equal(rhythm.kind, "chat-replying");
+  assert.doesNotMatch(rhythm.text, /summarizedMessageCount|originalMessageCount|providerMessages|prompt/);
 });
 
 test("history context preview only estimates count and boundary", () => {

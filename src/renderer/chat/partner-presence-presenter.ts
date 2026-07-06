@@ -6,6 +6,16 @@ import type { ProviderStatus } from "../../shared/provider-config";
 
 export type StatusDatasetState = "ready" | "fallback" | "error";
 export type ActivityEchoState = "idle" | "active" | "fading";
+export type DailyCompanionRhythmPhase = "replying" | "complete" | "idle";
+export type DailyCompanionRhythmKind =
+  | "chat-replying"
+  | "memory-sensitive-skip"
+  | "context-compressed"
+  | "memory-injected"
+  | "memory-captured"
+  | "search-cited"
+  | "chat-complete"
+  | "idle-presence";
 
 export const ACTIVITY_ECHO_IDLE_MESSAGE = "安静待着";
 export const ACTIVITY_ECHO_FADING_MESSAGE = "在旁边陪着";
@@ -236,6 +246,100 @@ export function formatContextTransparency(payload: ChatContextTransparencyPayloa
     state: budget.compressed || payload.memory.injectionCount > 0 || payload.webSearch.included
       ? "ready"
       : "fallback"
+  };
+}
+
+export function formatDailyCompanionRhythm(input: {
+  memoryActivity?: ChatMemoryActivityPayload | null;
+  contextTransparency?: ChatContextTransparencyPayload | null;
+  activityEcho?: string | null;
+  activityEchoState?: ActivityEchoState;
+  phase: DailyCompanionRhythmPhase;
+}): {
+  primaryText: string;
+  secondaryText: string | null;
+  text: string;
+  state: StatusDatasetState;
+  kind: DailyCompanionRhythmKind;
+} {
+  const important = selectImportantDailyRhythm(input);
+
+  if (input.phase === "replying") {
+    return createDailyRhythm("她在想怎么说", important?.text ?? null, "ready", "chat-replying");
+  }
+
+  if (important) {
+    return createDailyRhythm(important.text, null, important.state, important.kind);
+  }
+
+  if (input.phase === "complete") {
+    return createDailyRhythm("她刚说完", null, "fallback", "chat-complete");
+  }
+
+  const idleText = input.activityEcho === ACTIVITY_ECHO_IDLE_MESSAGE
+    ? "她安静待着"
+    : "她在旁边陪着";
+  return createDailyRhythm(idleText, null, "fallback", "idle-presence");
+}
+
+function selectImportantDailyRhythm(input: {
+  memoryActivity?: ChatMemoryActivityPayload | null;
+  contextTransparency?: ChatContextTransparencyPayload | null;
+}): {
+  text: string;
+  state: StatusDatasetState;
+  kind: Exclude<DailyCompanionRhythmKind, "chat-replying" | "chat-complete" | "idle-presence">;
+} | null {
+  const memory = input.memoryActivity;
+  const context = input.contextTransparency;
+
+  if (memory?.autoCapture.enabled && memory.autoCapture.skippedReason === "sensitive") {
+    return { text: "她跳过了敏感内容", state: "ready", kind: "memory-sensitive-skip" };
+  }
+
+  if (memory?.contextBudget.compressed || context?.contextBudget.compressed) {
+    return { text: "长会话已收束，保留近期上下文", state: "ready", kind: "context-compressed" };
+  }
+
+  const injectionCount = Math.max(
+    memory?.injection.count ?? 0,
+    context?.memory.injectionCount ?? 0
+  );
+  if (injectionCount > 0) {
+    return { text: "她带上了已允许的记忆", state: "ready", kind: "memory-injected" };
+  }
+
+  const capturedCount = memory?.autoCapture.capturedCount ?? 0;
+  const organizedCount = (memory?.autoCapture.mergedCount ?? 0) + (memory?.autoCapture.deduplicatedCount ?? 0);
+  if (memory?.autoCapture.enabled && (capturedCount > 0 || organizedCount > 0 || memory.autoCapture.compressionTriggered)) {
+    return { text: "她刚整理了记忆", state: "ready", kind: "memory-captured" };
+  }
+
+  if (context?.webSearch.included && context.webSearch.citationCount > 0) {
+    return { text: "这轮带上联网引用线索", state: "ready", kind: "search-cited" };
+  }
+
+  return null;
+}
+
+function createDailyRhythm(
+  primaryText: string,
+  secondaryText: string | null,
+  state: StatusDatasetState,
+  kind: DailyCompanionRhythmKind
+): {
+  primaryText: string;
+  secondaryText: string | null;
+  text: string;
+  state: StatusDatasetState;
+  kind: DailyCompanionRhythmKind;
+} {
+  return {
+    primaryText,
+    secondaryText,
+    text: secondaryText ? `${primaryText} · ${secondaryText}` : primaryText,
+    state,
+    kind
   };
 }
 

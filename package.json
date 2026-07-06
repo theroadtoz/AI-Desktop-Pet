@@ -41,6 +41,7 @@
     "accept:p2-26-memory-v2-v3-productization": "npm run build && node scripts/p2-26-memory-v2-v3-productization-real-ui.mjs",
     "accept:p2-27-memory-activity-rhythm-companion-feedback": "npm run build && node scripts/p2-27-memory-activity-rhythm-companion-feedback-real-ui.mjs",
     "accept:p2-28-history-summary-context-transparency": "npm run build && node scripts/p2-28-history-summary-context-transparency-real-ui.mjs",
+    "accept:p2-30-daily-companion-contextual-rhythm": "npm run build && node scripts/p2-30-daily-companion-contextual-rhythm-real-ui.mjs",
     "accept:p2-29a-privacy-safe-mcp-web-search": "node scripts/p2-29a-privacy-safe-mcp-web-search-real-ui.mjs",
     "accept:p2-29b-real-mcp-server-compatibility-search-citation-ui": "npm run build && node scripts/p2-29b-real-mcp-server-compatibility-search-citation-ui.mjs",
     "accept:p2-31d-layered-action-matrix": "node --no-warnings --experimental-strip-types scripts/p2-31d-layered-action-matrix-real-ui.mjs",

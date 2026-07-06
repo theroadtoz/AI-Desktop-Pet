@@ -481,6 +481,8 @@ async function main() {
         const note = noteElement?.textContent ?? "";
         const memory = document.querySelector("#memory-session-status")?.textContent ?? "";
         const completionNote = note.includes("她刚说完，可以继续聊") ||
+          note.includes("她刚说完") ||
+          note.includes("她带上了已允许的记忆") ||
           note.includes("她这轮带上了 1 条已允许的记忆");
         return noteElement?.hidden === false &&
           completionNote &&
@@ -494,6 +496,8 @@ async function main() {
         const memory = document.querySelector("#memory-session-status")?.textContent ?? "";
         const messages = [...document.querySelectorAll(".message")];
         const completionNote = note.includes("她刚说完，可以继续聊") ||
+          note.includes("她刚说完") ||
+          note.includes("她带上了已允许的记忆") ||
           note.includes("她这轮带上了 1 条已允许的记忆");
         return noteElement?.hidden === false &&
           completionNote &&
