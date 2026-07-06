@@ -59,7 +59,6 @@ test("rejects invalid import files with a safe blocked summary", async () => {
   assert.equal(badExtResult.ok, false);
   assert.equal(badExtResult.summary.status, "blocked");
   assert.equal(badExtResult.summary.reason, "model_import_not_gguf");
-  assert.equal(badExtResult.summary.sourceBasename, "model.bin");
   assertSafeOutput(badExtResult.summary, [binPath, leakMarker, modelGgufPathEnv]);
 
   const wrongSize = createFixture("wrong-size");
@@ -78,7 +77,6 @@ test("rejects invalid import files with a safe blocked summary", async () => {
   assert.equal(wrongSizeResult.ok, false);
   assert.equal(wrongSizeResult.summary.status, "blocked");
   assert.equal(wrongSizeResult.summary.reason, "model_import_size_mismatch");
-  assert.equal(wrongSizeResult.summary.sourceBasename, "wrong-size.gguf");
   assertSafeOutput(wrongSizeResult.summary, [ggufPath, leakMarker, modelGgufPathEnv]);
 });
 
@@ -103,7 +101,7 @@ test("keeps partial downloads and resumes them with a Range request", async () =
   assert.equal(firstResult.summary.reason, "model_download_size_mismatch");
   assert.equal(existsSync(partialPath), true);
   assert.equal(statSync(partialPath).size, 3);
-  assert.equal(fetchCalls[0].headers.Range, undefined);
+  assert.equal(fetchCalls[0].headers.Range, "bytes=0-8");
 
   const secondResult = await prepareQwen25LocalLlmPack({
     repoRoot,
@@ -118,7 +116,7 @@ test("keeps partial downloads and resumes them with a Range request", async () =
 
   assert.equal(secondResult.ok, true);
   assert.equal(secondResult.summary.modelSource, "resumed");
-  assert.equal(fetchCalls[1].headers.Range, "bytes=3-");
+  assert.equal(fetchCalls[1].headers.Range, "bytes=3-8");
   assert.equal(existsSync(partialPath), false);
   assert.deepEqual(readFileSync(join(fixture.packRoot, "models", "model.gguf")), expectedModel);
 });

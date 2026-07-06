@@ -1,15 +1,24 @@
 import { createHash } from "node:crypto";
-import { copyFileSync, createReadStream, createWriteStream, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { copyFileSync, createReadStream, existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, extname, join, resolve, sep } from "node:path";
 import { spawnSync } from "node:child_process";
-import { Readable } from "node:stream";
-import { pipeline } from "node:stream/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import {
+  downloadChunkedGgufModel,
+  defaultChunkBytes,
+  defaultChunkTimeoutMs,
+  defaultMaxRetriesPerChunk
+} from "./lib/p2-23c-chunked-gguf-downloader.mjs";
 
 export const packRootEnv = "P2_23C_LOCAL_LLM_PACK_ROOT";
 export const llamaServerPathEnv = "P2_23C_LLAMA_SERVER_PATH";
 export const modelGgufPathEnv = "P2_23C_MODEL_GGUF_PATH";
 export const modelDownloadTimeoutMsEnv = "P2_23C_MODEL_DOWNLOAD_TIMEOUT_MS";
+export const modelDownloadChunkBytesEnv = "P2_23C_MODEL_DOWNLOAD_CHUNK_BYTES";
+export const modelDownloadMaxRetriesEnv = "P2_23C_MODEL_DOWNLOAD_MAX_RETRIES";
+export const modelDownloadMaxChunksEnv = "P2_23C_MODEL_DOWNLOAD_MAX_CHUNKS";
+export const modelDownloadMaxBytesEnv = "P2_23C_MODEL_DOWNLOAD_MAX_BYTES";
+export const modelDownloadMaxDurationMsEnv = "P2_23C_MODEL_DOWNLOAD_MAX_DURATION_MS";
 export const packRootName = "p2-23c-qwen25-15b-local-llm";
 
 const runtimeName = "llama.cpp";
@@ -19,7 +28,6 @@ const modelRepo = "Qwen/Qwen2.5-1.5B-Instruct-GGUF";
 const modelFileName = "qwen2.5-1.5b-instruct-q4_k_m.gguf";
 const modelAlias = "qwen2.5-1.5b-instruct-q4_k_m";
 const expectedModelSizeBytes = 1_117_320_736;
-const defaultModelDownloadTimeoutMs = 120_000;
 const modelDownloadURL =
   `https://huggingface.co/${modelRepo}/resolve/main/${modelFileName}?download=true`;
 
@@ -66,7 +74,12 @@ export async function prepareQwen25LocalLlmPack(options = {}) {
     expectedSizeBytes: modelExpectedSizeBytes,
     fetchImpl: options.fetch,
     downloadURL: options.modelDownloadURL ?? modelDownloadURL,
-    downloadTimeoutMs: resolveDownloadTimeoutMs(options.downloadTimeoutMs, env)
+    downloadTimeoutMs: resolveDownloadTimeoutMs(options.downloadTimeoutMs, env),
+    downloadChunkBytes: resolveDownloadChunkBytes(options.downloadChunkBytes, env),
+    downloadMaxRetriesPerChunk: resolveDownloadMaxRetriesPerChunk(options.downloadMaxRetriesPerChunk, env),
+    downloadMaxChunks: resolveOptionalPositiveInteger(options.downloadMaxChunks, env[modelDownloadMaxChunksEnv]),
+    downloadMaxBytes: resolveOptionalPositiveInteger(options.downloadMaxBytes, env[modelDownloadMaxBytesEnv]),
+    downloadMaxDurationMs: resolveDownloadMaxDurationMs(options.downloadMaxDurationMs, env)
   });
 
   if (!modelResult.ok) {
@@ -279,112 +292,18 @@ async function importModelFile(modelPath, sourcePath, expectedSizeBytes) {
 }
 
 async function downloadModel(modelPath, details) {
-  const fetchFn = details.fetchImpl ?? globalThis.fetch;
-  const tempPath = `${modelPath}.download`;
-  const existingPartialSize = getFileSize(tempPath);
-  const canResume = existingPartialSize > 0 && existingPartialSize < details.expectedSizeBytes;
-
-  if (typeof fetchFn !== "function") {
-    return createBlockedModelResult("model_download_unavailable", {
-      source: "download",
-      partialSizeBytes: existingPartialSize,
-      expectedModelSizeBytes: details.expectedSizeBytes
-    });
-  }
-
-  if (existingPartialSize === details.expectedSizeBytes) {
-    renameSync(tempPath, modelPath);
-    return {
-      ok: true,
-      source: "resumed",
-      sourceBasename: basename(modelPath)
-    };
-  }
-
-  if (existingPartialSize > details.expectedSizeBytes) {
-    rmSync(tempPath, { force: true });
-  }
-
-  mkdirSync(dirname(modelPath), { recursive: true });
-
-  const headers = {
-    "User-Agent": "AI_Desktop_Pet/P2-23C local-llm-pack-preparer"
-  };
-
-  if (canResume) {
-    headers.Range = `bytes=${existingPartialSize}-`;
-  }
-
-  const abortController = new AbortController();
-  const timeout = setTimeout(() => abortController.abort(), details.downloadTimeoutMs);
-  try {
-    let response;
-
-    try {
-      response = await fetchFn(details.downloadURL, {
-        headers,
-        signal: abortController.signal
-      });
-    } catch (error) {
-      return createBlockedModelResult("model_download_failed", {
-        source: canResume ? "resume" : "download",
-        errorName: error instanceof Error ? error.name : "unexpected_error",
-        partialSizeBytes: getFileSize(tempPath),
-        expectedModelSizeBytes: details.expectedSizeBytes,
-        timeoutMs: details.downloadTimeoutMs
-      });
-    }
-
-    if (!response?.ok || !response.body) {
-      return createBlockedModelResult(`model_download_http_${Number.isInteger(response?.status) ? response.status : 0}`, {
-        source: canResume ? "resume" : "download",
-        partialSizeBytes: getFileSize(tempPath),
-        expectedModelSizeBytes: details.expectedSizeBytes
-      });
-    }
-
-    const responseStatus = Number.isInteger(response.status) ? response.status : 200;
-    const shouldAppend = canResume && responseStatus === 206;
-    const source = shouldAppend ? "resumed" : "downloaded";
-
-    try {
-      const sourceStream = typeof response.body.getReader === "function"
-        ? Readable.fromWeb(response.body)
-        : response.body;
-
-      await pipeline(sourceStream, createWriteStream(tempPath, { flags: shouldAppend ? "a" : "w" }));
-    } catch (error) {
-      return createBlockedModelResult("model_download_failed", {
-        source: shouldAppend ? "resume" : "download",
-        errorName: error instanceof Error ? error.name : "unexpected_error",
-        partialSizeBytes: getFileSize(tempPath),
-        expectedModelSizeBytes: details.expectedSizeBytes,
-        timeoutMs: details.downloadTimeoutMs
-      });
-    }
-
-    const actualSizeBytes = getFileSize(tempPath);
-
-    if (actualSizeBytes !== details.expectedSizeBytes) {
-      return createBlockedModelResult("model_download_size_mismatch", {
-        source,
-        partialSizeBytes: actualSizeBytes,
-        expectedModelSizeBytes: details.expectedSizeBytes,
-        actualModelSizeBytes: actualSizeBytes
-      });
-    }
-
-    renameSync(tempPath, modelPath);
-
-    return {
-      ok: true,
-      source,
-      sourceBasename: basename(modelPath),
-      sizeBytes: actualSizeBytes
-    };
-  } finally {
-    clearTimeout(timeout);
-  }
+  return downloadChunkedGgufModel({
+    destinationPath: modelPath,
+    expectedSizeBytes: details.expectedSizeBytes,
+    fetchImpl: details.fetchImpl ?? globalThis.fetch,
+    downloadURL: details.downloadURL,
+    chunkBytes: details.downloadChunkBytes,
+    maxRetriesPerChunk: details.downloadMaxRetriesPerChunk,
+    timeoutMs: details.downloadTimeoutMs,
+    maxChunks: details.downloadMaxChunks,
+    maxBytes: details.downloadMaxBytes,
+    maxDurationMs: details.downloadMaxDurationMs
+  });
 }
 
 function createBlockedModelResult(reason, details) {
@@ -493,14 +412,40 @@ ${dllList}
 }
 
 function createSummary(packRoot, status, details) {
-  return removeUndefined({
+  const summary = removeUndefined({
     ok: status === "ready",
     status,
     safeSummaryOnly: true,
-    packRootName: basename(packRoot),
-    packRootParentName: basename(dirname(packRoot)),
     ...details
   });
+
+  return status === "blocked" ? filterSafeBlockedSummary(summary) : summary;
+}
+
+function filterSafeBlockedSummary(summary) {
+  const allowedKeys = new Set([
+    "ok",
+    "status",
+    "reason",
+    "modelName",
+    "modelSource",
+    "source",
+    "partialSizeBytes",
+    "expectedModelSizeBytes",
+    "chunkStartBytes",
+    "chunkEndBytes",
+    "chunkBytes",
+    "attempt",
+    "maxRetriesPerChunk",
+    "timeoutMs",
+    "errorName",
+    "durationMs",
+    "safeSummaryOnly"
+  ]);
+
+  return Object.fromEntries(
+    Object.entries(summary).filter(([key]) => allowedKeys.has(key))
+  );
 }
 
 function createChildEnv(sourceEnv) {
@@ -523,10 +468,6 @@ function isExistingFile(path) {
   }
 }
 
-function getFileSize(path) {
-  return isExistingFile(path) ? statSync(path).size : 0;
-}
-
 function readNonEmpty(value) {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
@@ -534,7 +475,31 @@ function readNonEmpty(value) {
 function resolveDownloadTimeoutMs(optionValue, env) {
   return readPositiveInteger(optionValue)
     ?? readPositiveIntegerText(env[modelDownloadTimeoutMsEnv])
-    ?? defaultModelDownloadTimeoutMs;
+    ?? defaultChunkTimeoutMs;
+}
+
+function resolveDownloadChunkBytes(optionValue, env) {
+  return readPositiveInteger(optionValue)
+    ?? readPositiveIntegerText(env[modelDownloadChunkBytesEnv])
+    ?? defaultChunkBytes;
+}
+
+function resolveDownloadMaxRetriesPerChunk(optionValue, env) {
+  return readPositiveInteger(optionValue)
+    ?? readPositiveIntegerText(env[modelDownloadMaxRetriesEnv])
+    ?? defaultMaxRetriesPerChunk;
+}
+
+function resolveDownloadMaxDurationMs(optionValue, env) {
+  return readPositiveInteger(optionValue)
+    ?? readPositiveIntegerText(env[modelDownloadMaxDurationMsEnv])
+    ?? resolveDownloadTimeoutMs(undefined, env);
+}
+
+function resolveOptionalPositiveInteger(optionValue, envValue) {
+  return readPositiveInteger(optionValue)
+    ?? readPositiveIntegerText(envValue)
+    ?? undefined;
 }
 
 function readPositiveInteger(value) {
