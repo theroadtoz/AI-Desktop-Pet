@@ -23,7 +23,7 @@ export type PromptTemplateProfile = "cloud-chat" | "local-small-model";
 const SYSTEM_PROMPT = "你是一个低打扰的桌面伙伴。回复要自然、简短，优先使用中文。不要输出 JSON。";
 const LOCAL_SMALL_MODEL_SYSTEM_PROMPT = [
   "魔法学院高年级进修魔女/现代魔导工程进修生/Windows Live2D 桌面魔女同伴。Provider/本地模型/Live2D/记忆/窗口不魔法化。",
-  "API key/密钥等敏感信息：必须拒绝保存、记住、复述和索要。"
+  "API key/密钥/测试哨兵/私有标识等敏感片段：必须拒绝保存、记住、逐字复述和索要；只能概括为敏感内容或私有标记。"
 ].join("\n");
 
 export function mapChatMessagesToOpenAICompatible(
@@ -148,17 +148,25 @@ function createMemoryMessage(memoryContext?: MemoryInjection): OpenAICompatibleM
 
 function createSensitiveDataBoundaryMessage(messages: readonly ChatProviderMessage[]): OpenAICompatibleMessage | null {
   const latestUserMessage = getLatestUserMessage(messages);
+  const hasPrivateMarker = containsPrivateMarker(latestUserMessage);
 
-  if (!asksToStoreSensitiveData(latestUserMessage)) {
+  if (!asksToStoreSensitiveData(latestUserMessage) && !hasPrivateMarker) {
     return null;
   }
 
+  const lines = hasPrivateMarker
+    ? [
+        "当前用户消息包含密钥、测试哨兵或私有标识样式片段。",
+        "必须避免逐字复述这些片段；不要复制其中的 token、sentinel、密钥、私有 ID 或完整标记。可概括为“那段敏感内容/私有标记”，然后继续回答用户的实际意图。"
+      ]
+    : [
+        "当前用户在询问是否把密钥、API key、密码、银行卡等敏感信息发给你保存或记住。",
+        "必须回答：我不能保存、记住、复述或索要这类敏感信息；不要把密钥发给我；请放在本地密码管理器或环境变量。"
+      ];
+
   return {
     role: "system",
-    content: [
-      "当前用户在询问是否把密钥、API key、密码、银行卡等敏感信息发给你保存或记住。",
-      "必须回答：我不能保存、记住、复述或索要这类敏感信息；不要把密钥发给我；请放在本地密码管理器或环境变量。"
-    ].join("\n")
+    content: lines.join("\n")
   };
 }
 
@@ -180,4 +188,12 @@ function asksToStoreSensitiveData(text: string): boolean {
   }
 
   return /(记住|保存|存着|发给你|发送给你|给你|帮我|以后调用|复述|索要|告诉你)/.test(text);
+}
+
+function containsPrivateMarker(text: string): boolean {
+  if (!text) {
+    return false;
+  }
+
+  return /(?:sk-[A-Za-z0-9_-]{8,}|Bearer\s+\S+|[A-Z0-9-]{2,}_[A-Z0-9_-]*SENTINEL[A-Z0-9_-]*|PRIVATE[_-]?[A-Z0-9_-]*|SECRET[_-]?[A-Z0-9_-]*|TOKEN[_-]?[A-Z0-9_-]*)/u.test(text);
 }

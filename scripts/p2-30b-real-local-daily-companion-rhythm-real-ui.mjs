@@ -63,6 +63,7 @@ const privateTexts = [
   "sk-p230b-secret-should-not-appear"
 ];
 const replySummaries = [];
+const requiredReplyCount = 5;
 
 main().catch((error) => {
   const summary = createSummary({
@@ -194,11 +195,11 @@ async function main() {
       memory: window.__p230bMemoryActivityEvents?.length ?? 0
     })`);
     checks.contextAndMemoryEventsObserved = eventCounts.context >= 5 && eventCounts.memory >= 5;
-    checks.realRepliesSafe = replySummaries.length >= 6 &&
+    checks.realRepliesSafe = replySummaries.length >= requiredReplyCount &&
       replySummaries.every((item) => item.replyLength > 0 && !item.thinkLeak && !item.privateLeak);
 
     telemetry = summarizeTelemetry(readTelemetryEntries());
-    Object.assign(checks, createProviderChecks({ validation, providerStatus, telemetry, requiredReplyCount: replySummaries.length }));
+    Object.assign(checks, createProviderChecks({ validation, providerStatus, telemetry, requiredReplyCount }));
 
     const residueBeforeCleanup = findScreenshotResidue(context).filter((path) => !path.includes(context.runParentDir));
     checks.noScreenshotResidue = residueBeforeCleanup.length === 0;

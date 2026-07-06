@@ -5,6 +5,10 @@ import type {
   ChatRequest,
   ChatStreamDelta
 } from "../../../shared/chat-provider";
+import {
+  createAssistantReplyPrivacyStreamGuard,
+  redactAssistantReplyPrivateMarkers
+} from "./assistant-reply-privacy";
 import { createFakeChatProvider } from "./fake-provider";
 
 export class ChatEngineBusyError extends Error {
@@ -57,10 +61,21 @@ export function createChatEngine(provider: ChatProvider = createFakeChatProvider
       activeAbortController = abortController;
 
       try {
-        return await provider.streamReply(request, {
-          signal: abortController.signal,
-          onDelta: options.onDelta
+        const streamGuard = createAssistantReplyPrivacyStreamGuard((text) => {
+          options.onDelta({ text });
         });
+        const result = await provider.streamReply(request, {
+          signal: abortController.signal,
+          onDelta(delta) {
+            streamGuard.push(delta.text);
+          }
+        });
+        streamGuard.flush();
+
+        return {
+          ...result,
+          text: redactAssistantReplyPrivateMarkers(result.text)
+        };
       } finally {
         if (activeAbortController === abortController) {
           activeAbortController = null;

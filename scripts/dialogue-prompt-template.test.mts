@@ -98,6 +98,21 @@ test("prompt template: sensitive data storage requests get a local boundary mess
   assert.match(boundary?.content ?? "", /本地密码管理器或环境变量/);
 });
 
+test("prompt template: local small model treats sentinel-like text as private markers", () => {
+  const marker = "P2-30B_LONG_HISTORY_SENTINEL";
+  const mapped = mapChatMessagesToOpenAICompatible([
+    { id: crypto.randomUUID(), role: "user", content: `继续上下文检查 ${marker}` }
+  ], undefined, undefined, undefined, "local-small-model");
+  const boundary = mapped.at(-2);
+
+  assert.equal(boundary?.role, "system");
+  assert.match(boundary?.content ?? "", /测试哨兵|私有标识/);
+  assert.match(boundary?.content ?? "", /避免逐字复述/);
+  assert.match(boundary?.content ?? "", /敏感内容|私有标记/);
+  assert.doesNotMatch(boundary?.content ?? "", new RegExp(marker));
+  assert.equal(mapped.filter((message) => message.content.includes(marker)).length, 1);
+});
+
 function systemLength(mapped: ReturnType<typeof mapChatMessagesToOpenAICompatible>): number {
   return mapped
     .filter((message) => message.role === "system")
