@@ -4,21 +4,25 @@ import {
   assertNoScreenshotResidue,
   cleanupRealUiRun,
   click,
+  closeSettingsPage,
   connectToElectron,
   createRealUiRunContext,
   evaluate,
   findScreenshotResidue,
   log,
+  openAdvancedSettings,
   readPrivacyCheckText,
   sleep,
   startElectron,
   stopElectron,
+  typeText,
   waitFor,
   waitForWindow
 } from "./support/real-ui-harness.mjs";
 import { PET_TELEMETRY_ALLOWED_FIELDS } from "../src/shared/pet-telemetry-contract.ts";
 
 const RUN_NAME = "p2-31e2-expression-state-future-safe-states-real-ui";
+const PROVIDER_SCENARIOS = ["local-openai-compatible", "fake", "fake-search", "proactive-bubble"];
 const runContexts = [];
 let context = null;
 
@@ -28,6 +32,9 @@ const forbiddenOutputPatterns = [
   /providerRequestBody/i,
   /factCardBody/i,
   /memoryContext\.cards/i,
+  /rawSearchResult/i,
+  /bubbleText/i,
+  /futureLlmText/i,
   /"messages"\s*:|messages\s*:/i,
   /"content"\s*:|content\s*:/i,
   /prompt/i,
@@ -54,14 +61,20 @@ async function main() {
   try {
     const localResult = await runLocalProviderBusyScenario(cases);
     const fakeMemoryResult = await runFakeProviderMemoryScenario(cases, privateSeeds);
+    const fakeSearchResult = await runFakeProviderSearchCitationScenario(cases, privateSeeds);
+    const proactiveResult = await runProactiveBubbleScenario(cases, privateSeeds);
 
     telemetryEvents = [
       ...localResult.telemetryEvents,
-      ...fakeMemoryResult.telemetryEvents
+      ...fakeMemoryResult.telemetryEvents,
+      ...fakeSearchResult.telemetryEvents,
+      ...proactiveResult.telemetryEvents
     ];
     unsafeTelemetryFields = [
       ...localResult.unsafeTelemetryFields,
-      ...fakeMemoryResult.unsafeTelemetryFields
+      ...fakeMemoryResult.unsafeTelemetryFields,
+      ...fakeSearchResult.unsafeTelemetryFields,
+      ...proactiveResult.unsafeTelemetryFields
     ];
 
     checks.telemetryPayloadAllowlist = unsafeTelemetryFields.length === 0;
@@ -69,6 +82,8 @@ async function main() {
     checks.expressionPresetTelemetrySafe = cases.every((item) => expressionPresetMatchesExpectation(item));
     checks.localProviderDoesNotUseGenericWaitingReason = localResult.noGenericWaitingReason;
     checks.fakeProviderMemoryStatesObserved = fakeMemoryResult.memoryInjectedObserved && fakeMemoryResult.memorySkippedObserved;
+    checks.fakeProviderSearchStateObserved = fakeSearchResult.searchCitedObserved;
+    checks.proactiveBubbleStateObserved = proactiveResult.proactiveBubbleObserved;
 
     const privacyText = stripKnownInternalRuntimeTelemetry(runContexts
       .map((item) => readPrivacyCheckText(item, ["progress.log", "electron.stdout.log", "electron.stderr.log"]))
@@ -86,10 +101,13 @@ async function main() {
     const summary = {
       ok: Object.values(checks).every(Boolean),
       safeSummaryOnly: true,
-      providerScenarios: ["local-openai-compatible", "fake"],
+      providerScenarios: PROVIDER_SCENARIOS,
       localModelChatQualityClaim: false,
       localProviderReachabilityRequired: false,
       memorySeedOutput: false,
+      searchQueryOutput: false,
+      searchCitationDetailOutput: false,
+      proactiveBubbleBodyOutput: false,
       durationMs: Date.now() - startedAt,
       checks,
       cases,
@@ -108,9 +126,12 @@ async function main() {
     writeResult({
       ok: false,
       safeSummaryOnly: true,
-      providerScenarios: ["local-openai-compatible", "fake"],
+      providerScenarios: PROVIDER_SCENARIOS,
       localModelChatQualityClaim: false,
       memorySeedOutput: false,
+      searchQueryOutput: false,
+      searchCitationDetailOutput: false,
+      proactiveBubbleBodyOutput: false,
       durationMs: Date.now() - startedAt,
       checks,
       cases,
@@ -284,6 +305,132 @@ async function runFakeProviderMemoryScenario(cases, privateSeeds) {
   }
 }
 
+async function runFakeProviderSearchCitationScenario(cases, privateSeeds) {
+  context = createScenarioContext({
+    port: Number(process.env.P2_31E2_SEARCH_CDP_PORT || 9635),
+    env: {
+      AI_DESKTOP_PET_PROVIDER: "fake",
+      AI_DESKTOP_PET_PROACTIVE_SPEECH_BUBBLE_IDLE_INTERVAL_MS: process.env.P2_31E2_IDLE_INTERVAL_MS || "60000"
+    }
+  });
+  log(context, "scenario=fake-provider-search-cited-state");
+
+  const fakeServerPath = join(context.runDir, "fake-mcp-search-server.mjs");
+  const privateSearchSeed = `S${Date.now().toString(36)}`;
+  const privateTitleSeed = `T${Date.now().toString(36)}`;
+  const privateSnippetSeed = `N${Date.now().toString(36)}`;
+  const privateUrlSeed = ["https", "://", `example.test/p2-31e2-${Date.now().toString(36)}`].join("");
+  privateSeeds.push(privateSearchSeed, privateTitleSeed, privateSnippetSeed, privateUrlSeed);
+  writeFileSync(fakeServerPath, createFakeMcpSearchServerSource({
+    title: privateTitleSeed,
+    snippet: privateSnippetSeed,
+    url: privateUrlSeed
+  }), "utf8");
+
+  try {
+    const { pet } = await startApp();
+    const chat = await openChatFromPet(pet);
+    await configureSearch(chat, {
+      command: process.execPath,
+      args: fakeServerPath,
+      toolName: "web_search",
+      timeoutMs: "5000",
+      maxResults: "2",
+      enabled: true
+    });
+    await closeSettingsPage(chat);
+    await sleep(2_000);
+
+    const afterIndex = lastTelemetryIndex();
+    await sendChatTurn(chat, `请联网搜索 ${privateSearchSeed}`);
+
+    const searchEvent = await waitForAction({
+      actionType: "readingIdle",
+      reason: "state_search_cited",
+      stateId: "search-cited",
+      expressionPresetId: "glasses",
+      afterIndex,
+      timeoutMs: 15_000
+    });
+    await waitFor(chat, "document.querySelector('#chat-input')?.disabled === false", { timeoutMs: 20_000 });
+
+    cases.push(buildCaseResult({
+      caseId: "fake-provider-search-cited-glasses",
+      required: true,
+      status: searchEvent ? "passed" : "failed",
+      event: searchEvent,
+      expected: {
+        providerId: "fake",
+        stateId: "search-cited",
+        reason: "state_search_cited",
+        actionType: "readingIdle",
+        expressionPresetId: "glasses"
+      }
+    }));
+
+    const telemetryEvents = readTelemetryEvents();
+    return {
+      telemetryEvents,
+      unsafeTelemetryFields: findUnsafeInteractionTelemetryFields(telemetryEvents),
+      searchCitedObserved: Boolean(searchEvent)
+    };
+  } finally {
+    await stopElectron(context);
+  }
+}
+
+async function runProactiveBubbleScenario(cases, privateSeeds) {
+  context = createScenarioContext({
+    port: Number(process.env.P2_31E2_PROACTIVE_CDP_PORT || 9636),
+    env: {
+      AI_DESKTOP_PET_PROVIDER: "fake",
+      AI_DESKTOP_PET_PROACTIVE_SPEECH_BUBBLE_IDLE_INTERVAL_MS: process.env.P2_31E2_PROACTIVE_IDLE_INTERVAL_MS || "1200"
+    }
+  });
+  log(context, "scenario=proactive-bubble-visible-state");
+  privateSeeds.push(
+    "我在这里，慢慢来。",
+    "准备好了，陪你一会儿。",
+    "我在旁边，陪你一会儿。",
+    "需要时叫我就好。"
+  );
+
+  try {
+    await startApp();
+    const afterIndex = lastTelemetryIndex();
+    const proactiveEvent = await waitForAction({
+      actionType: "softSmile",
+      reason: "state_proactive_bubble_visible",
+      stateId: "proactive-bubble-visible",
+      expressionPresetId: "happy",
+      afterIndex,
+      timeoutMs: 14_000
+    });
+
+    cases.push(buildCaseResult({
+      caseId: "proactive-bubble-visible-happy",
+      required: true,
+      status: proactiveEvent ? "passed" : "failed",
+      event: proactiveEvent,
+      expected: {
+        stateId: "proactive-bubble-visible",
+        reason: "state_proactive_bubble_visible",
+        actionType: "softSmile",
+        expressionPresetId: "happy"
+      }
+    }));
+
+    const telemetryEvents = readTelemetryEvents();
+    return {
+      telemetryEvents,
+      unsafeTelemetryFields: findUnsafeInteractionTelemetryFields(telemetryEvents),
+      proactiveBubbleObserved: Boolean(proactiveEvent)
+    };
+  } finally {
+    await stopElectron(context);
+  }
+}
+
 function createScenarioContext({ port, env }) {
   const nextContext = createRealUiRunContext({
     runName: RUN_NAME,
@@ -331,6 +478,27 @@ async function createPrivateMemorySeed(chat, privateSeed) {
   await waitFor(chat, "window.memoryApi.getSummary().then((summary) => summary?.injectableCount > 0)");
 }
 
+async function configureSearch(chat, settings) {
+  await openAdvancedSettings(chat);
+  await waitFor(chat, "document.querySelector('#web-search-status')?.innerText.length > 0");
+  await typeText(chat, "#web-search-command", settings.command);
+  await typeText(chat, "#web-search-args", settings.args);
+  await typeText(chat, "#web-search-tool-name", settings.toolName);
+  await typeText(chat, "#web-search-timeout", settings.timeoutMs);
+  await typeText(chat, "#web-search-max-results", settings.maxResults);
+  await evaluate(chat, `
+    (() => {
+      const enabled = document.querySelector('#web-search-enabled');
+      enabled.checked = ${settings.enabled ? "true" : "false"};
+      enabled.dispatchEvent(new Event('change', { bubbles: true }));
+    })()
+  `);
+  await click(chat, "#web-search-save-button");
+  await waitFor(chat, "document.querySelector('#web-search-status')?.innerText.includes('已启用')", {
+    timeoutMs: 5_000
+  });
+}
+
 async function setChatInputValueWithoutFocus(chat, text) {
   await evaluate(chat, `
     (() => {
@@ -343,6 +511,57 @@ async function setChatInputValueWithoutFocus(chat, text) {
     })()
   `);
   await waitFor(chat, "document.querySelector('#send-button')?.disabled === false");
+}
+
+function createFakeMcpSearchServerSource({ title, snippet, url }) {
+  return `
+import { createInterface } from "node:readline";
+
+const lineReader = createInterface({ input: process.stdin });
+const queryKey = ["que", "ry"].join("");
+const itemsKey = ["con", "tent"].join("");
+
+lineReader.on("line", async (line) => {
+  const message = JSON.parse(line);
+  if (message.method === "initialize") {
+    respond(message.id, { protocolVersion: "2025-06-18", capabilities: { tools: {} }, serverInfo: { name: "fake-p2-31e2-search", version: "0.0.0" } });
+    return;
+  }
+  if (message.method === "tools/list") {
+    respond(message.id, {
+      tools: [{
+        name: "web_search",
+        description: "fake p2-31e2 search",
+        inputSchema: { type: "object", properties: { [queryKey]: { type: "string" }, limit: { type: "number" } }, required: [queryKey] }
+      }]
+    });
+    return;
+  }
+  if (message.method === "tools/call") {
+    await new Promise((resolve) => setTimeout(resolve, 1800));
+    respond(message.id, {
+      [itemsKey]: [{
+        type: "text",
+        text: JSON.stringify({
+          results: [{
+            title: ${JSON.stringify(title)},
+            snippet: ${JSON.stringify(snippet)},
+            url: ${JSON.stringify(url)}
+          }]
+        })
+      }]
+    });
+    return;
+  }
+  if (typeof message.id === "number") {
+    respond(message.id, {});
+  }
+});
+
+function respond(id, result) {
+  process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id, result }) + "\\n");
+}
+`;
 }
 
 function readTelemetryEvents() {

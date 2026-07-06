@@ -27,7 +27,9 @@ export const PET_ACTION_TRIGGER_REASONS = [
   "state_flustered",
   "state_local_model_busy",
   "state_memory_injected",
-  "state_memory_skipped"
+  "state_memory_skipped",
+  "state_search_cited",
+  "state_proactive_bubble_visible"
 ] as const;
 
 export type PetActionTriggerReason = typeof PET_ACTION_TRIGGER_REASONS[number];
@@ -70,7 +72,9 @@ export const PET_ACTION_TRIGGER_ACTION_BY_REASON: Readonly<Record<PetActionTrigg
   state_flustered: "flusteredGlance",
   state_local_model_busy: "replyThinking",
   state_memory_injected: "quietNod",
-  state_memory_skipped: "quietNod"
+  state_memory_skipped: "quietNod",
+  state_search_cited: "readingIdle",
+  state_proactive_bubble_visible: "softSmile"
 };
 
 export const PET_EDGE_SETTLED_THRESHOLD_PX = 72;

@@ -173,6 +173,16 @@ const PET_EXPRESSION_STATE_LINKAGE_PROFILE_BY_STATE = {
   "memory-skipped": {
     minDurationMs: 0,
     maxDurationMs: 0
+  },
+  "search-cited": {
+    baseExpressionPresetId: "glasses",
+    minDurationMs: 1_000,
+    maxDurationMs: 1_600
+  },
+  "proactive-bubble-visible": {
+    baseExpressionPresetId: "happy",
+    minDurationMs: 900,
+    maxDurationMs: 1_300
   }
 } as const satisfies Readonly<Record<PetActionStateId, PetExpressionStateLinkageProfile>>;
 

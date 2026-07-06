@@ -779,6 +779,7 @@ function sendProactiveSpeechBubble(payload: ProactiveSpeechBubblePayload): boole
   petWindow.webContents.send("pet:proactive-speech-bubble", payload);
   proactiveSpeechBubbleVisibleUntil = Date.now() + payload.durationMs;
   logProactiveSpeechBubbleDecision("shown", payload);
+  sendPetActionTrigger("state_proactive_bubble_visible");
   return true;
 }
 
@@ -2247,13 +2248,17 @@ app.whenReady().then(async () => {
 
     void resolveWebSearchForLatestMessage(submittedMessage.content).then((webSearchResolution) => {
       const webSearchCitation = createWebSearchCitationPayload(webSearchResolution.context);
+      const webSearchCitationCount = webSearchCitation?.citations.length ?? 0;
+      if (webSearchCitationCount > 0) {
+        sendPetActionTrigger("state_search_cited");
+      }
 
       event.sender.send("chat:context-transparency", createChatContextTransparencyPayload({
         requestVersion: request.requestVersion,
         contextBudgetSummary: contextBudget.summary,
         memoryInjectionCount: memoryContext.count,
         webSearchIncluded: Boolean(webSearchResolution.context?.results.length),
-        webSearchCitationCount: webSearchCitation?.citations.length ?? 0
+        webSearchCitationCount
       }));
       event.sender.send("chat:memory-injection", {
         requestVersion: request.requestVersion,

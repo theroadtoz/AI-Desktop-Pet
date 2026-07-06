@@ -42,7 +42,9 @@ const EXPECTED_STATE_ACTIONS = {
   flustered: { triggerReason: "state_flustered", actionType: "flusteredGlance" },
   "local-model-busy": { triggerReason: "state_local_model_busy", actionType: "replyThinking" },
   "memory-injected": { triggerReason: "state_memory_injected", actionType: "quietNod" },
-  "memory-skipped": { triggerReason: "state_memory_skipped", actionType: "quietNod" }
+  "memory-skipped": { triggerReason: "state_memory_skipped", actionType: "quietNod" },
+  "search-cited": { triggerReason: "state_search_cited", actionType: "readingIdle" },
+  "proactive-bubble-visible": { triggerReason: "state_proactive_bubble_visible", actionType: "softSmile" }
 } as const;
 
 const EXPECTED_ACTIONS_BY_REASON = {
@@ -65,7 +67,9 @@ const EXPECTED_ACTIONS_BY_REASON = {
   state_flustered: "flusteredGlance",
   state_local_model_busy: "replyThinking",
   state_memory_injected: "quietNod",
-  state_memory_skipped: "quietNod"
+  state_memory_skipped: "quietNod",
+  state_search_cited: "readingIdle",
+  state_proactive_bubble_visible: "softSmile"
 } as const;
 
 test("pet action state catalog maps every state to a fixed safe body action", () => {
@@ -83,7 +87,9 @@ test("pet action state catalog maps every state to a fixed safe body action", ()
     "flustered",
     "local-model-busy",
     "memory-injected",
-    "memory-skipped"
+    "memory-skipped",
+    "search-cited",
+    "proactive-bubble-visible"
   ]);
 
   for (const stateId of PET_ACTION_STATE_IDS) {
@@ -125,7 +131,9 @@ test("pet action state machine keeps legacy trigger reasons as compatibility ent
     state_flustered: "flustered",
     state_local_model_busy: "local-model-busy",
     state_memory_injected: "memory-injected",
-    state_memory_skipped: "memory-skipped"
+    state_memory_skipped: "memory-skipped",
+    state_search_cited: "search-cited",
+    state_proactive_bubble_visible: "proactive-bubble-visible"
   } as const;
 
   for (const reason of PET_ACTION_TRIGGER_REASONS) {
@@ -179,6 +187,33 @@ test("main chat reply trigger waits for memory safe summary before selecting one
   assert.doesNotMatch(chatSendSource, /sendPetActionTrigger\([^)]*memoryContext\.cards|pet:action-trigger",\s*\{[\s\S]{0,120}(count|cards|text|payload)/);
 });
 
+test("main search citation trigger uses only citation count after safe payload creation", async () => {
+  const source = await readFile(new URL("../src/main/app.ts", import.meta.url), "utf8");
+  const citationStart = source.indexOf("const webSearchCitation = createWebSearchCitationPayload");
+  const citationEnd = source.indexOf('event.sender.send("chat:context-transparency"', citationStart);
+  const citationSource = source.slice(citationStart, citationEnd);
+
+  assert.notEqual(citationStart, -1);
+  assert.match(citationSource, /createWebSearchCitationPayload\(webSearchResolution\.context\)/);
+  assert.match(citationSource, /const webSearchCitationCount = webSearchCitation\?\.citations\.length \?\? 0;/);
+  assert.match(citationSource, /if \(webSearchCitationCount > 0\) \{\s*sendPetActionTrigger\("state_search_cited"\);\s*\}/);
+  assert.doesNotMatch(citationSource, /sendPetActionTrigger\([^)]*(query|url|title|snippet|result|payload)/i);
+});
+
+test("main proactive bubble trigger fires only after a shown bubble without text payloads", async () => {
+  const source = await readFile(new URL("../src/main/app.ts", import.meta.url), "utf8");
+  const bubbleStart = source.indexOf("function sendProactiveSpeechBubble");
+  const bubbleEnd = source.indexOf("function isChatVisible", bubbleStart);
+  const bubbleSource = source.slice(bubbleStart, bubbleEnd);
+  const shownIndex = bubbleSource.indexOf('logProactiveSpeechBubbleDecision("shown", payload)');
+  const triggerIndex = bubbleSource.indexOf('sendPetActionTrigger("state_proactive_bubble_visible")');
+
+  assert.notEqual(bubbleStart, -1);
+  assert.equal(shownIndex >= 0, true);
+  assert.equal(triggerIndex > shownIndex, true);
+  assert.doesNotMatch(bubbleSource, /sendPetActionTrigger\([^)]*(payload|lineId|text|content|message|prompt|expressionName|motion|partId)/i);
+});
+
 test("pet action trigger allowlist only exposes fixed action and reason combinations", () => {
   assert.deepEqual(PET_ACTION_TRIGGER_REASONS, [
     "chat_opened",
@@ -200,7 +235,9 @@ test("pet action trigger allowlist only exposes fixed action and reason combinat
     "state_flustered",
     "state_local_model_busy",
     "state_memory_injected",
-    "state_memory_skipped"
+    "state_memory_skipped",
+    "state_search_cited",
+    "state_proactive_bubble_visible"
   ]);
   assert.deepEqual(PET_ACTION_TRIGGER_ACTION_BY_REASON, EXPECTED_ACTIONS_BY_REASON);
 

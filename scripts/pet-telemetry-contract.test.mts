@@ -46,6 +46,12 @@ const FORBIDDEN_KEYS = [
   "windowTitle",
   "foregroundApp",
   "url",
+  "query",
+  "title",
+  "snippet",
+  "rawResult",
+  "text",
+  "bubbleText",
   "path",
   "request",
   "response",
@@ -247,6 +253,36 @@ test("action trigger telemetry keeps only fixed safe trigger reasons", () => {
       prompt: "sentinel"
     }
   });
+  const searchCited = parsePetRendererTelemetryEvent({
+    type: "pet_interaction_action_started",
+    payload: {
+      type: "readingIdle",
+      reason: "state_search_cited",
+      stateId: "search-cited",
+      durationMs: 1600,
+      expressionPresetId: "glasses",
+      query: "sentinel",
+      url: "https://example.invalid/private",
+      title: "sentinel",
+      snippet: "sentinel",
+      rawResult: { content: "sentinel" },
+      content: "sentinel"
+    }
+  });
+  const proactiveBubbleVisible = parsePetRendererTelemetryEvent({
+    type: "pet_interaction_action_started",
+    payload: {
+      type: "softSmile",
+      reason: "state_proactive_bubble_visible",
+      stateId: "proactive-bubble-visible",
+      durationMs: 1300,
+      expressionPresetId: "happy",
+      text: "sentinel",
+      bubbleText: "sentinel",
+      content: "sentinel",
+      prompt: "sentinel"
+    }
+  });
   const unsafeAction = parsePetRendererTelemetryEvent({
     type: "pet_interaction_action_started",
     payload: {
@@ -345,6 +381,26 @@ test("action trigger telemetry keeps only fixed safe trigger reasons", () => {
       durationMs: 1050
     }
   });
+  assert.deepEqual(searchCited, {
+    type: "pet_interaction_action_started",
+    payload: {
+      type: "readingIdle",
+      reason: "state_search_cited",
+      stateId: "search-cited",
+      durationMs: 1600,
+      expressionPresetId: "glasses"
+    }
+  });
+  assert.deepEqual(proactiveBubbleVisible, {
+    type: "pet_interaction_action_started",
+    payload: {
+      type: "softSmile",
+      reason: "state_proactive_bubble_visible",
+      stateId: "proactive-bubble-visible",
+      durationMs: 1300,
+      expressionPresetId: "happy"
+    }
+  });
   assert.deepEqual(unsafeAction, {
     type: "pet_interaction_action_started",
     payload: {
@@ -362,6 +418,8 @@ test("action trigger telemetry keeps only fixed safe trigger reasons", () => {
   assertNoForbiddenKeys(unsafeStateId?.payload);
   assertNoForbiddenKeys(memoryInjected?.payload);
   assertNoForbiddenKeys(memorySkipped?.payload);
+  assertNoForbiddenKeys(searchCited?.payload);
+  assertNoForbiddenKeys(proactiveBubbleVisible?.payload);
   assertNoForbiddenKeys(unsafeAction?.payload);
 });
 

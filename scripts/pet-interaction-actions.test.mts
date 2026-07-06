@@ -293,7 +293,9 @@ test("action trigger reasons map to fixed actions and emit safe started telemetr
     state_flustered: "flusteredGlance",
     state_local_model_busy: "replyThinking",
     state_memory_injected: "quietNod",
-    state_memory_skipped: "quietNod"
+    state_memory_skipped: "quietNod",
+    state_search_cited: "readingIdle",
+    state_proactive_bubble_visible: "softSmile"
   } as const;
 
   for (const reason of PET_ACTION_TRIGGER_REASONS) {
@@ -494,6 +496,86 @@ test("memory safe states use quiet nod without exposing memory payloads", () => 
   assert.equal("count" in skippedHarness.telemetry[0]?.payload, false);
   assert.equal("cards" in skippedHarness.telemetry[0]?.payload, false);
   assert.deepEqual(parsePetRendererTelemetryEvent(skippedHarness.telemetry[0]), skippedHarness.telemetry[0]);
+});
+
+test("search and proactive safe states expose only fixed action and expression summaries", () => {
+  const searchHarness = createFakeInteractionActionPlayer();
+  const searchState = getPetActionStateForReason("state_search_cited");
+  const searchAction = getPetInteractionAction(searchState.actionType);
+  const searchExpression = resolvePetExpressionStateLinkage({
+    stateId: searchState.stateId,
+    dialogueModeId: "default",
+    presenceModeId: "default"
+  });
+
+  assert.equal(searchState.actionType, "readingIdle");
+  assert.equal(searchExpression.status, "selected");
+  assert.equal(searchExpression.expressionPresetId, "glasses");
+  assert.equal(searchHarness.player.playAction(searchAction, searchState.triggerReason, {
+    stateId: searchState.stateId,
+    modeId: "default",
+    presenceModeId: "default",
+    expressionPresetId: searchExpression.expressionPresetId,
+    candidateActionTypes: [searchState.actionType]
+  }), true);
+
+  assert.deepEqual(searchHarness.telemetry[0], {
+    type: "pet_interaction_action_started",
+    payload: {
+      type: "readingIdle",
+      reason: "state_search_cited",
+      stateId: "search-cited",
+      durationMs: searchAction.durationMs,
+      modeId: "default",
+      presenceModeId: "default",
+      expressionPresetId: "glasses",
+      candidateActionTypes: ["readingIdle"],
+      selectedActionType: "readingIdle"
+    }
+  });
+  assert.equal("query" in searchHarness.telemetry[0]?.payload, false);
+  assert.equal("url" in searchHarness.telemetry[0]?.payload, false);
+  assert.equal("title" in searchHarness.telemetry[0]?.payload, false);
+  assert.equal("snippet" in searchHarness.telemetry[0]?.payload, false);
+  assert.deepEqual(parsePetRendererTelemetryEvent(searchHarness.telemetry[0]), searchHarness.telemetry[0]);
+
+  const proactiveHarness = createFakeInteractionActionPlayer();
+  const proactiveState = getPetActionStateForReason("state_proactive_bubble_visible");
+  const proactiveAction = getPetInteractionAction(proactiveState.actionType);
+  const proactiveExpression = resolvePetExpressionStateLinkage({
+    stateId: proactiveState.stateId,
+    dialogueModeId: "default",
+    presenceModeId: "default"
+  });
+
+  assert.equal(proactiveState.actionType, "softSmile");
+  assert.equal(proactiveExpression.status, "selected");
+  assert.equal(proactiveExpression.expressionPresetId, "happy");
+  assert.equal(proactiveHarness.player.playAction(proactiveAction, proactiveState.triggerReason, {
+    stateId: proactiveState.stateId,
+    modeId: "default",
+    presenceModeId: "default",
+    expressionPresetId: proactiveExpression.expressionPresetId,
+    candidateActionTypes: [proactiveState.actionType]
+  }), true);
+
+  assert.deepEqual(proactiveHarness.telemetry[0], {
+    type: "pet_interaction_action_started",
+    payload: {
+      type: "softSmile",
+      reason: "state_proactive_bubble_visible",
+      stateId: "proactive-bubble-visible",
+      durationMs: proactiveAction.durationMs,
+      modeId: "default",
+      presenceModeId: "default",
+      expressionPresetId: "happy",
+      candidateActionTypes: ["softSmile"],
+      selectedActionType: "softSmile"
+    }
+  });
+  assert.equal("text" in proactiveHarness.telemetry[0]?.payload, false);
+  assert.equal("content" in proactiveHarness.telemetry[0]?.payload, false);
+  assert.deepEqual(parsePetRendererTelemetryEvent(proactiveHarness.telemetry[0]), proactiveHarness.telemetry[0]);
 });
 
 test("main pet activity echo delegates safe messages to the shared catalog helpers", async () => {

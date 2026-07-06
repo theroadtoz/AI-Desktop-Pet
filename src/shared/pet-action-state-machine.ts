@@ -17,7 +17,9 @@ export const PET_ACTION_STATE_IDS = [
   "flustered",
   "local-model-busy",
   "memory-injected",
-  "memory-skipped"
+  "memory-skipped",
+  "search-cited",
+  "proactive-bubble-visible"
 ] as const;
 
 export type PetActionStateId = typeof PET_ACTION_STATE_IDS[number];
@@ -176,6 +178,26 @@ export const PET_ACTION_STATE_CATALOG: Readonly<Record<PetActionStateId, PetActi
     interruptPolicy: "skip_if_active",
     supportLevel: "parameter_composition",
     safeSummaryLabel: "memory skipped"
+  },
+  "search-cited": {
+    stateId: "search-cited",
+    triggerReason: "state_search_cited",
+    actionType: "readingIdle",
+    priority: 25,
+    minimumIntervalMs: 1_800,
+    interruptPolicy: "skip_if_active",
+    supportLevel: "existing_action",
+    safeSummaryLabel: "search cited"
+  },
+  "proactive-bubble-visible": {
+    stateId: "proactive-bubble-visible",
+    triggerReason: "state_proactive_bubble_visible",
+    actionType: "softSmile",
+    priority: 15,
+    minimumIntervalMs: 1_800,
+    interruptPolicy: "skip_if_active",
+    supportLevel: "existing_action",
+    safeSummaryLabel: "proactive bubble visible"
   }
 };
 
@@ -199,7 +221,9 @@ const PET_ACTION_STATE_ID_BY_REASON: Readonly<Record<PetActionTriggerReason, Pet
   state_flustered: "flustered",
   state_local_model_busy: "local-model-busy",
   state_memory_injected: "memory-injected",
-  state_memory_skipped: "memory-skipped"
+  state_memory_skipped: "memory-skipped",
+  state_search_cited: "search-cited",
+  state_proactive_bubble_visible: "proactive-bubble-visible"
 };
 
 export function isPetActionStateId(value: unknown): value is PetActionStateId {

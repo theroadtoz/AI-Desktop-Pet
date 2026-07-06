@@ -92,8 +92,12 @@ test("layered action decisions declare presence and dialogue boundaries as safe 
   assert.deepEqual(getPetLayeredActionDecision("read").allowedDialogueModes, ["reading"]);
   assert.deepEqual(getPetLayeredActionDecision("memory-injected").allowedPresenceModes, ["default", "focus", "quiet"]);
   assert.deepEqual(getPetLayeredActionDecision("memory-skipped").allowedPresenceModes, ["default", "focus", "quiet"]);
+  assert.deepEqual(getPetLayeredActionDecision("search-cited").allowedPresenceModes, ["default", "focus", "quiet"]);
+  assert.deepEqual(getPetLayeredActionDecision("proactive-bubble-visible").allowedPresenceModes, ["default", "focus", "quiet"]);
   assert.deepEqual(getPetLayeredActionDecision("memory-injected").allowedDialogueModes, ["default", "work", "game", "reading"]);
   assert.deepEqual(getPetLayeredActionDecision("memory-skipped").allowedDialogueModes, ["default", "work", "game", "reading"]);
+  assert.deepEqual(getPetLayeredActionDecision("search-cited").allowedDialogueModes, ["default", "work", "game", "reading"]);
+  assert.deepEqual(getPetLayeredActionDecision("proactive-bubble-visible").allowedDialogueModes, ["default", "work", "game", "reading"]);
 });
 
 test("layered action decisions keep native motion as expected safe skip", () => {
@@ -132,6 +136,8 @@ test("layered action expression fallback only references audited preset ids", ()
   assert.deepEqual(getPetLayeredActionDecision("read").expressionPresetFallback.presetIds, ["glasses"]);
   assert.deepEqual(getPetLayeredActionDecision("memory-injected").expressionPresetFallback.presetIds, []);
   assert.deepEqual(getPetLayeredActionDecision("memory-skipped").expressionPresetFallback.presetIds, []);
+  assert.deepEqual(getPetLayeredActionDecision("search-cited").expressionPresetFallback.presetIds, ["glasses"]);
+  assert.deepEqual(getPetLayeredActionDecision("proactive-bubble-visible").expressionPresetFallback.presetIds, ["happy"]);
 });
 
 test("layered action telemetry summary only uses the pet telemetry allowlist", () => {
@@ -182,4 +188,6 @@ test("layered action catalog stores only safe enums and summaries, never raw res
   }
   assert.deepEqual(getPetLayeredActionDecision("memory-injected").realUiCoverage, ["p2-31e2-memory-safe-states-real-ui"]);
   assert.deepEqual(getPetLayeredActionDecision("memory-skipped").realUiCoverage, ["p2-31e2-memory-safe-states-real-ui"]);
+  assert.deepEqual(getPetLayeredActionDecision("search-cited").realUiCoverage, ["p2-31e2-search-proactive-safe-states-real-ui"]);
+  assert.deepEqual(getPetLayeredActionDecision("proactive-bubble-visible").realUiCoverage, ["p2-31e2-search-proactive-safe-states-real-ui"]);
 });

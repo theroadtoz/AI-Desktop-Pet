@@ -51,6 +51,25 @@ test("p2-31e2 runner requires local-model-busy and memory safe states", () => {
   }
 });
 
+test("p2-31e2 runner requires search and proactive safe states", () => {
+  for (const token of [
+    "fake-provider-search-cited-glasses",
+    "state_search_cited",
+    "search-cited",
+    "readingIdle",
+    "expressionPresetId: \"glasses\"",
+    "fakeProviderSearchStateObserved",
+    "proactive-bubble-visible-happy",
+    "state_proactive_bubble_visible",
+    "proactive-bubble-visible",
+    "softSmile",
+    "expressionPresetId: \"happy\"",
+    "proactiveBubbleStateObserved"
+  ]) {
+    assert.match(runnerSource, new RegExp(escapeRegExp(token)));
+  }
+});
+
 test("p2-31e2 runner uses fake provider only for the memory scenario and hides dynamic seeds", () => {
   for (const token of [
     "scenario=fake-provider-memory-safe-states",
@@ -66,6 +85,26 @@ test("p2-31e2 runner uses fake provider only for the memory scenario and hides d
   }
 
   assert.doesNotMatch(runnerSource, /observed:\s*.*privateSeeds|expected:\s*.*privateSeeds/);
+});
+
+test("p2-31e2 runner hides search details and proactive bubble text", () => {
+  for (const token of [
+    "runFakeProviderSearchCitationScenario",
+    "privateSearchSeed",
+    "privateTitleSeed",
+    "privateSnippetSeed",
+    "privateUrlSeed",
+    "createFakeMcpSearchServerSource",
+    "searchQueryOutput: false",
+    "searchCitationDetailOutput: false",
+    "proactiveBubbleBodyOutput: false",
+    "containsForbiddenOutput(privacyText, privateSeeds)",
+    "isSafeSummary(summary, privateSeeds)"
+  ]) {
+    assert.match(runnerSource, new RegExp(escapeRegExp(token)));
+  }
+
+  assert.doesNotMatch(runnerSource, /observed:\s*.*private(Search|Title|Snippet|Url)Seed|expected:\s*.*private(Search|Title|Snippet|Url)Seed/);
 });
 
 test("p2-31e2 runner keeps output to safe summaries and cleans temporary files", () => {
@@ -108,7 +147,10 @@ test("p2-31e2 runner keeps output to safe summaries and cleans temporary files",
     "assertNoScreenshotResidue",
     "cleanupRealUiRun",
     "safeSummaryOnly: true",
-    "memorySeedOutput: false"
+    "memorySeedOutput: false",
+    "searchQueryOutput: false",
+    "searchCitationDetailOutput: false",
+    "proactiveBubbleBodyOutput: false"
   ]) {
     assert.match(runnerSource, new RegExp(escapeRegExp(token)));
   }

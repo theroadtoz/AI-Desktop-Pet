@@ -348,6 +348,16 @@ export const PET_ACTION_STATE_CATALOG = {
     triggerReason: "state_memory_skipped",
     actionType: "quietNod",
     safeSummaryLabel: "memory skipped"
+  },
+  "search-cited": {
+    triggerReason: "state_search_cited",
+    actionType: "readingIdle",
+    safeSummaryLabel: "search cited"
+  },
+  "proactive-bubble-visible": {
+    triggerReason: "state_proactive_bubble_visible",
+    actionType: "softSmile",
+    safeSummaryLabel: "proactive bubble visible"
   }
 };
 

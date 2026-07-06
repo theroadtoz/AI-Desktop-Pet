@@ -105,6 +105,8 @@ test("expression state linkage selects representative safe presets for core mode
   assertSelected("think", "dark", "default", "default");
   assertSelected("local-model-busy", "dark", "default", "default");
   assertSelected("memory-injected", "happy", "default", "default");
+  assertSelected("search-cited", "glasses", "default", "default");
+  assertSelected("proactive-bubble-visible", "happy", "default", "default");
   assertSelected("work", "glasses", "work", "focus");
   assertSelected("read", "glasses", "reading", "default");
   assertSelected("game", "gestureGame", "game", "default");
@@ -179,6 +181,22 @@ test("expression state linkage lowers intensity in quiet and sleep contexts", ()
   assert.equal(memorySkipped.status, "presentation-only");
   assert.equal(memorySkipped.durationMs, 0);
   assert.equal("expressionPresetId" in memorySkipped, false);
+
+  const quietSearchCited = resolvePetExpressionStateLinkage({
+    stateId: "search-cited",
+    dialogueModeId: "default",
+    presenceModeId: "quiet"
+  });
+  assert.equal(quietSearchCited.status, "presentation-only");
+  assert.equal("expressionPresetId" in quietSearchCited, false);
+
+  const sleepProactiveBubble = resolvePetExpressionStateLinkage({
+    stateId: "proactive-bubble-visible",
+    dialogueModeId: "default",
+    presenceModeId: "sleep"
+  });
+  assert.equal(sleepProactiveBubble.status, "blocked");
+  assert.equal(sleepProactiveBubble.blockReason, "presence-mode-blocked");
 });
 
 test("expression state linkage blocks state and dialogue mismatches before selecting a preset", () => {
