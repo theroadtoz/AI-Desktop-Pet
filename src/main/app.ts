@@ -12,7 +12,7 @@ import {
 } from "electron";
 import { release as getOsRelease } from "node:os";
 import { isAbsolute } from "node:path";
-import type { ChatContextBudgetSummary, ChatRequest, ChatRuntimeContext } from "../shared/chat-provider";
+import type { ChatContextBudgetSummary, ChatProviderId, ChatRequest, ChatRuntimeContext } from "../shared/chat-provider";
 import type {
   ChatContextTransparencyPayload,
   ConfigApiKeyRequest,
@@ -1293,6 +1293,27 @@ function createChatMemoryActivityPayload(input: {
   };
 }
 
+function selectMainPetActionTriggerForMemorySafeChatReply(input: {
+  providerId: ChatProviderId;
+  autoCaptureSkippedReason: ChatMemoryActivityPayload["autoCapture"]["skippedReason"];
+  memoryInjectionCount: number;
+}): PetActionTriggerReason {
+  if (input.autoCaptureSkippedReason === "sensitive" || input.autoCaptureSkippedReason === "capture_failed") {
+    return "state_memory_skipped";
+  }
+
+  const replyWaitingReason = selectPetActionTriggerForChatReplyWaiting(input.providerId);
+  if (replyWaitingReason === "state_local_model_busy") {
+    return replyWaitingReason;
+  }
+
+  if (input.memoryInjectionCount > 0) {
+    return "state_memory_injected";
+  }
+
+  return replyWaitingReason;
+}
+
 function createChatContextTransparencyPayload(input: {
   requestVersion: number;
   contextBudgetSummary: ChatContextBudgetSummary;
@@ -2144,7 +2165,6 @@ app.whenReady().then(async () => {
 
     activeChatRequestVersion = request.requestVersion;
     clearChatReplySustainTimer();
-    sendPetActionTrigger(selectPetActionTriggerForChatReplyWaiting(providerId));
     const submittedMessage = request.messages.at(-1);
     let autoMemoryCaptureForActivity: ChatMemoryActivityPayload["autoCapture"] =
       createFailedMemoryActivityAutoCapture(memoryStoreForRequest);
@@ -2212,6 +2232,11 @@ app.whenReady().then(async () => {
     }
 
     const memoryContext = memoryStoreForRequest.createInjection();
+    sendPetActionTrigger(selectMainPetActionTriggerForMemorySafeChatReply({
+      providerId,
+      autoCaptureSkippedReason: autoMemoryCaptureForActivity.skippedReason,
+      memoryInjectionCount: memoryContext.count
+    }));
     const dialogueStyleContext = {
       modeId: currentDialogueModeId,
       styleId: "gentle-desktop-companion-v1" as const

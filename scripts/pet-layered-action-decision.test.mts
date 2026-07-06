@@ -90,6 +90,10 @@ test("layered action decisions declare presence and dialogue boundaries as safe 
   assert.deepEqual(getPetLayeredActionDecision("work").allowedDialogueModes, ["work"]);
   assert.deepEqual(getPetLayeredActionDecision("game").allowedDialogueModes, ["game"]);
   assert.deepEqual(getPetLayeredActionDecision("read").allowedDialogueModes, ["reading"]);
+  assert.deepEqual(getPetLayeredActionDecision("memory-injected").allowedPresenceModes, ["default", "focus", "quiet"]);
+  assert.deepEqual(getPetLayeredActionDecision("memory-skipped").allowedPresenceModes, ["default", "focus", "quiet"]);
+  assert.deepEqual(getPetLayeredActionDecision("memory-injected").allowedDialogueModes, ["default", "work", "game", "reading"]);
+  assert.deepEqual(getPetLayeredActionDecision("memory-skipped").allowedDialogueModes, ["default", "work", "game", "reading"]);
 });
 
 test("layered action decisions keep native motion as expected safe skip", () => {
@@ -126,6 +130,8 @@ test("layered action expression fallback only references audited preset ids", ()
 
   assert.deepEqual(getPetLayeredActionDecision("game").expressionPresetFallback.presetIds, ["gestureGame"]);
   assert.deepEqual(getPetLayeredActionDecision("read").expressionPresetFallback.presetIds, ["glasses"]);
+  assert.deepEqual(getPetLayeredActionDecision("memory-injected").expressionPresetFallback.presetIds, []);
+  assert.deepEqual(getPetLayeredActionDecision("memory-skipped").expressionPresetFallback.presetIds, []);
 });
 
 test("layered action telemetry summary only uses the pet telemetry allowlist", () => {
@@ -174,4 +180,6 @@ test("layered action catalog stores only safe enums and summaries, never raw res
     assert.equal(decision.realUiCoverage.length > 0, true, decision.stateId);
     assert.equal(decision.poseAccessoryFallback.restores.includes("temporary-accessory"), true);
   }
+  assert.deepEqual(getPetLayeredActionDecision("memory-injected").realUiCoverage, ["p2-31e2-memory-safe-states-real-ui"]);
+  assert.deepEqual(getPetLayeredActionDecision("memory-skipped").realUiCoverage, ["p2-31e2-memory-safe-states-real-ui"]);
 });

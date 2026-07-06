@@ -61,7 +61,9 @@ const petActionTriggerReasons = [
   "state_read",
   "state_edge",
   "state_flustered",
-  "state_local_model_busy"
+  "state_local_model_busy",
+  "state_memory_injected",
+  "state_memory_skipped"
 ] as const;
 const scaleWheelModifierPattern = /^(Ctrl|Alt|Shift|Meta)(\+(Ctrl|Alt|Shift|Meta))*$/;
 

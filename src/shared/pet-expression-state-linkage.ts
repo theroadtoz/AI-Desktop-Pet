@@ -164,6 +164,15 @@ const PET_EXPRESSION_STATE_LINKAGE_PROFILE_BY_STATE = {
     baseExpressionPresetId: "dark",
     minDurationMs: 900,
     maxDurationMs: 1_400
+  },
+  "memory-injected": {
+    baseExpressionPresetId: "happy",
+    minDurationMs: 900,
+    maxDurationMs: 1_300
+  },
+  "memory-skipped": {
+    minDurationMs: 0,
+    maxDurationMs: 0
   }
 } as const satisfies Readonly<Record<PetActionStateId, PetExpressionStateLinkageProfile>>;
 

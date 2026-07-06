@@ -14,7 +14,7 @@ test("p2-31e2 package command runs the future safe states real UI runner", () =>
   );
 });
 
-test("p2-31e2 runner uses a local provider trigger without claiming local model quality", () => {
+test("p2-31e2 runner keeps local provider busy coverage without claiming local model quality", () => {
   for (const token of [
     "createRealUiRunContext",
     "startElectron",
@@ -27,11 +27,9 @@ test("p2-31e2 runner uses a local provider trigger without claiming local model 
   ]) {
     assert.match(runnerSource, new RegExp(escapeRegExp(token)));
   }
-
-  assert.doesNotMatch(runnerSource, /provider:\s*"fake"/);
 });
 
-test("p2-31e2 runner requires local-model-busy with a safe expression preset", () => {
+test("p2-31e2 runner requires local-model-busy and memory safe states", () => {
   for (const token of [
     "local-provider-request-local-model-busy-dark",
     "state_local_model_busy",
@@ -39,10 +37,35 @@ test("p2-31e2 runner requires local-model-busy with a safe expression preset", (
     "replyThinking",
     "expressionPresetId: \"dark\"",
     "localProviderDoesNotUseGenericWaitingReason",
-    "chat_reply_waiting"
+    "chat_reply_waiting",
+    "fake-provider-memory-injected-happy",
+    "state_memory_injected",
+    "memory-injected",
+    "expressionPresetId: \"happy\"",
+    "fake-provider-memory-skipped-presentation-only",
+    "state_memory_skipped",
+    "memory-skipped",
+    "quietNod"
   ]) {
     assert.match(runnerSource, new RegExp(escapeRegExp(token)));
   }
+});
+
+test("p2-31e2 runner uses fake provider only for the memory scenario and hides dynamic seeds", () => {
+  for (const token of [
+    "scenario=fake-provider-memory-safe-states",
+    "AI_DESKTOP_PET_PROVIDER: \"fake\"",
+    "window.memoryApi.setEnabled(true)",
+    "privateSeeds.push",
+    "memorySeedOutput: false",
+    "privateSeedCount",
+    "containsForbiddenOutput(privacyText, privateSeeds)",
+    "isSafeSummary(summary, privateSeeds)"
+  ]) {
+    assert.match(runnerSource, new RegExp(escapeRegExp(token)));
+  }
+
+  assert.doesNotMatch(runnerSource, /observed:\s*.*privateSeeds|expected:\s*.*privateSeeds/);
 });
 
 test("p2-31e2 runner keeps output to safe summaries and cleans temporary files", () => {
@@ -55,6 +78,9 @@ test("p2-31e2 runner keeps output to safe summaries and cleans temporary files",
   ).replace(
     "line.includes('\"promptTemplateProfile\"')",
     "line.includes('<provider-profile-enum>')"
+  ).replace(
+    /const sensitiveSeed = \[[\s\S]*?\]\.join\(""\);/,
+    "const sensitiveSeed = '<private-seed>';"
   );
   const forbiddenPatterns = [
     /providerRequestBody/i,
@@ -81,7 +107,8 @@ test("p2-31e2 runner keeps output to safe summaries and cleans temporary files",
     "readPrivacyCheckText",
     "assertNoScreenshotResidue",
     "cleanupRealUiRun",
-    "safeSummaryOnly: true"
+    "safeSummaryOnly: true",
+    "memorySeedOutput: false"
   ]) {
     assert.match(runnerSource, new RegExp(escapeRegExp(token)));
   }

@@ -25,7 +25,9 @@ export const PET_ACTION_TRIGGER_REASONS = [
   "state_read",
   "state_edge",
   "state_flustered",
-  "state_local_model_busy"
+  "state_local_model_busy",
+  "state_memory_injected",
+  "state_memory_skipped"
 ] as const;
 
 export type PetActionTriggerReason = typeof PET_ACTION_TRIGGER_REASONS[number];
@@ -34,6 +36,7 @@ export type PetActionTriggerActionType =
   | "greeting"
   | "listen"
   | "softSmile"
+  | "quietNod"
   | "replyThinking"
   | "gameReady"
   | "readingIdle"
@@ -65,7 +68,9 @@ export const PET_ACTION_TRIGGER_ACTION_BY_REASON: Readonly<Record<PetActionTrigg
   state_read: "readingIdle",
   state_edge: "edgeGlance",
   state_flustered: "flusteredGlance",
-  state_local_model_busy: "replyThinking"
+  state_local_model_busy: "replyThinking",
+  state_memory_injected: "quietNod",
+  state_memory_skipped: "quietNod"
 };
 
 export const PET_EDGE_SETTLED_THRESHOLD_PX = 72;

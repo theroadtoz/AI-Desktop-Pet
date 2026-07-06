@@ -152,7 +152,9 @@ const PET_ACTION_STATE_IDS = [
   "read",
   "edge",
   "flustered",
-  "local-model-busy"
+  "local-model-busy",
+  "memory-injected",
+  "memory-skipped"
 ] as const;
 const PET_EXPRESSION_PRESET_IDS = [
   "dark",
@@ -194,7 +196,9 @@ const PET_INTERACTION_REASONS = [
   "state_read",
   "state_edge",
   "state_flustered",
-  "state_local_model_busy"
+  "state_local_model_busy",
+  "state_memory_injected",
+  "state_memory_skipped"
 ] as const;
 const PET_INTERACTION_SKIP_REASONS = [
   "active_action",

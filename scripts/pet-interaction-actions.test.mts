@@ -291,7 +291,9 @@ test("action trigger reasons map to fixed actions and emit safe started telemetr
     state_read: "readingIdle",
     state_edge: "edgeGlance",
     state_flustered: "flusteredGlance",
-    state_local_model_busy: "replyThinking"
+    state_local_model_busy: "replyThinking",
+    state_memory_injected: "quietNod",
+    state_memory_skipped: "quietNod"
   } as const;
 
   for (const reason of PET_ACTION_TRIGGER_REASONS) {
@@ -415,6 +417,83 @@ test("local model busy linkage drives dark preset through safe state telemetry",
   });
   assert.equal("expressionName" in harness.telemetry[0]?.payload, false);
   assert.deepEqual(parsePetRendererTelemetryEvent(harness.telemetry[0]), harness.telemetry[0]);
+});
+
+test("memory safe states use quiet nod without exposing memory payloads", () => {
+  const injectedHarness = createFakeInteractionActionPlayer();
+  const injectedState = getPetActionStateForReason("state_memory_injected");
+  const injectedAction = getPetInteractionAction(injectedState.actionType);
+  const injectedExpression = resolvePetExpressionStateLinkage({
+    stateId: injectedState.stateId,
+    dialogueModeId: "default",
+    presenceModeId: "default"
+  });
+
+  assert.equal(injectedState.actionType, "quietNod");
+  assert.equal(injectedExpression.status, "selected");
+  assert.equal(injectedExpression.expressionPresetId, "happy");
+  assert.equal(injectedHarness.player.playAction(injectedAction, injectedState.triggerReason, {
+    stateId: injectedState.stateId,
+    modeId: "default",
+    presenceModeId: "default",
+    expressionPresetId: injectedExpression.expressionPresetId,
+    candidateActionTypes: [injectedState.actionType]
+  }), true);
+
+  assert.deepEqual(injectedHarness.telemetry[0], {
+    type: "pet_interaction_action_started",
+    payload: {
+      type: "quietNod",
+      reason: "state_memory_injected",
+      stateId: "memory-injected",
+      durationMs: injectedAction.durationMs,
+      modeId: "default",
+      presenceModeId: "default",
+      expressionPresetId: "happy",
+      candidateActionTypes: ["quietNod"],
+      selectedActionType: "quietNod"
+    }
+  });
+  assert.equal("expressionName" in injectedHarness.telemetry[0]?.payload, false);
+  assert.equal("count" in injectedHarness.telemetry[0]?.payload, false);
+  assert.equal("cards" in injectedHarness.telemetry[0]?.payload, false);
+  assert.deepEqual(parsePetRendererTelemetryEvent(injectedHarness.telemetry[0]), injectedHarness.telemetry[0]);
+
+  const skippedHarness = createFakeInteractionActionPlayer();
+  const skippedState = getPetActionStateForReason("state_memory_skipped");
+  const skippedAction = getPetInteractionAction(skippedState.actionType);
+  const skippedExpression = resolvePetExpressionStateLinkage({
+    stateId: skippedState.stateId,
+    dialogueModeId: "default",
+    presenceModeId: "default"
+  });
+
+  assert.equal(skippedState.actionType, "quietNod");
+  assert.equal(skippedExpression.status, "presentation-only");
+  assert.equal(skippedHarness.player.playAction(skippedAction, skippedState.triggerReason, {
+    stateId: skippedState.stateId,
+    modeId: "default",
+    presenceModeId: "default",
+    candidateActionTypes: [skippedState.actionType]
+  }), true);
+
+  assert.deepEqual(skippedHarness.telemetry[0], {
+    type: "pet_interaction_action_started",
+    payload: {
+      type: "quietNod",
+      reason: "state_memory_skipped",
+      stateId: "memory-skipped",
+      durationMs: skippedAction.durationMs,
+      modeId: "default",
+      presenceModeId: "default",
+      candidateActionTypes: ["quietNod"],
+      selectedActionType: "quietNod"
+    }
+  });
+  assert.equal("expressionPresetId" in skippedHarness.telemetry[0]?.payload, false);
+  assert.equal("count" in skippedHarness.telemetry[0]?.payload, false);
+  assert.equal("cards" in skippedHarness.telemetry[0]?.payload, false);
+  assert.deepEqual(parsePetRendererTelemetryEvent(skippedHarness.telemetry[0]), skippedHarness.telemetry[0]);
 });
 
 test("main pet activity echo delegates safe messages to the shared catalog helpers", async () => {

@@ -58,6 +58,7 @@ export type PetLayeredActionRealUiCoverage =
   | "p2-25a-state-machine-real-ui"
   | "p2-25b-edge-half-body-real-ui"
   | "p2-31e2-local-model-busy-real-ui"
+  | "p2-31e2-memory-safe-states-real-ui"
   | "p2-8c-interaction-review"
   | "focused-tests-only";
 
@@ -166,6 +167,16 @@ const PET_LAYERED_ACTION_DECISION_POLICY_BY_STATE = {
     allowedPresenceModes: ALL_PRESENCE_MODE_IDS,
     allowedDialogueModes: ALL_DIALOGUE_MODE_IDS,
     realUiCoverage: ["p2-31e2-local-model-busy-real-ui"]
+  },
+  "memory-injected": {
+    allowedPresenceModes: NON_SLEEP_PRESENCE_MODE_IDS,
+    allowedDialogueModes: ALL_DIALOGUE_MODE_IDS,
+    realUiCoverage: ["p2-31e2-memory-safe-states-real-ui"]
+  },
+  "memory-skipped": {
+    allowedPresenceModes: NON_SLEEP_PRESENCE_MODE_IDS,
+    allowedDialogueModes: ALL_DIALOGUE_MODE_IDS,
+    realUiCoverage: ["p2-31e2-memory-safe-states-real-ui"]
   }
 } as const satisfies Readonly<Record<PetActionStateId, PetLayeredActionDecisionPolicy>>;
 

@@ -40,7 +40,9 @@ const EXPECTED_STATE_ACTIONS = {
   read: { triggerReason: "state_read", actionType: "readingIdle" },
   edge: { triggerReason: "state_edge", actionType: "edgeGlance" },
   flustered: { triggerReason: "state_flustered", actionType: "flusteredGlance" },
-  "local-model-busy": { triggerReason: "state_local_model_busy", actionType: "replyThinking" }
+  "local-model-busy": { triggerReason: "state_local_model_busy", actionType: "replyThinking" },
+  "memory-injected": { triggerReason: "state_memory_injected", actionType: "quietNod" },
+  "memory-skipped": { triggerReason: "state_memory_skipped", actionType: "quietNod" }
 } as const;
 
 const EXPECTED_ACTIONS_BY_REASON = {
@@ -61,7 +63,9 @@ const EXPECTED_ACTIONS_BY_REASON = {
   state_read: "readingIdle",
   state_edge: "edgeGlance",
   state_flustered: "flusteredGlance",
-  state_local_model_busy: "replyThinking"
+  state_local_model_busy: "replyThinking",
+  state_memory_injected: "quietNod",
+  state_memory_skipped: "quietNod"
 } as const;
 
 test("pet action state catalog maps every state to a fixed safe body action", () => {
@@ -77,7 +81,9 @@ test("pet action state catalog maps every state to a fixed safe body action", ()
     "read",
     "edge",
     "flustered",
-    "local-model-busy"
+    "local-model-busy",
+    "memory-injected",
+    "memory-skipped"
   ]);
 
   for (const stateId of PET_ACTION_STATE_IDS) {
@@ -117,7 +123,9 @@ test("pet action state machine keeps legacy trigger reasons as compatibility ent
     state_read: "read",
     state_edge: "edge",
     state_flustered: "flustered",
-    state_local_model_busy: "local-model-busy"
+    state_local_model_busy: "local-model-busy",
+    state_memory_injected: "memory-injected",
+    state_memory_skipped: "memory-skipped"
   } as const;
 
   for (const reason of PET_ACTION_TRIGGER_REASONS) {
@@ -145,6 +153,32 @@ test("chat reply waiting selector uses local-model-busy only for local providers
   assert.equal(selectPetActionTriggerForChatReplyWaiting("local-openai-compatible"), "state_local_model_busy");
 });
 
+test("main chat reply trigger waits for memory safe summary before selecting one fixed reason", async () => {
+  const source = await readFile(new URL("../src/main/app.ts", import.meta.url), "utf8");
+  const selectorStart = source.indexOf("function selectMainPetActionTriggerForMemorySafeChatReply");
+  const selectorEnd = source.indexOf("function createChatContextTransparencyPayload", selectorStart);
+  const selectorSource = source.slice(selectorStart, selectorEnd);
+  const chatSendStart = source.indexOf('ipcMain.on("chat:send"');
+  const chatSendSource = source.slice(chatSendStart, source.indexOf('ipcMain.on("chat:abort"', chatSendStart));
+  const memoryContextIndex = chatSendSource.indexOf("const memoryContext = memoryStoreForRequest.createInjection()");
+  const triggerIndex = chatSendSource.indexOf("selectMainPetActionTriggerForMemorySafeChatReply", memoryContextIndex);
+
+  assert.notEqual(selectorStart, -1);
+  assert.match(selectorSource, /autoCaptureSkippedReason === "sensitive"/);
+  assert.match(selectorSource, /autoCaptureSkippedReason === "capture_failed"/);
+  assert.match(selectorSource, /return "state_memory_skipped"/);
+  assert.match(selectorSource, /selectPetActionTriggerForChatReplyWaiting\(input\.providerId\)/);
+  assert.match(selectorSource, /replyWaitingReason === "state_local_model_busy"/);
+  assert.match(selectorSource, /memoryInjectionCount > 0/);
+  assert.match(selectorSource, /return "state_memory_injected"/);
+  assert.match(selectorSource, /return replyWaitingReason/);
+  assert.equal(memoryContextIndex >= 0, true);
+  assert.equal(triggerIndex > memoryContextIndex, true);
+  assert.match(chatSendSource, /sendPetActionTrigger\(selectMainPetActionTriggerForMemorySafeChatReply\(\{\s*providerId,\s*autoCaptureSkippedReason: autoMemoryCaptureForActivity\.skippedReason,\s*memoryInjectionCount: memoryContext\.count\s*\}\)\);/);
+  assert.doesNotMatch(selectorSource, /cards|content|messages|prompt|providerMessages|payload|expressionName|motion|partId/);
+  assert.doesNotMatch(chatSendSource, /sendPetActionTrigger\([^)]*memoryContext\.cards|pet:action-trigger",\s*\{[\s\S]{0,120}(count|cards|text|payload)/);
+});
+
 test("pet action trigger allowlist only exposes fixed action and reason combinations", () => {
   assert.deepEqual(PET_ACTION_TRIGGER_REASONS, [
     "chat_opened",
@@ -164,7 +198,9 @@ test("pet action trigger allowlist only exposes fixed action and reason combinat
     "state_read",
     "state_edge",
     "state_flustered",
-    "state_local_model_busy"
+    "state_local_model_busy",
+    "state_memory_injected",
+    "state_memory_skipped"
   ]);
   assert.deepEqual(PET_ACTION_TRIGGER_ACTION_BY_REASON, EXPECTED_ACTIONS_BY_REASON);
 

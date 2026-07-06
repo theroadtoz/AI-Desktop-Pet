@@ -338,6 +338,16 @@ export const PET_ACTION_STATE_CATALOG = {
     triggerReason: "state_local_model_busy",
     actionType: "replyThinking",
     safeSummaryLabel: "local model busy"
+  },
+  "memory-injected": {
+    triggerReason: "state_memory_injected",
+    actionType: "quietNod",
+    safeSummaryLabel: "memory injected"
+  },
+  "memory-skipped": {
+    triggerReason: "state_memory_skipped",
+    actionType: "quietNod",
+    safeSummaryLabel: "memory skipped"
   }
 };
 

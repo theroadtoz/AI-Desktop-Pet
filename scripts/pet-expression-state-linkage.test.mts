@@ -104,6 +104,7 @@ test("expression state linkage policies only reference audited preset ids", () =
 test("expression state linkage selects representative safe presets for core modes", () => {
   assertSelected("think", "dark", "default", "default");
   assertSelected("local-model-busy", "dark", "default", "default");
+  assertSelected("memory-injected", "happy", "default", "default");
   assertSelected("work", "glasses", "work", "focus");
   assertSelected("read", "glasses", "reading", "default");
   assertSelected("game", "gestureGame", "game", "default");
@@ -153,6 +154,31 @@ test("expression state linkage lowers intensity in quiet and sleep contexts", ()
   });
   assert.equal(quietLocalModelBusy.status, "presentation-only");
   assert.equal("expressionPresetId" in quietLocalModelBusy, false);
+
+  const quietMemoryInjected = resolvePetExpressionStateLinkage({
+    stateId: "memory-injected",
+    dialogueModeId: "default",
+    presenceModeId: "quiet"
+  });
+  assert.equal(quietMemoryInjected.status, "presentation-only");
+  assert.equal("expressionPresetId" in quietMemoryInjected, false);
+
+  const sleepMemoryInjected = resolvePetExpressionStateLinkage({
+    stateId: "memory-injected",
+    dialogueModeId: "default",
+    presenceModeId: "sleep"
+  });
+  assert.equal(sleepMemoryInjected.status, "blocked");
+  assert.equal(sleepMemoryInjected.blockReason, "presence-mode-blocked");
+
+  const memorySkipped = resolvePetExpressionStateLinkage({
+    stateId: "memory-skipped",
+    dialogueModeId: "default",
+    presenceModeId: "default"
+  });
+  assert.equal(memorySkipped.status, "presentation-only");
+  assert.equal(memorySkipped.durationMs, 0);
+  assert.equal("expressionPresetId" in memorySkipped, false);
 });
 
 test("expression state linkage blocks state and dialogue mismatches before selecting a preset", () => {

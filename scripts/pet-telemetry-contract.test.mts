@@ -220,6 +220,33 @@ test("action trigger telemetry keeps only fixed safe trigger reasons", () => {
       content: "sentinel"
     }
   });
+  const memoryInjected = parsePetRendererTelemetryEvent({
+    type: "pet_interaction_action_started",
+    payload: {
+      type: "quietNod",
+      reason: "state_memory_injected",
+      stateId: "memory-injected",
+      durationMs: 1050,
+      expressionPresetId: "happy",
+      count: 3,
+      cards: ["sentinel"],
+      factCardBody: "sentinel",
+      content: "sentinel"
+    }
+  });
+  const memorySkipped = parsePetRendererTelemetryEvent({
+    type: "pet_interaction_action_started",
+    payload: {
+      type: "quietNod",
+      reason: "state_memory_skipped",
+      stateId: "memory-skipped",
+      durationMs: 1050,
+      skippedReason: "sensitive",
+      payload: { text: "sentinel" },
+      messages: ["sentinel"],
+      prompt: "sentinel"
+    }
+  });
   const unsafeAction = parsePetRendererTelemetryEvent({
     type: "pet_interaction_action_started",
     payload: {
@@ -299,6 +326,25 @@ test("action trigger telemetry keeps only fixed safe trigger reasons", () => {
       durationMs: 1250
     }
   });
+  assert.deepEqual(memoryInjected, {
+    type: "pet_interaction_action_started",
+    payload: {
+      type: "quietNod",
+      reason: "state_memory_injected",
+      stateId: "memory-injected",
+      durationMs: 1050,
+      expressionPresetId: "happy"
+    }
+  });
+  assert.deepEqual(memorySkipped, {
+    type: "pet_interaction_action_started",
+    payload: {
+      type: "quietNod",
+      reason: "state_memory_skipped",
+      stateId: "memory-skipped",
+      durationMs: 1050
+    }
+  });
   assert.deepEqual(unsafeAction, {
     type: "pet_interaction_action_started",
     payload: {
@@ -314,6 +360,8 @@ test("action trigger telemetry keeps only fixed safe trigger reasons", () => {
   assertNoForbiddenKeys(unsafeExpressionPreset?.payload);
   assertNoForbiddenKeys(stateWork?.payload);
   assertNoForbiddenKeys(unsafeStateId?.payload);
+  assertNoForbiddenKeys(memoryInjected?.payload);
+  assertNoForbiddenKeys(memorySkipped?.payload);
   assertNoForbiddenKeys(unsafeAction?.payload);
 });
 

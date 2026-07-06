@@ -15,7 +15,9 @@ export const PET_ACTION_STATE_IDS = [
   "read",
   "edge",
   "flustered",
-  "local-model-busy"
+  "local-model-busy",
+  "memory-injected",
+  "memory-skipped"
 ] as const;
 
 export type PetActionStateId = typeof PET_ACTION_STATE_IDS[number];
@@ -154,6 +156,26 @@ export const PET_ACTION_STATE_CATALOG: Readonly<Record<PetActionStateId, PetActi
     interruptPolicy: "skip_if_active",
     supportLevel: "parameter_composition",
     safeSummaryLabel: "local model busy"
+  },
+  "memory-injected": {
+    stateId: "memory-injected",
+    triggerReason: "state_memory_injected",
+    actionType: "quietNod",
+    priority: 20,
+    minimumIntervalMs: 1_800,
+    interruptPolicy: "skip_if_active",
+    supportLevel: "parameter_composition",
+    safeSummaryLabel: "memory injected"
+  },
+  "memory-skipped": {
+    stateId: "memory-skipped",
+    triggerReason: "state_memory_skipped",
+    actionType: "quietNod",
+    priority: 15,
+    minimumIntervalMs: 1_800,
+    interruptPolicy: "skip_if_active",
+    supportLevel: "parameter_composition",
+    safeSummaryLabel: "memory skipped"
   }
 };
 
@@ -175,7 +197,9 @@ const PET_ACTION_STATE_ID_BY_REASON: Readonly<Record<PetActionTriggerReason, Pet
   state_read: "read",
   state_edge: "edge",
   state_flustered: "flustered",
-  state_local_model_busy: "local-model-busy"
+  state_local_model_busy: "local-model-busy",
+  state_memory_injected: "memory-injected",
+  state_memory_skipped: "memory-skipped"
 };
 
 export function isPetActionStateId(value: unknown): value is PetActionStateId {

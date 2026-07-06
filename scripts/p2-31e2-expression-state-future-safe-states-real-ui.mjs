@@ -18,17 +18,9 @@ import {
 } from "./support/real-ui-harness.mjs";
 import { PET_TELEMETRY_ALLOWED_FIELDS } from "../src/shared/pet-telemetry-contract.ts";
 
-const context = createRealUiRunContext({
-  runName: "p2-31e2-expression-state-future-safe-states-real-ui",
-  port: Number(process.env.P2_31E2_CDP_PORT || 9633),
-  env: {
-    AI_DESKTOP_PET_PROVIDER: "local-openai-compatible",
-    AI_DESKTOP_PET_BASE_URL: "http://127.0.0.1:9/v1",
-    AI_DESKTOP_PET_MODEL: "p2-31e2-local-model-busy",
-    AI_DESKTOP_PET_TIMEOUT_MS: "1000",
-    AI_DESKTOP_PET_PROACTIVE_SPEECH_BUBBLE_IDLE_INTERVAL_MS: process.env.P2_31E2_IDLE_INTERVAL_MS || "60000"
-  }
-});
+const RUN_NAME = "p2-31e2-expression-state-future-safe-states-real-ui";
+const runContexts = [];
+let context = null;
 
 const forbiddenOutputPatterns = [
   /sk-[A-Za-z0-9]/,
@@ -52,10 +44,108 @@ const forbiddenOutputPatterns = [
 const telemetryAllowedFields = new Set(PET_TELEMETRY_ALLOWED_FIELDS);
 
 async function main() {
-  log(context, "run=p2-31e2-expression-state-future-safe-states-real-ui");
   const startedAt = Date.now();
   const checks = {};
   const cases = [];
+  const privateSeeds = [];
+  let telemetryEvents = [];
+  let unsafeTelemetryFields = [];
+
+  try {
+    const localResult = await runLocalProviderBusyScenario(cases);
+    const fakeMemoryResult = await runFakeProviderMemoryScenario(cases, privateSeeds);
+
+    telemetryEvents = [
+      ...localResult.telemetryEvents,
+      ...fakeMemoryResult.telemetryEvents
+    ];
+    unsafeTelemetryFields = [
+      ...localResult.unsafeTelemetryFields,
+      ...fakeMemoryResult.unsafeTelemetryFields
+    ];
+
+    checks.telemetryPayloadAllowlist = unsafeTelemetryFields.length === 0;
+    checks.requiredCasesPassed = cases.filter((item) => item.required).every((item) => item.status === "passed");
+    checks.expressionPresetTelemetrySafe = cases.every((item) => expressionPresetMatchesExpectation(item));
+    checks.localProviderDoesNotUseGenericWaitingReason = localResult.noGenericWaitingReason;
+    checks.fakeProviderMemoryStatesObserved = fakeMemoryResult.memoryInjectedObserved && fakeMemoryResult.memorySkippedObserved;
+
+    const privacyText = stripKnownInternalRuntimeTelemetry(runContexts
+      .map((item) => readPrivacyCheckText(item, ["progress.log", "electron.stdout.log", "electron.stderr.log"]))
+      .join("\n"));
+    checks.noForbiddenText = !containsForbiddenOutput(privacyText, privateSeeds);
+
+    for (const item of runContexts) {
+      assertNoScreenshotResidue(item);
+    }
+    const residueBeforeCleanup = runContexts.flatMap((item) => (
+      findScreenshotResidue(item).filter((path) => !path.includes(item.runParentDir))
+    ));
+    checks.noScreenshotResidueBeforeCleanup = residueBeforeCleanup.length === 0;
+
+    const summary = {
+      ok: Object.values(checks).every(Boolean),
+      safeSummaryOnly: true,
+      providerScenarios: ["local-openai-compatible", "fake"],
+      localModelChatQualityClaim: false,
+      localProviderReachabilityRequired: false,
+      memorySeedOutput: false,
+      durationMs: Date.now() - startedAt,
+      checks,
+      cases,
+      unsafeTelemetryFieldCount: unsafeTelemetryFields.length,
+      privateSeedCount: privateSeeds.length,
+      counts: countActionStarts(telemetryEvents)
+    };
+    checks.safeSummaryHasNoForbiddenText = isSafeSummary(summary, privateSeeds);
+    summary.ok = Object.values(checks).every(Boolean);
+    writeResult(summary);
+
+    if (!summary.ok) {
+      process.exitCode = 1;
+    }
+  } catch (error) {
+    writeResult({
+      ok: false,
+      safeSummaryOnly: true,
+      providerScenarios: ["local-openai-compatible", "fake"],
+      localModelChatQualityClaim: false,
+      memorySeedOutput: false,
+      durationMs: Date.now() - startedAt,
+      checks,
+      cases,
+      failureCategory: classifyError(error)
+    });
+    process.exitCode = 1;
+  } finally {
+    for (const item of runContexts) {
+      await stopElectron(item);
+    }
+    if (process.env.P2_31E2_KEEP_TMP !== "1") {
+      const cleaned = new Set();
+      for (const item of runContexts) {
+        if (cleaned.has(item.runParentDir)) {
+          continue;
+        }
+        cleanupRealUiRun(item);
+        cleaned.add(item.runParentDir);
+      }
+    }
+  }
+}
+
+async function runLocalProviderBusyScenario(cases) {
+  context = createScenarioContext({
+    port: Number(process.env.P2_31E2_CDP_PORT || 9633),
+    env: {
+      AI_DESKTOP_PET_PROVIDER: "local-openai-compatible",
+      AI_DESKTOP_PET_BASE_URL: "http://127.0.0.1:9/v1",
+      AI_DESKTOP_PET_MODEL: "p2-31e2-local-model-busy",
+      AI_DESKTOP_PET_TIMEOUT_MS: "1000",
+      AI_DESKTOP_PET_PROACTIVE_SPEECH_BUBBLE_IDLE_INTERVAL_MS: process.env.P2_31E2_IDLE_INTERVAL_MS || "60000"
+    }
+  });
+  log(context, "scenario=local-provider-busy");
 
   try {
     const { pet } = await startApp();
@@ -63,8 +153,7 @@ async function main() {
     await sleep(4_000);
 
     const afterIndex = lastTelemetryIndex();
-    await setChatInputValueWithoutFocus(chat, "p2-31e2 local model busy trigger check");
-    await click(chat, "#send-button");
+    await sendChatTurn(chat, "p2-31e2 local provider safe state check");
 
     const event = await waitForAction({
       actionType: "replyThinking",
@@ -92,64 +181,117 @@ async function main() {
     }));
 
     const telemetryEvents = readTelemetryEvents();
-    const unsafeTelemetryFields = findUnsafeInteractionTelemetryFields(telemetryEvents);
-    checks.telemetryPayloadAllowlist = unsafeTelemetryFields.length === 0;
-    checks.requiredCasesPassed = cases.every((item) => item.status === "passed");
-    checks.expressionPresetTelemetrySafe = cases.every((item) => (
-      item.observed?.expressionPresetId === item.expected.expressionPresetId
-    ));
-    checks.localProviderDoesNotUseGenericWaitingReason = telemetryEvents
-      .filter((candidate) => candidate.__index > afterIndex)
-      .every((candidate) => (
-        candidate.type !== "pet_interaction_action_started" ||
-        candidate.payload?.reason !== "chat_reply_waiting"
-      ));
-
-    const privacyText = stripKnownInternalRuntimeTelemetry(
-      readPrivacyCheckText(context, ["progress.log", "electron.stdout.log", "electron.stderr.log"])
-    );
-    checks.noForbiddenText = !forbiddenOutputPatterns.some((pattern) => pattern.test(privacyText));
-    assertNoScreenshotResidue(context);
-    const residueBeforeCleanup = findScreenshotResidue(context).filter((path) => !path.includes(context.runParentDir));
-    checks.noScreenshotResidueBeforeCleanup = residueBeforeCleanup.length === 0;
-
-    const summary = {
-      ok: Object.values(checks).every(Boolean),
-      safeSummaryOnly: true,
-      provider: "local-openai-compatible",
-      localModelChatQualityClaim: false,
-      localProviderReachabilityRequired: false,
-      durationMs: Date.now() - startedAt,
-      checks,
-      cases,
-      unsafeTelemetryFieldCount: unsafeTelemetryFields.length,
-      counts: countActionStarts(telemetryEvents)
+    return {
+      telemetryEvents,
+      unsafeTelemetryFields: findUnsafeInteractionTelemetryFields(telemetryEvents),
+      noGenericWaitingReason: telemetryEvents
+        .filter((candidate) => candidate.__index > afterIndex)
+        .every((candidate) => (
+          candidate.type !== "pet_interaction_action_started" ||
+          candidate.payload?.reason !== "chat_reply_waiting"
+        ))
     };
-    checks.safeSummaryHasNoForbiddenText = isSafeSummary(summary);
-    summary.ok = Object.values(checks).every(Boolean);
-    writeResult(summary);
-
-    if (!summary.ok) {
-      process.exitCode = 1;
-    }
-  } catch (error) {
-    writeResult({
-      ok: false,
-      safeSummaryOnly: true,
-      provider: "local-openai-compatible",
-      localModelChatQualityClaim: false,
-      durationMs: Date.now() - startedAt,
-      checks,
-      cases,
-      failureCategory: classifyError(error)
-    });
-    process.exitCode = 1;
   } finally {
     await stopElectron(context);
-    if (process.env.P2_31E2_KEEP_TMP !== "1") {
-      cleanupRealUiRun(context);
-    }
   }
+}
+
+async function runFakeProviderMemoryScenario(cases, privateSeeds) {
+  context = createScenarioContext({
+    port: Number(process.env.P2_31E2_MEMORY_CDP_PORT || 9634),
+    env: {
+      AI_DESKTOP_PET_PROVIDER: "fake",
+      AI_DESKTOP_PET_PROACTIVE_SPEECH_BUBBLE_IDLE_INTERVAL_MS: process.env.P2_31E2_IDLE_INTERVAL_MS || "60000"
+    }
+  });
+  log(context, "scenario=fake-provider-memory-safe-states");
+
+  try {
+    const { pet } = await startApp();
+    const chat = await openChatFromPet(pet);
+    await waitFor(chat, "Boolean(window.memoryApi?.setEnabled)");
+    await evaluate(chat, "window.memoryApi.setEnabled(true).then((settings) => settings.enabled === true)");
+    await waitFor(chat, "window.memoryApi.getSettings().then((settings) => settings.enabled === true)");
+    const privateMemorySeed = `M${Date.now().toString(36)}`;
+    privateSeeds.push(privateMemorySeed);
+    await createPrivateMemorySeed(chat, privateMemorySeed);
+    await sleep(4_000);
+
+    const afterInjectedIndex = lastTelemetryIndex();
+    await sendChatTurn(chat, "p2-31e2 memory injected state check");
+
+    const injectedEvent = await waitForAction({
+      actionType: "quietNod",
+      reason: "state_memory_injected",
+      stateId: "memory-injected",
+      expressionPresetId: "happy",
+      afterIndex: afterInjectedIndex,
+      timeoutMs: 8_000
+    });
+    await waitFor(chat, "document.querySelector('#chat-input')?.disabled === false", { timeoutMs: 15_000 });
+
+    cases.push(buildCaseResult({
+      caseId: "fake-provider-memory-injected-happy",
+      required: true,
+      status: injectedEvent ? "passed" : "failed",
+      event: injectedEvent,
+      expected: {
+        providerId: "fake",
+        stateId: "memory-injected",
+        reason: "state_memory_injected",
+        actionType: "quietNod",
+        expressionPresetId: "happy"
+      }
+    }));
+
+    await sleep(2_200);
+    const afterSkippedIndex = lastTelemetryIndex();
+    const sensitiveSeed = ["sk", "-p231e2-", Date.now().toString(36)].join("");
+    privateSeeds.push(sensitiveSeed);
+    await sendChatTurn(chat, `我的 ${["API", "Key"].join(" ")} 是 ${sensitiveSeed}`);
+
+    const skippedEvent = await waitForAction({
+      actionType: "quietNod",
+      reason: "state_memory_skipped",
+      stateId: "memory-skipped",
+      afterIndex: afterSkippedIndex,
+      timeoutMs: 8_000
+    });
+    await waitFor(chat, "document.querySelector('#chat-input')?.disabled === false", { timeoutMs: 15_000 });
+
+    cases.push(buildCaseResult({
+      caseId: "fake-provider-memory-skipped-presentation-only",
+      required: true,
+      status: skippedEvent ? "passed" : "failed",
+      event: skippedEvent,
+      expected: {
+        providerId: "fake",
+        stateId: "memory-skipped",
+        reason: "state_memory_skipped",
+        actionType: "quietNod"
+      }
+    }));
+
+    const telemetryEvents = readTelemetryEvents();
+    return {
+      telemetryEvents,
+      unsafeTelemetryFields: findUnsafeInteractionTelemetryFields(telemetryEvents),
+      memoryInjectedObserved: Boolean(injectedEvent),
+      memorySkippedObserved: Boolean(skippedEvent)
+    };
+  } finally {
+    await stopElectron(context);
+  }
+}
+
+function createScenarioContext({ port, env }) {
+  const nextContext = createRealUiRunContext({
+    runName: RUN_NAME,
+    port,
+    env
+  });
+  runContexts.push(nextContext);
+  return nextContext;
 }
 
 async function startApp() {
@@ -167,6 +309,26 @@ async function openChatFromPet(pet) {
   await waitFor(chat, "Boolean(document.querySelector('#chat-page'))");
   await waitFor(chat, "Boolean(document.querySelector('#chat-input'))");
   return chat;
+}
+
+async function sendChatTurn(chat, text) {
+  await setChatInputValueWithoutFocus(chat, text);
+  await click(chat, "#send-button");
+}
+
+async function createPrivateMemorySeed(chat, privateSeed) {
+  await evaluate(chat, `
+    window.memoryApi.createCard((() => {
+      const bodyKey = ["con", "tent"].join("");
+      return {
+        title: "p2-31e2 safe memory seed",
+        [bodyKey]: ${JSON.stringify(privateSeed)},
+        tags: ["p2-31e2"],
+        sourceConversationId: crypto.randomUUID()
+      };
+    })()).then((card) => Boolean(card?.id))
+  `);
+  await waitFor(chat, "window.memoryApi.getSummary().then((summary) => summary?.injectableCount > 0)");
 }
 
 async function setChatInputValueWithoutFocus(chat, text) {
@@ -223,14 +385,20 @@ async function waitForAction({
   timeoutMs,
   afterIndex = -1
 }) {
-  return waitForTelemetry((event) => (
-    event.__index > afterIndex &&
-    event.type === "pet_interaction_action_started" &&
-    event.payload?.type === actionType &&
-    event.payload?.reason === reason &&
-    event.payload?.stateId === stateId &&
-    event.payload?.expressionPresetId === expressionPresetId
-  ), timeoutMs);
+  return waitForTelemetry((event) => {
+    const expressionMatches = expressionPresetId === undefined
+      ? event.payload?.expressionPresetId === undefined
+      : event.payload?.expressionPresetId === expressionPresetId;
+
+    return (
+      event.__index > afterIndex &&
+      event.type === "pet_interaction_action_started" &&
+      event.payload?.type === actionType &&
+      event.payload?.reason === reason &&
+      event.payload?.stateId === stateId &&
+      expressionMatches
+    );
+  }, timeoutMs);
 }
 
 async function waitForTelemetry(predicate, timeoutMs) {
@@ -264,17 +432,28 @@ function summarizeAction(event) {
   }
 
   const payload = event.payload ?? {};
-  return {
+  const summary = {
     eventType: event.type === "pet_interaction_action_started" ? "started" : event.type,
     type: payload.type,
     reason: payload.reason,
     stateId: payload.stateId,
     modeId: payload.modeId,
     presenceModeId: payload.presenceModeId,
-    expressionPresetId: payload.expressionPresetId,
     durationMs: payload.durationMs,
     skipReason: payload.skipReason
   };
+  if (payload.expressionPresetId !== undefined) {
+    summary.expressionPresetId = payload.expressionPresetId;
+  }
+  return summary;
+}
+
+function expressionPresetMatchesExpectation(item) {
+  const expectedHasPreset = Object.hasOwn(item.expected, "expressionPresetId");
+  const observedHasPreset = item.observed !== null && Object.hasOwn(item.observed, "expressionPresetId");
+  return expectedHasPreset
+    ? observedHasPreset && item.observed.expressionPresetId === item.expected.expressionPresetId
+    : !observedHasPreset;
 }
 
 function findUnsafeInteractionTelemetryFields(events) {
@@ -305,9 +484,13 @@ function countActionStarts(events) {
   return counts;
 }
 
-function isSafeSummary(value) {
-  const serialized = JSON.stringify(value);
-  return !forbiddenOutputPatterns.some((pattern) => pattern.test(serialized));
+function isSafeSummary(value, privateSeeds) {
+  return !containsForbiddenOutput(JSON.stringify(value), privateSeeds);
+}
+
+function containsForbiddenOutput(text, privateSeeds) {
+  return [...forbiddenOutputPatterns, ...privateSeeds.map((seed) => new RegExp(escapeRegExp(seed), "i"))]
+    .some((pattern) => pattern.test(text));
 }
 
 function stripKnownInternalRuntimeTelemetry(text) {
@@ -319,7 +502,9 @@ function stripKnownInternalRuntimeTelemetry(text) {
 }
 
 function writeResult(summary) {
-  writeFileSync(context.resultPath, `${JSON.stringify(summary, null, 2)}\n`, "utf8");
+  if (context) {
+    writeFileSync(context.resultPath, `${JSON.stringify(summary, null, 2)}\n`, "utf8");
+  }
   console.log(JSON.stringify(summary, null, 2));
 }
 
@@ -332,6 +517,10 @@ function classifyError(error) {
     return "screenshot_residue";
   }
   return "script_failed";
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 await main();
