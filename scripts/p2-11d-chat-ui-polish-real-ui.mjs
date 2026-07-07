@@ -480,10 +480,16 @@ async function main() {
         const noteElement = document.querySelector("#chat-session-note");
         const note = noteElement?.textContent ?? "";
         const memory = document.querySelector("#memory-session-status")?.textContent ?? "";
-        const completionNote = note.includes("她刚说完，可以继续聊") ||
-          note.includes("她刚说完") ||
-          note.includes("她带上了已允许的记忆") ||
-          note.includes("她这轮带上了 1 条已允许的记忆");
+        const completionNote = [
+          "她刚说完，可以继续聊",
+          "她刚说完",
+          "她带着已允许的记忆靠近",
+          "她把长聊收拢成轻便脉络",
+          "她把记忆轻轻归好",
+          "她把敏感部分先放下",
+          "她带着联网引用线索回来",
+          "她这轮带上了 1 条已允许的记忆"
+        ].some((text) => note.includes(text));
         return noteElement?.hidden === false &&
           completionNote &&
           memory.includes("她带上了 1 条已允许的记忆");
@@ -495,10 +501,16 @@ async function main() {
         const note = noteElement?.textContent ?? "";
         const memory = document.querySelector("#memory-session-status")?.textContent ?? "";
         const messages = [...document.querySelectorAll(".message")];
-        const completionNote = note.includes("她刚说完，可以继续聊") ||
-          note.includes("她刚说完") ||
-          note.includes("她带上了已允许的记忆") ||
-          note.includes("她这轮带上了 1 条已允许的记忆");
+        const completionNote = [
+          "她刚说完，可以继续聊",
+          "她刚说完",
+          "她带着已允许的记忆靠近",
+          "她把长聊收拢成轻便脉络",
+          "她把记忆轻轻归好",
+          "她把敏感部分先放下",
+          "她带着联网引用线索回来",
+          "她这轮带上了 1 条已允许的记忆"
+        ].some((text) => note.includes(text));
         return noteElement?.hidden === false &&
           completionNote &&
           memory.includes("她带上了 1 条已允许的记忆") &&
@@ -536,9 +548,16 @@ async function main() {
     checks.abortOrCompleteState = await evaluate(chat, `
       (() => {
         const note = document.querySelector("#chat-session-note")?.textContent ?? "";
-        return note.includes("这轮先停在这里") ||
-          note.includes("她刚说完") ||
-          note.includes("她这轮带上了");
+        return [
+          "这轮先停在这里",
+          "她刚说完",
+          "她带着已允许的记忆靠近",
+          "她把长聊收拢成轻便脉络",
+          "她把记忆轻轻归好",
+          "她把敏感部分先放下",
+          "她带着联网引用线索回来",
+          "她这轮带上了"
+        ].some((text) => note.includes(text));
       })()
     `);
 

@@ -294,11 +294,11 @@ function selectImportantDailyRhythm(input: {
   const context = input.contextTransparency;
 
   if (memory?.autoCapture.enabled && memory.autoCapture.skippedReason === "sensitive") {
-    return { text: "她跳过了敏感内容", state: "ready", kind: "memory-sensitive-skip" };
+    return { text: "她把敏感部分先放下", state: "ready", kind: "memory-sensitive-skip" };
   }
 
   if (memory?.contextBudget.compressed || context?.contextBudget.compressed) {
-    return { text: "长会话已收束，保留近期上下文", state: "ready", kind: "context-compressed" };
+    return { text: "她把长聊收拢成轻便脉络", state: "ready", kind: "context-compressed" };
   }
 
   const injectionCount = Math.max(
@@ -306,17 +306,17 @@ function selectImportantDailyRhythm(input: {
     context?.memory.injectionCount ?? 0
   );
   if (injectionCount > 0) {
-    return { text: "她带上了已允许的记忆", state: "ready", kind: "memory-injected" };
+    return { text: "她带着已允许的记忆靠近", state: "ready", kind: "memory-injected" };
   }
 
   const capturedCount = memory?.autoCapture.capturedCount ?? 0;
   const organizedCount = (memory?.autoCapture.mergedCount ?? 0) + (memory?.autoCapture.deduplicatedCount ?? 0);
   if (memory?.autoCapture.enabled && (capturedCount > 0 || organizedCount > 0 || memory.autoCapture.compressionTriggered)) {
-    return { text: "她刚整理了记忆", state: "ready", kind: "memory-captured" };
+    return { text: "她把记忆轻轻归好", state: "ready", kind: "memory-captured" };
   }
 
   if (context?.webSearch.included && context.webSearch.citationCount > 0) {
-    return { text: "这轮带上联网引用线索", state: "ready", kind: "search-cited" };
+    return { text: "她带着联网引用线索回来", state: "ready", kind: "search-cited" };
   }
 
   return null;

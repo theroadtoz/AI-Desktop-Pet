@@ -287,16 +287,16 @@ async function main() {
     await openMemorySettings(chat);
     const memorySnapshot = await safeUiSnapshot(chat);
     checks.memoryCaptureAndInjectionRhythm = captured.lastMemory?.payload?.autoCapture?.capturedCount > 0 &&
-      /她刚整理了记忆|她带上了已允许的记忆/.test(captured.finalNote) &&
+      /她把记忆轻轻归好|她带着已允许的记忆靠近/.test(captured.finalNote) &&
       injected.lastMemory?.payload?.injection?.count > 0 &&
-      /她带上了已允许的记忆|长会话已收束/.test(injected.finalNote) &&
+      /她带着已允许的记忆靠近|她把长聊收拢成轻便脉络/.test(injected.finalNote) &&
       /最近活动：/.test(memorySnapshot.memoryFeedback) &&
       !/capturedCount|injectionCount|P230小夏/.test([captured.finalNote, injected.finalNote, memorySnapshot.memoryFeedback].join("\n"));
 
     await openChatPage(chat);
     const sensitive = await sendMessage(chat, "我的 API Key 是 sk-p230-secret-should-not-appear P2-30_SENSITIVE_SENTINEL");
     checks.sensitiveMemorySkipLowNoise = sensitive.lastMemory?.payload?.autoCapture?.skippedReason === "sensitive" &&
-      sensitive.finalNote === "她跳过了敏感内容" &&
+      sensitive.finalNote === "她把敏感部分先放下" &&
       !/sk-p230|P2-30_SENSITIVE_SENTINEL|skippedReason/.test(sensitive.finalNote);
 
     const historyState = await selectSeededHistory(chat);
@@ -306,7 +306,7 @@ async function main() {
     await continueSeededHistory(chat);
     const compressed = await sendMessage(chat, "继续历史上下文节奏检查 P2-30_LONG_HISTORY_SENTINEL");
     checks.historyContinueCompressedRhythm = compressed.lastContext?.payload?.contextBudget?.compressed === true &&
-      /长会话已收束，保留近期上下文/.test(compressed.finalNote) &&
+      /她把长聊收拢成轻便脉络/.test(compressed.finalNote) &&
       !/P2-30_LONG_HISTORY_SENTINEL|P2-30_SEEDED_PRIVATE_SENTINEL|providerMessages|originalMessageCount/.test(compressed.finalNote);
 
     const ui = await safeUiSnapshot(chat);

@@ -332,7 +332,7 @@ test("daily companion rhythm prioritizes sensitive skip, compression, injection,
       contextBudget: { compressed: true }
     })
   });
-  assert.equal(sensitive.text, "她跳过了敏感内容");
+  assert.equal(sensitive.text, "她把敏感部分先放下");
   assert.equal(sensitive.kind, "memory-sensitive-skip");
 
   const compressed = formatDailyCompanionRhythm({
@@ -344,7 +344,7 @@ test("daily companion rhythm prioritizes sensitive skip, compression, injection,
       contextBudget: { compressed: true, summarizedMessageCount: 9, recentMessageCount: 8 }
     })
   });
-  assert.equal(compressed.text, "长会话已收束，保留近期上下文");
+  assert.equal(compressed.text, "她把长聊收拢成轻便脉络");
   assert.equal(compressed.kind, "context-compressed");
 
   const injected = formatDailyCompanionRhythm({
@@ -353,7 +353,7 @@ test("daily companion rhythm prioritizes sensitive skip, compression, injection,
       injection: { count: 2 }
     })
   });
-  assert.equal(injected.text, "她带上了已允许的记忆");
+  assert.equal(injected.text, "她带着已允许的记忆靠近");
   assert.equal(injected.kind, "memory-injected");
 
   const captured = formatDailyCompanionRhythm({
@@ -365,7 +365,7 @@ test("daily companion rhythm prioritizes sensitive skip, compression, injection,
       webSearch: { included: true, citationCount: 2 }
     })
   });
-  assert.equal(captured.text, "她刚整理了记忆");
+  assert.equal(captured.text, "她把记忆轻轻归好");
   assert.equal(captured.kind, "memory-captured");
 
   const search = formatDailyCompanionRhythm({
@@ -374,7 +374,7 @@ test("daily companion rhythm prioritizes sensitive skip, compression, injection,
       webSearch: { included: true, citationCount: 2 }
     })
   });
-  assert.equal(search.text, "这轮带上联网引用线索");
+  assert.equal(search.text, "她带着联网引用线索回来");
   assert.equal(search.kind, "search-cited");
 });
 
@@ -392,8 +392,8 @@ test("daily companion rhythm keeps important context as a short secondary line w
   });
 
   assert.equal(rhythm.primaryText, "她在想怎么说");
-  assert.equal(rhythm.secondaryText, "长会话已收束，保留近期上下文");
-  assert.equal(rhythm.text, "她在想怎么说 · 长会话已收束，保留近期上下文");
+  assert.equal(rhythm.secondaryText, "她把长聊收拢成轻便脉络");
+  assert.equal(rhythm.text, "她在想怎么说 · 她把长聊收拢成轻便脉络");
   assert.equal(rhythm.kind, "chat-replying");
   assert.doesNotMatch(rhythm.text, /summarizedMessageCount|originalMessageCount|providerMessages|prompt/);
 });
