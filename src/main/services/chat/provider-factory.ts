@@ -65,60 +65,19 @@ export function createChatProviderFromConfig(options: {
     }
   }
 
-  try {
-    const apiKey = options.getApiKey(options.config.apiKeyRef);
-
-    if (!apiKey) {
-      logUnavailable(options.logTelemetry, {
-        providerId: "openai-compatible",
-        model: options.config.model,
-        baseURLHost,
-        errorType: "missing_api_key"
-      });
-      return createUnavailableChatProvider({
-        providerId: "openai-compatible",
-        model: options.config.model,
-        baseURLHost,
-        reason: "missing_api_key",
-        logTelemetry: options.logTelemetry
-      });
-    }
-
-    options.logTelemetry?.("provider_selected", {
-      providerId: "openai-compatible",
-      model: options.config.model,
-      baseURLHost
-    });
-
-    const providerOptions: OpenAICompatibleProviderOptions = {
-      baseURL: options.config.baseURL,
-      model: options.config.model,
-      apiKey,
-      temperature: options.config.temperature,
-      maxTokens: options.config.maxTokens,
-      timeoutMs: options.config.timeoutMs
-    };
-
-    if (options.logTelemetry) {
-      providerOptions.logTelemetry = options.logTelemetry;
-    }
-
-    return createOpenAICompatibleProvider(providerOptions);
-  } catch {
-    logUnavailable(options.logTelemetry, {
-      providerId: "openai-compatible",
-      model: options.config.model,
-      baseURLHost,
-      errorType: "invalid_config"
-    });
-    return createUnavailableChatProvider({
-      providerId: "openai-compatible",
-      model: options.config.model,
-      baseURLHost,
-      reason: "invalid_config",
-      logTelemetry: options.logTelemetry
-    });
-  }
+  logUnavailable(options.logTelemetry, {
+    providerId: "openai-compatible",
+    model: options.config.model,
+    baseURLHost,
+    errorType: "external_model_disabled"
+  });
+  return createUnavailableChatProvider({
+    providerId: "openai-compatible",
+    model: options.config.model,
+    baseURLHost,
+    reason: "invalid_config",
+    logTelemetry: options.logTelemetry
+  });
 }
 
 function createUnavailableChatProvider(options: {

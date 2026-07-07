@@ -127,7 +127,7 @@ test("local OpenAI-compatible provider streams SSE without Authorization and kee
     assert.match(body.messages?.[0]?.content ?? "", /魔法学院高年级进修魔女\/现代魔导工程进修生\/Windows Live2D 桌面魔女同伴/);
     assert.match(body.messages?.[0]?.content ?? "", /Provider\/本地模型\/Live2D\/记忆\/窗口.*不魔法化/);
     assert.doesNotMatch(body.messages?.[0]?.content ?? "", /现代老魔女|千年判断力|活了上千年/);
-    assert.match(body.messages?.[0]?.content ?? "", /敏感片段.*必须拒绝保存、记住、逐字复述和索要/);
+    assert.match(body.messages?.[0]?.content ?? "", /API key\/密钥\/私有标识.*不存不记不复述不索要/);
     assert.match(body.messages?.[1]?.content ?? "", /魔法学院高年级进修魔女\/现代魔导工程进修生\/Windows Live2D 桌面魔女同伴/);
     assert.doesNotMatch(body.messages?.[1]?.content ?? "", /现代老魔女|千年判断力|活了上千年/);
     assert.match(body.messages?.[2]?.content ?? "", /工作=下一步/);

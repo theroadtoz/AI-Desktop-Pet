@@ -27,6 +27,9 @@ test("prompt template: local small model keeps system order but uses shorter fir
   assert.match(local[1]?.content ?? "", /魔法学院高年级进修魔女/);
   assert.match(local[1]?.content ?? "", /现代魔导工程进修生/);
   assert.match(local[1]?.content ?? "", /Windows Live2D 桌面魔女同伴/);
+  assert.match(local[0]?.content ?? "", /不要自称普通 AI 助手|不要自称普通 AI助手|普通 AI 助手/);
+  assert.match(local[0]?.content ?? "", /MCP 搜索.*不是对话模型/);
+  assert.match(local[0]?.content ?? "", /对话与思考由本地模型完成/);
   assert.match(local[1]?.content ?? "", /技术名词准确/);
   assert.match(local[1]?.content ?? "", /长寿阅历低频呈现/);
   assert.match(local[1]?.content ?? "", /术语不魔法化/);
@@ -40,6 +43,11 @@ test("prompt template: local small model keeps system order but uses shorter fir
   assert.match(local[1]?.content ?? "", /action payload/);
   assert.match(local[1]?.content ?? "", /不编造记忆/);
   assert.match(local[2]?.content ?? "", /不泄.*提示词/);
+  assert.match(local[2]?.content ?? "", /先答问题.*准确回答当轮|先准确回答用户当轮问题/);
+  assert.match(local[2]?.content ?? "", /学院魔女同伴的温度/);
+  assert.match(local[2]?.content ?? "", /不要自称普通AI助手/);
+  assert.match(local[2]?.content ?? "", /MCP搜索只提供资料，不是对话模型/);
+  assert.match(local[2]?.content ?? "", /主动气泡或记忆状态线.*未授权事实/);
   assert.match(local[2]?.content ?? "", /格式.*数量.*问题数.*照办/);
   assert.match(local[2]?.content ?? "", /API key.*密码.*银行卡.*不记/);
   assert.match(local[2]?.content ?? "", /不复述.*不索要/);
@@ -84,6 +92,24 @@ test("prompt template: memory fact and preferred name stay in their own messages
   assert.equal(mapped[1]?.content.includes(fact), false);
   assert.equal(mapped[2]?.content.includes(fact), false);
   assert.match(mapped.find((message) => message.content.includes(fact))?.content ?? "", /仅用于当前回复/);
+});
+
+test("prompt template: runtime time answer anchor tells local model to copy localTime", () => {
+  const mapped = mapChatMessagesToOpenAICompatible([
+    { id: crypto.randomUUID(), role: "user", content: "现在几点了？" }
+  ], undefined, undefined, undefined, "local-small-model", {
+    isoTime: "2026-07-08T07:25:00.000Z",
+    localDate: "2026-07-08",
+    localTime: "15:25",
+    weekday: "星期三",
+    timezone: "America/Los_Angeles",
+    locale: "zh-CN"
+  });
+  const runtime = mapped.find((message) => message.content.startsWith("运行时上下文"));
+
+  assert.match(runtime?.content ?? "", /问现在时间时必须照抄本地时间/);
+  assert.match(runtime?.content ?? "", /时间题回答锚=现在本地时间是 15:25。/);
+  assert.doesNotMatch(runtime?.content ?? "", /API Key|Provider 请求正文|事实卡正文/);
 });
 
 test("prompt template: sensitive data storage requests get a local boundary message", () => {

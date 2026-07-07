@@ -9,8 +9,6 @@ export type EnvProviderConfig = {
   apiKeyRef: string | null;
 };
 
-const DEFAULT_ENV_API_KEY_REF = "openai-compatible-default";
-
 export function readEnvProviderConfig(options: {
   cwd?: string;
   env?: NodeJS.ProcessEnv;
@@ -50,31 +48,7 @@ export function readEnvProviderConfig(options: {
     };
   }
 
-  if (provider !== "openai-compatible") {
-    return null;
-  }
-
-  const baseURL = readNonEmpty(env.AI_DESKTOP_PET_BASE_URL);
-  const model = readNonEmpty(env.AI_DESKTOP_PET_MODEL);
-
-  if (!baseURL || !model) {
-    return null;
-  }
-
-  return {
-    providerConfig: {
-      providerId: "openai-compatible",
-      displayName: "OpenAI Compatible",
-      baseURL,
-      model,
-      apiKeyRef: DEFAULT_ENV_API_KEY_REF,
-      temperature: readNumber(env.AI_DESKTOP_PET_TEMPERATURE, 0.7),
-      maxTokens: readInteger(env.AI_DESKTOP_PET_MAX_TOKENS, 1024),
-      timeoutMs: readInteger(env.AI_DESKTOP_PET_TIMEOUT_MS, 60_000)
-    },
-    apiKey: readNonEmpty(env.AI_DESKTOP_PET_API_KEY),
-    apiKeyRef: DEFAULT_ENV_API_KEY_REF
-  };
+  return null;
 }
 
 function readDotEnvLocal(path: string): Record<string, string> {

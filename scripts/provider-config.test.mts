@@ -90,6 +90,20 @@ test("env provider keeps fake explicit and local env uses recommended defaults",
   assert.equal(local?.apiKey, null);
 });
 
+test("env provider ignores external OpenAI-compatible chat configuration", () => {
+  const external = readEnvProviderConfig({
+    cwd: emptyEnvCwd,
+    env: {
+      AI_DESKTOP_PET_PROVIDER: "openai-compatible",
+      AI_DESKTOP_PET_BASE_URL: "https://api.example.com/v1",
+      AI_DESKTOP_PET_MODEL: "external-chat-model",
+      AI_DESKTOP_PET_API_KEY: "sk-test-should-not-be-used"
+    }
+  });
+
+  assert.equal(external, null);
+});
+
 test("local provider telemetry records preset and host without key material", () => {
   const payload = createProviderTelemetryPayload({
     providerId: "local-openai-compatible",
@@ -182,8 +196,9 @@ test("provider config store migrates legacy DeepSeek default file to local recom
   }
 });
 
-test("provider config store preserves custom external OpenAI-compatible providers", () => {
+test("provider config store migrates custom external OpenAI-compatible providers to local recommendation", () => {
   const userDataPath = createTempUserDataPath();
+  const events: Array<{ type: string; payload?: Record<string, unknown> }> = [];
   const customConfig = {
     providerId: "openai-compatible" as const,
     displayName: "External OpenAI-compatible",
@@ -198,9 +213,42 @@ test("provider config store preserves custom external OpenAI-compatible provider
   try {
     writeProviderConfig(userDataPath, customConfig);
 
-    const store = createProviderConfigStore({ userDataPath });
+    const store = createProviderConfigStore({
+      userDataPath,
+      logTelemetry(type, payload) {
+        events.push({ type, payload });
+      }
+    });
 
-    assert.deepEqual(store.getConfig(), customConfig);
+    assert.deepEqual(store.getConfig(), DEFAULT_PROVIDER_CONFIG);
+    assert.ok(events.some((event) => (
+      event.type === "provider_config_migrated" &&
+      event.payload?.reason === "external_model_disabled" &&
+      event.payload?.toProviderId === "local-openai-compatible"
+    )));
+  } finally {
+    rmSync(userDataPath, { recursive: true, force: true });
+  }
+});
+
+test("provider config store refuses to persist external OpenAI-compatible providers", () => {
+  const userDataPath = createTempUserDataPath();
+
+  try {
+    const store = createProviderConfigStore({ userDataPath });
+    const saved = store.saveConfig({
+      providerId: "openai-compatible",
+      displayName: "External OpenAI-compatible",
+      baseURL: "https://api.example.com/v1",
+      model: "external-chat-model",
+      apiKeyRef: "custom-external-key",
+      temperature: 0.5,
+      maxTokens: 512,
+      timeoutMs: 30000
+    });
+
+    assert.deepEqual(saved, DEFAULT_PROVIDER_CONFIG);
+    assert.deepEqual(store.getConfig(), DEFAULT_PROVIDER_CONFIG);
   } finally {
     rmSync(userDataPath, { recursive: true, force: true });
   }
@@ -246,7 +294,7 @@ test("provider factory does not require real api key for local provider", () => 
   assert.equal(provider.id, "local-openai-compatible");
 });
 
-test("provider factory keeps explicit fake but blocks unavailable real providers", async () => {
+test("provider factory keeps explicit fake and blocks external or unavailable real providers", async () => {
   const fakeProvider = createChatProviderFromConfig({
     config: { providerId: "fake", displayName: "Fake Provider" },
     getApiKey() {
@@ -307,7 +355,14 @@ test("provider factory keeps explicit fake but blocks unavailable real providers
       signal: new AbortController().signal,
       onDelta() {}
     }),
-    { name: "provider_missing_api_key" }
+    { name: "provider_invalid_config" }
+  );
+  await assert.rejects(
+    cloudProvider.streamReply(minimalChatRequest, {
+      signal: new AbortController().signal,
+      onDelta() {}
+    }),
+    { name: "provider_invalid_config" }
   );
   await assert.rejects(
     invalidLocalProvider.streamReply(minimalChatRequest, {

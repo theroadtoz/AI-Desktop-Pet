@@ -140,7 +140,7 @@ test("provider health detects timeout and cancellation", async () => {
   }
 });
 
-test("cloud health returns missing_api_key without network request", async () => {
+test("external chat health is disabled without network request", async () => {
   let requestCount = 0;
   const server = createServer((_request: IncomingMessage, response: ServerResponse) => {
     requestCount += 1;
@@ -160,7 +160,7 @@ test("cloud health returns missing_api_key without network request", async () =>
       apiKey: null
     });
 
-    assert.equal(result.status, "missing_api_key");
+    assert.equal(result.status, "invalid_config");
     assert.equal(requestCount, 0);
   } finally {
     await close(server);

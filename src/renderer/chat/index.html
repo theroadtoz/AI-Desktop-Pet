@@ -187,7 +187,7 @@
             </section>
           </section>
           <section id="settings-model-page" class="settings-page content-stack" hidden aria-labelledby="provider-settings-title">
-            <h3 id="provider-settings-title" class="settings-section-title">Provider / 模型</h3>
+            <h3 id="provider-settings-title" class="settings-section-title">本地模型</h3>
             <section class="partner-status-band" aria-label="魔女状态缎带">
               <p id="partner-status" class="status-box ribbon-primary" aria-live="polite">桌面伙伴：等待本地身份 · 默认陪伴 · 默认陪伴</p>
               <p id="provider-status" class="status-box ribbon-provider" aria-live="polite">正在读取模型状态...</p>
@@ -199,8 +199,7 @@
               Provider
               <select id="provider-id" name="providerId">
                 <option value="local-openai-compatible">内置本地模型（推荐）</option>
-                <option value="openai-compatible">OpenAI-compatible（显式外部模型）</option>
-                <option value="fake">Fake（开发回退）</option>
+                <option value="fake">Fake（验收/开发）</option>
               </select>
             </label>
             <label class="field-label">
@@ -239,11 +238,11 @@
                   <input id="provider-timeout" name="timeoutMs" type="number" min="1" step="1" required />
                 </label>
               </div>
-              <p id="local-provider-note" class="selection-note" hidden>推荐本地默认：内置本地模型、ai-desktop-pet-local。本地服务不会要求 API Key；如果安装包缺少 local-llm 资源，诊断会显示未就绪。Ollama 和 LM Studio 保留为高级兼容选项。</p>
+              <p id="local-provider-note" class="selection-note" hidden>默认使用随应用携带的本地模型，不需要 API Key。Ollama 和 LM Studio 只作为高级兼容诊断选项，不是新安装用户的必要条件。</p>
               <section id="local-model-diagnostic-section" class="content-stack" aria-labelledby="local-model-diagnostic-title" hidden>
                 <h3 id="local-model-diagnostic-title" class="settings-section-title">本地模型诊断</h3>
                 <p id="local-model-diagnostic-status" class="status-box" data-state="fallback" aria-live="polite">本地模型诊断尚未运行。</p>
-                <p id="local-model-diagnostic-summary" class="selection-note">运行后会显示 Ollama、LM Studio 和 llama.cpp 的安全摘要。</p>
+                <p id="local-model-diagnostic-summary" class="selection-note">运行后会显示内置 local-llm、托管 llama.cpp 和兼容运行时的安全摘要。</p>
                 <div id="local-model-diagnostic-runtimes" class="content-stack" aria-live="polite"></div>
                 <div class="inline-actions">
                   <button id="local-model-diagnostic-button" class="button-light" type="button">运行本地诊断</button>
@@ -287,6 +286,7 @@
                 </div>
               </section>
               <div class="inline-actions">
+                <button id="provider-reset-local-button" class="button-light" type="button">恢复内置本地模型</button>
                 <button id="provider-health-check-button" class="button-light" type="button">检查连接</button>
               </div>
               <p id="provider-health-status" class="status-box" aria-live="polite">连接检查尚未运行。</p>

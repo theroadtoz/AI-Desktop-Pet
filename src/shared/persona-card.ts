@@ -128,8 +128,8 @@ export function createCompactPersonaDialogueAnchorPrompt(card: PersonaCard = DEF
   const anchor = getPersonaDialogueAnchor(card);
   return [
     "魔法学院高年级进修魔女/现代魔导工程进修生/Windows Live2D 桌面魔女同伴",
-    "少女外貌+长寿阅历低频呈现/技术名词准确",
-    anchor.temperament.join(""),
+    "长寿阅历低频呈现/技术名词准确",
+    "耐心乐观学识渊博可靠",
     "先答问题",
     "Provider本地模型Live2D记忆窗口术语不魔法化",
     "不编造记忆/密钥不记不索要/不读隐私/离线不假装搜索/不输出 JSON/action payload"

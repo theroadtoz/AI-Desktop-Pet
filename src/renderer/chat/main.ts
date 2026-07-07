@@ -127,6 +127,7 @@ const llamaCppRuntimeModelButton = document.querySelector<HTMLButtonElement>("#l
 const llamaCppRuntimeStartButton = document.querySelector<HTMLButtonElement>("#llama-cpp-runtime-start-button");
 const llamaCppRuntimeStopButton = document.querySelector<HTMLButtonElement>("#llama-cpp-runtime-stop-button");
 const llamaCppRuntimeRefreshButton = document.querySelector<HTMLButtonElement>("#llama-cpp-runtime-refresh-button");
+const providerResetLocalButton = document.querySelector<HTMLButtonElement>("#provider-reset-local-button");
 const providerHealthCheckButton = document.querySelector<HTMLButtonElement>("#provider-health-check-button");
 const providerHealthStatus = document.querySelector<HTMLElement>("#provider-health-status");
 const apiKeyInput = document.querySelector<HTMLInputElement>("#provider-api-key");
@@ -225,7 +226,7 @@ if (
   !llamaCppRuntimeHost || !llamaCppRuntimePort || !llamaCppRuntimeCtx || !llamaCppRuntimeAlias ||
   !llamaCppRuntimeSaveButton || !llamaCppRuntimeExecutableButton || !llamaCppRuntimeModelButton ||
   !llamaCppRuntimeStartButton || !llamaCppRuntimeStopButton || !llamaCppRuntimeRefreshButton ||
-  !providerHealthCheckButton || !providerHealthStatus || !apiKeyInput || !apiKeyStatus || !connectionSafeSection || !deleteApiKeyButton ||
+  !providerResetLocalButton || !providerHealthCheckButton || !providerHealthStatus || !apiKeyInput || !apiKeyStatus || !connectionSafeSection || !deleteApiKeyButton ||
   !deleteKeyConfirmation || !cancelDeleteApiKeyButton || !confirmDeleteApiKeyButton || !settingsFeedback ||
   !petScaleInput || !petScaleValue || !petAccessorySelect || !petAccessoryStatus || !savePetScaleButton ||
   !savePetAccessoryButton || !petLockStatus || !togglePetLockButton || !userProfileSummary ||
@@ -300,6 +301,7 @@ const llamaCppRuntimeModelAction = llamaCppRuntimeModelButton;
 const llamaCppRuntimeStartAction = llamaCppRuntimeStartButton;
 const llamaCppRuntimeStopAction = llamaCppRuntimeStopButton;
 const llamaCppRuntimeRefreshAction = llamaCppRuntimeRefreshButton;
+const providerResetLocalAction = providerResetLocalButton;
 const providerHealthCheckAction = providerHealthCheckButton;
 const providerHealthStatusBox = providerHealthStatus;
 const apiKeyField = apiKeyInput;
@@ -648,7 +650,7 @@ function resetLocalModelDiagnosticSummary(): void {
   latestLocalModelDiagnosticSummary = null;
   localModelDiagnosticStatusBox.textContent = "本地模型诊断尚未运行。";
   localModelDiagnosticStatusBox.dataset.state = "fallback";
-  localModelDiagnosticSummaryBox.textContent = "运行后会显示 Ollama、LM Studio 和 llama.cpp 的安全摘要。";
+  localModelDiagnosticSummaryBox.textContent = "运行后会显示内置 local-llm、托管 llama.cpp 和兼容运行时的安全摘要。";
   localModelDiagnosticRuntimesBox.replaceChildren();
   localModelDiagnosticAction.disabled = false;
   localModelDiagnosticAction.textContent = "运行本地诊断";
@@ -691,8 +693,8 @@ function formatLocalModelDiagnosticNextAction(runtime: LocalModelDiagnosticRunti
 
   if (runtime.reason === "command_missing") {
     return runtime.id === "ollama"
-      ? "安装并启动 Ollama，再手动拉取目标模型。"
-      : "安装或打开对应本地运行时，并启动 OpenAI-compatible 服务。";
+      ? "Ollama 仅作为高级兼容路径；默认使用内置本地模型。"
+      : "该兼容运行时未就绪；默认使用内置本地模型。";
   }
 
   if (runtime.reason === "tcp_unreachable") {
@@ -2478,10 +2480,9 @@ function applyLocalProviderPreset(presetId: LocalProviderPresetId): void {
 
 function updateProviderFields(): void {
   const hasOpenAIFields = isProviderWithOpenAIFieldsSelected();
-  const isCloudOpenAI = isOpenAICompatibleSelected();
   const isLocalOpenAI = isLocalOpenAICompatibleSelected();
   openAIFieldsContainer.hidden = !hasOpenAIFields;
-  connectionSafeSectionBox.hidden = !isCloudOpenAI;
+  connectionSafeSectionBox.hidden = true;
   localProviderPresetFieldBox.hidden = !isLocalOpenAI;
   localProviderNoteBox.hidden = !isLocalOpenAI;
   localModelDiagnosticSectionBox.hidden = !isLocalOpenAI;
@@ -2520,19 +2521,23 @@ function fillLocalOpenAIDefaults(): void {
 }
 
 function fillProviderForm(config: ProviderConfig): void {
-  providerIdField.value = config.providerId;
-  displayNameField.value = config.displayName;
+  const formConfig = config.providerId === "openai-compatible"
+    ? RECOMMENDED_LOCAL_PROVIDER_CONFIG
+    : config;
 
-  if (config.providerId === "openai-compatible" || config.providerId === "local-openai-compatible") {
-    baseURLField.value = config.baseURL;
-    modelField.value = config.model;
-    temperatureField.value = String(config.temperature);
-    maxTokensField.value = String(config.maxTokens);
-    timeoutField.value = String(config.timeoutMs);
+  providerIdField.value = formConfig.providerId;
+  displayNameField.value = formConfig.displayName;
+
+  if (formConfig.providerId === "local-openai-compatible") {
+    baseURLField.value = formConfig.baseURL;
+    modelField.value = formConfig.model;
+    temperatureField.value = String(formConfig.temperature);
+    maxTokensField.value = String(formConfig.maxTokens);
+    timeoutField.value = String(formConfig.timeoutMs);
   }
 
-  if (config.providerId === "local-openai-compatible") {
-    localProviderPresetField.value = inferLocalProviderPresetId(config);
+  if (formConfig.providerId === "local-openai-compatible") {
+    localProviderPresetField.value = inferLocalProviderPresetId(formConfig);
   } else {
     localProviderPresetField.value = DEFAULT_LOCAL_OPENAI_CONFIG.localPresetId;
   }
@@ -2686,16 +2691,8 @@ function buildProviderConfig(): ProviderConfig | null {
     };
   }
 
-  return {
-    providerId: "openai-compatible",
-    displayName,
-    baseURL,
-    model,
-    apiKeyRef: getApiKeyRef(),
-    temperature,
-    maxTokens,
-    timeoutMs
-  };
+  setSettingsFeedback("外部对话模型已停用；请使用内置本地模型，联网资料通过 MCP 搜索提供。");
+  return null;
 }
 
 function buildProviderHealthRequest(): ProviderHealthCheckRequest | null {
@@ -2733,12 +2730,8 @@ function buildProviderHealthRequest(): ProviderHealthCheckRequest | null {
     };
   }
 
-  return {
-    providerId: "openai-compatible",
-    baseURL,
-    model,
-    timeoutMs
-  };
+  setProviderHealthStatus("外部对话模型已停用；请检查本地模型连接。", "fallback");
+  return null;
 }
 
 window.chatApi?.onReplyDelta((delta) => {
@@ -3254,6 +3247,14 @@ providerIdField.addEventListener("change", () => {
   clearSettingsFeedback();
 });
 
+providerResetLocalAction.addEventListener("click", () => {
+  providerIdField.value = "local-openai-compatible";
+  fillLocalOpenAIDefaults();
+  updateProviderFields();
+  resetLocalModelDiagnosticSummary();
+  setSettingsFeedback("已切回内置本地模型。", "ready");
+});
+
 localProviderPresetField.addEventListener("change", () => {
   if (!isLocalOpenAICompatibleSelected()) {
     return;
@@ -3382,7 +3383,7 @@ providerSettingsForm.addEventListener("submit", (event) => {
   }
 
   void (async () => {
-    const newApiKey = apiKeyField.value.trim();
+    const newApiKey = isOpenAICompatibleSelected() ? apiKeyField.value.trim() : "";
 
     try {
       if (newApiKey) {

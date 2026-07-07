@@ -1,6 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createInterface } from "node:readline";
-import { basename } from "node:path";
+import { basename, delimiter } from "node:path";
 import type {
   WebSearchConnectionTestResult,
   WebSearchSettings,
@@ -414,12 +414,23 @@ function sanitizeUrl(value: unknown): string | null {
 
 function createSafeMcpChildEnv(config: McpSearchClientConfig): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
-  for (const key of ["PATH", "Path", "SystemRoot", "COMSPEC", "ComSpec", "TEMP", "TMP"]) {
+  for (const key of ["SystemRoot", "WINDIR", "COMSPEC", "ComSpec"]) {
     const value = process.env[key];
     if (value) {
       env[key] = value;
     }
   }
+
+  const pathValue = process.env.Path ?? process.env.PATH;
+  const safePath = sanitizeMcpPath(pathValue);
+  if (safePath) {
+    env[process.platform === "win32" ? "Path" : "PATH"] = safePath;
+  }
+
+  for (const key of ["TEMP", "TMP", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "HOME"]) {
+    env[key] = "";
+  }
+
   const braveApiKey = process.env.BRAVE_API_KEY;
   if (braveApiKey && isBraveSearchMcpConfig(config)) {
     env.BRAVE_API_KEY = braveApiKey;
@@ -427,8 +438,31 @@ function createSafeMcpChildEnv(config: McpSearchClientConfig): NodeJS.ProcessEnv
   return env;
 }
 
+function sanitizeMcpPath(value: string | undefined): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  const safeEntries = value
+    .split(delimiter)
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0 && !isPersonalPathEntry(entry));
+
+  return safeEntries.length > 0 ? safeEntries.join(delimiter) : undefined;
+}
+
+function isPersonalPathEntry(value: string): boolean {
+  return /(?:\\Users\\|\/Users\/|\/home\/|\/mnt\/|\\AppData\\|\/\.local\/|\/\.config\/)/iu.test(value);
+}
+
 function isBraveSearchMcpConfig(config: McpSearchClientConfig): boolean {
-  return config.args.some((arg) => arg.toLowerCase().includes("@brave/brave-search-mcp-server"));
+  return config.args.some(isBraveSearchPackageArg);
+}
+
+function isBraveSearchPackageArg(value: string): boolean {
+  const packageName = "@brave/brave-search-mcp-server";
+  const normalized = value.trim().toLowerCase();
+  return normalized === packageName || normalized.startsWith(`${packageName}@`);
 }
 
 function normalizeTimeoutMs(value: number): number {

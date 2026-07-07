@@ -33,8 +33,8 @@ export async function checkProviderHealth(options: ProviderHealthCheckOptions): 
     return result;
   }
 
-  if (request.providerId === "openai-compatible" && !options.apiKey) {
-    const result = createResult(request, "missing_api_key", baseURLHost);
+  if (request.providerId === "openai-compatible") {
+    const result = createResult(request, "invalid_config", baseURLHost);
     logHealth(options, result, Date.now() - startedAt);
     return result;
   }
@@ -56,10 +56,6 @@ export async function checkProviderHealth(options: ProviderHealthCheckOptions): 
     const headers: Record<string, string> = {
       Accept: "application/json"
     };
-
-    if (request.providerId === "openai-compatible" && options.apiKey) {
-      headers.Authorization = `Bearer ${options.apiKey}`;
-    }
 
     const response = await fetch(createModelsURL(request.baseURL), {
       method: "GET",

@@ -409,16 +409,19 @@ async function main() {
         const provider = document.querySelector("#provider-id");
         const openaiFields = document.querySelector("#openai-fields");
         const security = document.querySelector("#connection-safe-section");
-        provider.value = "openai-compatible";
-        provider.dispatchEvent(new Event("change", { bubbles: true }));
-        const cloud = openaiFields.hidden === false && security.hidden === false;
+        const apiKey = document.querySelector("#provider-api-key");
+        const reset = document.querySelector("#provider-reset-local-button");
+        const options = [...provider.options].map((option) => option.value);
+        const localOnlyOptions = options.join("|") === "local-openai-compatible|fake";
         provider.value = "local-openai-compatible";
         provider.dispatchEvent(new Event("change", { bubbles: true }));
         const local = openaiFields.hidden === false && security.hidden === true &&
+          apiKey.offsetParent === null &&
+          reset.offsetParent !== null &&
           document.querySelector("#local-provider-note")?.hidden === false;
         provider.value = "fake";
         provider.dispatchEvent(new Event("change", { bubbles: true }));
-        return cloud && local && openaiFields.hidden === true;
+        return localOnlyOptions && local && openaiFields.hidden === true && security.hidden === true;
       })()
     `);
     await evaluate(chat, `

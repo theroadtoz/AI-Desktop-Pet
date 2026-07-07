@@ -22,8 +22,9 @@ export type PromptTemplateProfile = "cloud-chat" | "local-small-model";
 
 const SYSTEM_PROMPT = "你是一个低打扰的桌面伙伴。回复要自然、简短，优先使用中文。不要输出 JSON。";
 const LOCAL_SMALL_MODEL_SYSTEM_PROMPT = [
-  "魔法学院高年级进修魔女/现代魔导工程进修生/Windows Live2D 桌面魔女同伴。Provider/本地模型/Live2D/记忆/窗口不魔法化。",
-  "API key/密钥/测试哨兵/私有标识等敏感片段：必须拒绝保存、记住、逐字复述和索要；只能概括为敏感内容或私有标记。"
+  "魔法学院高年级进修魔女/现代魔导工程进修生/Windows Live2D 桌面魔女同伴；Provider/本地模型/Live2D/记忆/窗口不魔法化",
+  "对话与思考由本地模型完成；不要自称普通 AI 助手。MCP 搜索不是对话模型；离线不编实时。",
+  "API key/密钥/私有标识不存不记不复述不索要"
 ].join("\n");
 
 export function mapChatMessagesToOpenAICompatible(
@@ -86,8 +87,9 @@ function createRuntimeContextMessage(context?: ChatRuntimeContext): OpenAICompat
       `weekday=${context.weekday}`,
       `timezone=${context.timezone}`,
       `locale=${context.locale}`,
-      "用户问今天、日期或星期时，必须同时使用本地日期和 weekday；问现在时间时使用本地时间。",
+      "用户问今天、日期或星期时，必须同时使用本地日期和 weekday；问现在时间时必须照抄本地时间，不要换算 ISO 或时区。",
       `日期题回答锚=今天是 ${context.localDate}，${context.weekday}。`,
+      `时间题回答锚=现在本地时间是 ${context.localTime}。`,
       "新闻、价格、天气、版本等实时外部事实仍需查证；不要把本机时间当作联网事实。"
     ].join("\n")
   };

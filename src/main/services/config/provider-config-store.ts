@@ -59,13 +59,16 @@ export function createProviderConfigStore(options: {
         const config = migrateLegacyProviderConfig(parsedConfig);
 
         if (config !== parsedConfig) {
+          const migrationReason = isLegacyDeepSeekDefaultConfig(parsedConfig)
+            ? "legacy_deepseek_default"
+            : "external_model_disabled";
           log("provider_config_migrated", {
             source: "file",
-            reason: "legacy_deepseek_default",
+            reason: migrationReason,
             fromProviderId: parsedConfig.providerId,
             toProviderId: config.providerId,
             baseURLHost: parsedConfig.providerId === "fake" ? undefined : readBaseURLHost(parsedConfig.baseURL),
-            modelCategory: parsedConfig.providerId === "fake" ? undefined : "legacy_deepseek_default"
+            modelCategory: parsedConfig.providerId === "fake" ? undefined : migrationReason
           });
           logLoaded(config, "default");
           return config;
@@ -93,10 +96,27 @@ export function createProviderConfigStore(options: {
         throw new Error("Invalid provider config");
       }
 
+      const configToSave = migrateLegacyProviderConfig(parsed);
+
       mkdirSync(dirname(configPath), { recursive: true });
-      writeFileSync(configPath, `${JSON.stringify(parsed, null, 2)}\n`, "utf8");
-      log("provider_config_saved", createProviderTelemetryPayload(parsed, "file"));
-      return parsed;
+      writeFileSync(configPath, `${JSON.stringify(configToSave, null, 2)}\n`, "utf8");
+
+      if (configToSave !== parsed) {
+        const migrationReason = isLegacyDeepSeekDefaultConfig(parsed)
+          ? "legacy_deepseek_default"
+          : "external_model_disabled";
+        log("provider_config_migrated", {
+          source: "file",
+          reason: migrationReason,
+          fromProviderId: parsed.providerId,
+          toProviderId: configToSave.providerId,
+          baseURLHost: parsed.providerId === "fake" ? undefined : readBaseURLHost(parsed.baseURL),
+          modelCategory: parsed.providerId === "fake" ? undefined : migrationReason
+        });
+      }
+
+      log("provider_config_saved", createProviderTelemetryPayload(configToSave, "file"));
+      return configToSave;
     },
     getConfigPath() {
       return configPath;
@@ -177,7 +197,7 @@ export function parseProviderConfig(value: unknown): ProviderConfig | null {
 }
 
 function migrateLegacyProviderConfig(config: ProviderConfig): ProviderConfig {
-  if (isLegacyDeepSeekDefaultConfig(config)) {
+  if (config.providerId === "openai-compatible") {
     return DEFAULT_PROVIDER_CONFIG;
   }
 

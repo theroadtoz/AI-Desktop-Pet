@@ -146,6 +146,51 @@ test("non-Brave MCP child does not inherit BRAVE_API_KEY", async () => {
   assert.doesNotMatch(record, /p2-29b-secret-should-not-leak/);
 });
 
+test("MCP child env omits temp and user profile paths and rejects Brave package substring spoof", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "p2-41-mcp-env-"));
+  const serverPath = join(dir, "env-probe-mcp-search-server.mjs");
+  const recordPath = join(dir, "env-probe.jsonl");
+  writeFileSync(serverPath, createEnvProbeMcpServerSource(), "utf8");
+
+  const previous = {
+    BRAVE_API_KEY: process.env.BRAVE_API_KEY,
+    TEMP: process.env.TEMP,
+    TMP: process.env.TMP,
+    USERPROFILE: process.env.USERPROFILE
+  };
+  process.env.BRAVE_API_KEY = "p2-41-brave-secret-should-not-leak";
+  process.env.TEMP = "C:\\Users\\PrivateUser\\AppData\\Local\\Temp";
+  process.env.TMP = "C:\\Users\\PrivateUser\\AppData\\Local\\Temp";
+  process.env.USERPROFILE = "C:\\Users\\PrivateUser";
+
+  try {
+    const results = await callMcpSearchTool({
+      command: process.execPath,
+      args: [serverPath, recordPath, "@brave/brave-search-mcp-server-spoof"],
+      toolName: "web_search",
+      timeoutMs: 5_000,
+      maxResults: 1
+    }, {
+      query: "P2-41 env probe",
+      maxResults: 1
+    });
+
+    assert.equal(results.length, 1);
+  } finally {
+    restoreEnv("BRAVE_API_KEY", previous.BRAVE_API_KEY);
+    restoreEnv("TEMP", previous.TEMP);
+    restoreEnv("TMP", previous.TMP);
+    restoreEnv("USERPROFILE", previous.USERPROFILE);
+  }
+
+  const record = readFileSync(recordPath, "utf8");
+  assert.match(record, /"braveApiKeyPresent":false/);
+  assert.match(record, /"tempPresent":false/);
+  assert.match(record, /"tmpPresent":false/);
+  assert.match(record, /"userProfilePresent":false/);
+  assert.doesNotMatch(record, /p2-41-brave-secret-should-not-leak|PrivateUser|AppData/);
+});
+
 test("web search prompt context is temporary model context, not history or memory", () => {
   const context = createWebSearchContext({
     query: "Live2D 动作方式",
@@ -309,7 +354,12 @@ lineReader.on("line", (line) => {
     return;
   }
   if (message.method === "tools/call") {
-    writeFileSync(recordPath, JSON.stringify({ braveApiKeyPresent: Boolean(process.env.BRAVE_API_KEY) }) + "\\n", { flag: "a" });
+    writeFileSync(recordPath, JSON.stringify({
+      braveApiKeyPresent: Boolean(process.env.BRAVE_API_KEY),
+      tempPresent: Boolean(process.env.TEMP),
+      tmpPresent: Boolean(process.env.TMP),
+      userProfilePresent: Boolean(process.env.USERPROFILE)
+    }) + "\\n", { flag: "a" });
     respond(message.id, {
       content: [{
         type: "text",
@@ -327,4 +377,12 @@ function respond(id, result) {
   process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id, result }) + "\\n");
 }
 `;
+}
+
+function restoreEnv(key: string, value: string | undefined): void {
+  if (value === undefined) {
+    delete process.env[key];
+  } else {
+    process.env[key] = value;
+  }
 }

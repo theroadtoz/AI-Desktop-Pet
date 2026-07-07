@@ -1566,7 +1566,6 @@ function isProviderHealthCheckRequest(value: unknown): value is ProviderHealthCh
   return Boolean(
     request &&
     (
-      request.providerId === "openai-compatible" ||
       request.providerId === "local-openai-compatible"
     ) &&
     typeof request.baseURL === "string" &&
