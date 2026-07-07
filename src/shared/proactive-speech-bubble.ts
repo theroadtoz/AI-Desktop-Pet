@@ -12,6 +12,16 @@ export const PROACTIVE_SPEECH_BUBBLE_LINE_CATALOG = {
   idle_presence_work: "先处理最小一步。",
   idle_presence_game: "准备好再开始。",
   idle_presence_reading: "这一页慢慢读。",
+  idle_presence_morning: "早上好，我在。",
+  idle_presence_afternoon: "下午也慢慢来。",
+  idle_presence_evening: "晚上先歇口气。",
+  idle_presence_night: "夜深了，轻一点。",
+  idle_presence_work_morning: "早上先理一小步。",
+  idle_presence_work_afternoon: "下午稳稳推进。",
+  idle_presence_reading_evening: "晚点读也可以。",
+  idle_presence_reading_night: "夜里慢慢读。",
+  idle_presence_game_evening: "晚上玩得轻松点。",
+  idle_presence_context_settle: "我先陪你缓缓。",
   mode_presence_focus: "我会放轻声音。",
   mode_presence_work: "工作模式，先稳住。",
   mode_presence_game: "游戏模式，轻松点。",
@@ -27,6 +37,15 @@ export const PROACTIVE_SPEECH_BUBBLE_REASONS = [
 ] as const;
 
 export type ProactiveSpeechBubbleReason = typeof PROACTIVE_SPEECH_BUBBLE_REASONS[number];
+
+export const PROACTIVE_SPEECH_BUBBLE_TIME_BANDS = [
+  "morning",
+  "afternoon",
+  "evening",
+  "night"
+] as const;
+
+export type ProactiveSpeechBubbleTimeBand = typeof PROACTIVE_SPEECH_BUBBLE_TIME_BANDS[number];
 
 export type ProactiveSpeechBubblePayload = {
   lineId: ProactiveSpeechBubbleLineId;
@@ -44,6 +63,7 @@ export type ProactiveSpeechBubbleSelectionInput = {
   presenceModeId: PresenceModeId;
   dialogueModeId: DialogueModeId;
   tick: number;
+  timeBand?: ProactiveSpeechBubbleTimeBand | undefined;
 };
 
 export function isProactiveSpeechBubbleLineId(value: unknown): value is ProactiveSpeechBubbleLineId {
@@ -53,6 +73,29 @@ export function isProactiveSpeechBubbleLineId(value: unknown): value is Proactiv
 export function isProactiveSpeechBubbleReason(value: unknown): value is ProactiveSpeechBubbleReason {
   return typeof value === "string" &&
     PROACTIVE_SPEECH_BUBBLE_REASONS.includes(value as ProactiveSpeechBubbleReason);
+}
+
+export function isProactiveSpeechBubbleTimeBand(value: unknown): value is ProactiveSpeechBubbleTimeBand {
+  return typeof value === "string" &&
+    PROACTIVE_SPEECH_BUBBLE_TIME_BANDS.includes(value as ProactiveSpeechBubbleTimeBand);
+}
+
+export function getProactiveSpeechBubbleTimeBand(date: Date): ProactiveSpeechBubbleTimeBand {
+  const hour = date.getHours();
+
+  if (hour >= 5 && hour < 12) {
+    return "morning";
+  }
+
+  if (hour >= 12 && hour < 18) {
+    return "afternoon";
+  }
+
+  if (hour >= 18 && hour < 22) {
+    return "evening";
+  }
+
+  return "night";
 }
 
 export function clampProactiveSpeechBubbleDuration(durationMs: number): number {
@@ -113,15 +156,51 @@ export function selectProactiveSpeechBubbleLineId(input: ProactiveSpeechBubbleSe
   }
 
   if (input.dialogueModeId === "work") {
+    if (input.timeBand === "morning") {
+      return "idle_presence_work_morning";
+    }
+
+    if (input.timeBand === "afternoon") {
+      return "idle_presence_work_afternoon";
+    }
+
     return "idle_presence_work";
   }
 
   if (input.dialogueModeId === "game") {
+    if (input.timeBand === "evening") {
+      return "idle_presence_game_evening";
+    }
+
     return "idle_presence_game";
   }
 
   if (input.dialogueModeId === "reading") {
+    if (input.timeBand === "evening") {
+      return "idle_presence_reading_evening";
+    }
+
+    if (input.timeBand === "night") {
+      return "idle_presence_reading_night";
+    }
+
     return "idle_presence_reading";
+  }
+
+  if (input.timeBand === "morning") {
+    return "idle_presence_morning";
+  }
+
+  if (input.timeBand === "afternoon") {
+    return "idle_presence_afternoon";
+  }
+
+  if (input.timeBand === "evening") {
+    return "idle_presence_evening";
+  }
+
+  if (input.timeBand === "night") {
+    return "idle_presence_night";
   }
 
   return selectFromList(["idle_presence_soft", "idle_presence_default"], input.tick);

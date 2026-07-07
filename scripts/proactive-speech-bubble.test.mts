@@ -8,10 +8,13 @@ import {
   MIN_PROACTIVE_SPEECH_BUBBLE_DURATION_MS,
   PROACTIVE_SPEECH_BUBBLE_LINE_CATALOG,
   PROACTIVE_SPEECH_BUBBLE_REASONS,
+  PROACTIVE_SPEECH_BUBBLE_TIME_BANDS,
   clampProactiveSpeechBubbleDuration,
   getProactiveSpeechBubbleLine,
+  getProactiveSpeechBubbleTimeBand,
   isProactiveSpeechBubbleLineId,
   isProactiveSpeechBubbleReason,
+  isProactiveSpeechBubbleTimeBand,
   selectProactiveSpeechBubbleLineId
 } from "../src/shared/proactive-speech-bubble.ts";
 
@@ -50,6 +53,28 @@ test("proactive speech bubble rejects arbitrary ids and reasons", () => {
   assert.equal(isProactiveSpeechBubbleReason("mode_presence"), true);
   assert.equal(isProactiveSpeechBubbleReason("chat_done"), false);
   assert.equal(isProactiveSpeechBubbleReason("model_generated"), false);
+});
+
+test("proactive speech bubble accepts only safe time bands", () => {
+  assert.deepEqual(PROACTIVE_SPEECH_BUBBLE_TIME_BANDS, ["morning", "afternoon", "evening", "night"]);
+  assert.equal(isProactiveSpeechBubbleTimeBand("morning"), true);
+  assert.equal(isProactiveSpeechBubbleTimeBand("afternoon"), true);
+  assert.equal(isProactiveSpeechBubbleTimeBand("evening"), true);
+  assert.equal(isProactiveSpeechBubbleTimeBand("night"), true);
+  assert.equal(isProactiveSpeechBubbleTimeBand("dawn"), false);
+  assert.equal(isProactiveSpeechBubbleTimeBand(""), false);
+  assert.equal(isProactiveSpeechBubbleTimeBand(undefined), false);
+});
+
+test("proactive speech bubble derives local time bands from Date", () => {
+  assert.equal(getProactiveSpeechBubbleTimeBand(new Date(2026, 6, 7, 4, 59)), "night");
+  assert.equal(getProactiveSpeechBubbleTimeBand(new Date(2026, 6, 7, 5, 0)), "morning");
+  assert.equal(getProactiveSpeechBubbleTimeBand(new Date(2026, 6, 7, 11, 59)), "morning");
+  assert.equal(getProactiveSpeechBubbleTimeBand(new Date(2026, 6, 7, 12, 0)), "afternoon");
+  assert.equal(getProactiveSpeechBubbleTimeBand(new Date(2026, 6, 7, 17, 59)), "afternoon");
+  assert.equal(getProactiveSpeechBubbleTimeBand(new Date(2026, 6, 7, 18, 0)), "evening");
+  assert.equal(getProactiveSpeechBubbleTimeBand(new Date(2026, 6, 7, 21, 59)), "evening");
+  assert.equal(getProactiveSpeechBubbleTimeBand(new Date(2026, 6, 7, 22, 0)), "night");
 });
 
 test("proactive speech bubble duration is clamped to low-interruption bounds", () => {
@@ -96,12 +121,47 @@ test("proactive speech bubble selection is mode-aware but stays allowlisted", ()
   }), "mode_presence_focus");
 });
 
+test("proactive speech bubble selection can use time bands without changing renderer payload", () => {
+  assert.equal(selectProactiveSpeechBubbleLineId({
+    reason: "idle_presence",
+    presenceModeId: "default",
+    dialogueModeId: "default",
+    tick: 0,
+    timeBand: "morning"
+  }), "idle_presence_morning");
+
+  assert.equal(selectProactiveSpeechBubbleLineId({
+    reason: "idle_presence",
+    presenceModeId: "default",
+    dialogueModeId: "work",
+    tick: 0,
+    timeBand: "afternoon"
+  }), "idle_presence_work_afternoon");
+
+  assert.equal(selectProactiveSpeechBubbleLineId({
+    reason: "idle_presence",
+    presenceModeId: "default",
+    dialogueModeId: "reading",
+    tick: 0,
+    timeBand: "night"
+  }), "idle_presence_reading_night");
+
+  assert.equal(selectProactiveSpeechBubbleLineId({
+    reason: "idle_presence",
+    presenceModeId: "default",
+    dialogueModeId: "game",
+    tick: 0,
+    timeBand: "evening"
+  }), "idle_presence_game_evening");
+});
+
 test("proactive speech bubble selection keeps low-interruption presence ahead of dialogue mode", () => {
   assert.equal(selectProactiveSpeechBubbleLineId({
     reason: "idle_presence",
     presenceModeId: "quiet",
     dialogueModeId: "work",
-    tick: 0
+    tick: 0,
+    timeBand: "morning"
   }), "idle_presence_quiet");
 
   assert.equal(selectProactiveSpeechBubbleLineId({
@@ -115,14 +175,16 @@ test("proactive speech bubble selection keeps low-interruption presence ahead of
     reason: "mode_presence",
     presenceModeId: "focus",
     dialogueModeId: "work",
-    tick: 0
+    tick: 0,
+    timeBand: "afternoon"
   }), "mode_presence_focus");
 
   assert.equal(selectProactiveSpeechBubbleLineId({
     reason: "mode_presence",
     presenceModeId: "quiet",
     dialogueModeId: "reading",
-    tick: 0
+    tick: 0,
+    timeBand: "night"
   }), "mode_presence_focus");
 
   assert.equal(selectProactiveSpeechBubbleLineId({
@@ -131,6 +193,16 @@ test("proactive speech bubble selection keeps low-interruption presence ahead of
     dialogueModeId: "game",
     tick: 0
   }), "mode_presence_focus");
+});
+
+test("main runtime gates proactive speech bubble time band env to acceptance telemetry", () => {
+  const appSource = readFileSync("src/main/app.ts", "utf8");
+
+  assert.match(appSource, /AI_DESKTOP_PET_PROACTIVE_SPEECH_BUBBLE_TIME_BAND/);
+  assert.match(appSource, /function readAcceptanceProactiveSpeechBubbleTimeBand\([\s\S]*isAcceptance[\s\S]*isProactiveSpeechBubbleTimeBand/);
+  assert.match(appSource, /if \(!isAcceptance \|\| !isProactiveSpeechBubbleTimeBand\(value\)\) \{[\s\S]*return null;/);
+  assert.match(appSource, /ACCEPTANCE_PROACTIVE_SPEECH_BUBBLE_TIME_BAND \?\? getProactiveSpeechBubbleTimeBand\(new Date\(\)\)/);
+  assert.match(appSource, /timeBand: getRuntimeProactiveSpeechBubbleTimeBand\(\)/);
 });
 
 test("pet preload keeps proactive speech bubble allowlists aligned", () => {
@@ -168,10 +240,15 @@ test("proactive speech bubble renderer payload contract stays event-pool agnosti
   const sharedSource = readFileSync("src/shared/proactive-speech-bubble.ts", "utf8");
   const appSource = readFileSync("src/main/app.ts", "utf8");
   const preloadSource = readFileSync("src/preload/pet-preload.ts", "utf8");
+  const payloadTypeSource = sharedSource.slice(
+    sharedSource.indexOf("export type ProactiveSpeechBubblePayload"),
+    sharedSource.indexOf("};", sharedSource.indexOf("export type ProactiveSpeechBubblePayload")) + 2
+  );
 
   assert.match(sharedSource, /export type ProactiveSpeechBubblePayload = \{\s+lineId: ProactiveSpeechBubbleLineId;\s+reason: ProactiveSpeechBubbleReason;\s+durationMs: number;\s+\};/);
-  assert.doesNotMatch(sharedSource, /eventId/);
+  assert.doesNotMatch(payloadTypeSource, /eventId|timeBand/);
   assert.match(appSource, /petWindow\.webContents\.send\("pet:proactive-speech-bubble", payload\)/);
+  assert.doesNotMatch(appSource, /petWindow\.webContents\.send\("pet:proactive-speech-bubble", \{/);
   assert.match(preloadSource, /return \{\s+lineId,\s+reason,\s+durationMs: Math\.round\(durationMs\)\s+\};/);
-  assert.doesNotMatch(preloadSource, /eventId/);
+  assert.doesNotMatch(preloadSource, /eventId|timeBand/);
 });

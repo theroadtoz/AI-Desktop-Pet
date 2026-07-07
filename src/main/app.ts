@@ -31,9 +31,12 @@ import { isChatMessage } from "../shared/ipc-contract";
 import {
   DEFAULT_PROACTIVE_SPEECH_BUBBLE_DURATION_MS,
   DEFAULT_PROACTIVE_SPEECH_BUBBLE_LINE_ID,
+  getProactiveSpeechBubbleTimeBand,
+  isProactiveSpeechBubbleTimeBand,
   selectProactiveSpeechBubbleLineId,
   type ProactiveSpeechBubbleReason,
-  type ProactiveSpeechBubblePayload
+  type ProactiveSpeechBubblePayload,
+  type ProactiveSpeechBubbleTimeBand
 } from "../shared/proactive-speech-bubble";
 import {
   selectLowFrequencyCompanionEvent,
@@ -225,6 +228,10 @@ const LOW_FREQUENCY_COMPANION_EVENT_ACCEPTANCE_MINIMUM_INTERVAL_MS = readLowFreq
   process.env.AI_DESKTOP_PET_LOW_FREQUENCY_COMPANION_EVENT_MINIMUM_INTERVAL_MS,
   isAcceptanceTelemetryEnabled
 );
+const ACCEPTANCE_PROACTIVE_SPEECH_BUBBLE_TIME_BAND = readAcceptanceProactiveSpeechBubbleTimeBand(
+  process.env.AI_DESKTOP_PET_PROACTIVE_SPEECH_BUBBLE_TIME_BAND,
+  isAcceptanceTelemetryEnabled
+);
 let petRendererRecoveryTimes: number[] = [];
 const lastPetActionTriggerAtByReason: Partial<Record<PetActionTriggerReason, number>> = {};
 const chatReplySustainTrigger = createChatReplySustainTriggerController({
@@ -406,6 +413,17 @@ function readProactiveSpeechBubbleIdleIntervalMs(value: string | undefined, isAc
   }
 
   return Math.min(maximum, Math.max(minimum, Math.round(parsed)));
+}
+
+function readAcceptanceProactiveSpeechBubbleTimeBand(
+  value: string | undefined,
+  isAcceptance: boolean
+): ProactiveSpeechBubbleTimeBand | null {
+  if (!isAcceptance || !isProactiveSpeechBubbleTimeBand(value)) {
+    return null;
+  }
+
+  return value;
 }
 
 function readLowFrequencyCompanionEventAcceptanceMinimumIntervalMs(
@@ -873,6 +891,10 @@ function markProactiveSpeechBubbleHidden(): void {
   proactiveSpeechBubbleVisibleUntil = 0;
 }
 
+function getRuntimeProactiveSpeechBubbleTimeBand(): ProactiveSpeechBubbleTimeBand {
+  return ACCEPTANCE_PROACTIVE_SPEECH_BUBBLE_TIME_BAND ?? getProactiveSpeechBubbleTimeBand(new Date());
+}
+
 function createProactiveSpeechBubblePayload(reason: ProactiveSpeechBubbleReason): ProactiveSpeechBubblePayload {
   proactiveSpeechBubbleTick += 1;
   return {
@@ -880,7 +902,8 @@ function createProactiveSpeechBubblePayload(reason: ProactiveSpeechBubbleReason)
       reason,
       presenceModeId: currentPresenceModeId,
       dialogueModeId: currentDialogueModeId,
-      tick: proactiveSpeechBubbleTick
+      tick: proactiveSpeechBubbleTick,
+      timeBand: getRuntimeProactiveSpeechBubbleTimeBand()
     }),
     reason,
     durationMs: DEFAULT_PROACTIVE_SPEECH_BUBBLE_DURATION_MS

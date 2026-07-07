@@ -8,7 +8,7 @@ import {
   evaluate,
   findScreenshotResidue,
   readPrivacyCheckText,
-  setPresenceMode,
+  setDialogueMode,
   sleep,
   startElectron,
   stopElectron,
@@ -16,34 +16,50 @@ import {
   waitForWindow
 } from "./support/real-ui-harness.mjs";
 
+const requestedTimeBand =
+  process.env.P2_37_PROACTIVE_SPEECH_BUBBLE_TIME_BAND ||
+  process.env.P2_37_COMPANION_TIME_BAND ||
+  "evening";
+const contentLayeringPlans = {
+  morning: {
+    defaultIdleLineId: "idle_presence_morning",
+    dialogueModeId: "work",
+    modePresenceLineId: "mode_presence_work",
+    layeredIdleLineId: "idle_presence_work_morning"
+  },
+  afternoon: {
+    defaultIdleLineId: "idle_presence_afternoon",
+    dialogueModeId: "work",
+    modePresenceLineId: "mode_presence_work",
+    layeredIdleLineId: "idle_presence_work_afternoon"
+  },
+  evening: {
+    defaultIdleLineId: "idle_presence_evening",
+    dialogueModeId: "game",
+    modePresenceLineId: "mode_presence_game",
+    layeredIdleLineId: "idle_presence_game_evening"
+  },
+  night: {
+    defaultIdleLineId: "idle_presence_night",
+    dialogueModeId: "reading",
+    modePresenceLineId: "mode_presence_reading",
+    layeredIdleLineId: "idle_presence_reading_night"
+  }
+};
+const selectedPlan = contentLayeringPlans[requestedTimeBand] ?? contentLayeringPlans.evening;
+
 const context = createRealUiRunContext({
-  runName: "p2-36-low-frequency-companion-event-pool-runtime-integration-real-ui",
-  port: Number(process.env.P2_36_CDP_PORT || 9566),
+  runName: "p2-37-low-frequency-companion-content-layering-real-ui",
+  port: Number(process.env.P2_37_CDP_PORT || 9567),
   env: {
     AI_DESKTOP_PET_PROVIDER: "fake",
     AI_DESKTOP_PET_ACCEPTANCE_TELEMETRY: "1",
-    AI_DESKTOP_PET_PROACTIVE_SPEECH_BUBBLE_IDLE_INTERVAL_MS: process.env.P2_36_IDLE_INTERVAL_MS || "900",
+    AI_DESKTOP_PET_PROACTIVE_SPEECH_BUBBLE_IDLE_INTERVAL_MS: process.env.P2_37_IDLE_INTERVAL_MS || "850",
     AI_DESKTOP_PET_LOW_FREQUENCY_COMPANION_EVENT_MINIMUM_INTERVAL_MS:
-      process.env.P2_36_LOW_FREQUENCY_MINIMUM_INTERVAL_MS || "8000"
+      process.env.P2_37_LOW_FREQUENCY_MINIMUM_INTERVAL_MS || "900",
+    AI_DESKTOP_PET_PROACTIVE_SPEECH_BUBBLE_TIME_BAND: requestedTimeBand
   }
 });
-
-const runtimeAllowedEventIds = new Set([
-  "idle-presence-check",
-  "context-settle",
-  "mode-presence-echo"
-]);
-
-const forbiddenRuntimeEventIds = new Set([
-  "memory-safe-pulse",
-  "search-citation-pulse"
-]);
-
-const allowedBubbleReasons = new Set([
-  "startup_presence",
-  "idle_presence",
-  "mode_presence"
-]);
 
 const allowedLineIds = new Set([
   "startup_presence_ready",
@@ -72,15 +88,31 @@ const allowedLineIds = new Set([
   "mode_presence_reading"
 ]);
 
+const allowedBubbleReasons = new Set([
+  "startup_presence",
+  "idle_presence",
+  "mode_presence"
+]);
+
+const allowedLowFrequencyEventIds = new Set([
+  "idle-presence-check",
+  "context-settle",
+  "mode-presence-echo"
+]);
+
+const forbiddenDomDatasetKeys = new Set([
+  "eventId",
+  "timeBand"
+]);
+
 const forbiddenOutputPatterns = [
   /sk-[A-Za-z0-9]/i,
   /\.env/i,
   /Provider request body|providerRequestBody|requestBody/i,
   /complete prompt|system prompt|prompt/i,
-  /userMessage|assistantMessage|messageText|bubbleText/i,
+  /userMessage|assistantMessage|messageText|bubbleText|textContent/i,
   /fact card|memory card|factCardBody|memoryCardBody/i,
-  /search query|search result|safeQuery|snippet|domain|url|title/i,
-  /memory-safe-pulse|search-citation-pulse/i,
+  /memory content|search content|search query|search result|safeQuery|snippet|domain|url|title/i,
   /apiKey|Authorization/i,
   /motion path|motionPath|expressionName|partId|resourcePath/i,
   /\b[A-Za-z]:[\\/]/
@@ -98,103 +130,114 @@ async function main() {
       reason: "startup_presence",
       timeoutMs: 10_000
     });
-    checks.startupBubbleAppears = startupBubble.reason === "startup_presence" &&
-      inspectBubbleSafety(startupBubble);
+    checks.startupBubbleSafe = inspectBubbleSafety(startupBubble);
     observations.startupBubble = summarizeBubble(startupBubble);
 
-    const startupCleared = await waitForBubbleHidden(pet, 10_000);
-    checks.startupBubbleClearsBeforeIdle = startupCleared.state === "hidden" &&
-      startupCleared.textLength === 0;
+    await waitForBubbleHidden(pet, 10_000);
 
-    const beforeIdleIndex = lastTelemetryIndex();
-    const idleBubble = await waitForBubbleVisible(pet, {
+    const beforeDefaultIdleIndex = lastTelemetryIndex();
+    const defaultIdleBubble = await waitForBubbleVisible(pet, {
+      reason: "idle_presence",
+      lineId: selectedPlan.defaultIdleLineId,
       timeoutMs: 10_000
     });
-    const firstLowFrequencyEvent = await waitForLowFrequencyEvent({
+    const defaultIdleEvent = await waitForLowFrequencyEvent({
       status: "shown",
-      afterIndex: beforeIdleIndex,
-      timeoutMs: 3_000
+      afterIndex: beforeDefaultIdleIndex,
+      timeoutMs: 2_500
     });
-    const firstProactiveBubble = await waitForProactiveBubble({
+    const defaultIdleTelemetry = await waitForProactiveBubble({
       status: "shown",
-      afterIndex: beforeIdleIndex,
+      lineId: selectedPlan.defaultIdleLineId,
+      afterIndex: beforeDefaultIdleIndex,
       timeoutMs: 1_500
     });
-    checks.idleTriggersLowFrequencyEventShown = Boolean(firstLowFrequencyEvent) &&
-      summarizeLowFrequencyEvent(firstLowFrequencyEvent).runtimeAllowed &&
-      !summarizeLowFrequencyEvent(firstLowFrequencyEvent).runtimeForbidden;
-    checks.idleTriggersProactiveBubbleShown = Boolean(firstProactiveBubble) &&
-      firstProactiveBubble.payload?.reason === firstLowFrequencyEvent?.payload?.reason;
-    checks.rendererPayloadNoEventIdLeak = inspectBubbleSafety(idleBubble) &&
-      idleBubble.hasEventIdKey === false &&
-      idleBubble.hasForbiddenEventIdLeak === false;
-    observations.idle = {
-      bubble: summarizeBubble(idleBubble),
-      lowFrequencyEvent: summarizeLowFrequencyEvent(firstLowFrequencyEvent),
-      proactiveBubble: summarizeProactiveBubble(firstProactiveBubble)
+    checks.defaultTimeBandIdleLineShown = defaultIdleBubble.lineId === selectedPlan.defaultIdleLineId &&
+      defaultIdleBubble.reason === "idle_presence" &&
+      inspectBubbleSafety(defaultIdleBubble);
+    checks.defaultIdleLowFrequencyEventShown = isRuntimeAllowedLowFrequencyEvent(defaultIdleEvent);
+    checks.defaultIdleBubbleMatchesTelemetry = Boolean(defaultIdleTelemetry) &&
+      defaultIdleTelemetry.payload?.reason === defaultIdleEvent?.payload?.reason &&
+      defaultIdleTelemetry.payload?.lineId === defaultIdleBubble.lineId;
+    observations.defaultIdle = {
+      bubble: summarizeBubble(defaultIdleBubble),
+      lowFrequencyEvent: summarizeLowFrequencyEvent(defaultIdleEvent),
+      proactiveBubble: summarizeProactiveBubble(defaultIdleTelemetry)
     };
 
-    const afterFirstLowFrequencyEventIndex = firstLowFrequencyEvent?.__index ?? lastTelemetryIndex();
-    await sleep(Number(process.env.P2_36_MINIMUM_INTERVAL_OBSERVE_MS || 6200));
-    const secondShownInsideMinimumInterval = countLowFrequencyEvents({
-      afterIndex: afterFirstLowFrequencyEventIndex,
-      status: "shown"
-    });
-    const skippedMinimumInterval = countLowFrequencyEvents({
-      afterIndex: afterFirstLowFrequencyEventIndex,
-      status: "skipped",
-      skipReason: "minimum_interval"
-    });
-    checks.minimumIntervalNoSecondShown = secondShownInsideMinimumInterval === 0 &&
-      skippedMinimumInterval > 0;
-    observations.minimumInterval = {
-      secondShownInsideWindow: secondShownInsideMinimumInterval,
-      skippedMinimumInterval
-    };
+    await waitForBubbleHidden(pet, 10_000);
 
-    const beforeChatOpenIndex = lastTelemetryIndex();
     const chat = await openChatFromPet(pet);
-    const chatCleared = await waitForBubbleHidden(pet, 6_000);
-    await sleep(Number(process.env.P2_36_CHAT_SUPPRESSION_WINDOW_MS || 2600));
-    const lowFrequencyShownDuringChat = countLowFrequencyEvents({
-      afterIndex: beforeChatOpenIndex,
-      status: "shown"
+    await setDialogueMode(chat, selectedPlan.dialogueModeId);
+    await closeChat(chat);
+
+    const modeBubble = await waitForBubbleVisible(pet, {
+      reason: "mode_presence",
+      lineId: selectedPlan.modePresenceLineId,
+      timeoutMs: 9_000
     });
-    const proactiveShownDuringChat = countProactiveBubbles({
-      afterIndex: beforeChatOpenIndex,
-      status: "shown"
+    checks.modePresenceBubbleSafe = modeBubble.lineId === selectedPlan.modePresenceLineId &&
+      inspectBubbleSafety(modeBubble);
+    observations.modePresence = summarizeBubble(modeBubble);
+
+    await waitForBubbleHidden(pet, 10_000);
+    const beforeGameIdleIndex = lastTelemetryIndex();
+    const gameModeEchoBubble = await waitForBubbleVisible(pet, {
+      reason: "mode_presence",
+      lineId: selectedPlan.modePresenceLineId,
+      timeoutMs: 10_000
     });
-    checks.chatSuppressesNewShownEvents = lowFrequencyShownDuringChat === 0 &&
-      proactiveShownDuringChat === 0;
-    observations.chatSuppression = {
-      bubble: summarizeBubble(chatCleared),
-      lowFrequencyShownDuringChat,
-      proactiveShownDuringChat
+    const gameModeEchoEvent = await waitForLowFrequencyEvent({
+      status: "shown",
+      afterIndex: beforeGameIdleIndex,
+      timeoutMs: 2_500
+    });
+    checks.modeEchoLowFrequencyEventShown = isRuntimeAllowedLowFrequencyEvent(gameModeEchoEvent);
+    checks.modeEchoBubbleSafe = gameModeEchoBubble.lineId === selectedPlan.modePresenceLineId &&
+      inspectBubbleSafety(gameModeEchoBubble);
+    observations.lowFrequencyModeEcho = {
+      bubble: summarizeBubble(gameModeEchoBubble),
+      lowFrequencyEvent: summarizeLowFrequencyEvent(gameModeEchoEvent)
     };
 
-    const beforeSleepIndex = lastTelemetryIndex();
-    await setPresenceMode(chat, "sleep");
-    const sleepSurface = await readPresenceSurface(chat);
-    await closeChat(chat);
-    const sleepBubble = await waitForBubbleHidden(pet, 5_000);
-    await sleep(Number(process.env.P2_36_SLEEP_SUPPRESSION_WINDOW_MS || 2600));
-    const lowFrequencyShownDuringSleep = countLowFrequencyEvents({
-      afterIndex: beforeSleepIndex,
-      status: "shown"
+    await waitForBubbleHidden(pet, 10_000);
+    const beforeGameLayeredIdleIndex = lastTelemetryIndex();
+    const gameIdleBubble = await waitForBubbleVisible(pet, {
+      reason: "idle_presence",
+      lineId: selectedPlan.layeredIdleLineId,
+      timeoutMs: 10_000
     });
-    const proactiveShownDuringSleep = countProactiveBubbles({
-      afterIndex: beforeSleepIndex,
-      status: "shown"
+    const gameIdleEvent = await waitForLowFrequencyEvent({
+      status: "shown",
+      afterIndex: beforeGameLayeredIdleIndex,
+      timeoutMs: 2_500
     });
-    checks.sleepModeActive = sleepSurface.presenceModeId === "sleep";
-    checks.sleepSuppressesNewShownEvents = lowFrequencyShownDuringSleep === 0 &&
-      proactiveShownDuringSleep === 0;
-    observations.sleepSuppression = {
-      surface: sleepSurface,
-      bubble: summarizeBubble(sleepBubble),
-      lowFrequencyShownDuringSleep,
-      proactiveShownDuringSleep
+    const gameIdleTelemetry = await waitForProactiveBubble({
+      status: "shown",
+      lineId: selectedPlan.layeredIdleLineId,
+      afterIndex: beforeGameLayeredIdleIndex,
+      timeoutMs: 1_500
+    });
+    checks.modeAwareTimeBandIdleLineShown = gameIdleBubble.lineId === selectedPlan.layeredIdleLineId &&
+      gameIdleBubble.reason === "idle_presence" &&
+      inspectBubbleSafety(gameIdleBubble);
+    checks.modeAwareLowFrequencyEventShown = isRuntimeAllowedLowFrequencyEvent(gameIdleEvent);
+    checks.modeAwareBubbleMatchesTelemetry = Boolean(gameIdleTelemetry) &&
+      gameIdleTelemetry.payload?.reason === gameIdleEvent?.payload?.reason &&
+      gameIdleTelemetry.payload?.lineId === gameIdleBubble.lineId;
+    observations.modeAwareIdle = {
+      bubble: summarizeBubble(gameIdleBubble),
+      lowFrequencyEvent: summarizeLowFrequencyEvent(gameIdleEvent),
+      proactiveBubble: summarizeProactiveBubble(gameIdleTelemetry)
     };
+
+    const inspectedBubbles = [startupBubble, defaultIdleBubble, modeBubble, gameModeEchoBubble, gameIdleBubble];
+    checks.rendererDomDatasetNoEventIdOrTimeBand = inspectedBubbles.every((bubble) =>
+      bubble.forbiddenDatasetKeys.length === 0
+    );
+    checks.rendererDomDatasetSafeShape = inspectedBubbles.every((bubble) =>
+      bubble.datasetKeys.every((key) => ["lineId", "reason", "state"].includes(key))
+    );
 
     assertNoScreenshotResidue(context);
     const residueBeforeCleanup = findScreenshotResidue(context)
@@ -208,6 +251,8 @@ async function main() {
       safeSummaryOnly: true,
       provider: "fake",
       providerFixture: "FakeProvider",
+      requestedTimeBand,
+      selectedPlan,
       durationMs: Date.now() - startedAt,
       checks,
       observations
@@ -231,6 +276,7 @@ async function main() {
       safeSummaryOnly: true,
       provider: "fake",
       providerFixture: "FakeProvider",
+      requestedTimeBand,
       durationMs: Date.now() - startedAt,
       failureCategory: classifyError(error),
       errorName: error instanceof Error ? error.name : "Error"
@@ -238,7 +284,7 @@ async function main() {
     process.exitCode = 1;
   } finally {
     await stopElectron(context);
-    if (process.env.P2_36_KEEP_TMP !== "1") {
+    if (process.env.P2_37_KEEP_TMP !== "1") {
       cleanupRealUiRun(context);
     }
   }
@@ -256,7 +302,7 @@ async function startApp() {
 async function openChatFromPet(pet) {
   await evaluate(pet, "window.petApi?.openChat()");
   const chat = await waitForWindow(context, "renderer/chat/index.html");
-  await waitFor(chat, "Boolean(window.presenceModeApi)");
+  await waitFor(chat, "Boolean(window.dialogueModeApi)");
   await waitFor(chat, "Boolean(document.querySelector('#chat-page'))");
   return chat;
 }
@@ -270,11 +316,14 @@ async function waitForBubbleVisible(pet, options = {}) {
   const reasonCheck = options.reason
     ? ` && bubble.dataset.reason === ${JSON.stringify(options.reason)}`
     : "";
+  const lineCheck = options.lineId
+    ? ` && bubble.dataset.lineId === ${JSON.stringify(options.lineId)}`
+    : "";
 
   await waitFor(pet, `
     (() => {
       const bubble = document.querySelector('#proactive-speech-bubble');
-      return bubble?.dataset.state === 'visible'${reasonCheck};
+      return bubble?.dataset.state === 'visible'${reasonCheck}${lineCheck};
     })()
   `, { timeoutMs: options.timeoutMs ?? 10_000 });
   return inspectBubble(pet);
@@ -297,7 +346,7 @@ async function inspectBubble(pet) {
       if (!bubble) throw new Error('missing-bubble-node');
       const text = bubble.textContent ?? '';
       const dataset = { ...bubble.dataset };
-      const eventIds = ${JSON.stringify([...runtimeAllowedEventIds, ...forbiddenRuntimeEventIds])};
+      const forbiddenDatasetKeys = ${JSON.stringify([...forbiddenDomDatasetKeys])};
       return {
         state: bubble.dataset.state ?? '',
         lineId: bubble.dataset.lineId ?? '',
@@ -305,23 +354,7 @@ async function inspectBubble(pet) {
         textLength: [...text].length,
         ariaHidden: bubble.getAttribute('aria-hidden'),
         datasetKeys: Object.keys(dataset).sort(),
-        hasEventIdKey: Object.hasOwn(dataset, 'eventId'),
-        hasForbiddenEventIdLeak: eventIds.some((eventId) => (
-          text.includes(eventId) ||
-          Object.keys(dataset).includes(eventId) ||
-          Object.values(dataset).includes(eventId)
-        ))
-      };
-    })()
-  `);
-}
-
-async function readPresenceSurface(chat) {
-  return evaluate(chat, `
-    (() => {
-      return {
-        presenceModeId: document.querySelector('#presence-mode-controls .mode-button.is-active')?.dataset.modeId ?? '',
-        partnerTextLength: [...(document.querySelector('#partner-status')?.textContent ?? '')].length
+        forbiddenDatasetKeys: Object.keys(dataset).filter((key) => forbiddenDatasetKeys.includes(key)).sort()
       };
     })()
   `);
@@ -332,7 +365,8 @@ function inspectBubbleSafety(info) {
     (info.state === "hidden" || allowedLineIds.has(info.lineId)) &&
     (info.state === "hidden" || allowedBubbleReasons.has(info.reason)) &&
     info.textLength >= 0 &&
-    info.textLength <= 16;
+    info.textLength <= 16 &&
+    info.forbiddenDatasetKeys.length === 0;
 }
 
 function summarizeBubble(info) {
@@ -343,8 +377,7 @@ function summarizeBubble(info) {
     textLength: info.textLength,
     ariaHidden: info.ariaHidden,
     datasetKeys: info.datasetKeys,
-    hasEventIdKey: info.hasEventIdKey,
-    hasForbiddenEventIdLeak: info.hasForbiddenEventIdLeak
+    forbiddenDatasetKeys: info.forbiddenDatasetKeys
   };
 }
 
@@ -388,11 +421,12 @@ async function waitForLowFrequencyEvent({ status, afterIndex, timeoutMs }) {
   ), timeoutMs);
 }
 
-async function waitForProactiveBubble({ status, afterIndex, timeoutMs }) {
+async function waitForProactiveBubble({ status, lineId, afterIndex, timeoutMs }) {
   return waitForTelemetry((event) => (
     event.__index > afterIndex &&
     event.type === "proactive_speech_bubble" &&
-    event.payload?.status === status
+    event.payload?.status === status &&
+    (!lineId || event.payload?.lineId === lineId)
   ), timeoutMs);
 }
 
@@ -409,29 +443,18 @@ async function waitForTelemetry(predicate, timeoutMs) {
   return null;
 }
 
-function countLowFrequencyEvents({ afterIndex, status, skipReason }) {
-  return readTelemetryEvents()
-    .filter((event) => event.__index > afterIndex)
-    .filter((event) => event.type === "low_frequency_companion_event")
-    .filter((event) => event.payload?.status === status)
-    .filter((event) => !skipReason || event.payload?.skipReason === skipReason)
-    .length;
-}
-
-function countProactiveBubbles({ afterIndex, status }) {
-  return readTelemetryEvents()
-    .filter((event) => event.__index > afterIndex)
-    .filter((event) => event.type === "proactive_speech_bubble")
-    .filter((event) => event.payload?.status === status)
-    .length;
+function isRuntimeAllowedLowFrequencyEvent(event) {
+  return Boolean(event) &&
+    event.type === "low_frequency_companion_event" &&
+    event.payload?.status === "shown" &&
+    allowedLowFrequencyEventIds.has(event.payload?.eventId);
 }
 
 function summarizeLowFrequencyEvent(event) {
   if (!event) {
     return {
       status: "missing",
-      runtimeAllowed: false,
-      runtimeForbidden: false
+      runtimeAllowed: false
     };
   }
 
@@ -449,8 +472,7 @@ function summarizeLowFrequencyEvent(event) {
     durationMs: payload.durationMs,
     minimumIntervalMs: payload.minimumIntervalMs,
     elapsedSinceLastEventMs: payload.elapsedSinceLastEventMs,
-    runtimeAllowed: runtimeAllowedEventIds.has(payload.eventId),
-    runtimeForbidden: forbiddenRuntimeEventIds.has(payload.eventId)
+    runtimeAllowed: allowedLowFrequencyEventIds.has(payload.eventId)
   };
 }
 
