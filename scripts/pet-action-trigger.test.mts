@@ -150,6 +150,10 @@ test("pet action state selector maps mode changes to fixed state reasons", () =>
   assert.equal(selectPetActionStateForModeChange({ dialogueModeId: "reading" })?.triggerReason, "state_read");
   assert.equal(selectPetActionStateForModeChange({ presenceModeId: "sleep" })?.triggerReason, "state_sleep");
   assert.equal(
+    selectPetActionStateForModeChange({ dialogueModeId: "work", presenceModeId: "sleep" })?.triggerReason,
+    "state_sleep"
+  );
+  assert.equal(
     selectPetActionStateForModeChange({ dialogueModeId: "game", presenceModeId: "sleep" })?.triggerReason,
     "state_sleep"
   );
@@ -275,11 +279,14 @@ test("main mode changes trigger only fixed state reasons and preserve bubble sup
   assert.match(source, /PET_MODE_ACTION_STATE_TRIGGER_DELAY_MS = 2_000/);
   assert.match(source, /function schedulePetModeActionStateTrigger\(reason: PetActionTriggerReason\)/);
   assert.match(source, /cancelPendingModeActionStateTrigger\(\);[\s\S]*sendPetActionTrigger\(reason\);/);
+  assert.match(source, /function markProactiveSpeechBubbleHidden\(\): void \{\s*proactiveSpeechBubbleVisibleUntil = 0;\s*\}/);
+  assert.match(source, /selectPetActionStateForModeChange\(\{\s*dialogueModeId: currentDialogueModeId,\s*presenceModeId: currentPresenceModeId\s*\}\)/);
   assert.match(source, /dialogueActionState\.stateId !== "idle"/);
   assert.match(source, /schedulePetModeActionStateTrigger\(dialogueActionState\.triggerReason\)/);
   assert.match(source, /schedulePetModeActionStateTrigger\(presenceActionState\.triggerReason\)/);
   assert.match(source, /will-quit[\s\S]*cancelPendingModeActionStateTrigger\(\);/);
-  assert.match(source, /currentPresenceModeId === "sleep"[\s\S]*cancelStartupProactiveSpeechBubbleTimer\(\);[\s\S]*cancelIdleProactiveSpeechBubbleTimer\(\);/);
+  assert.match(source, /openChatWindow\(\): void[\s\S]*cancelStartupProactiveSpeechBubbleTimer\(\);[\s\S]*cancelIdleProactiveSpeechBubbleTimer\(\);[\s\S]*markProactiveSpeechBubbleHidden\(\);[\s\S]*sendPetActionTrigger\("chat_opened"\);/);
+  assert.match(source, /currentPresenceModeId === "sleep"[\s\S]*cancelStartupProactiveSpeechBubbleTimer\(\);[\s\S]*cancelIdleProactiveSpeechBubbleTimer\(\);[\s\S]*markProactiveSpeechBubbleHidden\(\);[\s\S]*nextIdleProactiveSpeechBubbleReason = "idle_presence";/);
   assert.doesNotMatch(source, /sendPetActionTrigger\([^)]*actionType|pet:action-trigger",\s*\{\s*reason,\s*type/);
 });
 

@@ -96,6 +96,43 @@ test("proactive speech bubble selection is mode-aware but stays allowlisted", ()
   }), "mode_presence_focus");
 });
 
+test("proactive speech bubble selection keeps low-interruption presence ahead of dialogue mode", () => {
+  assert.equal(selectProactiveSpeechBubbleLineId({
+    reason: "idle_presence",
+    presenceModeId: "quiet",
+    dialogueModeId: "work",
+    tick: 0
+  }), "idle_presence_quiet");
+
+  assert.equal(selectProactiveSpeechBubbleLineId({
+    reason: "idle_presence",
+    presenceModeId: "sleep",
+    dialogueModeId: "game",
+    tick: 0
+  }), "idle_presence_quiet");
+
+  assert.equal(selectProactiveSpeechBubbleLineId({
+    reason: "mode_presence",
+    presenceModeId: "focus",
+    dialogueModeId: "work",
+    tick: 0
+  }), "mode_presence_focus");
+
+  assert.equal(selectProactiveSpeechBubbleLineId({
+    reason: "mode_presence",
+    presenceModeId: "quiet",
+    dialogueModeId: "reading",
+    tick: 0
+  }), "mode_presence_focus");
+
+  assert.equal(selectProactiveSpeechBubbleLineId({
+    reason: "mode_presence",
+    presenceModeId: "sleep",
+    dialogueModeId: "game",
+    tick: 0
+  }), "mode_presence_focus");
+});
+
 test("pet preload keeps proactive speech bubble allowlists aligned", () => {
   const preloadSource = readFileSync("src/preload/pet-preload.ts", "utf8");
 

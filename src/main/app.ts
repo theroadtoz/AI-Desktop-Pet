@@ -809,6 +809,10 @@ function cancelIdleProactiveSpeechBubbleTimer(): void {
   idleProactiveSpeechBubbleTimer = null;
 }
 
+function markProactiveSpeechBubbleHidden(): void {
+  proactiveSpeechBubbleVisibleUntil = 0;
+}
+
 function createProactiveSpeechBubblePayload(reason: ProactiveSpeechBubbleReason): ProactiveSpeechBubblePayload {
   proactiveSpeechBubbleTick += 1;
   return {
@@ -1686,6 +1690,7 @@ app.whenReady().then(async () => {
 
     cancelStartupProactiveSpeechBubbleTimer();
     cancelIdleProactiveSpeechBubbleTimer();
+    markProactiveSpeechBubbleHidden();
     showChatWindow(chatWindow);
     focusChatInput(chatWindow);
     transitionPetRole({ type: "chat:opened" });
@@ -2738,7 +2743,10 @@ app.whenReady().then(async () => {
       });
       notifyChatDialogueModeChanged(currentDialogueModeId);
       notifyPetDialogueModeChanged(currentDialogueModeId);
-      const dialogueActionState = selectPetActionStateForModeChange({ dialogueModeId: currentDialogueModeId });
+      const dialogueActionState = selectPetActionStateForModeChange({
+        dialogueModeId: currentDialogueModeId,
+        presenceModeId: currentPresenceModeId
+      });
       if (dialogueActionState && dialogueActionState.stateId !== "idle") {
         schedulePetModeActionStateTrigger(dialogueActionState.triggerReason);
       }
@@ -2777,6 +2785,8 @@ app.whenReady().then(async () => {
       if (currentPresenceModeId === "sleep") {
         cancelStartupProactiveSpeechBubbleTimer();
         cancelIdleProactiveSpeechBubbleTimer();
+        markProactiveSpeechBubbleHidden();
+        nextIdleProactiveSpeechBubbleReason = "idle_presence";
       }
 
       logTelemetry("presence_mode_changed", {

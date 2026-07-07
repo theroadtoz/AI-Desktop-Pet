@@ -74,12 +74,14 @@ export function selectProactiveSpeechBubbleLineId(input: ProactiveSpeechBubbleSe
   if (input.reason === "startup_presence") {
     return selectFromList([
       "startup_presence_ready",
-      input.presenceModeId === "focus" ? "startup_presence_focus" : "startup_presence_soft"
+      input.presenceModeId === "focus" || input.presenceModeId === "sleep"
+        ? "startup_presence_focus"
+        : "startup_presence_soft"
     ], input.tick);
   }
 
   if (input.reason === "mode_presence") {
-    if (input.presenceModeId === "focus" || input.presenceModeId === "quiet") {
+    if (input.presenceModeId === "focus" || input.presenceModeId === "quiet" || input.presenceModeId === "sleep") {
       return "mode_presence_focus";
     }
 
@@ -103,6 +105,10 @@ export function selectProactiveSpeechBubbleLineId(input: ProactiveSpeechBubbleSe
   }
 
   if (input.presenceModeId === "quiet") {
+    return "idle_presence_quiet";
+  }
+
+  if (input.presenceModeId === "sleep") {
     return "idle_presence_quiet";
   }
 

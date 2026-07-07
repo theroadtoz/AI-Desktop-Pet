@@ -46,6 +46,7 @@
     "accept:p2-28-history-summary-context-transparency": "npm run build && node scripts/p2-28-history-summary-context-transparency-real-ui.mjs",
     "accept:p2-30-daily-companion-contextual-rhythm": "npm run build && node scripts/p2-30-daily-companion-contextual-rhythm-real-ui.mjs",
     "accept:p2-33-companion-presence-microcopy-drift": "npm run build && node scripts/p2-33-companion-presence-microcopy-drift-real-ui.mjs",
+    "accept:p2-34-companion-presence-idle-mode-cadence": "npm run build && node scripts/p2-34-companion-presence-idle-mode-cadence-real-ui.mjs",
     "accept:p2-30b-real-local-daily-companion-rhythm": "npm run build && node scripts/p2-30b-real-local-daily-companion-rhythm-real-ui.mjs",
     "accept:p2-29a-privacy-safe-mcp-web-search": "node scripts/p2-29a-privacy-safe-mcp-web-search-real-ui.mjs",
     "accept:p2-29b-real-mcp-server-compatibility-search-citation-ui": "npm run build && node scripts/p2-29b-real-mcp-server-compatibility-search-citation-ui.mjs",
