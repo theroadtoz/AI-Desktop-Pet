@@ -184,7 +184,7 @@ async function runFirstSession(checks) {
     `);
     await waitFor(chat, "document.querySelector('#shelf-action-echo')?.dataset.state === 'idle'", 6_000);
     checks.actionEchoReturnsToIdle = await evaluate(chat, `
-      document.querySelector("#shelf-action-echo")?.textContent === "小动作：安静待着"
+      document.querySelector("#shelf-action-echo")?.textContent === "小动作：她安静待着"
     `);
 
     await evaluate(pet, `

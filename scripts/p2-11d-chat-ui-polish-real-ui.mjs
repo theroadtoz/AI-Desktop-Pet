@@ -488,11 +488,11 @@ async function main() {
           "她把记忆轻轻归好",
           "她把敏感部分先放下",
           "她带着联网引用线索回来",
-          "她这轮带上了 1 条已允许的记忆"
+          "她带着 1 条已允许的记忆靠近"
         ].some((text) => note.includes(text));
         return noteElement?.hidden === false &&
           completionNote &&
-          memory.includes("她带上了 1 条已允许的记忆");
+          memory.includes("她带着 1 条已允许的记忆靠近");
       })()
     `);
     checks.sendingAndCompleteStates = await evaluate(chat, `
@@ -509,11 +509,11 @@ async function main() {
           "她把记忆轻轻归好",
           "她把敏感部分先放下",
           "她带着联网引用线索回来",
-          "她这轮带上了 1 条已允许的记忆"
+          "她带着 1 条已允许的记忆靠近"
         ].some((text) => note.includes(text));
         return noteElement?.hidden === false &&
           completionNote &&
-          memory.includes("她带上了 1 条已允许的记忆") &&
+          memory.includes("她带着 1 条已允许的记忆靠近") &&
           messages.some((node) => node.classList.contains("message-user")) &&
           messages.some((node) => node.classList.contains("message-pet"));
       })()
@@ -556,7 +556,7 @@ async function main() {
           "她把记忆轻轻归好",
           "她把敏感部分先放下",
           "她带着联网引用线索回来",
-          "她这轮带上了"
+          "她带着"
         ].some((text) => note.includes(text));
       })()
     `);

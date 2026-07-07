@@ -107,9 +107,9 @@
               <button id="enable-memory-button" class="button" type="button">开启记忆</button>
               <button id="clear-memory-button" class="button-danger" type="button">清空全部记忆</button>
             </div>
-            <p id="memory-feedback" class="selection-note" aria-live="polite">记忆默认关闭；开启后才会在本机提取短事实，已启用事实卡才会临时加入 Provider 请求。</p>
-            <p id="memory-overview-status" class="status-box" data-state="fallback" aria-live="polite">记忆关闭；下次不会带入记忆。</p>
-            <p id="memory-next-injection-status" class="status-box" data-state="fallback" aria-live="polite">下次发送会注入 0 条。</p>
+            <p id="memory-feedback" class="selection-note" aria-live="polite">记忆默认关闭；开启后才会在本机提取短事实，已启用事实卡会在聊天时临时给她参考。</p>
+            <p id="memory-overview-status" class="status-box" data-state="fallback" aria-live="polite">记忆关闭；她这轮轻装陪着。</p>
+            <p id="memory-next-injection-status" class="status-box" data-state="fallback" aria-live="polite">下次发送她不会带入记忆。</p>
             <div id="memory-safe-stats" class="memory-safe-stats status-box" data-state="fallback" aria-live="polite"></div>
             <nav id="memory-filter-nav" class="subpage-nav" aria-label="记忆筛选">
               <button class="subpage-tab is-active" type="button" data-memory-filter="all">全部</button>
@@ -119,7 +119,7 @@
               <button class="subpage-tab" type="button" data-memory-filter="manual">手动</button>
               <button class="subpage-tab" type="button" data-memory-filter="disabled">已停用</button>
             </nav>
-            <p id="memory-session-status" class="status-box ribbon-echo" aria-live="polite">这轮没有带入记忆 · 她安静待着</p>
+            <p id="memory-session-status" class="status-box ribbon-echo" aria-live="polite">她这轮轻装陪着 · 她安静待着</p>
             <div id="clear-memory-confirmation" class="status-box delete-confirmation" hidden>
               <span>清空后无法恢复，是否继续？</span>
               <span class="inline-actions">
@@ -183,13 +183,13 @@
               <button id="shelf-accessory-button" class="button-light shelf-button" type="button">配件：无配件</button>
               <button id="shelf-scale-button" class="button-light shelf-button" type="button">大小：100%</button>
               <button id="shelf-lock-button" class="button-light shelf-button" type="button">锁定：未锁定</button>
-              <p id="shelf-action-echo" class="status-box shelf-echo" data-state="idle" aria-live="polite">小动作：安静待着</p>
+              <p id="shelf-action-echo" class="status-box shelf-echo" data-state="idle" aria-live="polite">小动作：她安静待着</p>
             </section>
           </section>
           <section id="settings-model-page" class="settings-page content-stack" hidden aria-labelledby="provider-settings-title">
             <h3 id="provider-settings-title" class="settings-section-title">Provider / 模型</h3>
             <section class="partner-status-band" aria-label="魔女状态缎带">
-              <p id="partner-status" class="status-box ribbon-primary" aria-live="polite">桌面伙伴 · 默认陪伴</p>
+              <p id="partner-status" class="status-box ribbon-primary" aria-live="polite">桌面伙伴：等待本地身份 · 默认陪伴 · 默认陪伴</p>
               <p id="provider-status" class="status-box ribbon-provider" aria-live="polite">正在读取模型状态...</p>
             </section>
             <button id="settings-model-detail-button" class="button-light" type="button">查看连接详情</button>

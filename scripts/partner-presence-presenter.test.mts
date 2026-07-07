@@ -172,33 +172,33 @@ test("partner status combines profile, dialogue mode, and presence mode", () => 
     userProfileLabel: "小夏",
     dialogueModeId: "reading",
     presenceModeId: "focus"
-  }), "桌面伙伴：小夏 · 读书模式 · 存在：专注陪伴");
+  }), "桌面伙伴：小夏 · 读书模式 · 专注陪伴");
   assert.equal(formatPartnerStatus({
     userProfileLabel: null,
     dialogueModeId: "default",
     presenceModeId: "default"
-  }), "桌面伙伴：等待本地身份 · 默认陪伴 · 存在：默认陪伴");
+  }), "桌面伙伴：等待本地身份 · 默认陪伴 · 默认陪伴");
 });
 
 test("memory ribbon handles 0, 1, and many memory counts", () => {
   assert.deepEqual(formatMemoryRibbon({ memoryInjectionCount: null, ribbonEcho: ACTIVITY_ECHO_IDLE_MESSAGE }), {
-    text: "这轮没有带入记忆 · 她安静待着",
+    text: "她这轮轻装陪着 · 她安静待着",
     state: "fallback"
   });
   assert.deepEqual(formatMemoryRibbon({ memoryInjectionCount: 1, ribbonEcho: "正在回复" }), {
-    text: "她带上了 1 条已允许的记忆 · 她在想怎么说",
+    text: "她带着 1 条已允许的记忆靠近 · 她在想怎么说",
     state: "ready"
   });
   assert.deepEqual(formatMemoryRibbon({ memoryInjectionCount: 3, ribbonEcho: "回复完成" }), {
-    text: "她带上了 3 条已允许的记忆 · 她刚说完",
+    text: "她带着 3 条已允许的记忆靠近 · 她刚说完",
     state: "ready"
   });
   assert.deepEqual(formatMemoryRibbon({ memoryInjectionCount: 2, ribbonEcho: "已中断" }), {
-    text: "她带上了 2 条已允许的记忆 · 她先停在这里",
+    text: "她带着 2 条已允许的记忆靠近 · 她先停在这里",
     state: "ready"
   });
   assert.deepEqual(formatMemoryRibbon({ memoryInjectionCount: null, ribbonEcho: "回复失败" }), {
-    text: "这轮没有带入记忆 · 她暂时没接上模型",
+    text: "她这轮轻装陪着 · 她暂时没接上模型",
     state: "fallback"
   });
 });
@@ -218,7 +218,7 @@ test("memory activity presenter keeps companion wording and safe fields only", (
       injectionBudget: 8
     }
   })), {
-    text: "记忆关闭；她不会替你保存，也没有带入记忆",
+    text: "记忆关闭；她只陪你聊，不会替你保存",
     state: "fallback"
   });
 
@@ -245,7 +245,7 @@ test("memory activity presenter keeps companion wording and safe fields only", (
       recentMessageCount: 8
     }
   })), {
-    text: "她刚记下 1 条关键记忆；她整理了 1 条相近记忆；她这轮带上了 2 条已允许的记忆；长会话已收束成安全摘要",
+    text: "她刚记下 1 条新记忆；她整理了 1 条相近记忆；她带着 2 条已允许的记忆靠近；她把长聊收拢成轻便脉络",
     state: "ready"
   });
 
@@ -264,17 +264,17 @@ test("memory activity presenter keeps companion wording and safe fields only", (
     }
   }));
 
-  assert.equal(sensitive.text, "她跳过了敏感内容；这轮没有带入记忆");
-  assert.doesNotMatch(sensitive.text, /SECRET_SENTINEL|capturedCount|skippedReason|memoryContext|providerMessages|prompt/);
+  assert.equal(sensitive.text, "她把敏感部分先放下；她这轮轻装陪着");
+  assert.doesNotMatch(sensitive.text, /SECRET_SENTINEL|capturedCount|skippedReason|memoryContext|providerMessages|prompt|注入|安全摘要/);
 });
 
 test("context transparency presenter describes short and compressed turns without debug fields", () => {
   const short = formatContextTransparency(createContextTransparency());
 
   assert.equal(short.state, "fallback");
-  assert.match(short.text, /当前短上下文/);
-  assert.match(short.text, /不需要安全摘要/);
-  assert.match(short.text, /没有带入记忆/);
+  assert.match(short.text, /当前这几句/);
+  assert.match(short.text, /不需要收拢长聊/);
+  assert.match(short.text, /轻装陪着/);
   assert.match(short.text, /打开历史只是本机查看/);
   assert.doesNotMatch(short.text, /requestVersion|originalMessageCount|providerMessages|prompt|SECRET_SENTINEL/);
 
@@ -297,11 +297,11 @@ test("context transparency presenter describes short and compressed turns withou
   }));
 
   assert.equal(compressed.state, "ready");
-  assert.match(compressed.text, /5 条较早消息变成安全摘要/);
+  assert.match(compressed.text, /收好 5 条较早消息/);
   assert.match(compressed.text, /保留最近 8 条/);
   assert.match(compressed.text, /2 条已允许记忆/);
   assert.match(compressed.text, /3 条引用线索/);
-  assert.doesNotMatch(compressed.text, /safeQuery|snippet|result body|providerMessages|requestVersion|prompt/);
+  assert.doesNotMatch(compressed.text, /safeQuery|snippet|result body|providerMessages|requestVersion|prompt|安全摘要|Provider 请求/);
 });
 
 test("daily companion rhythm merges low-value context and memory into quiet reply status", () => {
@@ -402,17 +402,32 @@ test("history context preview only estimates count and boundary", () => {
   const short = formatHistoryContextPreview({ messageCount: 3 });
   assert.equal(short.state, "fallback");
   assert.match(short.text, /3 条消息不会自动发送/);
-  assert.match(short.text, /预计不需要安全摘要/);
+  assert.match(short.text, /这段短聊天继续/);
 
   const long = formatHistoryContextPreview({ messageCount: 12, summaryTrigger: 12, recentMessageBudget: 8 });
   assert.equal(long.state, "ready");
   assert.match(long.text, /12 条消息不会自动发送/);
-  assert.match(long.text, /5 条较早消息/);
+  assert.match(long.text, /5 条较早消息收成轻便脉络/);
   assert.match(long.text, /保留最近 8 条/);
-  assert.doesNotMatch(long.text, /providerMessages|content|prompt|SECRET_SENTINEL|用户原文/);
+  assert.doesNotMatch(long.text, /providerMessages|content|prompt|SECRET_SENTINEL|用户原文|安全摘要/);
 });
 
 test("companion shelf presenter keeps action echo and lock wording", () => {
+  assert.deepEqual(formatCompanionShelf({
+    accessoryLabel: "无配件",
+    petScale: 1,
+    isPetLocked: false,
+    activityEcho: ACTIVITY_ECHO_IDLE_MESSAGE,
+    activityEchoState: "idle"
+  }), {
+    accessoryText: "配件：无配件",
+    scaleText: "大小：100%",
+    lockText: "锁定：未锁定",
+    lockState: "fallback",
+    actionEchoText: "小动作：她安静待着",
+    actionEchoState: "idle"
+  });
+
   assert.deepEqual(formatCompanionShelf({
     accessoryLabel: "眼镜",
     petScale: 1.15,

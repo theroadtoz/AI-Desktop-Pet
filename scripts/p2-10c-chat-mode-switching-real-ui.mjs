@@ -518,7 +518,7 @@ async function main() {
       })()
     `);
     await sendMessage(chat, "检查记忆状态");
-    await waitFor(chat, `document.querySelector("#memory-session-status")?.textContent.includes("她带上了 1 条已允许的记忆")`, 10_000);
+    await waitFor(chat, `document.querySelector("#memory-session-status")?.textContent.includes("她带着 1 条已允许的记忆靠近")`, 10_000);
     checks.memoryStatusHidesFactContent = await evaluate(chat, `
       (() => {
         const checkedText = [
@@ -529,7 +529,7 @@ async function main() {
           document.querySelector("#companion-control-shelf")?.textContent ?? ""
         ].join("\\n");
         const memoryStatus = document.querySelector("#memory-session-status")?.textContent ?? "";
-        return memoryStatus.includes("她带上了 1 条已允许的记忆") &&
+        return memoryStatus.includes("她带着 1 条已允许的记忆靠近") &&
           !checkedText.includes(${JSON.stringify(memorySentinel)});
       })()
     `);

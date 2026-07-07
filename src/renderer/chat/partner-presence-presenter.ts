@@ -136,7 +136,7 @@ export function formatPartnerStatus(input: {
   const presenceLabel = formatPresenceLabel(input.presenceModeId);
   const roleLabel = input.userProfileLabel ?? "等待本地身份";
 
-  return `桌面伙伴：${roleLabel} · ${modeLabel} · 存在：${presenceLabel}`;
+  return `桌面伙伴：${roleLabel} · ${modeLabel} · ${presenceLabel}`;
 }
 
 export function formatMemoryRibbon(input: {
@@ -149,8 +149,8 @@ export function formatMemoryRibbon(input: {
   const usedMemory = Boolean(input.memoryInjectionCount && input.memoryInjectionCount > 0);
   const companionState = formatCompanionStateEcho(input.ribbonEcho);
   const memoryText = usedMemory
-    ? `她带上了 ${input.memoryInjectionCount} 条已允许的记忆`
-    : "这轮没有带入记忆";
+    ? `她带着 ${input.memoryInjectionCount} 条已允许的记忆靠近`
+    : "她这轮轻装陪着";
 
   return {
     text: `${memoryText} · ${companionState}`,
@@ -166,13 +166,13 @@ export function formatMemoryActivity(payload: ChatMemoryActivityPayload): {
   const autoCapture = payload.autoCapture;
 
   if (!autoCapture.enabled || autoCapture.skippedReason === "disabled") {
-    parts.push("记忆关闭；她不会替你保存，也没有带入记忆");
+    parts.push("记忆关闭；她只陪你聊，不会替你保存");
   } else if (autoCapture.skippedReason === "sensitive") {
-    parts.push("她跳过了敏感内容");
+    parts.push("她把敏感部分先放下");
   } else if (autoCapture.skippedReason === "capture_failed") {
     parts.push("她暂时没能整理记忆");
   } else if (autoCapture.capturedCount > 0) {
-    parts.push(`她刚记下 ${autoCapture.capturedCount} 条${autoCapture.keyCount > 0 ? "关键" : "一般"}记忆`);
+    parts.push(`她刚记下 ${autoCapture.capturedCount} 条新记忆`);
   } else if (autoCapture.mergedCount + autoCapture.deduplicatedCount > 0) {
     parts.push(`她整理了 ${autoCapture.mergedCount + autoCapture.deduplicatedCount} 条相近记忆`);
   } else {
@@ -188,13 +188,13 @@ export function formatMemoryActivity(payload: ChatMemoryActivityPayload): {
   }
 
   if (autoCapture.enabled && payload.injection.count > 0) {
-    parts.push(`她这轮带上了 ${payload.injection.count} 条已允许的记忆`);
+    parts.push(`她带着 ${payload.injection.count} 条已允许的记忆靠近`);
   } else if (autoCapture.enabled) {
-    parts.push("这轮没有带入记忆");
+    parts.push("她这轮轻装陪着");
   }
 
   if (payload.contextBudget.compressed) {
-    parts.push("长会话已收束成安全摘要");
+    parts.push("她把长聊收拢成轻便脉络");
   }
 
   const state = autoCapture.enabled &&
@@ -222,15 +222,15 @@ export function formatContextTransparency(payload: ChatContextTransparencyPayloa
   const budget = payload.contextBudget;
 
   if (budget.compressed) {
-    parts.push(`长会话已收束：${budget.summarizedMessageCount} 条较早消息变成安全摘要，保留最近 ${budget.recentMessageCount} 条`);
+    parts.push(`她把长聊收拢成轻便脉络：收好 ${budget.summarizedMessageCount} 条较早消息，保留最近 ${budget.recentMessageCount} 条`);
   } else {
-    parts.push("这轮只发送当前短上下文；不需要安全摘要");
+    parts.push("她只拿当前这几句来回复；不需要收拢长聊");
   }
 
   if (payload.memory.injectionCount > 0) {
     parts.push(`她这轮会带上 ${payload.memory.injectionCount} 条已允许记忆`);
   } else {
-    parts.push("这轮没有带入记忆");
+    parts.push("她这轮轻装陪着");
   }
 
   if (payload.webSearch.included) {
@@ -239,7 +239,7 @@ export function formatContextTransparency(payload: ChatContextTransparencyPayloa
     parts.push("这轮没有带入联网搜索引用");
   }
 
-  parts.push("打开历史只是本机查看；继续发送后才会交给当前 Provider");
+  parts.push("打开历史只是本机查看；继续发送后才会交给当前模型");
 
   return {
     text: parts.join("；"),
@@ -362,13 +362,13 @@ export function formatHistoryContextPreview(input: {
     const summarizedCount = Math.max(0, nextMessageCount - recentCount);
 
     return {
-      text: `本地查看：${messageCount} 条消息不会自动发送；继续发送下一条后，预计 ${summarizedCount} 条较早消息会先变成安全摘要，保留最近 ${recentCount} 条。`,
+      text: `本地查看：${messageCount} 条消息不会自动发送；继续发送下一条后，她会把 ${summarizedCount} 条较早消息收成轻便脉络，保留最近 ${recentCount} 条。`,
       state: "ready"
     };
   }
 
   return {
-    text: `本地查看：${messageCount} 条消息不会自动发送；继续发送下一条后，会携带这段短上下文，预计不需要安全摘要。`,
+    text: `本地查看：${messageCount} 条消息不会自动发送；继续发送下一条后，她会带着这段短聊天继续。`,
     state: "fallback"
   };
 }
@@ -420,7 +420,7 @@ export function formatCompanionShelf(input: {
     scaleText: `大小：${Math.round(input.petScale * 100)}%`,
     lockText: `锁定：${input.isPetLocked ? "已锁定" : "未锁定"}`,
     lockState: input.isPetLocked ? "ready" : "fallback",
-    actionEchoText: `小动作：${input.activityEcho}`,
+    actionEchoText: `小动作：${formatCompanionStateEcho(input.activityEcho)}`,
     actionEchoState: input.activityEchoState
   };
 }
