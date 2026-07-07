@@ -8,12 +8,14 @@ import {
   MIN_PROACTIVE_SPEECH_BUBBLE_DURATION_MS,
   PROACTIVE_SPEECH_BUBBLE_LINE_CATALOG,
   PROACTIVE_SPEECH_BUBBLE_REASONS,
+  PROACTIVE_SPEECH_BUBBLE_SAFE_CONTEXT_TAGS,
   PROACTIVE_SPEECH_BUBBLE_TIME_BANDS,
   clampProactiveSpeechBubbleDuration,
   getProactiveSpeechBubbleLine,
   getProactiveSpeechBubbleTimeBand,
   isProactiveSpeechBubbleLineId,
   isProactiveSpeechBubbleReason,
+  isProactiveSpeechBubbleSafeContextTag,
   isProactiveSpeechBubbleTimeBand,
   selectProactiveSpeechBubbleLineId
 } from "../src/shared/proactive-speech-bubble.ts";
@@ -64,6 +66,14 @@ test("proactive speech bubble accepts only safe time bands", () => {
   assert.equal(isProactiveSpeechBubbleTimeBand("dawn"), false);
   assert.equal(isProactiveSpeechBubbleTimeBand(""), false);
   assert.equal(isProactiveSpeechBubbleTimeBand(undefined), false);
+});
+
+test("proactive speech bubble accepts only fixed safe context tags", () => {
+  assert.deepEqual(PROACTIVE_SPEECH_BUBBLE_SAFE_CONTEXT_TAGS, ["context_settle"]);
+  assert.equal(isProactiveSpeechBubbleSafeContextTag("context_settle"), true);
+  assert.equal(isProactiveSpeechBubbleSafeContextTag("context-settle"), false);
+  assert.equal(isProactiveSpeechBubbleSafeContextTag("memory_safe_pulse"), false);
+  assert.equal(isProactiveSpeechBubbleSafeContextTag(undefined), false);
 });
 
 test("proactive speech bubble derives local time bands from Date", () => {
@@ -195,6 +205,76 @@ test("proactive speech bubble selection keeps low-interruption presence ahead of
   }), "mode_presence_focus");
 });
 
+test("proactive speech bubble selection applies safe context tag after low-interruption presence", () => {
+  assert.equal(selectProactiveSpeechBubbleLineId({
+    reason: "idle_presence",
+    presenceModeId: "default",
+    dialogueModeId: "default",
+    tick: 0,
+    timeBand: "morning",
+    safeContextTag: "context_settle"
+  }), "idle_presence_context_settle");
+
+  assert.equal(selectProactiveSpeechBubbleLineId({
+    reason: "idle_presence",
+    presenceModeId: "default",
+    dialogueModeId: "work",
+    tick: 0,
+    timeBand: "afternoon",
+    safeContextTag: "context_settle"
+  }), "idle_presence_context_settle");
+
+  assert.equal(selectProactiveSpeechBubbleLineId({
+    reason: "idle_presence",
+    presenceModeId: "focus",
+    dialogueModeId: "default",
+    tick: 0,
+    safeContextTag: "context_settle"
+  }), "idle_presence_focus");
+
+  assert.equal(selectProactiveSpeechBubbleLineId({
+    reason: "idle_presence",
+    presenceModeId: "quiet",
+    dialogueModeId: "work",
+    tick: 0,
+    safeContextTag: "context_settle"
+  }), "idle_presence_quiet");
+
+  assert.equal(selectProactiveSpeechBubbleLineId({
+    reason: "idle_presence",
+    presenceModeId: "sleep",
+    dialogueModeId: "game",
+    tick: 0,
+    safeContextTag: "context_settle"
+  }), "idle_presence_quiet");
+});
+
+test("proactive speech bubble selection keeps startup and mode presence ahead of safe context tag", () => {
+  assert.equal(selectProactiveSpeechBubbleLineId({
+    reason: "startup_presence",
+    presenceModeId: "default",
+    dialogueModeId: "work",
+    tick: 0,
+    safeContextTag: "context_settle"
+  }), "startup_presence_ready");
+
+  assert.equal(selectProactiveSpeechBubbleLineId({
+    reason: "mode_presence",
+    presenceModeId: "default",
+    dialogueModeId: "reading",
+    tick: 0,
+    safeContextTag: "context_settle"
+  }), "mode_presence_reading");
+
+  assert.equal(selectProactiveSpeechBubbleLineId({
+    reason: "mode_presence",
+    presenceModeId: "focus",
+    dialogueModeId: "work",
+    tick: 0,
+    safeContextTag: "context_settle"
+  }), "mode_presence_focus");
+});
+
 test("main runtime gates proactive speech bubble time band env to acceptance telemetry", () => {
   const appSource = readFileSync("src/main/app.ts", "utf8");
 
@@ -229,11 +309,25 @@ test("main runtime routes idle proactive bubbles through low frequency event poo
   assert.notEqual(idleSchedulerEndIndex, -1);
   assert.match(appSource, /import\s+\{[\s\S]*selectLowFrequencyCompanionEvent[\s\S]*\}\s+from "\.\.\/shared\/daily-state-orchestration"/);
   assert.match(idleSchedulerSource, /reason !== "mode_presence"[\s\S]*selectRuntimeLowFrequencyCompanionEvent/);
-  assert.match(idleSchedulerSource, /createProactiveSpeechBubblePayload\(selection\.event\.bubbleReason\)/);
+  assert.match(idleSchedulerSource, /createProactiveSpeechBubblePayload\(selection\.event\.bubbleReason,[\s\S]*safeContextTag: getLowFrequencyCompanionSafeContextTag\(selection\.event\)/);
   assert.match(idleSchedulerSource, /sendProactiveSpeechBubble\(payload\)/);
   assert.match(idleSchedulerSource, /lastLowFrequencyCompanionEventAt = now/);
   assert.match(idleSchedulerSource, /lastLowFrequencyCompanionEventId = selection\.event\.eventId/);
   assert.match(appSource, /logTelemetry\("low_frequency_companion_event", \{[\s\S]*eventId:[\s\S]*reason:[\s\S]*stateId:[\s\S]*actionType:[\s\S]*modeId:[\s\S]*presenceModeId:[\s\S]*status,[\s\S]*skipReason:[\s\S]*safeSummaryLabel:[\s\S]*interruptPolicy:[\s\S]*durationMs:[\s\S]*elapsedSinceLastEventMs:[\s\S]*minimumIntervalMs:/);
+});
+
+test("main runtime maps context settle event to selector safe context tag", () => {
+  const appSource = readFileSync("src/main/app.ts", "utf8");
+  const mapperIndex = appSource.indexOf("function getLowFrequencyCompanionSafeContextTag(");
+  const mapperEndIndex = appSource.indexOf("function createProactiveSpeechBubblePayload(", mapperIndex);
+  const mapperSource = appSource.slice(mapperIndex, mapperEndIndex);
+
+  assert.notEqual(mapperIndex, -1);
+  assert.notEqual(mapperEndIndex, -1);
+  assert.match(appSource, /type ProactiveSpeechBubbleSafeContextTag/);
+  assert.match(mapperSource, /event\?\.eventId === "context-settle"/);
+  assert.match(mapperSource, /return "context_settle"/);
+  assert.doesNotMatch(mapperSource, /memory-safe-pulse|search-citation-pulse/);
 });
 
 test("proactive speech bubble renderer payload contract stays event-pool agnostic", () => {
@@ -246,9 +340,9 @@ test("proactive speech bubble renderer payload contract stays event-pool agnosti
   );
 
   assert.match(sharedSource, /export type ProactiveSpeechBubblePayload = \{\s+lineId: ProactiveSpeechBubbleLineId;\s+reason: ProactiveSpeechBubbleReason;\s+durationMs: number;\s+\};/);
-  assert.doesNotMatch(payloadTypeSource, /eventId|timeBand/);
+  assert.doesNotMatch(payloadTypeSource, /eventId|safeContextTag|timeBand/);
   assert.match(appSource, /petWindow\.webContents\.send\("pet:proactive-speech-bubble", payload\)/);
   assert.doesNotMatch(appSource, /petWindow\.webContents\.send\("pet:proactive-speech-bubble", \{/);
   assert.match(preloadSource, /return \{\s+lineId,\s+reason,\s+durationMs: Math\.round\(durationMs\)\s+\};/);
-  assert.doesNotMatch(preloadSource, /eventId|timeBand/);
+  assert.doesNotMatch(preloadSource, /eventId|safeContextTag|timeBand/);
 });

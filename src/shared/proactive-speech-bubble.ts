@@ -47,6 +47,12 @@ export const PROACTIVE_SPEECH_BUBBLE_TIME_BANDS = [
 
 export type ProactiveSpeechBubbleTimeBand = typeof PROACTIVE_SPEECH_BUBBLE_TIME_BANDS[number];
 
+export const PROACTIVE_SPEECH_BUBBLE_SAFE_CONTEXT_TAGS = [
+  "context_settle"
+] as const;
+
+export type ProactiveSpeechBubbleSafeContextTag = typeof PROACTIVE_SPEECH_BUBBLE_SAFE_CONTEXT_TAGS[number];
+
 export type ProactiveSpeechBubblePayload = {
   lineId: ProactiveSpeechBubbleLineId;
   reason: ProactiveSpeechBubbleReason;
@@ -64,6 +70,7 @@ export type ProactiveSpeechBubbleSelectionInput = {
   dialogueModeId: DialogueModeId;
   tick: number;
   timeBand?: ProactiveSpeechBubbleTimeBand | undefined;
+  safeContextTag?: ProactiveSpeechBubbleSafeContextTag | undefined;
 };
 
 export function isProactiveSpeechBubbleLineId(value: unknown): value is ProactiveSpeechBubbleLineId {
@@ -78,6 +85,11 @@ export function isProactiveSpeechBubbleReason(value: unknown): value is Proactiv
 export function isProactiveSpeechBubbleTimeBand(value: unknown): value is ProactiveSpeechBubbleTimeBand {
   return typeof value === "string" &&
     PROACTIVE_SPEECH_BUBBLE_TIME_BANDS.includes(value as ProactiveSpeechBubbleTimeBand);
+}
+
+export function isProactiveSpeechBubbleSafeContextTag(value: unknown): value is ProactiveSpeechBubbleSafeContextTag {
+  return typeof value === "string" &&
+    PROACTIVE_SPEECH_BUBBLE_SAFE_CONTEXT_TAGS.includes(value as ProactiveSpeechBubbleSafeContextTag);
 }
 
 export function getProactiveSpeechBubbleTimeBand(date: Date): ProactiveSpeechBubbleTimeBand {
@@ -153,6 +165,10 @@ export function selectProactiveSpeechBubbleLineId(input: ProactiveSpeechBubbleSe
 
   if (input.presenceModeId === "sleep") {
     return "idle_presence_quiet";
+  }
+
+  if (input.safeContextTag === "context_settle") {
+    return "idle_presence_context_settle";
   }
 
   if (input.dialogueModeId === "work") {

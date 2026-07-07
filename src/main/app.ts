@@ -36,6 +36,7 @@ import {
   selectProactiveSpeechBubbleLineId,
   type ProactiveSpeechBubbleReason,
   type ProactiveSpeechBubblePayload,
+  type ProactiveSpeechBubbleSafeContextTag,
   type ProactiveSpeechBubbleTimeBand
 } from "../shared/proactive-speech-bubble";
 import {
@@ -895,7 +896,20 @@ function getRuntimeProactiveSpeechBubbleTimeBand(): ProactiveSpeechBubbleTimeBan
   return ACCEPTANCE_PROACTIVE_SPEECH_BUBBLE_TIME_BAND ?? getProactiveSpeechBubbleTimeBand(new Date());
 }
 
-function createProactiveSpeechBubblePayload(reason: ProactiveSpeechBubbleReason): ProactiveSpeechBubblePayload {
+function getLowFrequencyCompanionSafeContextTag(
+  event: LowFrequencyCompanionEvent | null
+): ProactiveSpeechBubbleSafeContextTag | undefined {
+  if (event?.eventId === "context-settle") {
+    return "context_settle";
+  }
+
+  return undefined;
+}
+
+function createProactiveSpeechBubblePayload(
+  reason: ProactiveSpeechBubbleReason,
+  options: { safeContextTag?: ProactiveSpeechBubbleSafeContextTag | undefined } = {}
+): ProactiveSpeechBubblePayload {
   proactiveSpeechBubbleTick += 1;
   return {
     lineId: selectProactiveSpeechBubbleLineId({
@@ -903,7 +917,8 @@ function createProactiveSpeechBubblePayload(reason: ProactiveSpeechBubbleReason)
       presenceModeId: currentPresenceModeId,
       dialogueModeId: currentDialogueModeId,
       tick: proactiveSpeechBubbleTick,
-      timeBand: getRuntimeProactiveSpeechBubbleTimeBand()
+      timeBand: getRuntimeProactiveSpeechBubbleTimeBand(),
+      safeContextTag: options.safeContextTag
     }),
     reason,
     durationMs: DEFAULT_PROACTIVE_SPEECH_BUBBLE_DURATION_MS
@@ -1000,7 +1015,9 @@ function scheduleIdleProactiveSpeechBubble(): void {
         return;
       }
 
-      const payload = createProactiveSpeechBubblePayload(selection.event.bubbleReason);
+      const payload = createProactiveSpeechBubblePayload(selection.event.bubbleReason, {
+        safeContextTag: getLowFrequencyCompanionSafeContextTag(selection.event)
+      });
       if (sendProactiveSpeechBubble(payload)) {
         lastLowFrequencyCompanionEventAt = now;
         lastLowFrequencyCompanionEventId = selection.event.eventId;
