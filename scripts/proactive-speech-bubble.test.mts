@@ -146,3 +146,32 @@ test("pet preload keeps proactive speech bubble allowlists aligned", () => {
 
   assert.doesNotMatch(preloadSource, /textContent|messageText|promptText|factCard/);
 });
+
+test("main runtime routes idle proactive bubbles through low frequency event pool with safe telemetry", () => {
+  const appSource = readFileSync("src/main/app.ts", "utf8");
+  const idleSchedulerIndex = appSource.indexOf("function scheduleIdleProactiveSpeechBubble()");
+  const idleSchedulerEndIndex = appSource.indexOf("function scheduleStartupProactiveSpeechBubbleIfNeeded()");
+  const idleSchedulerSource = appSource.slice(idleSchedulerIndex, idleSchedulerEndIndex);
+
+  assert.notEqual(idleSchedulerIndex, -1);
+  assert.notEqual(idleSchedulerEndIndex, -1);
+  assert.match(appSource, /import\s+\{[\s\S]*selectLowFrequencyCompanionEvent[\s\S]*\}\s+from "\.\.\/shared\/daily-state-orchestration"/);
+  assert.match(idleSchedulerSource, /reason !== "mode_presence"[\s\S]*selectRuntimeLowFrequencyCompanionEvent/);
+  assert.match(idleSchedulerSource, /createProactiveSpeechBubblePayload\(selection\.event\.bubbleReason\)/);
+  assert.match(idleSchedulerSource, /sendProactiveSpeechBubble\(payload\)/);
+  assert.match(idleSchedulerSource, /lastLowFrequencyCompanionEventAt = now/);
+  assert.match(idleSchedulerSource, /lastLowFrequencyCompanionEventId = selection\.event\.eventId/);
+  assert.match(appSource, /logTelemetry\("low_frequency_companion_event", \{[\s\S]*eventId:[\s\S]*reason:[\s\S]*stateId:[\s\S]*actionType:[\s\S]*modeId:[\s\S]*presenceModeId:[\s\S]*status,[\s\S]*skipReason:[\s\S]*safeSummaryLabel:[\s\S]*interruptPolicy:[\s\S]*durationMs:[\s\S]*elapsedSinceLastEventMs:[\s\S]*minimumIntervalMs:/);
+});
+
+test("proactive speech bubble renderer payload contract stays event-pool agnostic", () => {
+  const sharedSource = readFileSync("src/shared/proactive-speech-bubble.ts", "utf8");
+  const appSource = readFileSync("src/main/app.ts", "utf8");
+  const preloadSource = readFileSync("src/preload/pet-preload.ts", "utf8");
+
+  assert.match(sharedSource, /export type ProactiveSpeechBubblePayload = \{\s+lineId: ProactiveSpeechBubbleLineId;\s+reason: ProactiveSpeechBubbleReason;\s+durationMs: number;\s+\};/);
+  assert.doesNotMatch(sharedSource, /eventId/);
+  assert.match(appSource, /petWindow\.webContents\.send\("pet:proactive-speech-bubble", payload\)/);
+  assert.match(preloadSource, /return \{\s+lineId,\s+reason,\s+durationMs: Math\.round\(durationMs\)\s+\};/);
+  assert.doesNotMatch(preloadSource, /eventId/);
+});

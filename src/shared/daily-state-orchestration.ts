@@ -70,6 +70,7 @@ export type LowFrequencyCompanionEventSelectionInput = {
   presenceModeId: PresenceModeId;
   tick: number;
   elapsedSinceLastEventMs?: number | undefined;
+  allowedEventIds?: readonly LowFrequencyCompanionEventId[] | undefined;
 };
 
 const ALL_DIALOGUE_MODE_IDS = DIALOGUE_MODE_VIEWS.map((mode) => mode.id);
@@ -181,6 +182,7 @@ export function selectLowFrequencyCompanionEvent(
   }
 
   const candidates = LOW_FREQUENCY_COMPANION_EVENTS.filter((event) => (
+    (!input.allowedEventIds || includesLowFrequencyCompanionEventId(input.allowedEventIds, event.eventId)) &&
     includesPresenceMode(event.allowedPresenceModes, input.presenceModeId) &&
     includesDialogueMode(event.allowedDialogueModes, input.dialogueModeId) &&
     (input.presenceModeId === "default" || event.interruptPolicy === "low-interruption") &&
@@ -252,4 +254,11 @@ function includesDialogueMode(
   modeId: DialogueModeId
 ): boolean {
   return modeIds.includes(modeId);
+}
+
+function includesLowFrequencyCompanionEventId(
+  eventIds: readonly LowFrequencyCompanionEventId[],
+  eventId: LowFrequencyCompanionEventId
+): boolean {
+  return eventIds.includes(eventId);
 }

@@ -143,6 +143,54 @@ test("low frequency selection is deterministic and interval-gated", () => {
   }), null);
 });
 
+test("runtime-facing low frequency gates keep sleep quiet and low-interruption modes conservative", () => {
+  assert.equal(selectLowFrequencyCompanionEvent({
+    dialogueModeId: "work",
+    presenceModeId: "sleep",
+    tick: 0,
+    elapsedSinceLastEventMs: undefined
+  }), null);
+
+  assert.equal(selectLowFrequencyCompanionEvent({
+    dialogueModeId: "default",
+    presenceModeId: "default",
+    tick: 0,
+    elapsedSinceLastEventMs: 899
+  }), null);
+
+  for (const presenceModeId of ["focus", "quiet"] as const) {
+    const selected = selectLowFrequencyCompanionEvent({
+      dialogueModeId: "reading",
+      presenceModeId,
+      tick: 0,
+      elapsedSinceLastEventMs: Number.MAX_SAFE_INTEGER
+    });
+
+    assert.notEqual(selected, null, presenceModeId);
+    assert.equal(selected?.interruptPolicy, "low-interruption");
+    assert.equal(selected?.allowedPresenceModes.includes("sleep"), false);
+  }
+});
+
+test("runtime-facing low frequency selection can restrict future fact-bound events", () => {
+  const allowedEventIds = ["idle-presence-check", "mode-presence-echo", "context-settle"] as const;
+
+  for (let tick = 0; tick < 8; tick += 1) {
+    const selected = selectLowFrequencyCompanionEvent({
+      dialogueModeId: "default",
+      presenceModeId: "default",
+      tick,
+      elapsedSinceLastEventMs: Number.MAX_SAFE_INTEGER,
+      allowedEventIds
+    });
+
+    assert.notEqual(selected, null);
+    assert.equal(allowedEventIds.includes(selected!.eventId as typeof allowedEventIds[number]), true);
+    assert.notEqual(selected?.eventId, "memory-safe-pulse");
+    assert.notEqual(selected?.eventId, "search-citation-pulse");
+  }
+});
+
 test("daily state orchestration catalog serializes without private text or raw resources", () => {
   const serialized = JSON.stringify({
     rules: listDailyStateOrchestrationRules(),

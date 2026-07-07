@@ -35,6 +35,11 @@ import {
   type ProactiveSpeechBubbleReason,
   type ProactiveSpeechBubblePayload
 } from "../shared/proactive-speech-bubble";
+import {
+  selectLowFrequencyCompanionEvent,
+  type LowFrequencyCompanionEventId,
+  type LowFrequencyCompanionEvent
+} from "../shared/daily-state-orchestration";
 import { isHistoryId, type HistoryMessage } from "../shared/chat-history";
 import { isMemoryId, parseMemoryCardDraft, parseMemoryCardUpdate, type MemoryCardUpdate } from "../shared/chat-memory";
 import { DIALOGUE_MODE_VIEWS, isDialogueModeId, type DialogueModeId } from "../shared/dialogue-style";
@@ -78,6 +83,7 @@ import {
   type PetActionTriggerReason
 } from "../shared/pet-action-trigger";
 import {
+  getPetActionStateActionType,
   selectPetActionStateForModeChange,
   selectPetActionTriggerForChatReplyWaiting
 } from "../shared/pet-action-state-machine";
@@ -191,6 +197,8 @@ let hasHandledStartupProactiveSpeechBubble = false;
 let proactiveSpeechBubbleTick = 0;
 let proactiveSpeechBubbleVisibleUntil = 0;
 let nextIdleProactiveSpeechBubbleReason: ProactiveSpeechBubbleReason = "idle_presence";
+let lastLowFrequencyCompanionEventAt: number | null = null;
+let lastLowFrequencyCompanionEventId: LowFrequencyCompanionEvent["eventId"] | null = null;
 
 const PET_RENDERER_RECOVERY_WINDOW_MS = 60_000;
 const DEFAULT_API_KEY_REF = "openai-compatible-default";
@@ -206,6 +214,15 @@ const PET_STARTUP_PROACTIVE_SPEECH_BUBBLE_DELAY_MS = 1_100;
 const isAcceptanceTelemetryEnabled = process.env.AI_DESKTOP_PET_ACCEPTANCE_TELEMETRY === "1";
 const PET_IDLE_PROACTIVE_SPEECH_BUBBLE_INTERVAL_MS = readProactiveSpeechBubbleIdleIntervalMs(
   process.env.AI_DESKTOP_PET_PROACTIVE_SPEECH_BUBBLE_IDLE_INTERVAL_MS,
+  isAcceptanceTelemetryEnabled
+);
+const RUNTIME_LOW_FREQUENCY_COMPANION_EVENT_IDS = [
+  "idle-presence-check",
+  "mode-presence-echo",
+  "context-settle"
+] as const satisfies readonly LowFrequencyCompanionEventId[];
+const LOW_FREQUENCY_COMPANION_EVENT_ACCEPTANCE_MINIMUM_INTERVAL_MS = readLowFrequencyCompanionEventAcceptanceMinimumIntervalMs(
+  process.env.AI_DESKTOP_PET_LOW_FREQUENCY_COMPANION_EVENT_MINIMUM_INTERVAL_MS,
   isAcceptanceTelemetryEnabled
 );
 let petRendererRecoveryTimes: number[] = [];
@@ -389,6 +406,22 @@ function readProactiveSpeechBubbleIdleIntervalMs(value: string | undefined, isAc
   }
 
   return Math.min(maximum, Math.max(minimum, Math.round(parsed)));
+}
+
+function readLowFrequencyCompanionEventAcceptanceMinimumIntervalMs(
+  value: string | undefined,
+  isAcceptance: boolean
+): number | null {
+  if (!isAcceptance) {
+    return null;
+  }
+
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return null;
+  }
+
+  return Math.min(60 * 60_000, Math.max(900, Math.round(parsed)));
 }
 
 function startBundledLlamaCppRuntimeIfAvailable(options: {
@@ -765,6 +798,33 @@ function logProactiveSpeechBubbleDecision(
   });
 }
 
+function logLowFrequencyCompanionEventDecision(
+  status: "shown" | "skipped",
+  event: LowFrequencyCompanionEvent | null,
+  extra: {
+    skipReason?: string | undefined;
+    durationMs?: number | undefined;
+    elapsedSinceLastEventMs?: number | undefined;
+    minimumIntervalMs?: number | undefined;
+  } = {}
+): void {
+  logTelemetry("low_frequency_companion_event", {
+    eventId: event?.eventId ?? lastLowFrequencyCompanionEventId ?? null,
+    reason: event?.bubbleReason ?? "idle_presence",
+    stateId: event?.actionStateId ?? null,
+    actionType: event ? getPetActionStateActionType(event.actionStateId) : null,
+    modeId: currentDialogueModeId,
+    presenceModeId: currentPresenceModeId,
+    status,
+    skipReason: extra.skipReason,
+    safeSummaryLabel: event?.safeSummaryLabel ?? null,
+    interruptPolicy: event?.interruptPolicy ?? null,
+    durationMs: extra.durationMs,
+    elapsedSinceLastEventMs: extra.elapsedSinceLastEventMs,
+    minimumIntervalMs: extra.minimumIntervalMs ?? event?.minimumIntervalMs
+  });
+}
+
 function sendProactiveSpeechBubble(payload: ProactiveSpeechBubblePayload): boolean {
   const skipReason = getProactiveSpeechBubbleSkipReason();
   if (skipReason) {
@@ -832,6 +892,68 @@ function getNextIdleProactiveSpeechBubbleDelayMs(): number {
   return visibleRemainingMs + PET_IDLE_PROACTIVE_SPEECH_BUBBLE_INTERVAL_MS;
 }
 
+function getLowFrequencyCompanionEventElapsedMs(now: number): number | undefined {
+  return lastLowFrequencyCompanionEventAt === null
+    ? undefined
+    : Math.max(0, now - lastLowFrequencyCompanionEventAt);
+}
+
+function selectRuntimeLowFrequencyCompanionEvent(now: number): {
+  event: LowFrequencyCompanionEvent | null;
+  elapsedSinceLastEventMs?: number | undefined;
+  minimumIntervalMs?: number | undefined;
+  skipReason?: string | undefined;
+} {
+  const elapsedSinceLastEventMs = getLowFrequencyCompanionEventElapsedMs(now);
+  const input = {
+    dialogueModeId: currentDialogueModeId,
+    presenceModeId: currentPresenceModeId,
+    tick: proactiveSpeechBubbleTick + 1,
+    elapsedSinceLastEventMs,
+    allowedEventIds: RUNTIME_LOW_FREQUENCY_COMPANION_EVENT_IDS
+  };
+  const event = selectLowFrequencyCompanionEvent(input);
+
+  if (event) {
+    return {
+      event,
+      elapsedSinceLastEventMs,
+      minimumIntervalMs: event.minimumIntervalMs
+    };
+  }
+
+  const ungatedEvent = selectLowFrequencyCompanionEvent({
+    ...input,
+    elapsedSinceLastEventMs: undefined
+  });
+  if (!ungatedEvent) {
+    return {
+      event: null,
+      elapsedSinceLastEventMs,
+      skipReason: "not_selected"
+    };
+  }
+
+  if (
+    elapsedSinceLastEventMs !== undefined &&
+    LOW_FREQUENCY_COMPANION_EVENT_ACCEPTANCE_MINIMUM_INTERVAL_MS !== null &&
+    elapsedSinceLastEventMs >= LOW_FREQUENCY_COMPANION_EVENT_ACCEPTANCE_MINIMUM_INTERVAL_MS
+  ) {
+    return {
+      event: ungatedEvent,
+      elapsedSinceLastEventMs,
+      minimumIntervalMs: LOW_FREQUENCY_COMPANION_EVENT_ACCEPTANCE_MINIMUM_INTERVAL_MS
+    };
+  }
+
+  return {
+    event: ungatedEvent,
+    elapsedSinceLastEventMs,
+    minimumIntervalMs: LOW_FREQUENCY_COMPANION_EVENT_ACCEPTANCE_MINIMUM_INTERVAL_MS ?? ungatedEvent.minimumIntervalMs,
+    skipReason: "minimum_interval"
+  };
+}
+
 function scheduleIdleProactiveSpeechBubble(): void {
   cancelIdleProactiveSpeechBubbleTimer();
 
@@ -842,6 +964,40 @@ function scheduleIdleProactiveSpeechBubble(): void {
   idleProactiveSpeechBubbleTimer = setTimeout(() => {
     idleProactiveSpeechBubbleTimer = null;
     const reason = nextIdleProactiveSpeechBubbleReason;
+    if (reason !== "mode_presence") {
+      const now = Date.now();
+      const selection = selectRuntimeLowFrequencyCompanionEvent(now);
+      if (!selection.event || selection.skipReason) {
+        logLowFrequencyCompanionEventDecision("skipped", selection.event, {
+          skipReason: selection.skipReason,
+          elapsedSinceLastEventMs: selection.elapsedSinceLastEventMs,
+          minimumIntervalMs: selection.minimumIntervalMs
+        });
+        scheduleIdleProactiveSpeechBubble();
+        return;
+      }
+
+      const payload = createProactiveSpeechBubblePayload(selection.event.bubbleReason);
+      if (sendProactiveSpeechBubble(payload)) {
+        lastLowFrequencyCompanionEventAt = now;
+        lastLowFrequencyCompanionEventId = selection.event.eventId;
+        logLowFrequencyCompanionEventDecision("shown", selection.event, {
+          durationMs: payload.durationMs,
+          elapsedSinceLastEventMs: selection.elapsedSinceLastEventMs,
+          minimumIntervalMs: selection.minimumIntervalMs
+        });
+      } else {
+        logLowFrequencyCompanionEventDecision("skipped", selection.event, {
+          durationMs: payload.durationMs,
+          elapsedSinceLastEventMs: selection.elapsedSinceLastEventMs,
+          minimumIntervalMs: selection.minimumIntervalMs,
+          skipReason: getProactiveSpeechBubbleSkipReason() ?? "send_failed"
+        });
+      }
+      scheduleIdleProactiveSpeechBubble();
+      return;
+    }
+
     const payload = createProactiveSpeechBubblePayload(reason);
     if (sendProactiveSpeechBubble(payload)) {
       nextIdleProactiveSpeechBubbleReason = "idle_presence";
