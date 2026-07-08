@@ -242,6 +242,10 @@ export function getPetActionStateActionType(stateId: PetActionStateId): PetActio
   return getPetActionState(stateId).actionType;
 }
 
+export function getPetActionStateTriggerReason(stateId: PetActionStateId): PetActionTriggerReason {
+  return getPetActionState(stateId).triggerReason;
+}
+
 export function selectPetActionStateForModeChange({
   dialogueModeId,
   presenceModeId

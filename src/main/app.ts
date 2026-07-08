@@ -88,8 +88,10 @@ import {
 } from "../shared/pet-action-trigger";
 import {
   getPetActionStateActionType,
+  getPetActionStateTriggerReason,
   selectPetActionStateForModeChange,
-  selectPetActionTriggerForChatReplyWaiting
+  selectPetActionTriggerForChatReplyWaiting,
+  type PetActionStateId
 } from "../shared/pet-action-state-machine";
 import { ChatEngineBusyError, createChatEngine, type ChatEngine } from "./services/chat/chat-engine";
 import { budgetChatContext } from "./services/chat/chat-context-budget";
@@ -207,6 +209,7 @@ let pendingSourcedLowFrequencyCompanionEvents: SourcedLowFrequencyCompanionEvent
 
 type SourcedLowFrequencyCompanionEvent = {
   eventId: LowFrequencyCompanionEventId;
+  actionStateId: PetActionStateId;
   queuedAtMs: number;
 };
 
@@ -832,13 +835,17 @@ function logLowFrequencyCompanionEventDecision(
     durationMs?: number | undefined;
     elapsedSinceLastEventMs?: number | undefined;
     minimumIntervalMs?: number | undefined;
+    actionStateId?: PetActionStateId | undefined;
   } = {}
 ): void {
+  const actionStateId = event
+    ? extra.actionStateId ?? getEffectiveLowFrequencyCompanionActionStateId(event)
+    : null;
   logTelemetry("low_frequency_companion_event", {
     eventId: event?.eventId ?? lastLowFrequencyCompanionEventId ?? null,
     reason: event?.bubbleReason ?? "idle_presence",
-    stateId: event?.actionStateId ?? null,
-    actionType: event ? getPetActionStateActionType(event.actionStateId) : null,
+    stateId: actionStateId,
+    actionType: actionStateId ? getPetActionStateActionType(actionStateId) : null,
     modeId: currentDialogueModeId,
     presenceModeId: currentPresenceModeId,
     status,
@@ -851,7 +858,10 @@ function logLowFrequencyCompanionEventDecision(
   });
 }
 
-function sendProactiveSpeechBubble(payload: ProactiveSpeechBubblePayload): boolean {
+function sendProactiveSpeechBubble(
+  payload: ProactiveSpeechBubblePayload,
+  actionTriggerReason: PetActionTriggerReason = "state_proactive_bubble_visible"
+): boolean {
   const skipReason = getProactiveSpeechBubbleSkipReason();
   if (skipReason) {
     logProactiveSpeechBubbleDecision("skipped", payload, { skipReason });
@@ -865,7 +875,7 @@ function sendProactiveSpeechBubble(payload: ProactiveSpeechBubblePayload): boole
   petWindow.webContents.send("pet:proactive-speech-bubble", payload);
   proactiveSpeechBubbleVisibleUntil = Date.now() + payload.durationMs;
   logProactiveSpeechBubbleDecision("shown", payload);
-  sendPetActionTrigger("state_proactive_bubble_visible");
+  sendPetActionTrigger(actionTriggerReason);
   return true;
 }
 
@@ -921,7 +931,38 @@ function getLowFrequencyCompanionSafeContextTag(
   return undefined;
 }
 
-function queueSourcedLowFrequencyCompanionEvent(eventId: LowFrequencyCompanionEventId, now = Date.now()): void {
+function selectMemorySafePulseActionStateId(input: {
+  autoCaptureSkippedReason: ChatMemoryActivityPayload["autoCapture"]["skippedReason"];
+  memoryInjectionCount: number;
+  capturedCount: number;
+  mergedCount: number;
+  deduplicatedCount: number;
+  compressionTriggered: boolean;
+}): PetActionStateId | null {
+  if (input.autoCaptureSkippedReason === "sensitive" || input.autoCaptureSkippedReason === "capture_failed") {
+    return "memory-skipped";
+  }
+
+  if (input.memoryInjectionCount > 0) {
+    return "memory-injected";
+  }
+
+  if (
+    input.capturedCount > 0 ||
+    input.mergedCount > 0 ||
+    input.deduplicatedCount > 0 ||
+    input.compressionTriggered
+  ) {
+    return "proactive-bubble-visible";
+  }
+
+  return null;
+}
+
+function queueSourcedLowFrequencyCompanionEvent(
+  eventId: LowFrequencyCompanionEventId,
+  options: { actionStateId: PetActionStateId; now?: number }
+): void {
   if (
     eventId !== "memory-safe-pulse" &&
     eventId !== "search-citation-pulse"
@@ -929,11 +970,13 @@ function queueSourcedLowFrequencyCompanionEvent(eventId: LowFrequencyCompanionEv
     return;
   }
 
+  const now = options.now ?? Date.now();
   pruneExpiredSourcedLowFrequencyCompanionEvents(now);
   pendingSourcedLowFrequencyCompanionEvents = pendingSourcedLowFrequencyCompanionEvents
     .filter((candidate) => candidate.eventId !== eventId);
   pendingSourcedLowFrequencyCompanionEvents.push({
     eventId,
+    actionStateId: options.actionStateId,
     queuedAtMs: now
   });
 }
@@ -954,6 +997,17 @@ function clearQueuedSourcedLowFrequencyCompanionEvent(eventId: LowFrequencyCompa
 
 function clearSourcedLowFrequencyCompanionEvents(): void {
   pendingSourcedLowFrequencyCompanionEvents = [];
+}
+
+function getPendingSourcedLowFrequencyCompanionEvent(
+  eventId: LowFrequencyCompanionEventId
+): SourcedLowFrequencyCompanionEvent | null {
+  pruneExpiredSourcedLowFrequencyCompanionEvents();
+  return pendingSourcedLowFrequencyCompanionEvents.find((event) => event.eventId === eventId) ?? null;
+}
+
+function getEffectiveLowFrequencyCompanionActionStateId(event: LowFrequencyCompanionEvent): PetActionStateId {
+  return getPendingSourcedLowFrequencyCompanionEvent(event.eventId)?.actionStateId ?? event.actionStateId;
 }
 
 function getRuntimeLowFrequencyCompanionEventIds(): readonly LowFrequencyCompanionEventId[] {
@@ -1079,21 +1133,27 @@ function scheduleIdleProactiveSpeechBubble(): void {
       const payload = createProactiveSpeechBubblePayload(selection.event.bubbleReason, {
         safeContextTag: getLowFrequencyCompanionSafeContextTag(selection.event)
       });
-      if (sendProactiveSpeechBubble(payload)) {
+      const actionStateId = getEffectiveLowFrequencyCompanionActionStateId(selection.event);
+      if (sendProactiveSpeechBubble(
+        payload,
+        getPetActionStateTriggerReason(actionStateId)
+      )) {
         lastLowFrequencyCompanionEventAt = now;
         lastLowFrequencyCompanionEventId = selection.event.eventId;
         clearQueuedSourcedLowFrequencyCompanionEvent(selection.event.eventId);
         logLowFrequencyCompanionEventDecision("shown", selection.event, {
           durationMs: payload.durationMs,
           elapsedSinceLastEventMs: selection.elapsedSinceLastEventMs,
-          minimumIntervalMs: selection.minimumIntervalMs
+          minimumIntervalMs: selection.minimumIntervalMs,
+          actionStateId
         });
       } else {
         logLowFrequencyCompanionEventDecision("skipped", selection.event, {
           durationMs: payload.durationMs,
           elapsedSinceLastEventMs: selection.elapsedSinceLastEventMs,
           minimumIntervalMs: selection.minimumIntervalMs,
-          skipReason: getProactiveSpeechBubbleSkipReason() ?? "send_failed"
+          skipReason: getProactiveSpeechBubbleSkipReason() ?? "send_failed",
+          actionStateId
         });
       }
       scheduleIdleProactiveSpeechBubble();
@@ -2495,15 +2555,18 @@ app.whenReady().then(async () => {
     }
 
     const memoryContext = memoryStoreForRequest.createInjection();
-    if (
-      memoryContext.count > 0 ||
-      autoMemoryCaptureForActivity.skippedReason === "sensitive" ||
-      autoMemoryCaptureForActivity.capturedCount > 0 ||
-      autoMemoryCaptureForActivity.mergedCount > 0 ||
-      autoMemoryCaptureForActivity.deduplicatedCount > 0 ||
-      autoMemoryCaptureForActivity.compressionTriggered
-    ) {
-      queueSourcedLowFrequencyCompanionEvent("memory-safe-pulse");
+    const memorySafePulseActionStateId = selectMemorySafePulseActionStateId({
+      autoCaptureSkippedReason: autoMemoryCaptureForActivity.skippedReason,
+      memoryInjectionCount: memoryContext.count,
+      capturedCount: autoMemoryCaptureForActivity.capturedCount,
+      mergedCount: autoMemoryCaptureForActivity.mergedCount,
+      deduplicatedCount: autoMemoryCaptureForActivity.deduplicatedCount,
+      compressionTriggered: autoMemoryCaptureForActivity.compressionTriggered
+    });
+    if (memorySafePulseActionStateId) {
+      queueSourcedLowFrequencyCompanionEvent("memory-safe-pulse", {
+        actionStateId: memorySafePulseActionStateId
+      });
     }
     sendPetActionTrigger(selectMainPetActionTriggerForMemorySafeChatReply({
       providerId,
@@ -2523,7 +2586,9 @@ app.whenReady().then(async () => {
       const webSearchCitationCount = webSearchCitation?.citations.length ?? 0;
       if (webSearchCitationCount > 0) {
         sendPetActionTrigger("state_search_cited");
-        queueSourcedLowFrequencyCompanionEvent("search-citation-pulse");
+        queueSourcedLowFrequencyCompanionEvent("search-citation-pulse", {
+          actionStateId: "search-cited"
+        });
       }
 
       event.sender.send("chat:context-transparency", createChatContextTransparencyPayload({
