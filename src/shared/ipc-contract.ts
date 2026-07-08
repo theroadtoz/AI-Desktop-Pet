@@ -18,6 +18,10 @@ import type { LlamaCppRuntimeSafeSummary, LlamaCppRuntimeSettingsUpdate } from "
 import type { LocalModelDiagnosticSafeSummary } from "./local-model-diagnostic";
 import type { ProactiveSpeechBubblePayload } from "./proactive-speech-bubble";
 import type {
+  ProactiveCompanionSettings,
+  ProactiveCompanionSettingsUpdate
+} from "./proactive-companion-settings";
+import type {
   WebSearchCitationPayload,
   WebSearchConnectionTestResult,
   WebSearchSettings,
@@ -34,6 +38,7 @@ export type PetWindowCommand =
   | { type: "pet:apply-presentation"; payload: PetPresentationIntent }
   | { type: "pet:action-trigger"; payload: PetActionTrigger }
   | { type: "pet:proactive-speech-bubble"; payload: ProactiveSpeechBubblePayload }
+  | { type: "pet:clear-proactive-speech-bubble" }
   | { type: "pet:window-motion-feedback"; payload: PetWindowMotionFeedback }
   | { type: "presenceMode:changed"; payload: PresenceModeId }
   | { type: "pet:inject-webgl-context-loss" }
@@ -48,6 +53,7 @@ export type ChatWindowCommand =
   | { type: "pet-lock:changed"; payload: PetLockState }
   | { type: "dialogueMode:changed"; payload: DialogueModeId }
   | { type: "presenceMode:changed"; payload: PresenceModeId }
+  | { type: "proactiveCompanion:changed"; payload: ProactiveCompanionSettings }
   | { type: "pet-activity:echo"; payload: PetActivityEcho };
 
 export type ChatSendRequest = Pick<ChatRequest, "requestVersion" | "conversationId" | "messages">;
@@ -195,6 +201,7 @@ export type PetApi = {
   onPresentationIntent(handler: (intent: PetPresentationIntent) => void): () => void;
   onActionTrigger(handler: (trigger: PetActionTrigger) => void): () => void;
   onProactiveSpeechBubble(handler: (payload: ProactiveSpeechBubblePayload) => void): () => void;
+  onClearProactiveSpeechBubble(handler: () => void): () => void;
   onInjectWebGLContextLoss(handler: () => void): () => void;
   onWindowMotionFeedback(handler: (feedback: PetWindowMotionFeedback) => void): () => void;
   openChat(): void;
@@ -276,6 +283,12 @@ export type PresenceModeApi = {
   getMode(): Promise<PresenceModeId>;
   setMode(modeId: PresenceModeId): Promise<PresenceModeId>;
   onModeChanged(handler: (modeId: PresenceModeId) => void): () => void;
+};
+
+export type ProactiveCompanionApi = {
+  getSettings(): Promise<ProactiveCompanionSettings>;
+  setSettings(update: ProactiveCompanionSettingsUpdate): Promise<ProactiveCompanionSettings>;
+  onSettingsChanged(handler: (settings: ProactiveCompanionSettings) => void): () => void;
 };
 
 export type UserProfileApi = {

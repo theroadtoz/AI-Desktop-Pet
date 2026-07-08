@@ -19,6 +19,7 @@ import type {
   PetLockState,
   PetPresentationApi,
   PresenceModeApi,
+  ProactiveCompanionApi,
   ShortcutApi,
   UserProfileApi,
   WebSearchApi
@@ -38,11 +39,22 @@ import type {
   LlamaCppRuntimeStatus
 } from "../shared/llama-cpp-runtime";
 import type { WebSearchConnectionTestResult, WebSearchSettings, WebSearchStatus } from "../shared/web-search";
+import type {
+  ProactiveCompanionCadence,
+  ProactiveCompanionSettings,
+  ProactiveCompanionSettingsUpdate
+} from "../shared/proactive-companion-settings";
 
 const petAccessoryPresetIds = ["none", "glasses"] as const;
 const shortcutActionIds = ["togglePetLock", "adjustPetScaleWithWheel"] as const;
 const dialogueModeIds = ["default", "work", "game", "reading"] as const;
 const presenceModeIds = ["default", "focus", "quiet", "sleep"] as const;
+const proactiveCompanionCadences = ["normal", "quiet", "off"] as const;
+const defaultProactiveCompanionSettings: ProactiveCompanionSettings = {
+  cadence: "normal",
+  memorySourceBubbles: true,
+  searchSourceBubbles: true
+};
 const dialogueModeViews: readonly DialogueModeView[] = [
   { id: "default", label: "默认陪伴" },
   { id: "work", label: "工作" },
@@ -207,6 +219,64 @@ function parsePresenceModeId(value: unknown): PresenceModeId | null {
   return typeof value === "string" && presenceModeIds.includes(value as PresenceModeId)
     ? value as PresenceModeId
     : null;
+}
+
+function parseProactiveCompanionCadence(value: unknown): ProactiveCompanionCadence | null {
+  return typeof value === "string" && proactiveCompanionCadences.includes(value as ProactiveCompanionCadence)
+    ? value as ProactiveCompanionCadence
+    : null;
+}
+
+function parseProactiveCompanionSettings(value: unknown): ProactiveCompanionSettings {
+  const settings = value as Partial<ProactiveCompanionSettings> | null;
+
+  if (!settings || typeof settings !== "object") {
+    return { ...defaultProactiveCompanionSettings };
+  }
+
+  return {
+    cadence: parseProactiveCompanionCadence(settings.cadence) ?? defaultProactiveCompanionSettings.cadence,
+    memorySourceBubbles: typeof settings.memorySourceBubbles === "boolean"
+      ? settings.memorySourceBubbles
+      : defaultProactiveCompanionSettings.memorySourceBubbles,
+    searchSourceBubbles: typeof settings.searchSourceBubbles === "boolean"
+      ? settings.searchSourceBubbles
+      : defaultProactiveCompanionSettings.searchSourceBubbles
+  };
+}
+
+function parseProactiveCompanionSettingsUpdate(value: unknown): ProactiveCompanionSettingsUpdate | null {
+  const update = value as Partial<ProactiveCompanionSettingsUpdate> | null;
+
+  if (!update || typeof update !== "object") {
+    return null;
+  }
+
+  const parsed: ProactiveCompanionSettingsUpdate = {};
+
+  if ("cadence" in update) {
+    const cadence = parseProactiveCompanionCadence(update.cadence);
+    if (!cadence) {
+      return null;
+    }
+    parsed.cadence = cadence;
+  }
+
+  if ("memorySourceBubbles" in update) {
+    if (typeof update.memorySourceBubbles !== "boolean") {
+      return null;
+    }
+    parsed.memorySourceBubbles = update.memorySourceBubbles;
+  }
+
+  if ("searchSourceBubbles" in update) {
+    if (typeof update.searchSourceBubbles !== "boolean") {
+      return null;
+    }
+    parsed.searchSourceBubbles = update.searchSourceBubbles;
+  }
+
+  return parsed;
 }
 
 function normalizeUserProfileText(value: unknown): string | null {
@@ -2034,6 +2104,33 @@ const presenceModeApi: PresenceModeApi = {
   }
 };
 
+const proactiveCompanionApi: ProactiveCompanionApi = {
+  async getSettings() {
+    return parseProactiveCompanionSettings(await ipcRenderer.invoke("proactiveCompanion:get-settings"));
+  },
+  async setSettings(update) {
+    const parsedUpdate = parseProactiveCompanionSettingsUpdate(update);
+
+    if (!parsedUpdate) {
+      throw new Error("Invalid proactive companion settings");
+    }
+
+    return parseProactiveCompanionSettings(
+      await ipcRenderer.invoke("proactiveCompanion:set-settings", parsedUpdate)
+    );
+  },
+  onSettingsChanged(handler) {
+    const listener = (_event: Electron.IpcRendererEvent, value: unknown): void => {
+      handler(parseProactiveCompanionSettings(value));
+    };
+
+    ipcRenderer.on("proactiveCompanion:changed", listener);
+    return () => {
+      ipcRenderer.removeListener("proactiveCompanion:changed", listener);
+    };
+  }
+};
+
 const userProfileApi: UserProfileApi = {
   async getUserProfile() {
     const profile = await ipcRenderer.invoke("userProfile:get");
@@ -2130,5 +2227,6 @@ contextBridge.exposeInMainWorld("petPresentationApi", petPresentationApi);
 contextBridge.exposeInMainWorld("shortcutApi", shortcutApi);
 contextBridge.exposeInMainWorld("dialogueModeApi", dialogueModeApi);
 contextBridge.exposeInMainWorld("presenceModeApi", presenceModeApi);
+contextBridge.exposeInMainWorld("proactiveCompanionApi", proactiveCompanionApi);
 contextBridge.exposeInMainWorld("userProfileApi", userProfileApi);
 contextBridge.exposeInMainWorld("webSearchApi", webSearchApi);

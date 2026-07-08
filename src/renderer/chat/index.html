@@ -101,6 +101,27 @@
               <div id="presence-mode-controls" class="mode-controls" aria-label="存在模式"></div>
               <p class="selection-note">存在模式影响她在桌面上的低打扰程度、待机预算和普通身体动作；不改变对话风格。</p>
             </section>
+            <section class="content-stack" aria-labelledby="proactive-companion-settings-title">
+              <h3 id="proactive-companion-settings-title" class="settings-section-title">主动气泡</h3>
+              <p id="proactive-companion-status" class="status-box" data-state="ready" aria-live="polite">主动气泡：标准陪伴。</p>
+              <div id="proactive-cadence-controls" class="mode-controls" aria-label="主动气泡频率"></div>
+              <label class="field-label">
+                <span>
+                  <input id="proactive-memory-source-bubbles" type="checkbox" />
+                  显示记忆整理回声
+                </span>
+              </label>
+              <label class="field-label">
+                <span>
+                  <input id="proactive-search-source-bubbles" type="checkbox" />
+                  显示搜索引用回声
+                </span>
+              </label>
+              <p class="selection-note">只控制角色左上方的自动短气泡；不会改变聊天回复、记忆保存或 MCP 搜索本身，也不会展示记忆正文或搜索正文。</p>
+              <div class="settings-actions">
+                <button id="save-proactive-companion-settings-button" class="button-light" type="button">保存主动气泡设置</button>
+              </div>
+            </section>
           </section>
           <section id="memory-page" class="settings-page memory-page content-stack" hidden aria-label="本地记忆">
             <div class="memory-actions">

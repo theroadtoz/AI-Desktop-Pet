@@ -34,6 +34,14 @@ import {
   type WebSearchStatus
 } from "../../shared/web-search";
 import {
+  DEFAULT_PROACTIVE_COMPANION_SETTINGS,
+  PROACTIVE_COMPANION_CADENCE_DESCRIPTIONS,
+  PROACTIVE_COMPANION_CADENCE_LABELS,
+  PROACTIVE_COMPANION_CADENCES,
+  type ProactiveCompanionCadence,
+  type ProactiveCompanionSettings
+} from "../../shared/proactive-companion-settings";
+import {
   applyChatTurnDelta,
   createInitialChatTurnState,
   finishChatTurn,
@@ -153,6 +161,11 @@ const saveUserProfileButton = document.querySelector<HTMLButtonElement>("#save-u
 const clearUserProfileButton = document.querySelector<HTMLButtonElement>("#clear-user-profile-button");
 const settingsDialogueModeSummary = document.querySelector<HTMLElement>("#settings-dialogue-mode-summary");
 const settingsPresenceModeSummary = document.querySelector<HTMLElement>("#settings-presence-mode-summary");
+const proactiveCompanionStatus = document.querySelector<HTMLElement>("#proactive-companion-status");
+const proactiveCadenceControls = document.querySelector<HTMLElement>("#proactive-cadence-controls");
+const proactiveMemorySourceBubbles = document.querySelector<HTMLInputElement>("#proactive-memory-source-bubbles");
+const proactiveSearchSourceBubbles = document.querySelector<HTMLInputElement>("#proactive-search-source-bubbles");
+const saveProactiveCompanionSettingsButton = document.querySelector<HTMLButtonElement>("#save-proactive-companion-settings-button");
 const shortcutList = document.querySelector<HTMLElement>("#shortcut-list");
 const shortcutStatus = document.querySelector<HTMLElement>("#shortcut-status");
 const webSearchStatus = document.querySelector<HTMLElement>("#web-search-status");
@@ -231,7 +244,9 @@ if (
   !petScaleInput || !petScaleValue || !petAccessorySelect || !petAccessoryStatus || !savePetScaleButton ||
   !savePetAccessoryButton || !petLockStatus || !togglePetLockButton || !userProfileSummary ||
   !settingsUserDisplayName || !settingsUserPreferredName || !saveUserProfileButton || !clearUserProfileButton ||
-  !settingsDialogueModeSummary || !settingsPresenceModeSummary || !shortcutList || !shortcutStatus ||
+  !settingsDialogueModeSummary || !settingsPresenceModeSummary || !proactiveCompanionStatus || !proactiveCadenceControls ||
+  !proactiveMemorySourceBubbles || !proactiveSearchSourceBubbles || !saveProactiveCompanionSettingsButton ||
+  !shortcutList || !shortcutStatus ||
   !webSearchStatus || !webSearchEnabled || !webSearchCommand || !webSearchArgs || !webSearchToolName ||
   !webSearchTimeout || !webSearchMaxResults || !webSearchSaveButton || !webSearchRefreshButton || !webSearchTestButton ||
   !chatTab || !historyTab || !memoryTab || !chatPage || !companionControlShelf || !dialogueModeControls || !presenceModeControls ||
@@ -327,6 +342,11 @@ const saveUserProfileAction = saveUserProfileButton;
 const clearUserProfileAction = clearUserProfileButton;
 const settingsDialogueModeSummaryBox = settingsDialogueModeSummary;
 const settingsPresenceModeSummaryBox = settingsPresenceModeSummary;
+const proactiveCompanionStatusBox = proactiveCompanionStatus;
+const proactiveCadenceControlsElement = proactiveCadenceControls;
+const proactiveMemorySourceBubblesField = proactiveMemorySourceBubbles;
+const proactiveSearchSourceBubblesField = proactiveSearchSourceBubbles;
+const saveProactiveCompanionSettingsAction = saveProactiveCompanionSettingsButton;
 const shortcutListElement = shortcutList;
 const shortcutStatusBox = shortcutStatus;
 const webSearchStatusBox = webSearchStatus;
@@ -410,6 +430,7 @@ const replyLockControlElements: Record<ReplyLockControlId, DisableableChatContro
   "save-user-profile-button": saveUserProfileAction,
   "clear-user-profile-button": clearUserProfileAction,
   "welcome-save-user-profile-button": welcomeSaveUserProfileAction,
+  "save-proactive-companion-settings-button": saveProactiveCompanionSettingsAction,
   "shelf-accessory-button": shelfAccessoryAction,
   "shelf-scale-button": shelfScaleAction,
   "shelf-lock-button": shelfLockAction
@@ -479,6 +500,7 @@ let dialogueModes: DialogueModeView[] = [];
 let currentDialogueModeId: DialogueModeId = "default";
 let presenceModes: PresenceModeView[] = [];
 let currentPresenceModeId: PresenceModeId = "default";
+let currentProactiveCompanionSettings: ProactiveCompanionSettings = DEFAULT_PROACTIVE_COMPANION_SETTINGS;
 let currentUserProfile: UserProfile | null = null;
 let currentMemoryInjectionCount: number | null = null;
 let latestMemoryActivity: ReturnType<typeof formatMemoryActivity> | null = null;
@@ -521,6 +543,92 @@ function setWebSearchFields(settings: WebSearchSettings): void {
   webSearchToolNameField.value = settings.toolName;
   webSearchTimeoutField.value = String(settings.timeoutMs);
   webSearchMaxResultsField.value = String(settings.maxResults);
+}
+
+function formatProactiveCompanionStatus(settings: ProactiveCompanionSettings): string {
+  const cadenceLabel = PROACTIVE_COMPANION_CADENCE_LABELS[settings.cadence];
+  if (settings.cadence === "off") {
+    return "主动气泡：关闭。她仍会正常聊天和动作，只是不自动冒出短气泡。";
+  }
+
+  const sourceLabels = [
+    settings.memorySourceBubbles ? "记忆整理回声开启" : "记忆整理回声关闭",
+    settings.searchSourceBubbles ? "搜索引用回声开启" : "搜索引用回声关闭"
+  ];
+  return `主动气泡：${cadenceLabel} · ${sourceLabels.join(" · ")}`;
+}
+
+function renderProactiveCompanionSettings(settings: ProactiveCompanionSettings): void {
+  currentProactiveCompanionSettings = settings;
+  proactiveCompanionStatusBox.textContent = formatProactiveCompanionStatus(settings);
+  proactiveCompanionStatusBox.dataset.state = settings.cadence === "normal" ? "ready" : "fallback";
+  proactiveMemorySourceBubblesField.checked = settings.memorySourceBubbles;
+  proactiveSearchSourceBubblesField.checked = settings.searchSourceBubbles;
+
+  for (const button of proactiveCadenceControlsElement.querySelectorAll<HTMLButtonElement>(".mode-button")) {
+    const isActive = button.dataset.cadence === settings.cadence;
+    button.classList.toggle("is-active", isActive);
+    button.setAttribute("aria-pressed", String(isActive));
+    button.disabled = chatTurnState.isReplying;
+  }
+}
+
+function renderProactiveCadenceControls(): void {
+  proactiveCadenceControlsElement.replaceChildren();
+
+  for (const cadence of PROACTIVE_COMPANION_CADENCES) {
+    const button = document.createElement("button");
+    button.className = "button-light mode-button";
+    button.type = "button";
+    button.dataset.cadence = cadence;
+    button.textContent = PROACTIVE_COMPANION_CADENCE_LABELS[cadence];
+    button.title = PROACTIVE_COMPANION_CADENCE_DESCRIPTIONS[cadence];
+    button.disabled = chatTurnState.isReplying;
+    button.setAttribute("aria-pressed", String(cadence === currentProactiveCompanionSettings.cadence));
+    button.addEventListener("click", () => {
+      renderProactiveCompanionSettings({
+        ...currentProactiveCompanionSettings,
+        cadence
+      });
+    });
+    proactiveCadenceControlsElement.append(button);
+  }
+}
+
+async function refreshProactiveCompanionSettings(): Promise<void> {
+  renderProactiveCadenceControls();
+
+  if (!window.proactiveCompanionApi) {
+    renderProactiveCompanionSettings(DEFAULT_PROACTIVE_COMPANION_SETTINGS);
+    proactiveCompanionStatusBox.dataset.state = "fallback";
+    proactiveCompanionStatusBox.textContent = "主动气泡设置不可用。";
+    return;
+  }
+
+  try {
+    renderProactiveCompanionSettings(await window.proactiveCompanionApi.getSettings());
+  } catch {
+    proactiveCompanionStatusBox.dataset.state = "fallback";
+    proactiveCompanionStatusBox.textContent = "无法读取主动气泡设置。";
+  }
+}
+
+async function saveProactiveCompanionSettings(): Promise<void> {
+  if (!window.proactiveCompanionApi || chatTurnState.isReplying) {
+    return;
+  }
+
+  try {
+    const settings = await window.proactiveCompanionApi.setSettings({
+      cadence: currentProactiveCompanionSettings.cadence,
+      memorySourceBubbles: proactiveMemorySourceBubblesField.checked,
+      searchSourceBubbles: proactiveSearchSourceBubblesField.checked
+    });
+    renderProactiveCompanionSettings(settings);
+    setSettingsFeedback("主动气泡设置已保存。", "ready");
+  } catch {
+    setSettingsFeedback("无法保存主动气泡设置，请稍后重试。", "fallback");
+  }
 }
 
 async function refreshWebSearchSettings(): Promise<void> {
@@ -2823,6 +2931,10 @@ window.presenceModeApi?.onModeChanged((modeId) => {
   setPresenceMode(modeId);
 });
 
+window.proactiveCompanionApi?.onSettingsChanged((settings) => {
+  renderProactiveCompanionSettings(settings);
+});
+
 chatForm.addEventListener("submit", (event) => {
   event.preventDefault();
 
@@ -3027,6 +3139,26 @@ webSearchRefreshAction.addEventListener("click", () => {
 webSearchTestAction.addEventListener("click", () => {
   if (!chatTurnState.isReplying) {
     void testWebSearchConnection();
+  }
+});
+
+proactiveMemorySourceBubblesField.addEventListener("change", () => {
+  renderProactiveCompanionSettings({
+    ...currentProactiveCompanionSettings,
+    memorySourceBubbles: proactiveMemorySourceBubblesField.checked
+  });
+});
+
+proactiveSearchSourceBubblesField.addEventListener("change", () => {
+  renderProactiveCompanionSettings({
+    ...currentProactiveCompanionSettings,
+    searchSourceBubbles: proactiveSearchSourceBubblesField.checked
+  });
+});
+
+saveProactiveCompanionSettingsAction.addEventListener("click", () => {
+  if (!chatTurnState.isReplying) {
+    void saveProactiveCompanionSettings();
   }
 });
 
@@ -3452,6 +3584,7 @@ setPresenceMode("default");
 setMemorySessionStatus(null);
 void refreshDialogueMode();
 void refreshPresenceMode();
+void refreshProactiveCompanionSettings();
 void refreshUserProfile();
 void refreshProviderStatus();
 void refreshWebSearchSettings();

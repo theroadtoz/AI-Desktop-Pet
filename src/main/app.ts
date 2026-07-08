@@ -40,6 +40,12 @@ import {
   type ProactiveSpeechBubbleTimeBand
 } from "../shared/proactive-speech-bubble";
 import {
+  DEFAULT_PROACTIVE_COMPANION_SETTINGS,
+  getProactiveCompanionIdleIntervalMs,
+  shouldQueueProactiveCompanionSourceBubble,
+  type ProactiveCompanionSettings
+} from "../shared/proactive-companion-settings";
+import {
   selectLowFrequencyCompanionEvent,
   type LowFrequencyCompanionEventId,
   type LowFrequencyCompanionEvent
@@ -106,6 +112,10 @@ import { createWebSearchCitationPayload, createWebSearchContext } from "./servic
 import { readEnvProviderConfig, type EnvProviderConfig } from "./services/config/env-config";
 import { createDialogueModeStore, type DialogueModeStore } from "./services/config/dialogue-mode-store";
 import { createPresenceModeStore, type PresenceModeStore } from "./services/config/presence-mode-store";
+import {
+  createProactiveCompanionSettingsStore,
+  type ProactiveCompanionSettingsStore
+} from "./services/config/proactive-companion-settings-store";
 import {
   createWebSearchSettingsStore,
   normalizeWebSearchSettings,
@@ -177,6 +187,7 @@ let memoryStore: MemoryStore | null = null;
 let webSearchSettingsStore: WebSearchSettingsStore | null = null;
 let dialogueModeStore: DialogueModeStore | null = null;
 let presenceModeStore: PresenceModeStore | null = null;
+let proactiveCompanionSettingsStore: ProactiveCompanionSettingsStore | null = null;
 let shortcutPreferencesStore: ShortcutPreferencesStore | null = null;
 let userProfileStore: UserProfileStore | null = null;
 let shortcutRegistry: ShortcutRegistry | null = null;
@@ -193,6 +204,7 @@ let currentPetPresentationIntent: PetPresentationIntent = createPetPresentationI
 let activeChatRequestVersion: number | null = null;
 let currentDialogueModeId: DialogueModeId = "default";
 let currentPresenceModeId: PresenceModeId = "default";
+let currentProactiveCompanionSettings: ProactiveCompanionSettings = DEFAULT_PROACTIVE_COMPANION_SETTINGS;
 let performanceHeartbeat: NodeJS.Timeout | null = null;
 let isPetLocked = false;
 let initialEdgeGlanceTimer: NodeJS.Timeout | null = null;
@@ -225,7 +237,7 @@ const PET_CHAT_REPLY_SUSTAIN_MIN_CHARS = 42;
 const PET_CHAT_REPLY_SUSTAIN_DELAY_MS = 1_250;
 const PET_STARTUP_PROACTIVE_SPEECH_BUBBLE_DELAY_MS = 1_100;
 const isAcceptanceTelemetryEnabled = process.env.AI_DESKTOP_PET_ACCEPTANCE_TELEMETRY === "1";
-const PET_IDLE_PROACTIVE_SPEECH_BUBBLE_INTERVAL_MS = readProactiveSpeechBubbleIdleIntervalMs(
+const PET_IDLE_PROACTIVE_SPEECH_BUBBLE_BASE_INTERVAL_MS = readProactiveSpeechBubbleIdleIntervalMs(
   process.env.AI_DESKTOP_PET_PROACTIVE_SPEECH_BUBBLE_IDLE_INTERVAL_MS,
   isAcceptanceTelemetryEnabled
 );
@@ -792,6 +804,10 @@ function getProactiveSpeechBubbleSkipReason(): string | null {
     return "pet_window_missing";
   }
 
+  if (currentProactiveCompanionSettings.cadence === "off") {
+    return "proactive_bubbles_off";
+  }
+
   if (currentPresenceModeId === "sleep") {
     return "sleep_mode";
   }
@@ -823,6 +839,7 @@ function logProactiveSpeechBubbleDecision(
     durationMs: payload.durationMs,
     presenceModeId: currentPresenceModeId,
     dialogueModeId: currentDialogueModeId,
+    cadence: currentProactiveCompanionSettings.cadence,
     ...extra
   });
 }
@@ -909,6 +926,15 @@ function markProactiveSpeechBubbleHidden(): void {
   proactiveSpeechBubbleVisibleUntil = 0;
 }
 
+function clearPetProactiveSpeechBubble(): void {
+  markProactiveSpeechBubbleHidden();
+  if (!petWindow || petWindow.isDestroyed()) {
+    return;
+  }
+
+  petWindow.webContents.send("pet:clear-proactive-speech-bubble");
+}
+
 function getRuntimeProactiveSpeechBubbleTimeBand(): ProactiveSpeechBubbleTimeBand {
   return ACCEPTANCE_PROACTIVE_SPEECH_BUBBLE_TIME_BAND ?? getProactiveSpeechBubbleTimeBand(new Date());
 }
@@ -966,6 +992,20 @@ function queueSourcedLowFrequencyCompanionEvent(
   if (
     eventId !== "memory-safe-pulse" &&
     eventId !== "search-citation-pulse"
+  ) {
+    return;
+  }
+
+  if (
+    eventId === "memory-safe-pulse" &&
+    !shouldQueueProactiveCompanionSourceBubble(currentProactiveCompanionSettings, "memory")
+  ) {
+    return;
+  }
+
+  if (
+    eventId === "search-citation-pulse" &&
+    !shouldQueueProactiveCompanionSourceBubble(currentProactiveCompanionSettings, "search")
   ) {
     return;
   }
@@ -1040,9 +1080,18 @@ function createProactiveSpeechBubblePayload(
   };
 }
 
-function getNextIdleProactiveSpeechBubbleDelayMs(): number {
+function getNextIdleProactiveSpeechBubbleDelayMs(): number | null {
+  const cadenceIntervalMs = getProactiveCompanionIdleIntervalMs(
+    currentProactiveCompanionSettings,
+    PET_IDLE_PROACTIVE_SPEECH_BUBBLE_BASE_INTERVAL_MS,
+    { acceptance: isAcceptanceTelemetryEnabled }
+  );
+  if (cadenceIntervalMs === null) {
+    return null;
+  }
+
   const visibleRemainingMs = Math.max(0, proactiveSpeechBubbleVisibleUntil - Date.now());
-  return visibleRemainingMs + PET_IDLE_PROACTIVE_SPEECH_BUBBLE_INTERVAL_MS;
+  return visibleRemainingMs + cadenceIntervalMs;
 }
 
 function getLowFrequencyCompanionEventElapsedMs(now: number): number | undefined {
@@ -1110,7 +1159,12 @@ function selectRuntimeLowFrequencyCompanionEvent(now: number): {
 function scheduleIdleProactiveSpeechBubble(): void {
   cancelIdleProactiveSpeechBubbleTimer();
 
-  if (currentPresenceModeId === "sleep") {
+  if (currentPresenceModeId === "sleep" || currentProactiveCompanionSettings.cadence === "off") {
+    return;
+  }
+
+  const nextDelayMs = getNextIdleProactiveSpeechBubbleDelayMs();
+  if (nextDelayMs === null) {
     return;
   }
 
@@ -1165,7 +1219,7 @@ function scheduleIdleProactiveSpeechBubble(): void {
       nextIdleProactiveSpeechBubbleReason = "idle_presence";
     }
     scheduleIdleProactiveSpeechBubble();
-  }, getNextIdleProactiveSpeechBubbleDelayMs());
+  }, nextDelayMs);
 }
 
 function scheduleStartupProactiveSpeechBubbleIfNeeded(): void {
@@ -1178,6 +1232,13 @@ function scheduleStartupProactiveSpeechBubbleIfNeeded(): void {
   cancelStartupProactiveSpeechBubbleTimer();
 
   if (!canShowStartupProactiveSpeechBubble()) {
+    logProactiveSpeechBubbleDecision("skipped", {
+      lineId: DEFAULT_PROACTIVE_SPEECH_BUBBLE_LINE_ID,
+      reason: "startup_presence",
+      durationMs: DEFAULT_PROACTIVE_SPEECH_BUBBLE_DURATION_MS
+    }, {
+      skipReason: getProactiveSpeechBubbleSkipReason() ?? "startup_blocked"
+    });
     scheduleIdleProactiveSpeechBubble();
     return;
   }
@@ -1185,6 +1246,13 @@ function scheduleStartupProactiveSpeechBubbleIfNeeded(): void {
   startupProactiveSpeechBubbleTimer = setTimeout(() => {
     startupProactiveSpeechBubbleTimer = null;
     if (!canShowStartupProactiveSpeechBubble()) {
+      logProactiveSpeechBubbleDecision("skipped", {
+        lineId: DEFAULT_PROACTIVE_SPEECH_BUBBLE_LINE_ID,
+        reason: "startup_presence",
+        durationMs: DEFAULT_PROACTIVE_SPEECH_BUBBLE_DURATION_MS
+      }, {
+        skipReason: getProactiveSpeechBubbleSkipReason() ?? "startup_blocked"
+      });
       return;
     }
 
@@ -1921,6 +1989,8 @@ app.whenReady().then(async () => {
   currentDialogueModeId = dialogueModeStore.getMode();
   presenceModeStore = createPresenceModeStore();
   currentPresenceModeId = presenceModeStore.getMode();
+  proactiveCompanionSettingsStore = createProactiveCompanionSettingsStore();
+  currentProactiveCompanionSettings = proactiveCompanionSettingsStore.getSettings();
   shortcutPreferencesStore = createShortcutPreferencesStore();
   userProfileStore = createUserProfileStore({ logTelemetry });
   shortcutRegistry = createUserShortcutRegistry();
@@ -2282,6 +2352,48 @@ app.whenReady().then(async () => {
     }
 
     petWindow.webContents.send("presenceMode:changed", modeId);
+  }
+
+  function notifyChatProactiveCompanionSettingsChanged(settings: ProactiveCompanionSettings): void {
+    if (!chatWindow || chatWindow.isDestroyed()) {
+      return;
+    }
+
+    chatWindow.webContents.send("proactiveCompanion:changed", settings);
+  }
+
+  function applyProactiveCompanionSettings(update: unknown): ProactiveCompanionSettings {
+    if (!proactiveCompanionSettingsStore) {
+      throw new Error("Proactive companion settings store unavailable");
+    }
+
+    const previousSettings = currentProactiveCompanionSettings;
+    currentProactiveCompanionSettings = proactiveCompanionSettingsStore.saveSettings(update);
+
+    if (
+      currentProactiveCompanionSettings.cadence === "off" ||
+      (previousSettings.memorySourceBubbles && !currentProactiveCompanionSettings.memorySourceBubbles) ||
+      (previousSettings.searchSourceBubbles && !currentProactiveCompanionSettings.searchSourceBubbles)
+    ) {
+      clearSourcedLowFrequencyCompanionEvents();
+    }
+
+    if (currentProactiveCompanionSettings.cadence === "off") {
+      cancelStartupProactiveSpeechBubbleTimer();
+      cancelIdleProactiveSpeechBubbleTimer();
+      clearPetProactiveSpeechBubble();
+      nextIdleProactiveSpeechBubbleReason = "idle_presence";
+    } else {
+      scheduleIdleProactiveSpeechBubble();
+    }
+
+    logTelemetry("proactive_companion_settings_changed", {
+      cadence: currentProactiveCompanionSettings.cadence,
+      memorySourceBubbles: currentProactiveCompanionSettings.memorySourceBubbles,
+      searchSourceBubbles: currentProactiveCompanionSettings.searchSourceBubbles
+    });
+    notifyChatProactiveCompanionSettingsChanged(currentProactiveCompanionSettings);
+    return currentProactiveCompanionSettings;
   }
 
   ipcMain.handle("pet:open-chat", (event) => {
@@ -3143,6 +3255,22 @@ app.whenReady().then(async () => {
     return currentPresenceModeId;
   });
 
+  ipcMain.handle("proactiveCompanion:get-settings", (event) => {
+    if (!isChatSender(event)) {
+      throw new Error("Unauthorized proactive companion settings request");
+    }
+
+    return currentProactiveCompanionSettings;
+  });
+
+  ipcMain.handle("proactiveCompanion:set-settings", (event, update: unknown) => {
+    if (!isChatSender(event)) {
+      throw new Error("Unauthorized proactive companion settings request");
+    }
+
+    return applyProactiveCompanionSettings(update);
+  });
+
   ipcMain.handle("userProfile:get", (event) => {
     if (!isChatSender(event) || !userProfileStore) {
       throw new Error("Unauthorized user profile request");
@@ -3357,6 +3485,7 @@ app.on("window-all-closed", () => {
 app.on("will-quit", () => {
   cancelPendingModeActionStateTrigger();
   cancelStartupProactiveSpeechBubbleTimer();
+  cancelIdleProactiveSpeechBubbleTimer();
   bundledLlamaCppRuntime?.stop();
   stopLlamaCppRuntime();
   petPresentationPersistence?.flush();

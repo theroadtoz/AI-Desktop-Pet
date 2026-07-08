@@ -263,6 +263,17 @@ const api: PetApi = {
       ipcRenderer.removeListener("pet:proactive-speech-bubble", listener);
     };
   },
+  onClearProactiveSpeechBubble(handler) {
+    const listener = (): void => {
+      handler();
+    };
+
+    ipcRenderer.on("pet:clear-proactive-speech-bubble", listener);
+
+    return () => {
+      ipcRenderer.removeListener("pet:clear-proactive-speech-bubble", listener);
+    };
+  },
   onInjectWebGLContextLoss(handler: () => void) {
     const listener = (): void => {
       handler();

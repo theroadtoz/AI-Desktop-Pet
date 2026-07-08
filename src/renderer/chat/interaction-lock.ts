@@ -12,6 +12,7 @@ export const REPLY_LOCKED_CONTROL_IDS = [
   "save-user-profile-button",
   "clear-user-profile-button",
   "welcome-save-user-profile-button",
+  "save-proactive-companion-settings-button",
   "shelf-accessory-button",
   "shelf-scale-button",
   "shelf-lock-button"

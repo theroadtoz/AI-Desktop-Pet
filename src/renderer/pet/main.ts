@@ -700,6 +700,9 @@ const removeActionTriggerListener = window.petApi?.onActionTrigger((trigger) => 
 const removeProactiveSpeechBubbleListener = window.petApi?.onProactiveSpeechBubble((payload) => {
   showProactiveSpeechBubble(payload);
 }) ?? null;
+const removeClearProactiveSpeechBubbleListener = window.petApi?.onClearProactiveSpeechBubble(() => {
+  clearProactiveSpeechBubble();
+}) ?? null;
 const removeWindowMotionFeedbackListener = window.petApi?.onWindowMotionFeedback((feedback) => {
   if (feedback.type === "shake_light_feedback") {
     interactionActionPlayer.playWindowShakeLightFeedback();
@@ -744,6 +747,7 @@ window.addEventListener("beforeunload", () => {
   removePresenceModeChangedListener?.();
   removeActionTriggerListener?.();
   removeProactiveSpeechBubbleListener?.();
+  removeClearProactiveSpeechBubbleListener?.();
   removeWindowMotionFeedbackListener?.();
   clearProactiveSpeechBubble();
   cancelClickInteractionAction();
