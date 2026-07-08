@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { PET_MOTION_PRESET_IDS } from "../src/shared/pet-motion-presets.ts";
-import { auditWitchMotionAssets, validateMotionPresetPath } from "./live2d-motion-asset-audit.mts";
+import {
+  auditWitchMotionAssets,
+  isProductionReadyMotionAssetLicenseStatus,
+  validateMotionPresetPath
+} from "./live2d-motion-asset-audit.mts";
 
 test("motion asset audit reports the current model has only idle motion", () => {
   const audit = auditWitchMotionAssets();
@@ -30,6 +34,13 @@ test("motion preset paths reject raw paths and non motion files", () => {
   assert.throws(() => validateMotionPresetPath("..\/wave.motion3.json"), /安全的 \.motion3\.json/);
   assert.throws(() => validateMotionPresetPath("motions\\wave.motion3.json"), /POSIX 相对路径/);
   assert.throws(() => validateMotionPresetPath("motions/wave.exp3.json"), /安全的 \.motion3\.json/);
+});
+
+test("motion intake boundary rejects reference-only or missing-license assets as production-ready", () => {
+  assert.equal(isProductionReadyMotionAssetLicenseStatus("project-owned"), true);
+  assert.equal(isProductionReadyMotionAssetLicenseStatus("user-provided"), true);
+  assert.equal(isProductionReadyMotionAssetLicenseStatus("official-sample-reference-only"), false);
+  assert.equal(isProductionReadyMotionAssetLicenseStatus("blocked-missing-license"), false);
 });
 
 test("motion audit safe output does not expose absolute local paths or raw motion json", () => {

@@ -36,8 +36,9 @@ export type MotionPresetAuditEntry = {
   allowedStates: string[];
   visualRisk: ModelMotionVisualRisk;
   assetLicenseStatus: ModelMotionAssetLicenseStatus;
+  productionReady: boolean;
   parameterIds: string[];
-  status: "ready";
+  status: "ready" | "blocked-license";
 };
 
 export type MotionAssetAuditResult = {
@@ -61,6 +62,10 @@ export type MotionAssetAuditResult = {
     reason: "no-semantic-motion-presets";
   } | null;
 };
+
+export function isProductionReadyMotionAssetLicenseStatus(status: ModelMotionAssetLicenseStatus): boolean {
+  return status === "project-owned" || status === "user-provided";
+}
 
 const MOTION_SEMANTIC_KINDS: readonly ModelMotionSemanticKind[] = [
   "idle",
@@ -344,8 +349,11 @@ export function auditWitchMotionAssets(repositoryRoot = REPOSITORY_ROOT): Motion
       allowedStates: [...preset.allowedStates],
       visualRisk: preset.visualRisk,
       assetLicenseStatus: preset.assetLicenseStatus,
+      productionReady: isProductionReadyMotionAssetLicenseStatus(preset.assetLicenseStatus),
       parameterIds: summary.usedParameterIds,
-      status: "ready" as const
+      status: isProductionReadyMotionAssetLicenseStatus(preset.assetLicenseStatus)
+        ? "ready" as const
+        : "blocked-license" as const
     };
   });
 
