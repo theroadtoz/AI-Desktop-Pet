@@ -200,8 +200,9 @@ test("main search citation trigger uses only citation count after safe payload c
   assert.notEqual(citationStart, -1);
   assert.match(citationSource, /createWebSearchCitationPayload\(webSearchResolution\.context\)/);
   assert.match(citationSource, /const webSearchCitationCount = webSearchCitation\?\.citations\.length \?\? 0;/);
-  assert.match(citationSource, /if \(webSearchCitationCount > 0\) \{\s*sendPetActionTrigger\("state_search_cited"\);\s*\}/);
+  assert.match(citationSource, /if \(webSearchCitationCount > 0\) \{\s*sendPetActionTrigger\("state_search_cited"\);\s*queueSourcedLowFrequencyCompanionEvent\("search-citation-pulse"\);\s*\}/);
   assert.doesNotMatch(citationSource, /sendPetActionTrigger\([^)]*(query|url|title|snippet|result|payload)/i);
+  assert.doesNotMatch(citationSource, /queueSourcedLowFrequencyCompanionEvent\([^)]*(query|url|title|snippet|result|payload)/i);
 });
 
 test("main proactive bubble trigger fires only after a shown bubble without text payloads", async () => {

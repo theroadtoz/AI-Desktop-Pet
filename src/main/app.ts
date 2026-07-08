@@ -203,6 +203,12 @@ let proactiveSpeechBubbleVisibleUntil = 0;
 let nextIdleProactiveSpeechBubbleReason: ProactiveSpeechBubbleReason = "idle_presence";
 let lastLowFrequencyCompanionEventAt: number | null = null;
 let lastLowFrequencyCompanionEventId: LowFrequencyCompanionEvent["eventId"] | null = null;
+let pendingSourcedLowFrequencyCompanionEvents: SourcedLowFrequencyCompanionEvent[] = [];
+
+type SourcedLowFrequencyCompanionEvent = {
+  eventId: LowFrequencyCompanionEventId;
+  queuedAtMs: number;
+};
 
 const PET_RENDERER_RECOVERY_WINDOW_MS = 60_000;
 const DEFAULT_API_KEY_REF = "openai-compatible-default";
@@ -220,11 +226,12 @@ const PET_IDLE_PROACTIVE_SPEECH_BUBBLE_INTERVAL_MS = readProactiveSpeechBubbleId
   process.env.AI_DESKTOP_PET_PROACTIVE_SPEECH_BUBBLE_IDLE_INTERVAL_MS,
   isAcceptanceTelemetryEnabled
 );
-const RUNTIME_LOW_FREQUENCY_COMPANION_EVENT_IDS = [
+const BASE_RUNTIME_LOW_FREQUENCY_COMPANION_EVENT_IDS = [
   "idle-presence-check",
   "mode-presence-echo",
   "context-settle"
 ] as const satisfies readonly LowFrequencyCompanionEventId[];
+const SOURCED_LOW_FREQUENCY_COMPANION_EVENT_TTL_MS = 15 * 60 * 1_000;
 const LOW_FREQUENCY_COMPANION_EVENT_ACCEPTANCE_MINIMUM_INTERVAL_MS = readLowFrequencyCompanionEventAcceptanceMinimumIntervalMs(
   process.env.AI_DESKTOP_PET_LOW_FREQUENCY_COMPANION_EVENT_MINIMUM_INTERVAL_MS,
   isAcceptanceTelemetryEnabled
@@ -903,7 +910,61 @@ function getLowFrequencyCompanionSafeContextTag(
     return "context_settle";
   }
 
+  if (event?.eventId === "memory-safe-pulse") {
+    return "memory_safe_pulse";
+  }
+
+  if (event?.eventId === "search-citation-pulse") {
+    return "search_citation_pulse";
+  }
+
   return undefined;
+}
+
+function queueSourcedLowFrequencyCompanionEvent(eventId: LowFrequencyCompanionEventId, now = Date.now()): void {
+  if (
+    eventId !== "memory-safe-pulse" &&
+    eventId !== "search-citation-pulse"
+  ) {
+    return;
+  }
+
+  pruneExpiredSourcedLowFrequencyCompanionEvents(now);
+  pendingSourcedLowFrequencyCompanionEvents = pendingSourcedLowFrequencyCompanionEvents
+    .filter((candidate) => candidate.eventId !== eventId);
+  pendingSourcedLowFrequencyCompanionEvents.push({
+    eventId,
+    queuedAtMs: now
+  });
+}
+
+function pruneExpiredSourcedLowFrequencyCompanionEvents(now = Date.now()): void {
+  if (pendingSourcedLowFrequencyCompanionEvents.length === 0) {
+    return;
+  }
+
+  pendingSourcedLowFrequencyCompanionEvents = pendingSourcedLowFrequencyCompanionEvents
+    .filter((candidate) => now - candidate.queuedAtMs <= SOURCED_LOW_FREQUENCY_COMPANION_EVENT_TTL_MS);
+}
+
+function clearQueuedSourcedLowFrequencyCompanionEvent(eventId: LowFrequencyCompanionEventId): void {
+  pendingSourcedLowFrequencyCompanionEvents = pendingSourcedLowFrequencyCompanionEvents
+    .filter((candidate) => candidate.eventId !== eventId);
+}
+
+function clearSourcedLowFrequencyCompanionEvents(): void {
+  pendingSourcedLowFrequencyCompanionEvents = [];
+}
+
+function getRuntimeLowFrequencyCompanionEventIds(): readonly LowFrequencyCompanionEventId[] {
+  pruneExpiredSourcedLowFrequencyCompanionEvents();
+  if (pendingSourcedLowFrequencyCompanionEvents.length > 0) {
+    return pendingSourcedLowFrequencyCompanionEvents.map((event) => event.eventId);
+  }
+
+  return [
+    ...BASE_RUNTIME_LOW_FREQUENCY_COMPANION_EVENT_IDS
+  ];
 }
 
 function createProactiveSpeechBubblePayload(
@@ -948,7 +1009,7 @@ function selectRuntimeLowFrequencyCompanionEvent(now: number): {
     presenceModeId: currentPresenceModeId,
     tick: proactiveSpeechBubbleTick + 1,
     elapsedSinceLastEventMs,
-    allowedEventIds: RUNTIME_LOW_FREQUENCY_COMPANION_EVENT_IDS
+    allowedEventIds: getRuntimeLowFrequencyCompanionEventIds()
   };
   const event = selectLowFrequencyCompanionEvent(input);
 
@@ -1021,6 +1082,7 @@ function scheduleIdleProactiveSpeechBubble(): void {
       if (sendProactiveSpeechBubble(payload)) {
         lastLowFrequencyCompanionEventAt = now;
         lastLowFrequencyCompanionEventId = selection.event.eventId;
+        clearQueuedSourcedLowFrequencyCompanionEvent(selection.event.eventId);
         logLowFrequencyCompanionEventDecision("shown", selection.event, {
           durationMs: payload.durationMs,
           elapsedSinceLastEventMs: selection.elapsedSinceLastEventMs,
@@ -2433,6 +2495,16 @@ app.whenReady().then(async () => {
     }
 
     const memoryContext = memoryStoreForRequest.createInjection();
+    if (
+      memoryContext.count > 0 ||
+      autoMemoryCaptureForActivity.skippedReason === "sensitive" ||
+      autoMemoryCaptureForActivity.capturedCount > 0 ||
+      autoMemoryCaptureForActivity.mergedCount > 0 ||
+      autoMemoryCaptureForActivity.deduplicatedCount > 0 ||
+      autoMemoryCaptureForActivity.compressionTriggered
+    ) {
+      queueSourcedLowFrequencyCompanionEvent("memory-safe-pulse");
+    }
     sendPetActionTrigger(selectMainPetActionTriggerForMemorySafeChatReply({
       providerId,
       autoCaptureSkippedReason: autoMemoryCaptureForActivity.skippedReason,
@@ -2451,6 +2523,7 @@ app.whenReady().then(async () => {
       const webSearchCitationCount = webSearchCitation?.citations.length ?? 0;
       if (webSearchCitationCount > 0) {
         sendPetActionTrigger("state_search_cited");
+        queueSourcedLowFrequencyCompanionEvent("search-citation-pulse");
       }
 
       event.sender.send("chat:context-transparency", createChatContextTransparencyPayload({
@@ -2982,6 +3055,7 @@ app.whenReady().then(async () => {
         cancelIdleProactiveSpeechBubbleTimer();
         markProactiveSpeechBubbleHidden();
         nextIdleProactiveSpeechBubbleReason = "idle_presence";
+        clearSourcedLowFrequencyCompanionEvents();
       }
 
       logTelemetry("presence_mode_changed", {

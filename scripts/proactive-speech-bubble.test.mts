@@ -69,10 +69,16 @@ test("proactive speech bubble accepts only safe time bands", () => {
 });
 
 test("proactive speech bubble accepts only fixed safe context tags", () => {
-  assert.deepEqual(PROACTIVE_SPEECH_BUBBLE_SAFE_CONTEXT_TAGS, ["context_settle"]);
+  assert.deepEqual(PROACTIVE_SPEECH_BUBBLE_SAFE_CONTEXT_TAGS, [
+    "context_settle",
+    "memory_safe_pulse",
+    "search_citation_pulse"
+  ]);
   assert.equal(isProactiveSpeechBubbleSafeContextTag("context_settle"), true);
+  assert.equal(isProactiveSpeechBubbleSafeContextTag("memory_safe_pulse"), true);
+  assert.equal(isProactiveSpeechBubbleSafeContextTag("search_citation_pulse"), true);
   assert.equal(isProactiveSpeechBubbleSafeContextTag("context-settle"), false);
-  assert.equal(isProactiveSpeechBubbleSafeContextTag("memory_safe_pulse"), false);
+  assert.equal(isProactiveSpeechBubbleSafeContextTag("memory-safe-pulse"), false);
   assert.equal(isProactiveSpeechBubbleSafeContextTag(undefined), false);
 });
 
@@ -226,6 +232,24 @@ test("proactive speech bubble selection applies safe context tag after low-inter
 
   assert.equal(selectProactiveSpeechBubbleLineId({
     reason: "idle_presence",
+    presenceModeId: "default",
+    dialogueModeId: "default",
+    tick: 0,
+    timeBand: "morning",
+    safeContextTag: "memory_safe_pulse"
+  }), "idle_presence_memory_safe");
+
+  assert.equal(selectProactiveSpeechBubbleLineId({
+    reason: "idle_presence",
+    presenceModeId: "default",
+    dialogueModeId: "default",
+    tick: 0,
+    timeBand: "evening",
+    safeContextTag: "search_citation_pulse"
+  }), "idle_presence_search_citation");
+
+  assert.equal(selectProactiveSpeechBubbleLineId({
+    reason: "idle_presence",
     presenceModeId: "focus",
     dialogueModeId: "default",
     tick: 0,
@@ -316,7 +340,7 @@ test("main runtime routes idle proactive bubbles through low frequency event poo
   assert.match(appSource, /logTelemetry\("low_frequency_companion_event", \{[\s\S]*eventId:[\s\S]*reason:[\s\S]*stateId:[\s\S]*actionType:[\s\S]*modeId:[\s\S]*presenceModeId:[\s\S]*status,[\s\S]*skipReason:[\s\S]*safeSummaryLabel:[\s\S]*interruptPolicy:[\s\S]*durationMs:[\s\S]*elapsedSinceLastEventMs:[\s\S]*minimumIntervalMs:/);
 });
 
-test("main runtime maps context settle event to selector safe context tag", () => {
+test("main runtime maps low frequency events to selector safe context tags", () => {
   const appSource = readFileSync("src/main/app.ts", "utf8");
   const mapperIndex = appSource.indexOf("function getLowFrequencyCompanionSafeContextTag(");
   const mapperEndIndex = appSource.indexOf("function createProactiveSpeechBubblePayload(", mapperIndex);
@@ -327,7 +351,32 @@ test("main runtime maps context settle event to selector safe context tag", () =
   assert.match(appSource, /type ProactiveSpeechBubbleSafeContextTag/);
   assert.match(mapperSource, /event\?\.eventId === "context-settle"/);
   assert.match(mapperSource, /return "context_settle"/);
-  assert.doesNotMatch(mapperSource, /memory-safe-pulse|search-citation-pulse/);
+  assert.match(mapperSource, /event\?\.eventId === "memory-safe-pulse"/);
+  assert.match(mapperSource, /return "memory_safe_pulse"/);
+  assert.match(mapperSource, /event\?\.eventId === "search-citation-pulse"/);
+  assert.match(mapperSource, /return "search_citation_pulse"/);
+});
+
+test("main runtime only queues sourced memory and search low frequency events from safe counters", () => {
+  const appSource = readFileSync("src/main/app.ts", "utf8");
+  const queueIndex = appSource.indexOf("function queueSourcedLowFrequencyCompanionEvent(");
+  const queueEndIndex = appSource.indexOf("function clearQueuedSourcedLowFrequencyCompanionEvent(", queueIndex);
+  const queueSource = appSource.slice(queueIndex, queueEndIndex);
+
+  assert.notEqual(queueIndex, -1);
+  assert.notEqual(queueEndIndex, -1);
+  assert.match(appSource, /const BASE_RUNTIME_LOW_FREQUENCY_COMPANION_EVENT_IDS = \[[\s\S]*"idle-presence-check"[\s\S]*"mode-presence-echo"[\s\S]*"context-settle"[\s\S]*\] as const/);
+  assert.match(appSource, /pendingSourcedLowFrequencyCompanionEvents/);
+  assert.match(appSource, /const SOURCED_LOW_FREQUENCY_COMPANION_EVENT_TTL_MS = 15 \* 60 \* 1_000/);
+  assert.match(appSource, /function pruneExpiredSourcedLowFrequencyCompanionEvents/);
+  assert.match(appSource, /function clearSourcedLowFrequencyCompanionEvents/);
+  assert.match(queueSource, /eventId !== "memory-safe-pulse"[\s\S]*eventId !== "search-citation-pulse"/);
+  assert.match(queueSource, /queuedAtMs: now/);
+  assert.match(appSource, /memoryContext\.count > 0[\s\S]*autoMemoryCaptureForActivity\.capturedCount > 0[\s\S]*queueSourcedLowFrequencyCompanionEvent\("memory-safe-pulse"\)/);
+  assert.match(appSource, /webSearchCitationCount > 0[\s\S]*queueSourcedLowFrequencyCompanionEvent\("search-citation-pulse"\)/);
+  assert.match(appSource, /clearQueuedSourcedLowFrequencyCompanionEvent\(selection\.event\.eventId\)/);
+  assert.match(appSource, /currentPresenceModeId === "sleep"[\s\S]*clearSourcedLowFrequencyCompanionEvents\(\)/);
+  assert.doesNotMatch(appSource, /safeQuery.*queueSourcedLowFrequencyCompanionEvent|webSearchResolution\.context\.results.*queueSourcedLowFrequencyCompanionEvent/);
 });
 
 test("proactive speech bubble renderer payload contract stays event-pool agnostic", () => {

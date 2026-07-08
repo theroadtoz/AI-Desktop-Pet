@@ -67,6 +67,8 @@ test("p2-38 runner validates startup to first idle to context settle sequence", 
     "context settle",
     "idle_presence_evening",
     "idle_presence_context_settle",
+    "idle_presence_memory_safe",
+    "idle_presence_search_citation",
     "lowFrequencySequenceStable",
     "firstIdleLowFrequencySafeSummary",
     "secondIdleLowFrequencySafeSummary"
