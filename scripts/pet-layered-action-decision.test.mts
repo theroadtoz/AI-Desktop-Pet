@@ -189,5 +189,8 @@ test("layered action catalog stores only safe enums and summaries, never raw res
   assert.deepEqual(getPetLayeredActionDecision("memory-injected").realUiCoverage, ["p2-31e2-memory-safe-states-real-ui"]);
   assert.deepEqual(getPetLayeredActionDecision("memory-skipped").realUiCoverage, ["p2-31e2-memory-safe-states-real-ui"]);
   assert.deepEqual(getPetLayeredActionDecision("search-cited").realUiCoverage, ["p2-31e2-search-proactive-safe-states-real-ui"]);
-  assert.deepEqual(getPetLayeredActionDecision("proactive-bubble-visible").realUiCoverage, ["p2-31e2-search-proactive-safe-states-real-ui"]);
+  assert.deepEqual(getPetLayeredActionDecision("proactive-bubble-visible").realUiCoverage, [
+    "p2-31e2-search-proactive-safe-states-real-ui",
+    "p2-49-history-summary-action-expression-real-ui"
+  ]);
 });
