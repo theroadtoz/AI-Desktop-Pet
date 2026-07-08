@@ -48,6 +48,7 @@ const safeLineIds = new Set([
   "idle_presence_reading_night",
   "idle_presence_game_evening",
   "idle_presence_context_settle",
+  "idle_presence_history_summary",
   "idle_presence_memory_safe",
   "idle_presence_search_citation",
   "mode_presence_focus",

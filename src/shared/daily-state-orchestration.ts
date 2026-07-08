@@ -26,6 +26,7 @@ export type DailyStateRealUiCoverage =
   | "p2-31d-layered-action-matrix"
   | "p2-31e2-expression-state-future-safe-states"
   | "p2-34-companion-presence-idle-mode-cadence"
+  | "p2-48-history-summary-proactive-bubble-safety"
   | "focused-tests-only";
 export type DailyStatePrivacyRisk = "safe-enum-only";
 
@@ -33,6 +34,7 @@ export type LowFrequencyCompanionEventId =
   | "idle-presence-check"
   | "mode-presence-echo"
   | "context-settle"
+  | "history-summary-pulse"
   | "memory-safe-pulse"
   | "search-citation-pulse";
 
@@ -127,6 +129,19 @@ const LOW_FREQUENCY_COMPANION_EVENTS = Object.freeze([
     interruptPolicy: "low-interruption",
     safeSummaryLabel: "context settle",
     realUiCoverage: ["p2-30-daily-companion-contextual-rhythm"],
+    privacyRisk: "safe-enum-only"
+  },
+  {
+    eventId: "history-summary-pulse",
+    bubbleReason: "idle_presence",
+    actionStateId: "proactive-bubble-visible",
+    minimumIntervalMs: 60 * 60 * 1_000,
+    allowedPresenceModes: ["default"],
+    allowedDialogueModes: ALL_DIALOGUE_MODE_IDS,
+    cadenceTier: "low-frequency",
+    interruptPolicy: "normal",
+    safeSummaryLabel: "context compression pulse",
+    realUiCoverage: ["p2-48-history-summary-proactive-bubble-safety"],
     privacyRisk: "safe-enum-only"
   },
   {

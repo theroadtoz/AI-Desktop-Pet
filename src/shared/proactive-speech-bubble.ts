@@ -22,6 +22,7 @@ export const PROACTIVE_SPEECH_BUBBLE_LINE_CATALOG = {
   idle_presence_reading_night: "夜里慢慢读。",
   idle_presence_game_evening: "晚上玩得轻松点。",
   idle_presence_context_settle: "我先陪你缓缓。",
+  idle_presence_history_summary: "长聊我收轻了。",
   idle_presence_memory_safe: "我把记忆轻轻收好。",
   idle_presence_search_citation: "引用线索我收好了。",
   mode_presence_focus: "我会放轻声音。",
@@ -51,6 +52,7 @@ export type ProactiveSpeechBubbleTimeBand = typeof PROACTIVE_SPEECH_BUBBLE_TIME_
 
 export const PROACTIVE_SPEECH_BUBBLE_SAFE_CONTEXT_TAGS = [
   "context_settle",
+  "history_summary_safe",
   "memory_safe_pulse",
   "search_citation_pulse"
 ] as const;
@@ -173,6 +175,10 @@ export function selectProactiveSpeechBubbleLineId(input: ProactiveSpeechBubbleSe
 
   if (input.safeContextTag === "context_settle") {
     return "idle_presence_context_settle";
+  }
+
+  if (input.safeContextTag === "history_summary_safe") {
+    return "idle_presence_history_summary";
   }
 
   if (input.safeContextTag === "memory_safe_pulse") {

@@ -71,13 +71,16 @@ test("proactive speech bubble accepts only safe time bands", () => {
 test("proactive speech bubble accepts only fixed safe context tags", () => {
   assert.deepEqual(PROACTIVE_SPEECH_BUBBLE_SAFE_CONTEXT_TAGS, [
     "context_settle",
+    "history_summary_safe",
     "memory_safe_pulse",
     "search_citation_pulse"
   ]);
   assert.equal(isProactiveSpeechBubbleSafeContextTag("context_settle"), true);
+  assert.equal(isProactiveSpeechBubbleSafeContextTag("history_summary_safe"), true);
   assert.equal(isProactiveSpeechBubbleSafeContextTag("memory_safe_pulse"), true);
   assert.equal(isProactiveSpeechBubbleSafeContextTag("search_citation_pulse"), true);
   assert.equal(isProactiveSpeechBubbleSafeContextTag("context-settle"), false);
+  assert.equal(isProactiveSpeechBubbleSafeContextTag("history-summary-safe"), false);
   assert.equal(isProactiveSpeechBubbleSafeContextTag("memory-safe-pulse"), false);
   assert.equal(isProactiveSpeechBubbleSafeContextTag(undefined), false);
 });
@@ -235,6 +238,15 @@ test("proactive speech bubble selection applies safe context tag after low-inter
     presenceModeId: "default",
     dialogueModeId: "default",
     tick: 0,
+    timeBand: "afternoon",
+    safeContextTag: "history_summary_safe"
+  }), "idle_presence_history_summary");
+
+  assert.equal(selectProactiveSpeechBubbleLineId({
+    reason: "idle_presence",
+    presenceModeId: "default",
+    dialogueModeId: "default",
+    tick: 0,
     timeBand: "morning",
     safeContextTag: "memory_safe_pulse"
   }), "idle_presence_memory_safe");
@@ -353,20 +365,27 @@ test("main runtime maps low frequency events to selector safe context tags", () 
   assert.match(appSource, /type ProactiveSpeechBubbleSafeContextTag/);
   assert.match(mapperSource, /event\?\.eventId === "context-settle"/);
   assert.match(mapperSource, /return "context_settle"/);
+  assert.match(mapperSource, /event\?\.eventId === "history-summary-pulse"/);
+  assert.match(mapperSource, /return "history_summary_safe"/);
   assert.match(mapperSource, /event\?\.eventId === "memory-safe-pulse"/);
   assert.match(mapperSource, /return "memory_safe_pulse"/);
   assert.match(mapperSource, /event\?\.eventId === "search-citation-pulse"/);
   assert.match(mapperSource, /return "search_citation_pulse"/);
 });
 
-test("main runtime only queues sourced memory and search low frequency events from safe counters", () => {
+test("main runtime only queues sourced history memory and search low frequency events from safe counters", () => {
   const appSource = readFileSync("src/main/app.ts", "utf8");
   const queueIndex = appSource.indexOf("function queueSourcedLowFrequencyCompanionEvent(");
   const queueEndIndex = appSource.indexOf("function clearQueuedSourcedLowFrequencyCompanionEvent(", queueIndex);
   const queueSource = appSource.slice(queueIndex, queueEndIndex);
+  const historyQueueIndex = appSource.indexOf("const contextBudget = budgetChatContext(request.messages);");
+  const historyQueueEndIndex = appSource.indexOf("void resolveWebSearchForLatestMessage", historyQueueIndex);
+  const historyQueueSource = appSource.slice(historyQueueIndex, historyQueueEndIndex);
 
   assert.notEqual(queueIndex, -1);
   assert.notEqual(queueEndIndex, -1);
+  assert.notEqual(historyQueueIndex, -1);
+  assert.notEqual(historyQueueEndIndex, -1);
   assert.match(appSource, /const BASE_RUNTIME_LOW_FREQUENCY_COMPANION_EVENT_IDS = \[[\s\S]*"idle-presence-check"[\s\S]*"mode-presence-echo"[\s\S]*"context-settle"[\s\S]*\] as const/);
   assert.match(appSource, /pendingSourcedLowFrequencyCompanionEvents/);
   assert.match(appSource, /actionStateId: PetActionStateId/);
@@ -378,9 +397,11 @@ test("main runtime only queues sourced memory and search low frequency events fr
   assert.match(appSource, /function getEffectiveLowFrequencyCompanionActionStateId/);
   assert.match(appSource, /function pruneExpiredSourcedLowFrequencyCompanionEvents/);
   assert.match(appSource, /function clearSourcedLowFrequencyCompanionEvents/);
-  assert.match(queueSource, /eventId !== "memory-safe-pulse"[\s\S]*eventId !== "search-citation-pulse"/);
+  assert.match(queueSource, /eventId !== "history-summary-pulse"[\s\S]*eventId !== "memory-safe-pulse"[\s\S]*eventId !== "search-citation-pulse"/);
   assert.match(queueSource, /actionStateId: options\.actionStateId/);
   assert.match(queueSource, /queuedAtMs: now/);
+  assert.match(historyQueueSource, /contextBudget\.summary\.compressed[\s\S]*contextBudget\.summary\.summaryMessageCount > 0[\s\S]*contextBudget\.summary\.summarizedMessageCount > 0[\s\S]*queueSourcedLowFrequencyCompanionEvent\("history-summary-pulse", \{\s*actionStateId: "proactive-bubble-visible"\s*\}\)/);
+  assert.doesNotMatch(historyQueueSource, /providerMessages|summaryText|summaryBody|submittedMessage\.content|userMessage|assistantMessage|safeQuery|webSearch|prompt/i);
   assert.match(appSource, /const memorySafePulseActionStateId = selectMemorySafePulseActionStateId/);
   assert.match(appSource, /queueSourcedLowFrequencyCompanionEvent\("memory-safe-pulse", \{\s*actionStateId: memorySafePulseActionStateId\s*\}\)/);
   assert.match(appSource, /webSearchCitationCount > 0[\s\S]*queueSourcedLowFrequencyCompanionEvent\("search-citation-pulse", \{\s*actionStateId: "search-cited"\s*\}\)/);

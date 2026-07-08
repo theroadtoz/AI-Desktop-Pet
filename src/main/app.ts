@@ -946,6 +946,10 @@ function getLowFrequencyCompanionSafeContextTag(
     return "context_settle";
   }
 
+  if (event?.eventId === "history-summary-pulse") {
+    return "history_summary_safe";
+  }
+
   if (event?.eventId === "memory-safe-pulse") {
     return "memory_safe_pulse";
   }
@@ -990,6 +994,7 @@ function queueSourcedLowFrequencyCompanionEvent(
   options: { actionStateId: PetActionStateId; now?: number }
 ): void {
   if (
+    eventId !== "history-summary-pulse" &&
     eventId !== "memory-safe-pulse" &&
     eventId !== "search-citation-pulse"
   ) {
@@ -1006,6 +1011,13 @@ function queueSourcedLowFrequencyCompanionEvent(
   if (
     eventId === "search-citation-pulse" &&
     !shouldQueueProactiveCompanionSourceBubble(currentProactiveCompanionSettings, "search")
+  ) {
+    return;
+  }
+
+  if (
+    eventId === "history-summary-pulse" &&
+    currentProactiveCompanionSettings.cadence === "off"
   ) {
     return;
   }
@@ -2692,6 +2704,15 @@ app.whenReady().then(async () => {
     const userProfileContext = createUserProfilePromptContext(userProfileStore?.getProfile() ?? null);
     const runtimeContext = createChatRuntimeContext();
     const contextBudget = budgetChatContext(request.messages);
+    if (
+      contextBudget.summary.compressed &&
+      contextBudget.summary.summaryMessageCount > 0 &&
+      contextBudget.summary.summarizedMessageCount > 0
+    ) {
+      queueSourcedLowFrequencyCompanionEvent("history-summary-pulse", {
+        actionStateId: "proactive-bubble-visible"
+      });
+    }
 
     void resolveWebSearchForLatestMessage(submittedMessage.content).then((webSearchResolution) => {
       const webSearchCitation = createWebSearchCitationPayload(webSearchResolution.context);

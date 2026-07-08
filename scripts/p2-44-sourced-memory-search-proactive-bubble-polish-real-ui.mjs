@@ -44,6 +44,7 @@ const allowedLineIds = new Set([
   "idle_presence_reading_night",
   "idle_presence_game_evening",
   "idle_presence_context_settle",
+  "idle_presence_history_summary",
   memoryLineId,
   searchLineId,
   "mode_presence_focus",

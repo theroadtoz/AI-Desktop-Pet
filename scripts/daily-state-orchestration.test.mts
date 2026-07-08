@@ -80,6 +80,7 @@ test("low frequency companion event pool only references known safe enums", () =
 
   assert.deepEqual([...eventIds].sort(), [
     "context-settle",
+    "history-summary-pulse",
     "idle-presence-check",
     "memory-safe-pulse",
     "mode-presence-echo",
@@ -186,6 +187,7 @@ test("runtime-facing low frequency selection can restrict future fact-bound even
 
     assert.notEqual(selected, null);
     assert.equal(allowedEventIds.includes(selected!.eventId as typeof allowedEventIds[number]), true);
+    assert.notEqual(selected?.eventId, "history-summary-pulse");
     assert.notEqual(selected?.eventId, "memory-safe-pulse");
     assert.notEqual(selected?.eventId, "search-citation-pulse");
   }
