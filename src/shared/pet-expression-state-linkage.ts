@@ -215,6 +215,10 @@ function allowsPresenceIntensity(presenceModeId: PresenceModeId, intensity: PetE
     : true;
 }
 
+function allowsFocusVisualRisk(presenceModeId: PresenceModeId, visualRisk: PetExpressionPresetVisualRisk): boolean {
+  return presenceModeId !== "focus" || visualRisk !== "needs-visual-check";
+}
+
 function getPolicyPresetIds(profile: PetExpressionStateLinkageProfile): readonly PetExpressionPresetId[] {
   return PRESET_ROLES
     .map((role) => profile[role])
@@ -306,7 +310,8 @@ function selectExpressionPresetId(
     if (
       allowsMode(preset.allowedDialogueModes, dialogueModeId) &&
       allowsMode(preset.allowedPresenceModes, presenceModeId) &&
-      allowsPresenceIntensity(presenceModeId, preset.intensity)
+      allowsPresenceIntensity(presenceModeId, preset.intensity) &&
+      allowsFocusVisualRisk(presenceModeId, preset.visualRisk)
     ) {
       return presetId;
     }
