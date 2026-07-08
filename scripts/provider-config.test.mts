@@ -161,16 +161,16 @@ test("local OpenAI-compatible provider parser rejects invalid local config", () 
   }), null);
 });
 
-test("provider config store migrates legacy DeepSeek default file to local recommendation", () => {
+test("provider config store migrates legacy external provider file to local recommendation", () => {
   const userDataPath = createTempUserDataPath();
   const events: Array<{ type: string; payload?: Record<string, unknown> }> = [];
 
   try {
     writeProviderConfig(userDataPath, {
       providerId: "openai-compatible",
-      displayName: "DeepSeek",
-      baseURL: "https://api.deepseek.com",
-      model: "deepseek-v4-flash",
+      displayName: "Legacy external provider",
+      baseURL: "https://legacy-cloud.example/v1",
+      model: "legacy-cloud-model",
       apiKeyRef: "openai-compatible-default",
       temperature: 0.7,
       maxTokens: 1024,
@@ -188,7 +188,7 @@ test("provider config store migrates legacy DeepSeek default file to local recom
     assert.equal(store.hasConfig(), true);
     assert.ok(events.some((event) => (
       event.type === "provider_config_migrated" &&
-      event.payload?.reason === "legacy_deepseek_default" &&
+      event.payload?.reason === "external_model_disabled" &&
       event.payload?.toProviderId === "local-openai-compatible"
     )));
   } finally {

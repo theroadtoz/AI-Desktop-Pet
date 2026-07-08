@@ -136,20 +136,11 @@ function isProviderConfig(value) {
 }
 
 function migrateLegacyProviderConfig(config) {
-  if (isLegacyDeepSeekDefaultConfig(config)) {
+  if (config.providerId === "openai-compatible") {
     return defaultConfig;
   }
 
   return config;
-}
-
-function isLegacyDeepSeekDefaultConfig(config) {
-  if (config.providerId !== "openai-compatible") {
-    return false;
-  }
-
-  return readBaseURLHost(config.baseURL)?.toLowerCase() === "api.deepseek.com" ||
-    config.model.trim().toLowerCase() === "deepseek-v4-flash";
 }
 
 function readBaseURLHost(baseURL) {

@@ -219,7 +219,7 @@ async function waitForEmbeddedProviderStatus(page, validation) {
         status?.providerId === "local-openai-compatible" &&
         status?.model === ${JSON.stringify(validation.alias)} &&
         status?.isFallback === false &&
-        !String(status?.baseURLHost ?? "").includes("api.deepseek.com")
+        /^(127\\.0\\.0\\.1|localhost|\\[::1\\]|::1)(:\\d+)?$/i.test(String(status?.baseURLHost ?? ""))
       ) {
         return {
           providerId: status.providerId,
@@ -557,9 +557,7 @@ function checkPrivacy(serializedSummary) {
     "memoryContext",
     "providerMessages",
     "Authorization",
-    "Bearer ",
-    "api.deepseek.com",
-    "deepseek-v4-flash"
+    "Bearer "
   ];
   return forbidden.every((snippet) => !text.includes(snippet));
 }
@@ -597,7 +595,8 @@ function assertion(passed, entries, failureCategory) {
 }
 
 function isExternalHost(host) {
-  return /api\.deepseek\.com|api\.openai\.com|openrouter\.ai|anthropic\.com|dashscope|bigmodel|volcengine/i.test(String(host ?? ""));
+  const value = String(host ?? "").trim();
+  return Boolean(value) && !/^(127\.0\.0\.1|localhost|\[::1\]|::1)(:\d+)?$/i.test(value);
 }
 
 function firstFailedCheck(checks) {

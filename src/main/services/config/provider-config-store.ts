@@ -59,16 +59,13 @@ export function createProviderConfigStore(options: {
         const config = migrateLegacyProviderConfig(parsedConfig);
 
         if (config !== parsedConfig) {
-          const migrationReason = isLegacyDeepSeekDefaultConfig(parsedConfig)
-            ? "legacy_deepseek_default"
-            : "external_model_disabled";
           log("provider_config_migrated", {
             source: "file",
-            reason: migrationReason,
+            reason: "external_model_disabled",
             fromProviderId: parsedConfig.providerId,
             toProviderId: config.providerId,
             baseURLHost: parsedConfig.providerId === "fake" ? undefined : readBaseURLHost(parsedConfig.baseURL),
-            modelCategory: parsedConfig.providerId === "fake" ? undefined : migrationReason
+            modelCategory: parsedConfig.providerId === "fake" ? undefined : "external_model_disabled"
           });
           logLoaded(config, "default");
           return config;
@@ -102,16 +99,13 @@ export function createProviderConfigStore(options: {
       writeFileSync(configPath, `${JSON.stringify(configToSave, null, 2)}\n`, "utf8");
 
       if (configToSave !== parsed) {
-        const migrationReason = isLegacyDeepSeekDefaultConfig(parsed)
-          ? "legacy_deepseek_default"
-          : "external_model_disabled";
         log("provider_config_migrated", {
           source: "file",
-          reason: migrationReason,
+          reason: "external_model_disabled",
           fromProviderId: parsed.providerId,
           toProviderId: configToSave.providerId,
           baseURLHost: parsed.providerId === "fake" ? undefined : readBaseURLHost(parsed.baseURL),
-          modelCategory: parsed.providerId === "fake" ? undefined : migrationReason
+          modelCategory: parsed.providerId === "fake" ? undefined : "external_model_disabled"
         });
       }
 
@@ -202,15 +196,6 @@ function migrateLegacyProviderConfig(config: ProviderConfig): ProviderConfig {
   }
 
   return config;
-}
-
-function isLegacyDeepSeekDefaultConfig(config: ProviderConfig): boolean {
-  if (config.providerId !== "openai-compatible") {
-    return false;
-  }
-
-  return readBaseURLHost(config.baseURL)?.toLowerCase() === "api.deepseek.com" ||
-    config.model.trim().toLowerCase() === "deepseek-v4-flash";
 }
 
 export function createProviderTelemetryPayload(
