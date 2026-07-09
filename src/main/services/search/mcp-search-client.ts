@@ -1,6 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { mkdirSync } from "node:fs";
 import { createInterface } from "node:readline";
-import { basename, delimiter } from "node:path";
+import { basename, delimiter, join, resolve } from "node:path";
 import type {
   WebSearchConnectionTestResult,
   WebSearchSettings,
@@ -22,6 +23,12 @@ type JsonRpcMessage = {
 type PendingRequest = {
   resolve(value: unknown): void;
   reject(error: Error): void;
+};
+
+type McpSpawnConfig = {
+  command: string;
+  args: string[];
+  shell: boolean;
 };
 
 const MCP_PROTOCOL_VERSION = "2025-06-18";
@@ -165,8 +172,9 @@ function createMcpJsonRpcSession(config: McpSearchClientConfig): {
   return {
     start() {
       return new Promise((resolve, reject) => {
-        const process = spawn(config.command, config.args, {
-          shell: false,
+        const spawnConfig = createMcpSpawnConfig(config);
+        const process = spawn(spawnConfig.command, spawnConfig.args, {
+          shell: spawnConfig.shell,
           windowsHide: true,
           stdio: ["pipe", "pipe", "pipe"],
           env: createSafeMcpChildEnv(config)
@@ -381,6 +389,11 @@ function parseResultJson(text: string): Array<Record<string, unknown>> {
       return results.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object"));
     }
 
+    const dataResults = (parsed as { data?: { results?: unknown } } | null)?.data?.results;
+    if (Array.isArray(dataResults)) {
+      return dataResults.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object"));
+    }
+
     return [];
   } catch {
     return [];
@@ -453,11 +466,55 @@ function createSafeMcpChildEnv(config: McpSearchClientConfig): NodeJS.ProcessEnv
     env[key] = "";
   }
 
+  if (isOpenWebSearchMcpConfig(config)) {
+    env.MODE = "stdio";
+    env.DEFAULT_SEARCH_ENGINE = "sogou";
+    env.ALLOWED_SEARCH_ENGINES = "sogou,baidu,bing";
+    env.SEARCH_MODE = "auto";
+
+    if (usesNpxCommand(config.command)) {
+      const runtimeRoot = join(resolve(process.cwd(), ".tmp"), "mcp-open-websearch-runtime");
+      const npmCache = join(runtimeRoot, "npm-cache");
+      const tempDir = join(runtimeRoot, "temp");
+      const homeDir = join(runtimeRoot, "home");
+      const appDataDir = join(runtimeRoot, "appdata");
+      const localAppDataDir = join(runtimeRoot, "localappdata");
+      mkdirSync(npmCache, { recursive: true });
+      mkdirSync(tempDir, { recursive: true });
+      mkdirSync(homeDir, { recursive: true });
+      mkdirSync(appDataDir, { recursive: true });
+      mkdirSync(localAppDataDir, { recursive: true });
+      env.NPM_CONFIG_CACHE = npmCache;
+      env.TEMP = tempDir;
+      env.TMP = tempDir;
+      env.USERPROFILE = homeDir;
+      env.HOME = homeDir;
+      env.APPDATA = appDataDir;
+      env.LOCALAPPDATA = localAppDataDir;
+    }
+  }
+
   const braveApiKey = process.env.BRAVE_API_KEY;
   if (braveApiKey && isBraveSearchMcpConfig(config)) {
     env.BRAVE_API_KEY = braveApiKey;
   }
   return env;
+}
+
+function createMcpSpawnConfig(config: McpSearchClientConfig): McpSpawnConfig {
+  if (shouldUseWindowsOpenWebSearchNpxBridge(config)) {
+    return {
+      command: process.env.ComSpec ?? process.env.COMSPEC ?? "cmd.exe",
+      args: ["/d", "/s", "/c", "npx.cmd -y open-websearch@latest"],
+      shell: false
+    };
+  }
+
+  return {
+    command: config.command,
+    args: config.args,
+    shell: false
+  };
 }
 
 function sanitizeMcpPath(value: string | undefined): string | undefined {
@@ -481,12 +538,33 @@ function isBraveSearchMcpConfig(config: McpSearchClientConfig): boolean {
   return config.args.some(isBraveSearchPackageArg);
 }
 
+function isOpenWebSearchMcpConfig(config: McpSearchClientConfig): boolean {
+  return config.args.some(isOpenWebSearchPackageArg);
+}
+
 function isBraveSearchPackageArg(value: string): boolean {
   const normalized = value.trim().toLowerCase();
   return [
     "@brave/brave-search-mcp-server",
     "@modelcontextprotocol/server-brave-search"
   ].some((packageName) => normalized === packageName || normalized.startsWith(`${packageName}@`));
+}
+
+function isOpenWebSearchPackageArg(value: string): boolean {
+  const normalized = value.trim().toLowerCase();
+  return normalized === "open-websearch" || normalized.startsWith("open-websearch@");
+}
+
+function usesNpxCommand(value: string): boolean {
+  return ["npx", "npx.cmd"].includes(basename(value).trim().toLowerCase());
+}
+
+function shouldUseWindowsOpenWebSearchNpxBridge(config: McpSearchClientConfig): boolean {
+  return process.platform === "win32" &&
+    basename(config.command).trim().toLowerCase() === "npx.cmd" &&
+    config.args.length === 2 &&
+    config.args[0] === "-y" &&
+    config.args[1] === "open-websearch@latest";
 }
 
 function normalizeTimeoutMs(value: number): number {

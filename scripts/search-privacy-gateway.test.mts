@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -10,6 +10,7 @@ const {
   mapChatMessagesToOpenAICompatible
 } = require("../dist/main/services/chat/chat-message-mapper.js") as typeof import("../src/main/services/chat/chat-message-mapper");
 const {
+  createWebSearchSettingsStore,
   normalizeWebSearchSettings
 } = require("../dist/main/services/config/web-search-settings-store.js") as typeof import("../src/main/services/config/web-search-settings-store");
 const {
@@ -226,7 +227,60 @@ test("MCP child env omits temp and user profile paths and rejects Brave package 
   assert.match(record, /"tempPresent":false/);
   assert.match(record, /"tmpPresent":false/);
   assert.match(record, /"userProfilePresent":false/);
-  assert.doesNotMatch(record, /p2-41-brave-secret-should-not-leak|PrivateUser|AppData/);
+  assert.doesNotMatch(record, /p2-41-brave-secret-should-not-leak|PrivateUser|C:\\Users|Roaming/);
+});
+
+test("open-websearch MCP child receives only the required public env preset", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "p2-open-websearch-env-"));
+  const serverPath = join(dir, "env-probe-mcp-search-server.mjs");
+  const recordPath = join(dir, "env-probe.jsonl");
+  writeFileSync(serverPath, createEnvProbeMcpServerSource(), "utf8");
+
+  const previous = {
+    BRAVE_API_KEY: process.env.BRAVE_API_KEY,
+    USERPROFILE: process.env.USERPROFILE,
+    APPDATA: process.env.APPDATA,
+    LOCALAPPDATA: process.env.LOCALAPPDATA,
+    HOME: process.env.HOME
+  };
+  process.env.BRAVE_API_KEY = "p2-open-websearch-secret-should-not-leak";
+  process.env.USERPROFILE = "C:\\Users\\PrivateUser";
+  process.env.APPDATA = "C:\\Users\\PrivateUser\\AppData\\Roaming";
+  process.env.LOCALAPPDATA = "C:\\Users\\PrivateUser\\AppData\\Local";
+  process.env.HOME = "C:\\Users\\PrivateUser";
+
+  try {
+    const results = await callMcpSearchTool({
+      command: process.execPath,
+      args: [serverPath, recordPath, "open-websearch@latest"],
+      toolName: "web_search",
+      timeoutMs: 5_000,
+      maxResults: 1
+    }, {
+      query: "open-websearch env probe",
+      maxResults: 1
+    });
+
+    assert.equal(results.length, 1);
+  } finally {
+    restoreEnv("BRAVE_API_KEY", previous.BRAVE_API_KEY);
+    restoreEnv("USERPROFILE", previous.USERPROFILE);
+    restoreEnv("APPDATA", previous.APPDATA);
+    restoreEnv("LOCALAPPDATA", previous.LOCALAPPDATA);
+    restoreEnv("HOME", previous.HOME);
+  }
+
+  const record = readFileSync(recordPath, "utf8");
+  assert.match(record, /"mode":"stdio"/);
+  assert.match(record, /"defaultSearchEngine":"sogou"/);
+  assert.match(record, /"allowedSearchEngines":"sogou,baidu,bing"/);
+  assert.match(record, /"searchMode":"auto"/);
+  assert.match(record, /"braveApiKeyPresent":false/);
+  assert.match(record, /"userProfilePresent":false/);
+  assert.match(record, /"appDataPresent":false/);
+  assert.match(record, /"localAppDataPresent":false/);
+  assert.match(record, /"homePresent":false/);
+  assert.doesNotMatch(record, /p2-open-websearch-secret-should-not-leak|PrivateUser|C:\\Users|Roaming/);
 });
 
 test("MCP search resolves common search aliases to Brave web search tool", async () => {
@@ -280,8 +334,15 @@ test("web search prompt context is temporary model context, not history or memor
   assert.equal(contents.some((content) => content.includes("事实卡")), false);
 });
 
-test("web search settings normalize to disabled safe status without command", () => {
-  assert.equal(normalizeWebSearchSettings({}).toolName, "brave_web_search");
+test("web search settings default to the open-websearch preset", () => {
+  assert.deepEqual(normalizeWebSearchSettings({}), {
+    enabled: true,
+    command: "npx.cmd",
+    args: ["-y", "open-websearch@latest"],
+    toolName: "search",
+    timeoutMs: 60_000,
+    maxResults: 3
+  });
   assert.deepEqual(normalizeWebSearchSettings({
     enabled: true,
     command: "",
@@ -294,6 +355,76 @@ test("web search settings normalize to disabled safe status without command", ()
     command: "",
     args: ["--unsafe"],
     toolName: "web_search",
+    timeoutMs: 5_000,
+    maxResults: 2
+  });
+});
+
+test("web search settings store defaults on first run but preserves explicit user disable", () => {
+  const userDataPath = mkdtempSync(join(tmpdir(), "p2-web-search-store-"));
+  const store = createWebSearchSettingsStore({ userDataPath });
+  assert.deepEqual(store.getSettings(), {
+    enabled: true,
+    command: "npx.cmd",
+    args: ["-y", "open-websearch@latest"],
+    toolName: "search",
+    timeoutMs: 60_000,
+    maxResults: 3
+  });
+
+  store.saveSettings({
+    enabled: false,
+    command: "npx.cmd",
+    args: ["-y", "open-websearch@latest"],
+    toolName: "search",
+    timeoutMs: 60_000,
+    maxResults: 3
+  });
+
+  const reloaded = createWebSearchSettingsStore({ userDataPath });
+  assert.equal(reloaded.getSettings().enabled, false);
+  assert.equal(reloaded.getSettings().command, "npx.cmd");
+});
+
+test("web search settings store migrates empty legacy config without replacing custom commands", () => {
+  const userDataPath = mkdtempSync(join(tmpdir(), "p2-web-search-migrate-"));
+  const configDir = join(userDataPath, "config");
+  mkdirSync(configDir, { recursive: true });
+  writeFileSync(join(configDir, "web-search-settings.json"), JSON.stringify({
+    enabled: true,
+    command: "",
+    args: [],
+    toolName: "brave_web_search",
+    timeoutMs: 10_000,
+    maxResults: 3
+  }), "utf8");
+
+  assert.deepEqual(createWebSearchSettingsStore({ userDataPath }).getSettings(), {
+    enabled: true,
+    command: "npx.cmd",
+    args: ["-y", "open-websearch@latest"],
+    toolName: "search",
+    timeoutMs: 60_000,
+    maxResults: 3
+  });
+
+  const customUserDataPath = mkdtempSync(join(tmpdir(), "p2-web-search-custom-"));
+  const customConfigDir = join(customUserDataPath, "config");
+  mkdirSync(customConfigDir, { recursive: true });
+  writeFileSync(join(customConfigDir, "web-search-settings.json"), JSON.stringify({
+    enabled: true,
+    command: "custom-mcp.cmd",
+    args: ["--stdio"],
+    toolName: "custom_search",
+    timeoutMs: 5_000,
+    maxResults: 2
+  }), "utf8");
+
+  assert.deepEqual(createWebSearchSettingsStore({ userDataPath: customUserDataPath }).getSettings(), {
+    enabled: true,
+    command: "custom-mcp.cmd",
+    args: ["--stdio"],
+    toolName: "custom_search",
     timeoutMs: 5_000,
     maxResults: 2
   });
@@ -319,15 +450,30 @@ test("MCP result normalization supports structuredContent, JSON text, common fie
           date: "2026-07-04"
         }]
       })
+    }, {
+      type: "text",
+      text: JSON.stringify({
+        status: "ok",
+        data: {
+          results: [{
+            title: "Nested data result title",
+            description: "Nested data result description",
+            url: "https://example.cn/path?token=secret#frag"
+          }]
+        }
+      })
     }]
   }, 5);
 
-  assert.equal(results.length, 2);
+  assert.equal(results.length, 3);
   assert.equal(results[0]?.snippet, "Structured description");
   assert.equal(results[0]?.url, "https://example.test/path");
   assert.equal(results[0]?.date, "2026-07-04T00:00:00.000Z");
   assert.equal(results[1]?.snippet, "JSON content summary");
   assert.equal(results[1]?.url, "https://example.org/search");
+  assert.equal(results[2]?.title, "Nested data result title");
+  assert.equal(results[2]?.snippet, "Nested data result description");
+  assert.equal(results[2]?.url, "https://example.cn/path");
   assert.equal(results.some((result) => /token=|#|q=private/.test(result.url ?? "")), false);
 });
 
@@ -419,7 +565,15 @@ lineReader.on("line", (line) => {
       braveApiKeyPresent: Boolean(process.env.BRAVE_API_KEY),
       tempPresent: Boolean(process.env.TEMP),
       tmpPresent: Boolean(process.env.TMP),
-      userProfilePresent: Boolean(process.env.USERPROFILE)
+      userProfilePresent: Boolean(process.env.USERPROFILE),
+      appDataPresent: Boolean(process.env.APPDATA),
+      localAppDataPresent: Boolean(process.env.LOCALAPPDATA),
+      homePresent: Boolean(process.env.HOME),
+      mode: process.env.MODE ?? "",
+      defaultSearchEngine: process.env.DEFAULT_SEARCH_ENGINE ?? "",
+      allowedSearchEngines: process.env.ALLOWED_SEARCH_ENGINES ?? "",
+      searchMode: process.env.SEARCH_MODE ?? "",
+      npmConfigCachePresent: Boolean(process.env.NPM_CONFIG_CACHE)
     }) + "\\n", { flag: "a" });
     respond(message.id, {
       content: [{

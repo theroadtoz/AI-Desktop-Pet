@@ -2041,6 +2041,7 @@ app.whenReady().then(async () => {
 
   ensurePetWindow("startup");
   chatWindow = createChatWindow();
+  setTimeout(warmUpWebSearchMcpConnection, 1_500);
   function handleChatWindowInactive(): void {
     isChatInteractionActive = false;
     if (activeChatRequestVersion !== null) {
@@ -2290,6 +2291,42 @@ app.whenReady().then(async () => {
       config: getRuntimeProviderConfig(),
       getApiKey,
       logTelemetry
+    });
+  }
+
+  function warmUpWebSearchMcpConnection(): void {
+    const providerConfig = getRuntimeProviderConfig();
+    if (providerConfig.providerId === "fake" && !isStartupLocalFallbackConfig(providerConfig)) {
+      logTelemetry("web_search_startup_connection_skipped", {
+        reason: "fake_provider",
+        enabled: webSearchSettingsStore?.getSettings().enabled === true
+      });
+      return;
+    }
+
+    const settings = webSearchSettingsStore?.getSettings();
+    if (!settings?.enabled || !settings.command) {
+      return;
+    }
+
+    void testMcpSearchConnection(settings).then((result) => {
+      logTelemetry("web_search_startup_connection_tested", {
+        enabled: result.enabled,
+        commandConfigured: result.commandConfigured,
+        status: result.status,
+        toolName: result.toolName,
+        toolFound: result.toolFound,
+        toolCount: result.toolCount
+      });
+    }).catch(() => {
+      logTelemetry("web_search_startup_connection_tested", {
+        enabled: settings.enabled,
+        commandConfigured: Boolean(settings.command),
+        status: "failed",
+        toolName: settings.toolName,
+        toolFound: false,
+        toolCount: 0
+      });
     });
   }
 

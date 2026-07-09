@@ -127,11 +127,11 @@ const localModelDiagnosticEndpointStatuses = [
   "skipped"
 ] as const;
 const DEFAULT_WEB_SEARCH_SETTINGS: WebSearchSettings = {
-  enabled: false,
-  command: "",
-  args: [],
-  toolName: "brave_web_search",
-  timeoutMs: 10_000,
+  enabled: true,
+  command: "npx.cmd",
+  args: ["-y", "open-websearch@latest"],
+  toolName: "search",
+  timeoutMs: 60_000,
   maxResults: 3
 };
 

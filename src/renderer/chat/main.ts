@@ -533,7 +533,7 @@ function setWebSearchStatus(status: WebSearchStatus): void {
     ? `MCP 搜索已启用 · 工具 ${status.toolName} · 结果 ${status.maxResults} 条 · 超时 ${status.timeoutMs}ms`
     : status.commandConfigured
       ? `MCP 搜索未启用 · 已配置 ${status.commandName ?? "命令"}`
-      : "联网搜索默认关闭；配置 MCP 命令后可显式启用。";
+      : "未配置 MCP 搜索命令。";
 }
 
 function setWebSearchFields(settings: WebSearchSettings): void {

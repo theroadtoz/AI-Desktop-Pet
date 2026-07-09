@@ -25,7 +25,7 @@ export type WebSearchSettingsStore = {
 
 export function createWebSearchSettingsStore(options: { userDataPath: string }): WebSearchSettingsStore {
   const settingsPath = join(options.userDataPath, "config", "web-search-settings.json");
-  let settings = normalizeSettings(readSettingsFile(settingsPath));
+  let settings = normalizeSettings(readSettingsFile(settingsPath), existsSync(settingsPath));
 
   function save(): void {
     mkdirSync(dirname(settingsPath), { recursive: true });
@@ -40,7 +40,7 @@ export function createWebSearchSettingsStore(options: { userDataPath: string }):
       return createStatus(settings);
     },
     saveSettings(update) {
-      settings = normalizeSettings(update);
+      settings = normalizeSettings(update, true);
       save();
       return cloneSettings(settings);
     }
@@ -48,7 +48,7 @@ export function createWebSearchSettingsStore(options: { userDataPath: string }):
 }
 
 export function normalizeWebSearchSettings(value: unknown): WebSearchSettings {
-  return normalizeSettings(value);
+  return normalizeSettings(value, true);
 }
 
 function readSettingsFile(settingsPath: string): StoreFile {
@@ -64,18 +64,42 @@ function readSettingsFile(settingsPath: string): StoreFile {
   }
 }
 
-function normalizeSettings(value: unknown): WebSearchSettings {
+function normalizeSettings(value: unknown, hasSettingsFile: boolean): WebSearchSettings {
   const input = value as StoreFile | null;
   const command = normalizeCommand(input?.command);
+  const shouldUseDefaultPreset = shouldUseDefaultWebSearchPreset(input, hasSettingsFile, command);
+  const normalizedCommand = shouldUseDefaultPreset ? DEFAULT_WEB_SEARCH_SETTINGS.command : command;
 
   return {
-    enabled: input?.enabled === true && command.length > 0,
-    command,
-    args: normalizeArgs(input?.args),
-    toolName: normalizeToolName(input?.toolName),
-    timeoutMs: normalizeInteger(input?.timeoutMs, DEFAULT_WEB_SEARCH_SETTINGS.timeoutMs, MIN_TIMEOUT_MS, MAX_TIMEOUT_MS),
-    maxResults: normalizeInteger(input?.maxResults, DEFAULT_WEB_SEARCH_SETTINGS.maxResults, MIN_RESULTS, MAX_RESULTS)
+    enabled: shouldUseDefaultPreset ? DEFAULT_WEB_SEARCH_SETTINGS.enabled : input?.enabled === true && normalizedCommand.length > 0,
+    command: normalizedCommand,
+    args: shouldUseDefaultPreset ? [...DEFAULT_WEB_SEARCH_SETTINGS.args] : normalizeArgs(input?.args),
+    toolName: shouldUseDefaultPreset ? DEFAULT_WEB_SEARCH_SETTINGS.toolName : normalizeToolName(input?.toolName),
+    timeoutMs: shouldUseDefaultPreset
+      ? DEFAULT_WEB_SEARCH_SETTINGS.timeoutMs
+      : normalizeInteger(input?.timeoutMs, DEFAULT_WEB_SEARCH_SETTINGS.timeoutMs, MIN_TIMEOUT_MS, MAX_TIMEOUT_MS),
+    maxResults: shouldUseDefaultPreset
+      ? DEFAULT_WEB_SEARCH_SETTINGS.maxResults
+      : normalizeInteger(input?.maxResults, DEFAULT_WEB_SEARCH_SETTINGS.maxResults, MIN_RESULTS, MAX_RESULTS)
   };
+}
+
+function shouldUseDefaultWebSearchPreset(input: StoreFile | null, hasSettingsFile: boolean, command: string): boolean {
+  if (command.length > 0) {
+    return false;
+  }
+
+  if (!hasSettingsFile) {
+    return true;
+  }
+
+  return Boolean(
+    input &&
+    input.enabled !== false &&
+    (input.command === undefined || input.command === "") &&
+    (input.args === undefined || Array.isArray(input.args) && input.args.length === 0) &&
+    (input.toolName === undefined || input.toolName === "" || input.toolName === "brave_web_search")
+  );
 }
 
 function cloneSettings(settings: WebSearchSettings): WebSearchSettings {
@@ -99,13 +123,13 @@ function createStatus(settings: WebSearchSettings): WebSearchStatus {
 
 function normalizeCommand(value: unknown): string {
   if (typeof value !== "string") {
-    return DEFAULT_WEB_SEARCH_SETTINGS.command;
+    return "";
   }
 
   const trimmed = value.trim();
 
   if (trimmed.length > MAX_COMMAND_LENGTH || /[\u0000-\u001f\u007f]/.test(trimmed)) {
-    return DEFAULT_WEB_SEARCH_SETTINGS.command;
+    return "";
   }
 
   return trimmed;
@@ -113,7 +137,7 @@ function normalizeCommand(value: unknown): string {
 
 function normalizeArgs(value: unknown): string[] {
   if (!Array.isArray(value)) {
-    return [...DEFAULT_WEB_SEARCH_SETTINGS.args];
+    return [];
   }
 
   return value
