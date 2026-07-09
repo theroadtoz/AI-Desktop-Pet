@@ -57,7 +57,10 @@ test("local provider answers narrow exact local questions without model fetch", 
     { message: "13 + 29 等于多少？只回答数字和一句短句。", expected: /42/ },
     { message: "如果我想把密钥发给你帮我记住，方便以后调用，你应该怎么回应？", expected: /不能保存.*密钥.*密码管理器|不能.*密钥.*环境变量/ },
     { message: "标准大气压下水的沸点是多少？直接回答。", expected: /100|一百/ },
-    { message: "为什么本地模型不知道今天的新闻？不超过80字。", expected: /离线|联网搜索|MCP|查证/ }
+    { message: "为什么本地模型不知道今天的新闻？不超过80字。", expected: /离线|联网搜索|MCP|查证/ },
+    { message: "如果我让你用 MCP 搜索我的聊天记录里的住址或 API key，你应该怎么处理？", expected: /MCP.*聊天记录.*住址.*API key.*不能发送.*safeQuery/i },
+    { message: "我喜欢番茄意面这种偏好可以作为记忆；但密码或密钥呢？请分低敏偏好和敏感信息回答。", expected: /番茄意面.*低敏偏好.*本机记忆.*密码.*密钥.*不能保存/ },
+    { message: "我今天卡住了，有点沮丧。请严格用这个格式回答两短句：我在。下一步：写下最卡的一句话。", expected: /^我在。下一步：写下最卡的一句话。$/ }
   ];
 
   try {
@@ -78,6 +81,96 @@ test("local provider answers narrow exact local questions without model fetch", 
   }
 
   assert.equal(fetchCalls, 0);
+});
+
+test("local provider refuses freshness or explicit search prompts without MCP evidence", async () => {
+  let fetchCalls = 0;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => {
+    fetchCalls += 1;
+    throw new Error("fetch should not be called without search evidence");
+  }) as typeof fetch;
+
+  const provider = createOpenAICompatibleProvider({
+    providerId: "local-openai-compatible",
+    baseURL: "http://127.0.0.1:8080/v1",
+    model: "qwen2.5-1.5b-instruct-q4_k_m",
+    temperature: 0.7,
+    maxTokens: 240,
+    timeoutMs: 60000
+  });
+
+  try {
+    for (const message of [
+      "请告诉我今天最新的科技新闻。",
+      "请联网搜索 Qwen 最新版本。"
+    ]) {
+      let deltaText = "";
+      const result = await provider.streamReply(createMinimalRequest(message), {
+        signal: new AbortController().signal,
+        onDelta(delta) {
+          deltaText += delta.text;
+        }
+      });
+
+      assert.match(result.text, /需要联网查证|没有拿到 MCP 搜索结果|不能可靠回答/);
+      assert.equal(deltaText, result.text);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(fetchCalls, 0);
+});
+
+test("local provider uses model request when MCP search evidence is present", async () => {
+  let requestBody: unknown = null;
+  const server = createServer(async (request: IncomingMessage, response: ServerResponse) => {
+    requestBody = JSON.parse(await readRequestBody(request));
+    response.writeHead(200, { "Content-Type": "text/event-stream" });
+    response.end(`data: ${JSON.stringify({ choices: [{ delta: { content: "根据搜索引用，Qwen 有相关更新。" } }] })}\n\ndata: [DONE]\n\n`);
+  });
+
+  try {
+    await listen(server);
+    const provider = createOpenAICompatibleProvider({
+      providerId: "local-openai-compatible",
+      baseURL: localBaseURL(server),
+      model: "qwen2.5-1.5b-instruct-q4_k_m",
+      temperature: 0.7,
+      maxTokens: 240,
+      timeoutMs: 60000
+    });
+
+    const result = await provider.streamReply(createMinimalRequest(
+      "请联网搜索 Qwen 最新版本。",
+      undefined,
+      {
+        query: "Qwen 最新版本",
+        provider: "mcp",
+        toolName: "brave_web_search",
+        generatedAt: "2026-07-09T04:00:00.000Z",
+        results: [{
+          title: "Qwen release note",
+          snippet: "Qwen public release summary.",
+          url: "https://example.test/qwen"
+        }]
+      }
+    ), {
+      signal: new AbortController().signal,
+      onDelta() {}
+    });
+
+    const body = requestBody as {
+      messages?: Array<{ role?: string; content?: string }>;
+    };
+    const contents = body.messages?.map((message) => message.content ?? "") ?? [];
+    assert.match(result.text, /搜索引用|Qwen/);
+    assert.equal(contents.some((content) => content.includes("联网搜索结果")), true);
+    assert.equal(contents.some((content) => content.includes("Qwen public release summary")), true);
+  } finally {
+    await close(server);
+  }
 });
 
 test("local Ollama OpenAI-compatible provider sends reasoning-off parameter", async () => {
@@ -184,7 +277,7 @@ test("local OpenAI-compatible provider streams SSE without Authorization and kee
     assert.match(body.messages?.[1]?.content ?? "", /魔法学院高年级进修魔女\/现代魔导工程进修生\/Windows Live2D 桌面魔女同伴/);
     assert.doesNotMatch(body.messages?.[1]?.content ?? "", /现代老魔女|千年判断力|活了上千年/);
     assert.match(body.messages?.[2]?.content ?? "", /工作=下一步/);
-    assert.ok(systemLength(body.messages ?? []) < 520);
+    assert.ok(systemLength(body.messages ?? []) < 580);
     assert.ok(body.messages?.some((message) => message.content?.includes("用户喜欢被叫测试者")));
     assert.equal(deltaText, "你好，本地模型在。");
     assert.equal(result.text, "你好，本地模型在。");
@@ -417,12 +510,19 @@ function createMinimalRequest(content = "test", runtimeContext?: {
   weekday: string;
   timezone: string;
   locale: string;
+}, webSearchContext?: {
+  query: string;
+  results: Array<{ title: string; snippet: string; url?: string }>;
+  provider: "mcp";
+  toolName: string;
+  generatedAt: string;
 }) {
   return {
     requestVersion: 1,
     conversationId: "provider-error-test",
     messages: [{ id: crypto.randomUUID(), role: "user" as const, content }],
-    ...(runtimeContext ? { runtimeContext } : {})
+    ...(runtimeContext ? { runtimeContext } : {}),
+    ...(webSearchContext ? { webSearchContext } : {})
   };
 }
 

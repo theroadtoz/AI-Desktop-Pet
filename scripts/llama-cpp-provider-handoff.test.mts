@@ -20,7 +20,7 @@ const EXPECTED_EMBEDDED_DEFAULT = {
   baseURL: "http://127.0.0.1:8080/v1",
   model: "ai-desktop-pet-local",
   localPresetId: "embedded-llama-cpp",
-  temperature: 0.7,
+  temperature: 0.25,
   maxTokens: 240,
   timeoutMs: 60000
 };
@@ -39,7 +39,7 @@ test("ready llama.cpp runtime creates local OpenAI-compatible handoff config", (
     baseURL: "http://127.0.0.1:4321/v1",
     model: "ai-desktop-pet-local",
     localPresetId: "custom-local",
-    temperature: 0.7,
+    temperature: 0.25,
     maxTokens: 240,
     timeoutMs: 60000
   });

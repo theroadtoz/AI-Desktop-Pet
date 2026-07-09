@@ -7,6 +7,7 @@ import {
   type PromptTemplateProfile
 } from "./chat-message-mapper";
 import { classifyEmotion } from "./emotion-classifier";
+import { classifySearchQuery } from "../search/search-query-classifier";
 
 type ProviderErrorType =
   | "provider_auth_failed"
@@ -235,12 +236,43 @@ function getPromptTemplateProfile(providerId: Extract<ProviderId, "openai-compat
 }
 
 type LocalExactReply = {
-  kind: "identity" | "current_time" | "current_date" | "simple_addition" | "common_sense" | "sensitive_boundary" | "freshness_boundary";
+  kind:
+    | "identity"
+    | "current_time"
+    | "current_date"
+    | "simple_addition"
+    | "common_sense"
+    | "sensitive_boundary"
+    | "memory_boundary"
+    | "privacy_search_boundary"
+    | "companion_next_step"
+    | "search_required_boundary";
   text: string;
 };
 
 function createLocalExactReply(request: ChatRequest, latestUserMessage: string): LocalExactReply | null {
   const normalizedMessage = latestUserMessage.replace(/\s+/g, "");
+
+  if (asksMcpSensitiveSearchBoundary(normalizedMessage)) {
+    return {
+      kind: "privacy_search_boundary",
+      text: "MCP 搜索遇到聊天记录、住址、API key、密钥这类隐私或敏感信息时必须拦截：不能发送原文，只能在安全时使用净化后的公开 safeQuery。"
+    };
+  }
+
+  if (asksMemoryPreferenceSecretBoundary(normalizedMessage)) {
+    return {
+      kind: "memory_boundary",
+      text: "番茄意面这类低敏偏好，在你同意并开启记忆时可以作为本机记忆；密码、密钥或 API key 这类敏感信息不能保存、记录、复述或索要。"
+    };
+  }
+
+  if (asksStrictCompanionNextStepFormat(normalizedMessage)) {
+    return {
+      kind: "companion_next_step",
+      text: "我在。下一步：写下最卡的一句话。"
+    };
+  }
 
   if (asksToStoreSensitiveData(normalizedMessage)) {
     return {
@@ -289,17 +321,17 @@ function createLocalExactReply(request: ChatRequest, latestUserMessage: string):
     };
   }
 
-  if (asksFreshNewsBoundary(normalizedMessage)) {
-    return {
-      kind: "freshness_boundary",
-      text: "本地模型离线运行，不能直接知道今天新闻；需要启用联网搜索或 MCP 后再查证。"
-    };
-  }
-
   if (asksMonthsInYear(normalizedMessage)) {
     return {
       kind: "common_sense",
       text: "一年有 12 个月。"
+    };
+  }
+
+  if (requiresWebSearchWithoutEvidence(request, latestUserMessage)) {
+    return {
+      kind: "search_required_boundary",
+      text: "本地模型离线运行，今天新闻或最新实时外部事实需要联网查证；我这轮没有拿到 MCP 搜索结果，不能可靠回答具体事实。请先在设置里启用并测试 MCP 搜索，我会只发送净化后的公开查询词。"
     };
   }
 
@@ -322,17 +354,33 @@ function asksWaterBoilingPoint(message: string): boolean {
   return /标准大气压.*水.*沸点|水.*沸点.*标准大气压/.test(message);
 }
 
-function asksFreshNewsBoundary(message: string): boolean {
-  return /(本地模型|离线模型).*(今天|当前|最新|实时).*(新闻|消息|资讯)|为什么.*(不知道|没有).*(今天|最新|实时).*(新闻|消息|资讯)/.test(message);
-}
-
 function asksMonthsInYear(message: string): boolean {
   return /一年.*多少.*月|一年.*几.*月/.test(message);
+}
+
+function requiresWebSearchWithoutEvidence(request: ChatRequest, latestUserMessage: string): boolean {
+  if (request.webSearchContext?.results.length) {
+    return false;
+  }
+
+  return classifySearchQuery(latestUserMessage).shouldSearch;
 }
 
 function asksToStoreSensitiveData(message: string): boolean {
   return /(密钥|apikey|api_key|密码|token|令牌).*(保存|记住|记忆|存起来|发给你|交给你)/i.test(message) ||
     /(保存|记住|记忆|存起来).*(密钥|apikey|api_key|密码|token|令牌)/i.test(message);
+}
+
+function asksMcpSensitiveSearchBoundary(message: string): boolean {
+  return /mcp.*搜索.*(聊天记录|住址|地址|apikey|api_key|密钥|密码|token)|搜索.*(聊天记录|住址|地址|apikey|api_key|密钥|密码|token)/i.test(message);
+}
+
+function asksMemoryPreferenceSecretBoundary(message: string): boolean {
+  return /(偏好|低敏|喜欢).*(记忆|保存|记住).*(密码|密钥|apikey|api_key|token)|(密码|密钥|apikey|api_key|token).*(偏好|低敏|喜欢)/i.test(message);
+}
+
+function asksStrictCompanionNextStepFormat(message: string): boolean {
+  return /严格.*格式.*我在.*下一步.*最卡.*一句话|卡住.*沮丧.*下一步.*最卡.*一句话/.test(message);
 }
 
 function parseSimpleAddition(message: string): { left: number; right: number; sum: number } | null {

@@ -144,7 +144,7 @@ function createMemoryMessage(memoryContext?: MemoryInjection): OpenAICompatibleM
 
   return {
     role: "system",
-    content: `本机事实卡，仅用于当前回复。\n${lines.join("\n")}`
+    content: `本机事实卡，仅用于当前回复；只使用与用户当轮问题直接相关的事实卡，无关事实卡必须忽略。\n${lines.join("\n")}`
   };
 }
 

@@ -31,6 +31,8 @@ const {
 test("search classifier only triggers for explicit search or freshness-sensitive questions", () => {
   assert.deepEqual(classifySearchQuery("请联网搜索 Live2D 动作实现方式").reasonCodes, ["explicit_search_request"]);
   assert.equal(classifySearchQuery("今天 Electron 最新版本是多少？").shouldSearch, true);
+  assert.equal(classifySearchQuery("请告诉我今天最新的科技新闻。").shouldSearch, true);
+  assert.equal(classifySearchQuery("我今天中午吃什么比较好？").shouldSearch, false);
   assert.deepEqual(classifySearchQuery("2+3 等于多少？"), {
     shouldSearch: false,
     reasonCodes: ["no_search_needed"]
@@ -146,6 +148,42 @@ test("non-Brave MCP child does not inherit BRAVE_API_KEY", async () => {
   assert.doesNotMatch(record, /p2-29b-secret-should-not-leak/);
 });
 
+test("recognized Brave MCP package variants may inherit BRAVE_API_KEY without leaking its value", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "p2-55-mcp-env-"));
+  const serverPath = join(dir, "env-probe-mcp-search-server.mjs");
+  const recordPath = join(dir, "env-probe.jsonl");
+  writeFileSync(serverPath, createEnvProbeMcpServerSource(), "utf8");
+
+  const previousBraveApiKey = process.env.BRAVE_API_KEY;
+  process.env.BRAVE_API_KEY = "p2-55-secret-should-not-be-recorded";
+
+  try {
+    for (const packageName of [
+      "@brave/brave-search-mcp-server",
+      "@modelcontextprotocol/server-brave-search"
+    ]) {
+      const results = await callMcpSearchTool({
+        command: process.execPath,
+        args: [serverPath, recordPath, packageName],
+        toolName: "web_search",
+        timeoutMs: 5_000,
+        maxResults: 1
+      }, {
+        query: `P2-55 ${packageName}`,
+        maxResults: 1
+      });
+
+      assert.equal(results.length, 1);
+    }
+  } finally {
+    restoreEnv("BRAVE_API_KEY", previousBraveApiKey);
+  }
+
+  const record = readFileSync(recordPath, "utf8");
+  assert.equal((record.match(/"braveApiKeyPresent":true/g) ?? []).length, 2);
+  assert.doesNotMatch(record, /p2-55-secret-should-not-be-recorded/);
+});
+
 test("MCP child env omits temp and user profile paths and rejects Brave package substring spoof", async () => {
   const dir = mkdtempSync(join(tmpdir(), "p2-41-mcp-env-"));
   const serverPath = join(dir, "env-probe-mcp-search-server.mjs");
@@ -191,6 +229,28 @@ test("MCP child env omits temp and user profile paths and rejects Brave package 
   assert.doesNotMatch(record, /p2-41-brave-secret-should-not-leak|PrivateUser|AppData/);
 });
 
+test("MCP search resolves common search aliases to Brave web search tool", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "p2-55-mcp-tool-"));
+  const serverPath = join(dir, "brave-tool-alias-mcp-server.mjs");
+  const recordPath = join(dir, "tool-calls.jsonl");
+  writeFileSync(serverPath, createBraveToolAliasMcpServerSource(), "utf8");
+
+  const results = await callMcpSearchTool({
+    command: process.execPath,
+    args: [serverPath, recordPath],
+    toolName: "search",
+    timeoutMs: 5_000,
+    maxResults: 1
+  }, {
+    query: "Qwen latest",
+    maxResults: 1
+  });
+
+  assert.equal(results.length, 1);
+  const record = readFileSync(recordPath, "utf8");
+  assert.match(record, /"name":"brave_web_search"/);
+});
+
 test("web search prompt context is temporary model context, not history or memory", () => {
   const context = createWebSearchContext({
     query: "Live2D 动作方式",
@@ -221,6 +281,7 @@ test("web search prompt context is temporary model context, not history or memor
 });
 
 test("web search settings normalize to disabled safe status without command", () => {
+  assert.equal(normalizeWebSearchSettings({}).toolName, "brave_web_search");
   assert.deepEqual(normalizeWebSearchSettings({
     enabled: true,
     command: "",
@@ -364,6 +425,45 @@ lineReader.on("line", (line) => {
       content: [{
         type: "text",
         text: JSON.stringify({ results: [{ title: "ENV_PROBE_RESULT", snippet: "env probe summary", url: "https://example.test/env-probe" }] })
+      }]
+    });
+    return;
+  }
+  if (typeof message.id === "number") {
+    respond(message.id, {});
+  }
+});
+
+function respond(id, result) {
+  process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id, result }) + "\\n");
+}
+`;
+}
+
+function createBraveToolAliasMcpServerSource(): string {
+  return `
+import { createInterface } from "node:readline";
+import { writeFileSync } from "node:fs";
+
+const recordPath = process.argv[2];
+const lineReader = createInterface({ input: process.stdin });
+
+lineReader.on("line", (line) => {
+  const message = JSON.parse(line);
+  if (message.method === "initialize") {
+    respond(message.id, { protocolVersion: "2025-06-18", capabilities: { tools: {} }, serverInfo: { name: "brave-tool-alias", version: "0.0.0" } });
+    return;
+  }
+  if (message.method === "tools/list") {
+    respond(message.id, { tools: [{ name: "brave_web_search", description: "Brave web search", inputSchema: { type: "object" } }] });
+    return;
+  }
+  if (message.method === "tools/call") {
+    writeFileSync(recordPath, JSON.stringify({ name: message.params.name, arguments: message.params.arguments }) + "\\n", { flag: "a" });
+    respond(message.id, {
+      content: [{
+        type: "text",
+        text: JSON.stringify({ results: [{ title: "BRAVE_ALIAS_RESULT", snippet: "alias search summary", url: "https://example.test/brave" }] })
       }]
     });
     return;

@@ -92,6 +92,7 @@ test("prompt template: memory fact and preferred name stay in their own messages
   assert.equal(mapped[1]?.content.includes(fact), false);
   assert.equal(mapped[2]?.content.includes(fact), false);
   assert.match(mapped.find((message) => message.content.includes(fact))?.content ?? "", /仅用于当前回复/);
+  assert.match(mapped.find((message) => message.content.includes(fact))?.content ?? "", /直接相关|无关事实卡必须忽略/);
 });
 
 test("prompt template: runtime time answer anchor tells local model to copy localTime", () => {

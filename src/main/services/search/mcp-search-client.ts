@@ -67,10 +67,10 @@ export async function callMcpSearchTool(
     session.notify("notifications/initialized", {});
 
     const tools = await session.request("tools/list", {});
-    assertToolExists(tools, config.toolName);
+    const toolName = resolveMcpSearchToolName(tools, config.toolName);
 
     const result = await session.request("tools/call", {
-      name: config.toolName,
+      name: toolName,
       arguments: {
         query: request.query,
         maxResults: Math.min(request.maxResults, config.maxResults),
@@ -118,13 +118,15 @@ export async function testMcpSearchConnection(config: WebSearchSettings): Promis
 
     const tools = await session.request("tools/list", {});
     const toolSummaries = readToolSummaries(tools);
-    const toolFound = toolSummaries.some((tool) => tool.name === config.toolName);
+    const resolvedTool = findMcpSearchToolName(toolSummaries, config.toolName);
+    const toolFound = Boolean(resolvedTool);
 
     return {
       ...baseResult,
       status: toolFound ? "tool_available" : "tool_missing",
       toolFound,
-      toolCount: toolSummaries.length
+      toolCount: toolSummaries.length,
+      ...(resolvedTool ? { toolName: resolvedTool } : {})
     };
   } catch (error: unknown) {
     const errorType = error instanceof Error ? error.name : "mcp_search_failed";
@@ -284,12 +286,32 @@ function handleJsonRpcLine(line: string, pending: Map<number, PendingRequest>): 
   request.resolve(message.result);
 }
 
-function assertToolExists(value: unknown, toolName: string): void {
+function resolveMcpSearchToolName(value: unknown, requestedToolName: string): string {
   const tools = readToolSummaries(value);
+  const resolvedToolName = findMcpSearchToolName(tools, requestedToolName);
 
-  if (!tools.some((tool) => tool.name === toolName)) {
+  if (!resolvedToolName) {
     throw createMcpSearchError("mcp_search_tool_missing");
   }
+
+  return resolvedToolName;
+}
+
+function findMcpSearchToolName(tools: Array<{ name: string }>, requestedToolName: string): string | null {
+  if (tools.some((tool) => tool.name === requestedToolName)) {
+    return requestedToolName;
+  }
+
+  if (!isSearchToolAlias(requestedToolName)) {
+    return null;
+  }
+
+  const aliases = ["brave_web_search", "web_search", "search"];
+  return aliases.find((alias) => tools.some((tool) => tool.name === alias)) ?? null;
+}
+
+function isSearchToolAlias(value: string): boolean {
+  return ["brave_web_search", "web_search", "search"].includes(value);
 }
 
 function readToolSummaries(value: unknown): Array<{ name: string }> {
@@ -460,9 +482,11 @@ function isBraveSearchMcpConfig(config: McpSearchClientConfig): boolean {
 }
 
 function isBraveSearchPackageArg(value: string): boolean {
-  const packageName = "@brave/brave-search-mcp-server";
   const normalized = value.trim().toLowerCase();
-  return normalized === packageName || normalized.startsWith(`${packageName}@`);
+  return [
+    "@brave/brave-search-mcp-server",
+    "@modelcontextprotocol/server-brave-search"
+  ].some((packageName) => normalized === packageName || normalized.startsWith(`${packageName}@`));
 }
 
 function normalizeTimeoutMs(value: number): number {

@@ -44,7 +44,7 @@ export const RECOMMENDED_LOCAL_PROVIDER_CONFIG = {
   baseURL: "http://127.0.0.1:8080/v1",
   model: "ai-desktop-pet-local",
   localPresetId: "embedded-llama-cpp",
-  temperature: 0.7,
+  temperature: 0.25,
   maxTokens: 240,
   timeoutMs: 60_000
 } as const satisfies LocalOpenAICompatibleConfig;
