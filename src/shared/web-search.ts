@@ -90,7 +90,7 @@ export type WebSearchConnectionTestResult = {
 export const DEFAULT_WEB_SEARCH_SETTINGS: WebSearchSettings = {
   enabled: true,
   command: "npx.cmd",
-  args: ["-y", "open-websearch@latest"],
+  args: ["-y", "@mcp-server/google-search-mcp@latest"],
   toolName: "search",
   timeoutMs: 60_000,
   maxResults: 3

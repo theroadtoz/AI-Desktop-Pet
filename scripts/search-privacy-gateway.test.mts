@@ -230,8 +230,8 @@ test("MCP child env omits temp and user profile paths and rejects Brave package 
   assert.doesNotMatch(record, /p2-41-brave-secret-should-not-leak|PrivateUser|C:\\Users|Roaming/);
 });
 
-test("open-websearch MCP child receives only the required public env preset", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "p2-open-websearch-env-"));
+test("Google MCP child receives isolated runtime env without private user paths or secrets", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "p2-google-search-env-"));
   const serverPath = join(dir, "env-probe-mcp-search-server.mjs");
   const recordPath = join(dir, "env-probe.jsonl");
   writeFileSync(serverPath, createEnvProbeMcpServerSource(), "utf8");
@@ -243,7 +243,7 @@ test("open-websearch MCP child receives only the required public env preset", as
     LOCALAPPDATA: process.env.LOCALAPPDATA,
     HOME: process.env.HOME
   };
-  process.env.BRAVE_API_KEY = "p2-open-websearch-secret-should-not-leak";
+  process.env.BRAVE_API_KEY = "p2-google-search-secret-should-not-leak";
   process.env.USERPROFILE = "C:\\Users\\PrivateUser";
   process.env.APPDATA = "C:\\Users\\PrivateUser\\AppData\\Roaming";
   process.env.LOCALAPPDATA = "C:\\Users\\PrivateUser\\AppData\\Local";
@@ -252,12 +252,12 @@ test("open-websearch MCP child receives only the required public env preset", as
   try {
     const results = await callMcpSearchTool({
       command: process.execPath,
-      args: [serverPath, recordPath, "open-websearch@latest"],
+      args: [serverPath, recordPath, "@mcp-server/google-search-mcp@latest"],
       toolName: "web_search",
       timeoutMs: 5_000,
       maxResults: 1
     }, {
-      query: "open-websearch env probe",
+      query: "google search env probe",
       maxResults: 1
     });
 
@@ -271,16 +271,47 @@ test("open-websearch MCP child receives only the required public env preset", as
   }
 
   const record = readFileSync(recordPath, "utf8");
-  assert.match(record, /"mode":"stdio"/);
-  assert.match(record, /"defaultSearchEngine":"sogou"/);
-  assert.match(record, /"allowedSearchEngines":"sogou,baidu,bing"/);
-  assert.match(record, /"searchMode":"auto"/);
+  assert.match(record, /"mode":""/);
+  assert.match(record, /"defaultSearchEngine":""/);
+  assert.match(record, /"allowedSearchEngines":""/);
+  assert.match(record, /"searchMode":""/);
   assert.match(record, /"braveApiKeyPresent":false/);
-  assert.match(record, /"userProfilePresent":false/);
-  assert.match(record, /"appDataPresent":false/);
-  assert.match(record, /"localAppDataPresent":false/);
-  assert.match(record, /"homePresent":false/);
-  assert.doesNotMatch(record, /p2-open-websearch-secret-should-not-leak|PrivateUser|C:\\Users|Roaming/);
+  assert.match(record, /"tempPresent":true/);
+  assert.match(record, /"tmpPresent":true/);
+  assert.match(record, /"userProfilePresent":true/);
+  assert.match(record, /"appDataPresent":true/);
+  assert.match(record, /"localAppDataPresent":true/);
+  assert.match(record, /"homePresent":true/);
+  assert.match(record, /"npmConfigCachePresent":true/);
+  assert.match(record, /"usesManagedGoogleRuntime":true/);
+  assert.match(record, /"usesPersonalPath":false/);
+  assert.doesNotMatch(record, /p2-google-search-secret-should-not-leak|PrivateUser|C:\\Users|Roaming/);
+});
+
+test("Google MCP search calls use google.com region and bounded arguments", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "p2-google-search-call-"));
+  const serverPath = join(dir, "fake-mcp-search-server.mjs");
+  const recordPath = join(dir, "calls.jsonl");
+  writeFileSync(serverPath, createFakeMcpServerSource(), "utf8");
+
+  const results = await callMcpSearchTool({
+    command: process.execPath,
+    args: [serverPath, recordPath, "@mcp-server/google-search-mcp@latest"],
+    toolName: "web_search",
+    timeoutMs: 5_000,
+    maxResults: 3
+  }, {
+    query: "OpenAI official website",
+    maxResults: 2
+  });
+
+  assert.equal(results.length, 1);
+  const record = readFileSync(recordPath, "utf8");
+  assert.match(record, /"query":"OpenAI official website"/);
+  assert.match(record, /"limit":2/);
+  assert.match(record, /"timeout":5000/);
+  assert.match(record, /"language":"zh-CN"/);
+  assert.match(record, /"region":"com"/);
 });
 
 test("MCP search resolves common search aliases to Brave web search tool", async () => {
@@ -334,11 +365,11 @@ test("web search prompt context is temporary model context, not history or memor
   assert.equal(contents.some((content) => content.includes("事实卡")), false);
 });
 
-test("web search settings default to the open-websearch preset", () => {
+test("web search settings default to the Google MCP preset", () => {
   assert.deepEqual(normalizeWebSearchSettings({}), {
     enabled: true,
     command: "npx.cmd",
-    args: ["-y", "open-websearch@latest"],
+    args: ["-y", "@mcp-server/google-search-mcp@latest"],
     toolName: "search",
     timeoutMs: 60_000,
     maxResults: 3
@@ -366,7 +397,7 @@ test("web search settings store defaults on first run but preserves explicit use
   assert.deepEqual(store.getSettings(), {
     enabled: true,
     command: "npx.cmd",
-    args: ["-y", "open-websearch@latest"],
+    args: ["-y", "@mcp-server/google-search-mcp@latest"],
     toolName: "search",
     timeoutMs: 60_000,
     maxResults: 3
@@ -375,7 +406,7 @@ test("web search settings store defaults on first run but preserves explicit use
   store.saveSettings({
     enabled: false,
     command: "npx.cmd",
-    args: ["-y", "open-websearch@latest"],
+    args: ["-y", "@mcp-server/google-search-mcp@latest"],
     toolName: "search",
     timeoutMs: 60_000,
     maxResults: 3
@@ -402,7 +433,7 @@ test("web search settings store migrates empty legacy config without replacing c
   assert.deepEqual(createWebSearchSettingsStore({ userDataPath }).getSettings(), {
     enabled: true,
     command: "npx.cmd",
-    args: ["-y", "open-websearch@latest"],
+    args: ["-y", "@mcp-server/google-search-mcp@latest"],
     toolName: "search",
     timeoutMs: 60_000,
     maxResults: 3
@@ -475,6 +506,17 @@ test("MCP result normalization supports structuredContent, JSON text, common fie
   assert.equal(results[2]?.snippet, "Nested data result description");
   assert.equal(results[2]?.url, "https://example.cn/path");
   assert.equal(results.some((result) => /token=|#|q=private/.test(result.url ?? "")), false);
+});
+
+test("MCP result normalization keeps empty JSON result arrays empty", () => {
+  const results = parseMcpToolResults({
+    content: [{
+      type: "text",
+      text: JSON.stringify({ query: "OpenAI official website", results: [], language: "zh-CN", region: "cn" })
+    }]
+  }, 3);
+
+  assert.deepEqual(results, []);
 });
 
 test("web search citation payload contains only safe renderer fields", () => {
@@ -573,7 +615,25 @@ lineReader.on("line", (line) => {
       defaultSearchEngine: process.env.DEFAULT_SEARCH_ENGINE ?? "",
       allowedSearchEngines: process.env.ALLOWED_SEARCH_ENGINES ?? "",
       searchMode: process.env.SEARCH_MODE ?? "",
-      npmConfigCachePresent: Boolean(process.env.NPM_CONFIG_CACHE)
+      npmConfigCachePresent: Boolean(process.env.NPM_CONFIG_CACHE),
+      usesManagedGoogleRuntime: [
+        process.env.TEMP,
+        process.env.TMP,
+        process.env.USERPROFILE,
+        process.env.APPDATA,
+        process.env.LOCALAPPDATA,
+        process.env.HOME,
+        process.env.NPM_CONFIG_CACHE
+      ].some((value) => typeof value === "string" && value.includes("mcp-google-search-runtime")),
+      usesPersonalPath: [
+        process.env.TEMP,
+        process.env.TMP,
+        process.env.USERPROFILE,
+        process.env.APPDATA,
+        process.env.LOCALAPPDATA,
+        process.env.HOME,
+        process.env.NPM_CONFIG_CACHE
+      ].some((value) => typeof value === "string" && /PrivateUser|C:\\\\Users|Roaming/.test(value))
     }) + "\\n", { flag: "a" });
     respond(message.id, {
       content: [{

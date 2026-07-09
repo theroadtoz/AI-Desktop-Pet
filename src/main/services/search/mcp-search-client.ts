@@ -51,6 +51,23 @@ export function createMcpSearchProvider(config: McpSearchClientConfig): WebSearc
   };
 }
 
+function createMcpSearchToolArguments(config: McpSearchClientConfig, request: WebSearchRequest): Record<string, unknown> {
+  const limit = Math.min(request.maxResults, config.maxResults);
+  const args: Record<string, unknown> = {
+    query: request.query,
+    maxResults: limit,
+    limit
+  };
+
+  if (isGoogleSearchMcpConfig(config)) {
+    args.timeout = config.timeoutMs;
+    args.language = "zh-CN";
+    args.region = "com";
+  }
+
+  return args;
+}
+
 export async function callMcpSearchTool(
   config: McpSearchClientConfig,
   request: WebSearchRequest
@@ -78,11 +95,7 @@ export async function callMcpSearchTool(
 
     const result = await session.request("tools/call", {
       name: toolName,
-      arguments: {
-        query: request.query,
-        maxResults: Math.min(request.maxResults, config.maxResults),
-        limit: Math.min(request.maxResults, config.maxResults)
-      }
+      arguments: createMcpSearchToolArguments(config, request)
     });
 
     return parseMcpToolResults(result, Math.min(request.maxResults, config.maxResults));
@@ -337,10 +350,14 @@ function readToolSummaries(value: unknown): Array<{ name: string }> {
 export function parseMcpToolResults(value: unknown, maxResults: number): WebSearchResult[] {
   const textParts = readMcpTextParts(value);
   const structuredResults = readStructuredResults(value);
-  const parsedFromJson = textParts.flatMap(parseResultJson);
+  const parsedJsonPayloads = textParts.map(parseResultJsonPayload);
+  const parsedFromJson = parsedJsonPayloads.flatMap((payload) => payload.results);
+  const hasRecognizedJsonResults = parsedJsonPayloads.some((payload) => payload.recognized);
   const candidates = [...structuredResults, ...parsedFromJson];
   const fallbackCandidates = candidates.length > 0
     ? candidates
+    : hasRecognizedJsonResults
+      ? []
     : textParts.map((text) => ({ title: "搜索结果", snippet: text }));
 
   return fallbackCandidates
@@ -372,31 +389,40 @@ function readMcpTextParts(value: unknown): string[] {
     .filter((text) => text.length > 0);
 }
 
-function parseResultJson(text: string): Array<Record<string, unknown>> {
+function parseResultJsonPayload(text: string): { recognized: boolean; results: Array<Record<string, unknown>> } {
   if (!text.trim()) {
-    return [];
+    return { recognized: false, results: [] };
   }
 
   try {
     const parsed = JSON.parse(text) as unknown;
 
     if (Array.isArray(parsed)) {
-      return parsed.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object"));
+      return {
+        recognized: true,
+        results: parsed.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object"))
+      };
     }
 
     const results = (parsed as { results?: unknown } | null)?.results;
     if (Array.isArray(results)) {
-      return results.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object"));
+      return {
+        recognized: true,
+        results: results.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object"))
+      };
     }
 
     const dataResults = (parsed as { data?: { results?: unknown } } | null)?.data?.results;
     if (Array.isArray(dataResults)) {
-      return dataResults.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object"));
+      return {
+        recognized: true,
+        results: dataResults.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object"))
+      };
     }
 
-    return [];
+    return { recognized: false, results: [] };
   } catch {
-    return [];
+    return { recognized: false, results: [] };
   }
 }
 
@@ -471,27 +497,27 @@ function createSafeMcpChildEnv(config: McpSearchClientConfig): NodeJS.ProcessEnv
     env.DEFAULT_SEARCH_ENGINE = "sogou";
     env.ALLOWED_SEARCH_ENGINES = "sogou,baidu,bing";
     env.SEARCH_MODE = "auto";
+  }
 
-    if (usesNpxCommand(config.command)) {
-      const runtimeRoot = join(resolve(process.cwd(), ".tmp"), "mcp-open-websearch-runtime");
-      const npmCache = join(runtimeRoot, "npm-cache");
-      const tempDir = join(runtimeRoot, "temp");
-      const homeDir = join(runtimeRoot, "home");
-      const appDataDir = join(runtimeRoot, "appdata");
-      const localAppDataDir = join(runtimeRoot, "localappdata");
-      mkdirSync(npmCache, { recursive: true });
-      mkdirSync(tempDir, { recursive: true });
-      mkdirSync(homeDir, { recursive: true });
-      mkdirSync(appDataDir, { recursive: true });
-      mkdirSync(localAppDataDir, { recursive: true });
-      env.NPM_CONFIG_CACHE = npmCache;
-      env.TEMP = tempDir;
-      env.TMP = tempDir;
-      env.USERPROFILE = homeDir;
-      env.HOME = homeDir;
-      env.APPDATA = appDataDir;
-      env.LOCALAPPDATA = localAppDataDir;
-    }
+  if (isManagedSearchMcpConfig(config)) {
+    const runtimeRoot = join(resolve(process.cwd(), ".tmp"), getManagedSearchRuntimeDir(config));
+    const npmCache = join(runtimeRoot, "npm-cache");
+    const tempDir = join(runtimeRoot, "temp");
+    const homeDir = join(runtimeRoot, "home");
+    const appDataDir = join(runtimeRoot, "appdata");
+    const localAppDataDir = join(runtimeRoot, "localappdata");
+    mkdirSync(npmCache, { recursive: true });
+    mkdirSync(tempDir, { recursive: true });
+    mkdirSync(homeDir, { recursive: true });
+    mkdirSync(appDataDir, { recursive: true });
+    mkdirSync(localAppDataDir, { recursive: true });
+    env.NPM_CONFIG_CACHE = npmCache;
+    env.TEMP = tempDir;
+    env.TMP = tempDir;
+    env.USERPROFILE = homeDir;
+    env.HOME = homeDir;
+    env.APPDATA = appDataDir;
+    env.LOCALAPPDATA = localAppDataDir;
   }
 
   const braveApiKey = process.env.BRAVE_API_KEY;
@@ -506,6 +532,14 @@ function createMcpSpawnConfig(config: McpSearchClientConfig): McpSpawnConfig {
     return {
       command: process.env.ComSpec ?? process.env.COMSPEC ?? "cmd.exe",
       args: ["/d", "/s", "/c", "npx.cmd -y open-websearch@latest"],
+      shell: false
+    };
+  }
+
+  if (shouldUseWindowsGoogleSearchNpxBridge(config)) {
+    return {
+      command: process.env.ComSpec ?? process.env.COMSPEC ?? "cmd.exe",
+      args: ["/d", "/s", "/c", "npx.cmd -y @mcp-server/google-search-mcp@latest"],
       shell: false
     };
   }
@@ -542,6 +576,10 @@ function isOpenWebSearchMcpConfig(config: McpSearchClientConfig): boolean {
   return config.args.some(isOpenWebSearchPackageArg);
 }
 
+function isGoogleSearchMcpConfig(config: McpSearchClientConfig): boolean {
+  return config.args.some(isGoogleSearchPackageArg);
+}
+
 function isBraveSearchPackageArg(value: string): boolean {
   const normalized = value.trim().toLowerCase();
   return [
@@ -555,8 +593,19 @@ function isOpenWebSearchPackageArg(value: string): boolean {
   return normalized === "open-websearch" || normalized.startsWith("open-websearch@");
 }
 
-function usesNpxCommand(value: string): boolean {
-  return ["npx", "npx.cmd"].includes(basename(value).trim().toLowerCase());
+function isGoogleSearchPackageArg(value: string): boolean {
+  const normalized = value.trim().toLowerCase();
+  return normalized === "@mcp-server/google-search-mcp" || normalized.startsWith("@mcp-server/google-search-mcp@");
+}
+
+function isManagedSearchMcpConfig(config: McpSearchClientConfig): boolean {
+  return isOpenWebSearchMcpConfig(config) || isGoogleSearchMcpConfig(config);
+}
+
+function getManagedSearchRuntimeDir(config: McpSearchClientConfig): string {
+  return isGoogleSearchMcpConfig(config)
+    ? "mcp-google-search-runtime"
+    : "mcp-open-websearch-runtime";
 }
 
 function shouldUseWindowsOpenWebSearchNpxBridge(config: McpSearchClientConfig): boolean {
@@ -565,6 +614,14 @@ function shouldUseWindowsOpenWebSearchNpxBridge(config: McpSearchClientConfig): 
     config.args.length === 2 &&
     config.args[0] === "-y" &&
     config.args[1] === "open-websearch@latest";
+}
+
+function shouldUseWindowsGoogleSearchNpxBridge(config: McpSearchClientConfig): boolean {
+  return process.platform === "win32" &&
+    basename(config.command).trim().toLowerCase() === "npx.cmd" &&
+    config.args.length === 2 &&
+    config.args[0] === "-y" &&
+    config.args[1] === "@mcp-server/google-search-mcp@latest";
 }
 
 function normalizeTimeoutMs(value: number): number {
