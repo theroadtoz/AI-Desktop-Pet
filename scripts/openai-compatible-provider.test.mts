@@ -8,6 +8,9 @@ const {
   createChatCompletionsURL,
   createOpenAICompatibleProvider
 } = require("../dist/main/services/chat/openai-compatible-provider.js") as typeof import("../src/main/services/chat/openai-compatible-provider");
+const {
+  hasProviderIdentityDrift
+} = require("../dist/shared/persona-self-identity.js") as typeof import("../src/shared/persona-self-identity");
 
 test("chat completions URL preserves /v1 base path for local providers", () => {
   assert.equal(
@@ -56,7 +59,7 @@ test("local provider answers narrow exact local questions without model fetch", 
     {
       message: "你是 AI 助手还是语言模型？请直接回答。",
       expected: /西塔.*本地模型驱动.*身份.*西塔/,
-      forbidden: /我是\s*(?:一个|一名)?\s*(?:AI\s*助手|人工智能助手|语言模型|聊天机器人)|作为\s*(?:一个|一名)?\s*(?:AI\s*助手|人工智能助手|语言模型|聊天机器人)/i
+      noProviderIdentityDrift: true
     },
     { message: "今天日期和星期几？只回答日期和星期。", expected: /2026-07-09.*星期四/ },
     { message: "13 + 29 等于多少？只回答数字和一句短句。", expected: /42/ },
@@ -79,8 +82,8 @@ test("local provider answers narrow exact local questions without model fetch", 
       });
 
       assert.match(result.text, item.expected);
-      if ("forbidden" in item) {
-        assert.doesNotMatch(result.text, item.forbidden);
+      if ("noProviderIdentityDrift" in item) {
+        assert.equal(hasProviderIdentityDrift(result.text), false);
       }
       assert.equal(deltaText, result.text);
     }

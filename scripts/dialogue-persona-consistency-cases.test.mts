@@ -12,6 +12,9 @@ const {
 const {
   getPersonaDialogueAnchor
 } = require("../dist/shared/persona-card.js") as typeof import("../src/shared/persona-card");
+const {
+  hasProviderIdentityDrift
+} = require("../dist/shared/persona-self-identity.js") as typeof import("../src/shared/persona-self-identity");
 
 type ChatMessage = Parameters<typeof mapChatMessagesToOpenAICompatible>[0][number];
 type DialogueModeId = "default" | "work" | "game" | "reading";
@@ -33,8 +36,6 @@ const FORBIDDEN_PERSONA_DRIFT = [
   /通用客服/,
   /搜索应用/,
   /操作系统/,
-  /我是\s*(?:一个|一名)?\s*(?:AI\s*助手|人工智能助手|语言模型|聊天机器人)/i,
-  /作为\s*(?:一个|一名)?\s*(?:AI\s*助手|人工智能助手|语言模型|聊天机器人)/i,
   /吾/,
   /汝/,
   /活了上千年/,
@@ -200,6 +201,7 @@ function assistantMessage(content: string): ChatMessage {
 }
 
 function assertNoPersonaDrift(text: string): void {
+  assert.equal(hasProviderIdentityDrift(text), false);
   for (const pattern of FORBIDDEN_PERSONA_DRIFT) {
     assert.doesNotMatch(text, pattern);
   }

@@ -1,6 +1,7 @@
 import type { ChatProvider, ChatProviderMessage, ChatProviderResult, ChatRequest } from "../../../shared/chat-provider";
 import type { ProviderId } from "../../../shared/provider-config";
 import { DEFAULT_PERSONA_CARD } from "../../../shared/persona-card";
+import { asksGenericAiIdentityQuestion } from "../../../shared/persona-self-identity";
 import type { TelemetryPayload } from "../telemetry";
 import {
   mapChatMessagesToOpenAICompatible,
@@ -340,7 +341,8 @@ function createLocalExactReply(request: ChatRequest, latestUserMessage: string):
 }
 
 function asksIdentity(message: string): boolean {
-  return /你是谁|你的身份|你的人设|你的人格|你是什么|介绍自己|你.*(?:是|算|属于|是不是).*(?:AI助手|人工智能助手|语言模型|聊天机器人|ChatGPT|OpenAI|通用助手)/i.test(message);
+  return /你是谁|你的身份|你的人设|你的人格|你是什么|介绍自己/i.test(message) ||
+    asksGenericAiIdentityQuestion(message);
 }
 
 function asksCurrentTime(message: string): boolean {

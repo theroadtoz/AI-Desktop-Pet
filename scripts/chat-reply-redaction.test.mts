@@ -11,6 +11,9 @@ const {
 const {
   createChatEngine
 } = require("../dist/main/services/chat/chat-engine.js") as typeof import("../src/main/services/chat/chat-engine");
+const {
+  hasGenericAiSelfIdentityDrift
+} = require("../dist/shared/persona-self-identity.js") as typeof import("../src/shared/persona-self-identity");
 
 test("assistant reply redaction preserves ordinary companion text", () => {
   const text = "我明白了，我们先把下一步定清楚。";
@@ -48,6 +51,7 @@ test("assistant reply redaction replaces generic AI self identity with Xita iden
   assert.match(redacted, /作为西塔/);
   assert.match(redacted, /西塔的身份是桌面魔女同伴/);
   assert.doesNotMatch(redacted, /我是一个AI助手|作为语言模型|普通 AI 助手|本质上是聊天机器人/);
+  assert.equal(hasGenericAiSelfIdentityDrift(redacted), false);
 });
 
 test("assistant reply stream guard redacts markers split across deltas", () => {
@@ -89,6 +93,7 @@ test("assistant reply stream guard redacts generic AI self identity split across
 
   assert.match(streamed, /我是西塔，魔法学院高年级的现代魔导工程进修魔女/);
   assert.doesNotMatch(streamed, /我是一个AI助手/);
+  assert.equal(hasGenericAiSelfIdentityDrift(streamed), false);
 });
 
 test("chat engine redacts streamed deltas and final provider result", async () => {

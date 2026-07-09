@@ -3,6 +3,7 @@ import type { ChatProvider, ChatProviderResult, ChatRequest } from "../../../sha
 import { DEFAULT_DIALOGUE_MODE_ID, parseDialogueModeId, type DialogueModeId } from "../../../shared/dialogue-style";
 import type { EmotionTag } from "../../../shared/emotion";
 import { DEFAULT_PERSONA_CARD, getPersonaDialogueAnchor } from "../../../shared/persona-card";
+import { asksGenericAiIdentityQuestion } from "../../../shared/persona-self-identity";
 import { getLatestUserMessage } from "./chat-message-mapper";
 import { classifyEmotion } from "./emotion-classifier";
 
@@ -380,7 +381,8 @@ function asksForSavedPreference(message: string): boolean {
 }
 
 function asksPersonaIdentity(message: string): boolean {
-  return /你是谁|你的身份|你的人设|你的人格|你是什么角色|你算什么角色|你.*(?:是|算|属于|是不是).*(AI助手|人工智能助手|语言模型|聊天机器人|ChatGPT|客服|搜索应用|操作系统|通用助手)|模式.*(人格|身份).*变|身份.*会.*变/i.test(message);
+  return /你是谁|你的身份|你的人设|你的人格|你是什么角色|你算什么角色|你.*(?:是|算|属于|是不是).*(客服|搜索应用|操作系统)|模式.*(人格|身份).*变|身份.*会.*变/i.test(message) ||
+    asksGenericAiIdentityQuestion(message);
 }
 
 function asksDirectPlanningQuestion(message: string): boolean {

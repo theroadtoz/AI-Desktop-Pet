@@ -6,6 +6,7 @@ import {
   statSync,
   writeFileSync
 } from "node:fs";
+import { createRequire } from "node:module";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -25,6 +26,8 @@ import {
   waitForWindow
 } from "./support/real-ui-harness.mjs";
 
+const require = createRequire(import.meta.url);
+const { hasProviderIdentityDrift } = require("../dist/shared/persona-self-identity.js");
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const runName = "p2-24b-real-local-model-persona-followup-qa";
 const defaultPackRoot = join(root, ".tmp", "p2-23c-qwen25-15b-local-llm");
@@ -925,22 +928,6 @@ function isDirectNonPersonaAnswer(text, maxLength) {
 
 function hasTechnicalMagicAlias(text) {
   return /(水晶球|咒文|咒语|法阵|魔力|魔药|占卜|炼金|传送门|使魔|魔法接口|魔导接口|魔法记忆|魔法窗口)/.test(text);
-}
-
-function hasProviderIdentityDrift(text) {
-  const providerTerms = "(?:ChatGPT|OpenAI|语言模型|AI\\s*助手|人工智能助手|通用助手)";
-  const negatedProviderIdentity = new RegExp(
-    `(?:不是|并非|不属于|不要当成|不应当成|别把我当成)\\s*(?:一个|一名)?\\s*${providerTerms}`,
-    "ig"
-  );
-  const driftText = text.replace(negatedProviderIdentity, "");
-
-  return [
-    new RegExp(`(?:我是|我叫|身份是|角色是|定位是|本质上是|属于|自称为)\\s*(?:一个|一名)?\\s*${providerTerms}`, "i"),
-    new RegExp(`作为\\s*(?:一个|一名)?\\s*${providerTerms}`, "i"),
-    new RegExp(`${providerTerms}\\s*(?:身份|角色|定位|模型|助手)`, "i"),
-    /由\s*OpenAI|OpenAI\s*(训练|开发|提供)/i
-  ].some((pattern) => pattern.test(driftText));
 }
 
 function hasThinkLeak(text) {

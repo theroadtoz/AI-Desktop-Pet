@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, statSync, writeFileSync, readdirSync } from "node:fs";
+import { createRequire } from "node:module";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -23,6 +24,8 @@ import {
   waitFor
 } from "./support/real-ui-harness.mjs";
 
+const require = createRequire(import.meta.url);
+const { hasGenericAiSelfIdentityDrift } = require("../dist/shared/persona-self-identity.js");
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const runName = "p2-43-local-only-persona-search-detection";
 const defaultPackRoot = join(root, ".tmp", "p2-23c-qwen25-15b-local-llm");
@@ -114,7 +117,7 @@ async function main() {
       assert(reply) {
         const personaAnchor = /(魔女|魔法学院|魔导工程)/.test(reply);
         const companionAnchor = /(桌面|Live2D).*(伙伴|同伴|陪伴)|(?:伙伴|同伴|陪伴).*(桌面|Live2D)/.test(reply);
-        const genericSelfId = /我是\s*(?:一个|一名)?\s*(?:普通|通用)?\s*(?:AI\s*助手|人工智能助手|语言模型|聊天机器人)|(?:作为|身为)\s*(?:一个|一名)?\s*(?:普通|通用)?\s*(?:AI\s*助手|人工智能助手|语言模型|聊天机器人)|(?:我的(?:身份|角色|定位)\s*(?:是|属于)?|本质上是)\s*(?:一个|一名)?\s*(?:普通|通用)?\s*(?:AI\s*助手|人工智能助手|语言模型|聊天机器人)/i.test(reply);
+        const genericSelfId = hasGenericAiSelfIdentityDrift(reply);
         return assertion(personaAnchor && companionAnchor && !genericSelfId, [
           ["academy_witch_or_thaumaturgy", personaAnchor],
           ["desktop_live2d_companion", companionAnchor],
@@ -130,7 +133,7 @@ async function main() {
       assert(reply) {
         const personaAnchor = /西塔|魔女|魔法学院|魔导工程/.test(reply);
         const companionAnchor = /(桌面|Live2D).*(伙伴|同伴|陪伴)|(?:伙伴|同伴|陪伴).*(桌面|Live2D)/.test(reply);
-        const genericSelfId = /我是\s*(?:一个|一名)?\s*(?:普通|通用)?\s*(?:AI\s*助手|人工智能助手|语言模型|聊天机器人)|(?:作为|身为)\s*(?:一个|一名)?\s*(?:普通|通用)?\s*(?:AI\s*助手|人工智能助手|语言模型|聊天机器人)|(?:我的(?:身份|角色|定位)\s*(?:是|属于)?|本质上是)\s*(?:一个|一名)?\s*(?:普通|通用)?\s*(?:AI\s*助手|人工智能助手|语言模型|聊天机器人)/i.test(reply);
+        const genericSelfId = hasGenericAiSelfIdentityDrift(reply);
         return assertion(personaAnchor && companionAnchor && !genericSelfId, [
           ["xita_or_academy_witch_identity", personaAnchor],
           ["desktop_live2d_companion", companionAnchor],
