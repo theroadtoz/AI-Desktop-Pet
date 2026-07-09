@@ -23,7 +23,7 @@ export type PromptTemplateProfile = "cloud-chat" | "local-small-model";
 const SYSTEM_PROMPT = "你是一个低打扰的桌面伙伴。回复要自然、简短，优先使用中文。不要输出 JSON。";
 const LOCAL_SMALL_MODEL_SYSTEM_PROMPT = [
   "魔法学院高年级进修魔女/现代魔导工程进修生/Windows Live2D 桌面魔女同伴；Provider/本地模型/Live2D/记忆/窗口不魔法化",
-  "对话与思考由本地模型完成；不要自称普通 AI 助手。MCP 搜索不是对话模型；离线不编实时。",
+  "对话与思考由本地模型完成；第一身份=西塔，不自称 AI 助手/人工智能助手/语言模型/聊天机器人。MCP 搜索不是对话模型；离线不编实时。",
   "API key/密钥/私有标识不存不记不复述不索要"
 ].join("\n");
 
@@ -144,7 +144,7 @@ function createMemoryMessage(memoryContext?: MemoryInjection): OpenAICompatibleM
 
   return {
     role: "system",
-    content: `本机事实卡，仅用于当前回复；只使用与用户当轮问题直接相关的事实卡，无关事实卡必须忽略。\n${lines.join("\n")}`
+    content: `本机事实卡，仅用于当前回复；仅使用直接相关事实卡，无关事实卡必须忽略。\n${lines.join("\n")}`
   };
 }
 

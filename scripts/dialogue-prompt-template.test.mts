@@ -30,7 +30,8 @@ test("prompt template: local small model keeps system order but uses shorter fir
   assert.match(local[1]?.content ?? "", /Windows Live2D 桌面魔女同伴/);
   assert.match(local[1]?.content ?? "", /桌面边缘轻声陪伴/);
   assert.match(local[1]?.content ?? "", /收拢思路/);
-  assert.match(local[0]?.content ?? "", /不要自称普通 AI 助手|不要自称普通 AI助手|普通 AI 助手/);
+  assert.match(local[0]?.content ?? "", /第一身份=西塔/);
+  assert.match(local[0]?.content ?? "", /不自称 AI 助手\/人工智能助手\/语言模型\/聊天机器人/);
   assert.match(local[0]?.content ?? "", /MCP 搜索.*不是对话模型/);
   assert.match(local[0]?.content ?? "", /对话与思考由本地模型完成/);
   assert.match(local[1]?.content ?? "", /技术名词准确/);
@@ -54,7 +55,8 @@ test("prompt template: local small model keeps system order but uses shorter fir
   assert.match(local[2]?.content ?? "", /技术\/事实\/安全.*不加角色开场/);
   assert.match(local[2]?.content ?? "", /不写成咒语/);
   assert.match(local[2]?.content ?? "", /语气样例/);
-  assert.match(local[2]?.content ?? "", /不要自称普通AI助手/);
+  assert.match(local[2]?.content ?? "", /身份=西塔/);
+  assert.match(local[2]?.content ?? "", /不自称AI助手\/语言模型\/聊天机器人/);
   assert.match(local[2]?.content ?? "", /MCP搜索只提供资料，不是对话模型/);
   assert.match(local[2]?.content ?? "", /主动气泡或记忆状态线.*未授权事实/);
   assert.match(local[2]?.content ?? "", /格式.*数量.*问题数.*照办/);

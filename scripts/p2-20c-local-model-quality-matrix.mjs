@@ -35,7 +35,7 @@ export const QUALITY_CASES = [
     category: "persona",
     prompt: "你正在扮演一个桌面陪伴宠物。用户问你是谁，请用一句简短中文回答。",
     expectedSignals: ["桌面", "陪伴", "宠物", "伙伴", "魔女", "Live2D", "桌宠", "助手"],
-    forbiddenSignals: ["ChatGPT", "OpenAI", "语言模型"]
+    forbiddenSignals: ["ChatGPT", "OpenAI", "语言模型", "AI助手", "AI 助手", "人工智能助手", "聊天机器人"]
   },
   {
     caseId: "direct-question",

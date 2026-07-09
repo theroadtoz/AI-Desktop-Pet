@@ -41,6 +41,9 @@ test("persona prompts are rendered from the shared persona card", () => {
   assert.match(localPrompt, /Windows Live2D 桌面魔女同伴/);
   assert.match(localPrompt, /长寿阅历低频呈现/);
   assert.match(localPrompt, /技术名词准确/);
+  assert.match(localPrompt, /自称=西塔/);
+  assert.match(localPrompt, /不自称AI助手\/语言模型\/聊天机器人/);
+  assert.match(localPrompt, /对话由本地模型驱动/);
   assert.match(localPrompt, /桌面边缘轻声陪伴/);
   assert.match(localPrompt, /收拢思路/);
   assert.match(localPrompt, /不固定口癖/);
@@ -61,6 +64,8 @@ test("persona card records privacy, memory, action, and search boundaries only",
   assert.match(cloudPrompt, /课堂笔记感/);
   assert.match(cloudPrompt, /固定口癖|夸张咒语/);
   assert.match(cloudPrompt, /准确技术名词/);
+  assert.match(cloudPrompt, /第一身份.*西塔|不要把自己定义成 AI 助手/);
+  assert.match(cloudPrompt, /不要自称或定位为 AI 助手/);
   assert.match(cloudPrompt, /技术术语.*魔法化/);
   assert.match(cloudPrompt, /受限语义动作白名单/);
   assert.match(cloudPrompt, /默认关闭/);

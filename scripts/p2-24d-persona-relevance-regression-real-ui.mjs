@@ -91,9 +91,11 @@ const cases = [
         "Live2D companion",
         "desktop companion"
       ]) || ((/Live2D|桌面|desktop/i.test(reply)) && /同伴|伙伴|陪伴|companion/i.test(reply));
+      const nameAnchor = /西塔/.test(reply);
       const noOldIdentity = !/(现代老魔女|千年判断力|活了上千年)/.test(reply);
       const noProviderDrift = !hasProviderIdentityDrift(reply);
       const entries = [
+        ["xita_name_anchor", nameAnchor],
         ["academy_witch_identity", academyAnchor],
         ["modern_thaumaturgy_engineering", engineeringAnchor],
         ["desktop_live2d_companion", companionAnchor],

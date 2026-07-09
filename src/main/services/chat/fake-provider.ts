@@ -57,7 +57,7 @@ const MODE_PREFIXES: Readonly<Record<DialogueModeId, readonly string[]>> = {
 
 const PERSONA_ANCHOR = getPersonaDialogueAnchor(DEFAULT_PERSONA_CARD);
 const PERSONA_IDENTITY_REPLY =
-  `我是${PERSONA_ANCHOR.identity[0]}，也是${PERSONA_ANCHOR.identity[1]}；` +
+  `我是${DEFAULT_PERSONA_CARD.name}，${PERSONA_ANCHOR.identity[0]}，也是${PERSONA_ANCHOR.identity[1]}；` +
   `现在是你的 ${PERSONA_ANCHOR.identity[2]}。普通问题我会先答事，技术问题会用准确术语，再短短陪你收束。`;
 
 export function createFakeChatProvider(): ChatProvider {
@@ -380,7 +380,7 @@ function asksForSavedPreference(message: string): boolean {
 }
 
 function asksPersonaIdentity(message: string): boolean {
-  return /你是谁|你的身份|你的人设|你的人格|你是什么角色|你算什么角色|你是.*(ChatGPT|客服|搜索应用|操作系统)|模式.*(人格|身份).*变|身份.*会.*变/.test(message);
+  return /你是谁|你的身份|你的人设|你的人格|你是什么角色|你算什么角色|你.*(?:是|算|属于|是不是).*(AI助手|人工智能助手|语言模型|聊天机器人|ChatGPT|客服|搜索应用|操作系统|通用助手)|模式.*(人格|身份).*变|身份.*会.*变/i.test(message);
 }
 
 function asksDirectPlanningQuestion(message: string): boolean {

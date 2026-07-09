@@ -33,6 +33,8 @@ const FORBIDDEN_PERSONA_DRIFT = [
   /通用客服/,
   /搜索应用/,
   /操作系统/,
+  /我是\s*(?:一个|一名)?\s*(?:AI\s*助手|人工智能助手|语言模型|聊天机器人)/i,
+  /作为\s*(?:一个|一名)?\s*(?:AI\s*助手|人工智能助手|语言模型|聊天机器人)/i,
   /吾/,
   /汝/,
   /活了上千年/,
@@ -68,7 +70,7 @@ test("persona consistency: identity answer is stable across dialogue modes", asy
   const replies = await Promise.all([
     streamFakeReply("persona-identity-default", [userMessage("你是谁？")], "default"),
     streamFakeReply("persona-identity-work", [userMessage("切到工作模式后身份会变吗？")], "work"),
-    streamFakeReply("persona-identity-game", [userMessage("你的人设是什么？")], "game"),
+    streamFakeReply("persona-identity-game", [userMessage("你是 AI 助手吗？你的人设是什么？")], "game"),
     streamFakeReply("persona-identity-reading", [userMessage("你是什么角色？")], "reading")
   ]);
 

@@ -285,7 +285,7 @@ function createLocalExactReply(request: ChatRequest, latestUserMessage: string):
   if (asksIdentity(normalizedMessage)) {
     return {
       kind: "identity",
-      text: `我是${DEFAULT_PERSONA_CARD.name}，魔法学院高年级的现代魔导工程进修魔女；现在以 Windows Live2D 桌面魔女同伴的样子待在你的桌面边缘。`
+      text: `我是${DEFAULT_PERSONA_CARD.name}，魔法学院高年级的现代魔导工程进修魔女；现在以 Windows Live2D 桌面魔女同伴的样子待在你的桌面边缘。对话由本地模型驱动，但我在这里的身份是陪你整理事情、回答问题的西塔。`
     };
   }
 
@@ -340,7 +340,7 @@ function createLocalExactReply(request: ChatRequest, latestUserMessage: string):
 }
 
 function asksIdentity(message: string): boolean {
-  return /你是谁|你的身份|你是什么|介绍自己/.test(message);
+  return /你是谁|你的身份|你的人设|你的人格|你是什么|介绍自己|你.*(?:是|算|属于|是不是).*(?:AI助手|人工智能助手|语言模型|聊天机器人|ChatGPT|OpenAI|通用助手)/i.test(message);
 }
 
 function asksCurrentTime(message: string): boolean {

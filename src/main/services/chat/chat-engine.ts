@@ -7,7 +7,7 @@ import type {
 } from "../../../shared/chat-provider";
 import {
   createAssistantReplyPrivacyStreamGuard,
-  redactAssistantReplyPrivateMarkers
+  sanitizeAssistantReplyForDisplay
 } from "./assistant-reply-privacy";
 import { createFakeChatProvider } from "./fake-provider";
 
@@ -74,7 +74,7 @@ export function createChatEngine(provider: ChatProvider = createFakeChatProvider
 
         return {
           ...result,
-          text: redactAssistantReplyPrivateMarkers(result.text)
+          text: sanitizeAssistantReplyForDisplay(result.text)
         };
       } finally {
         if (activeAbortController === abortController) {
