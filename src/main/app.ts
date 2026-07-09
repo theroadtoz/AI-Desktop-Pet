@@ -228,6 +228,10 @@ type SourcedLowFrequencyCompanionEvent = {
 const PET_RENDERER_RECOVERY_WINDOW_MS = 60_000;
 const DEFAULT_API_KEY_REF = "openai-compatible-default";
 const PET_RENDERER_MAX_RECOVERIES = 3;
+const STARTUP_LOCAL_FALLBACK_PROVIDER_CONFIG: ProviderConfig = {
+  providerId: "fake",
+  displayName: "本地即时对话"
+};
 const PET_WINDOW_TITLE = "Desktop Pet";
 const PET_ACTION_TRIGGER_THROTTLE_MS = 700;
 const PET_MODE_ACTION_STATE_TRIGGER_DELAY_MS = 2_000;
@@ -481,8 +485,8 @@ async function startBundledLlamaCppRuntimeNow(options: {
   if (!resolved.config) {
     if (bundledLlamaCppProviderConfig) {
       bundledLlamaCppProviderConfig = null;
-      options.refreshProvider?.();
     }
+    options.refreshProvider?.();
     return resolved.safeSummary;
   }
 
@@ -519,8 +523,8 @@ async function startBundledLlamaCppRuntimeNow(options: {
   } catch {
     if (bundledLlamaCppRuntime === runtime && bundledLlamaCppProviderConfig) {
       bundledLlamaCppProviderConfig = null;
-      options.refreshProvider?.();
     }
+    options.refreshProvider?.();
 
     const errorSummary = mergeBundledRuntimeSummary(resolved.safeSummary, {
       runtime: "llama.cpp",
@@ -1907,7 +1911,7 @@ function getChatErrorMessage(errorType: ChatStreamErrorType): string {
   }
 
   if (errorType === "missing_api_key") {
-    return "当前不会调用真实模型：请先配置 API Key，或切换到本地 Ollama。";
+    return "当前不会调用外部模型：请先配置 API Key，或切换到可用的本地模型。";
   }
 
   if (errorType === "invalid_config") {
@@ -1931,7 +1935,7 @@ function getChatErrorMessage(errorType: ChatStreamErrorType): string {
   }
 
   if (errorType === "model_missing") {
-    return `模型服务可达，但找不到当前模型；若使用推荐本地模型，请手动拉取 ${DEFAULT_PROVIDER_CONFIG.model} 后再试。`;
+    return "模型服务可达，但找不到当前模型；请在模型设置里确认模型名称，或等内置模型准备完成后重试。";
   }
 
   if (errorType === "incompatible_response") {
@@ -1939,7 +1943,7 @@ function getChatErrorMessage(errorType: ChatStreamErrorType): string {
   }
 
   if (errorType === "network_error") {
-    return "连接失败，请检查网络、baseURL；若使用推荐本地模型，请确认 Ollama 已安装并启动。";
+    return "连接失败，请检查模型服务地址；若正在启动内置模型，准备完成后会自动切换。";
   }
 
   return "她暂时没接上模型，稍后再试或检查连接。";
@@ -2106,8 +2110,12 @@ app.whenReady().then(async () => {
   }
 
   function getCurrentProviderConfig(): ProviderConfig {
-    if (providerConfigStore?.hasConfig()) {
-      return providerConfigStore.getConfig();
+    const savedConfig = providerConfigStore?.hasConfig()
+      ? providerConfigStore.getConfig()
+      : null;
+
+    if (savedConfig && !isDefaultEmbeddedLlamaCppConfig(savedConfig)) {
+      return savedConfig;
     }
 
     if (envProviderConfig) {
@@ -2126,11 +2134,28 @@ app.whenReady().then(async () => {
       return managedLlamaCppProviderConfig;
     }
 
-    return providerConfigStore?.getConfig() ?? DEFAULT_PROVIDER_CONFIG;
+    return savedConfig ?? providerConfigStore?.getConfig() ?? DEFAULT_PROVIDER_CONFIG;
+  }
+
+  function getRuntimeProviderConfig(): ProviderConfig {
+    const config = getCurrentProviderConfig();
+
+    if (isDefaultEmbeddedLlamaCppConfig(config)) {
+      return STARTUP_LOCAL_FALLBACK_PROVIDER_CONFIG;
+    }
+
+    return config;
+  }
+
+  function isDefaultEmbeddedLlamaCppConfig(config: ProviderConfig): boolean {
+    return config.providerId === "local-openai-compatible" &&
+      config.localPresetId === "embedded-llama-cpp" &&
+      config.baseURL === DEFAULT_PROVIDER_CONFIG.baseURL &&
+      config.model === DEFAULT_PROVIDER_CONFIG.model;
   }
 
   function getCurrentProviderStatus(): ProviderStatus {
-    const config = getCurrentProviderConfig();
+    const config = getRuntimeProviderConfig();
 
     if (config.providerId === "fake") {
       return {
@@ -2224,7 +2249,7 @@ app.whenReady().then(async () => {
 
   function createProviderFromCurrentConfig() {
     return createChatProviderFromConfig({
-      config: getCurrentProviderConfig(),
+      config: getRuntimeProviderConfig(),
       getApiKey,
       logTelemetry
     });

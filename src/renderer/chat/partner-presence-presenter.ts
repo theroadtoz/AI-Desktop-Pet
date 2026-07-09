@@ -72,6 +72,10 @@ export function formatProviderStatus(status: ProviderStatus): string {
     return parts.join(" · ");
   }
 
+  if (status.providerId === "fake" && status.displayName === "本地即时对话") {
+    return "本地即时对话 · 内置模型准备好后自动切换";
+  }
+
   return "开发模式：Fake Provider（不会调用真实模型）";
 }
 

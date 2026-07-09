@@ -105,6 +105,11 @@ test("provider status keeps fake, cloud, local, and fallback wording", () => {
     isFallback: false
   }), "开发模式：Fake Provider（不会调用真实模型）");
   assert.equal(formatProviderStatus({
+    providerId: "fake",
+    displayName: "本地即时对话",
+    isFallback: false
+  }), "本地即时对话 · 内置模型准备好后自动切换");
+  assert.equal(formatProviderStatus({
     providerId: "openai-compatible",
     displayName: "External OpenAI-compatible",
     model: "external-chat-model",
@@ -157,6 +162,21 @@ test("provider health result wording stays stable", () => {
     baseURLHost: "localhost:11434",
     localPresetId: "ollama"
   }), "Ollama 不可达：请确认已安装并启动 Ollama，且 Base URL 指向 http://localhost:11434/v1 · localhost:11434");
+  assert.doesNotMatch(formatProviderHealthResult({
+    providerId: "local-openai-compatible",
+    status: "model_missing",
+    model: "ai-desktop-pet-local",
+    baseURLHost: "127.0.0.1:8080",
+    localPresetId: "embedded-llama-cpp",
+    modelCount: 0
+  }), /Ollama|ollama/);
+  assert.doesNotMatch(formatProviderHealthResult({
+    providerId: "local-openai-compatible",
+    status: "service_unreachable",
+    model: "ai-desktop-pet-local",
+    baseURLHost: "127.0.0.1:8080",
+    localPresetId: "embedded-llama-cpp"
+  }), /Ollama|ollama/);
   assert.equal(formatProviderHealthResult({
     providerId: "openai-compatible",
     status: "missing_api_key",
