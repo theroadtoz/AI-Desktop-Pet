@@ -1404,7 +1404,7 @@ function renderDailyCompanionRhythmNote(requestVersion: number, phaseOverride?: 
 }
 
 function formatMessageRoleLabel(role: ChatRole): string {
-  return role === "user" ? "你" : "真央";
+  return role === "user" ? "你" : "西塔";
 }
 
 function getVisibleMessageContent(message: ChatMessage): string {

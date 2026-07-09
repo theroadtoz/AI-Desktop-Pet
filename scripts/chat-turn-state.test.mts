@@ -23,12 +23,12 @@ test("chat turn delta only appends to the active reply", () => {
   const started = startChatTurn(createInitialChatTurnState(), "reply-1");
   const stale = applyChatTurnDelta(started.state, 99, "旧片段");
   const first = applyChatTurnDelta(started.state, started.requestVersion, "你好");
-  const second = applyChatTurnDelta(first.state, started.requestVersion, "，真央");
+  const second = applyChatTurnDelta(first.state, started.requestVersion, "，西塔");
 
   assert.equal(stale.accepted, false);
   assert.equal(stale.content, "");
   assert.equal(first.accepted, true);
-  assert.equal(second.content, "你好，真央");
+  assert.equal(second.content, "你好，西塔");
 });
 
 test("chat turn ignores stale finish events", () => {

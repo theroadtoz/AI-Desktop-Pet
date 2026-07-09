@@ -25,7 +25,7 @@ test("prompt template: local small model keeps system order but uses shorter fir
   assert.match(cloud[1]?.content ?? "", /准确技术名词/);
   assert.match(cloud[1]?.content ?? "", /学识渊博/);
   assert.match(local[1]?.content ?? "", /魔法学院高年级进修魔女/);
-  assert.match(local[1]?.content ?? "", /名字=真央/);
+  assert.match(local[1]?.content ?? "", /名字=西塔/);
   assert.match(local[1]?.content ?? "", /现代魔导工程进修生/);
   assert.match(local[1]?.content ?? "", /Windows Live2D 桌面魔女同伴/);
   assert.match(local[1]?.content ?? "", /桌面边缘轻声陪伴/);

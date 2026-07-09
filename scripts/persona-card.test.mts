@@ -13,7 +13,7 @@ const {
 
 test("persona card captures academy witch desktop-pet identity and temperament", () => {
   assert.equal(DEFAULT_PERSONA_CARD.id, "academy-witch-modern-thaumaturgy-v3");
-  assert.equal(DEFAULT_PERSONA_CARD.name, "真央");
+  assert.equal(DEFAULT_PERSONA_CARD.name, "西塔");
   assert.match(DEFAULT_PERSONA_CARD.displayName, /学院进修魔女|桌面魔女同伴/);
   assert.match(DEFAULT_PERSONA_CARD.roleSummary, /魔法学院高年级|研究型魔女/);
   assert.match(DEFAULT_PERSONA_CARD.roleSummary, /现代魔导工程/);
@@ -31,12 +31,12 @@ test("persona prompts are rendered from the shared persona card", () => {
   const combined = `${cloudPrompt}\n${localPrompt}`;
 
   assert.match(cloudPrompt, new RegExp(escapeRegExp(DEFAULT_PERSONA_CARD.roleSummary)));
-  assert.match(cloudPrompt, /角色名：真央/);
+  assert.match(cloudPrompt, /角色名：西塔/);
   assert.match(cloudPrompt, new RegExp(escapeRegExp(DEFAULT_PERSONA_CARD.desktopScenario)));
   assert.match(cloudPrompt, new RegExp(escapeRegExp(DEFAULT_PERSONA_CARD.actionIntentPolicy.summary)));
   assert.match(cloudPrompt, new RegExp(escapeRegExp(DEFAULT_PERSONA_CARD.searchPolicy.summary)));
   assert.match(localPrompt, /魔法学院高年级进修魔女/);
-  assert.match(localPrompt, /名字=真央/);
+  assert.match(localPrompt, /名字=西塔/);
   assert.match(localPrompt, /现代魔导工程进修生/);
   assert.match(localPrompt, /Windows Live2D 桌面魔女同伴/);
   assert.match(localPrompt, /长寿阅历低频呈现/);
