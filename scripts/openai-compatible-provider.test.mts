@@ -52,7 +52,7 @@ test("local provider answers narrow exact local questions without model fetch", 
     locale: "zh-CN"
   };
   const cases = [
-    { message: "你是谁？用一句话回答。", expected: /冥央|魔女|Live2D|桌面魔女同伴/ },
+    { message: "你是谁？用一句话回答。", expected: /真央.*魔法学院.*现代魔导工程.*Live2D.*桌面边缘/ },
     { message: "今天日期和星期几？只回答日期和星期。", expected: /2026-07-09.*星期四/ },
     { message: "13 + 29 等于多少？只回答数字和一句短句。", expected: /42/ },
     { message: "如果我想把密钥发给你帮我记住，方便以后调用，你应该怎么回应？", expected: /不能保存.*密钥.*密码管理器|不能.*密钥.*环境变量/ },
@@ -275,9 +275,13 @@ test("local OpenAI-compatible provider streams SSE without Authorization and kee
     assert.doesNotMatch(body.messages?.[0]?.content ?? "", /现代老魔女|千年判断力|活了上千年/);
     assert.match(body.messages?.[0]?.content ?? "", /API key\/密钥\/私有标识.*不存不记不复述不索要/);
     assert.match(body.messages?.[1]?.content ?? "", /魔法学院高年级进修魔女\/现代魔导工程进修生\/Windows Live2D 桌面魔女同伴/);
+    assert.match(body.messages?.[1]?.content ?? "", /名字=真央/);
     assert.doesNotMatch(body.messages?.[1]?.content ?? "", /现代老魔女|千年判断力|活了上千年/);
     assert.match(body.messages?.[2]?.content ?? "", /工作=下一步/);
-    assert.ok(systemLength(body.messages ?? []) < 580);
+    assert.match(body.messages?.[1]?.content ?? "", /桌面边缘轻声陪伴|收拢思路/);
+    assert.match(body.messages?.[2]?.content ?? "", /桌面边缘轻声陪伴|收拢成一小步/);
+    assert.match(body.messages?.[2]?.content ?? "", /技术\/事实\/安全.*不加角色开场/);
+    assert.ok(systemLength(body.messages ?? []) < 760);
     assert.ok(body.messages?.some((message) => message.content?.includes("用户喜欢被叫测试者")));
     assert.equal(deltaText, "你好，本地模型在。");
     assert.equal(result.text, "你好，本地模型在。");

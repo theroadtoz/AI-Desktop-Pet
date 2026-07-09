@@ -95,6 +95,24 @@ test("persona consistency: emotional context keeps the concrete reason", async (
   assertNoPersonaDrift(reply.text);
 });
 
+test("persona consistency: local prompt gives roleful warmth without overriding technical answers", () => {
+  const mapped = mapChatMessagesToOpenAICompatible([
+    userMessage("今天有点卡住，也想问 Provider 和 Live2D 的区别")
+  ], undefined, undefined, undefined, "local-small-model");
+  const systemText = mapped
+    .filter((message) => message.role === "system")
+    .map((message) => message.content)
+    .join("\n");
+
+  assert.match(systemText, /日常\/情绪\/闲聊/);
+  assert.match(systemText, /桌面边缘轻声陪伴/);
+  assert.match(systemText, /收拢成一小步/);
+  assert.match(systemText, /技术\/事实\/安全.*不加角色开场/);
+  assert.match(systemText, /Provider\/本地模型\/Live2D\/MCP\/记忆\/窗口.*原名/);
+  assert.match(systemText, /不要每轮自报身份|不固定口癖/);
+  assert.doesNotMatch(systemText, /水晶球|法阵|本魔女|吾|汝/);
+});
+
 test("persona consistency: follow-up carries previous technical context", async () => {
   const reply = await streamFakeReply("persona-follow-up", [
     userMessage("TypeScript 和 Python 哪个更适合做这个桌宠脚本？"),

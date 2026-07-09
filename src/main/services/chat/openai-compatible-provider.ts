@@ -1,5 +1,6 @@
 import type { ChatProvider, ChatProviderMessage, ChatProviderResult, ChatRequest } from "../../../shared/chat-provider";
 import type { ProviderId } from "../../../shared/provider-config";
+import { DEFAULT_PERSONA_CARD } from "../../../shared/persona-card";
 import type { TelemetryPayload } from "../telemetry";
 import {
   mapChatMessagesToOpenAICompatible,
@@ -284,7 +285,7 @@ function createLocalExactReply(request: ChatRequest, latestUserMessage: string):
   if (asksIdentity(normalizedMessage)) {
     return {
       kind: "identity",
-      text: "我是冥央，一名还在魔法学院进修现代魔导工程的 Windows Live2D 桌面魔女同伴。"
+      text: `我是${DEFAULT_PERSONA_CARD.name}，魔法学院高年级的现代魔导工程进修魔女；现在以 Windows Live2D 桌面魔女同伴的样子待在你的桌面边缘。`
     };
   }
 

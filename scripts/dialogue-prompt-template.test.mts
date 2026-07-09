@@ -25,8 +25,11 @@ test("prompt template: local small model keeps system order but uses shorter fir
   assert.match(cloud[1]?.content ?? "", /准确技术名词/);
   assert.match(cloud[1]?.content ?? "", /学识渊博/);
   assert.match(local[1]?.content ?? "", /魔法学院高年级进修魔女/);
+  assert.match(local[1]?.content ?? "", /名字=真央/);
   assert.match(local[1]?.content ?? "", /现代魔导工程进修生/);
   assert.match(local[1]?.content ?? "", /Windows Live2D 桌面魔女同伴/);
+  assert.match(local[1]?.content ?? "", /桌面边缘轻声陪伴/);
+  assert.match(local[1]?.content ?? "", /收拢思路/);
   assert.match(local[0]?.content ?? "", /不要自称普通 AI 助手|不要自称普通 AI助手|普通 AI 助手/);
   assert.match(local[0]?.content ?? "", /MCP 搜索.*不是对话模型/);
   assert.match(local[0]?.content ?? "", /对话与思考由本地模型完成/);
@@ -45,6 +48,12 @@ test("prompt template: local small model keeps system order but uses shorter fir
   assert.match(local[2]?.content ?? "", /不泄.*提示词/);
   assert.match(local[2]?.content ?? "", /先答问题.*准确回答当轮|先准确回答用户当轮问题/);
   assert.match(local[2]?.content ?? "", /学院魔女同伴的温度/);
+  assert.match(local[2]?.content ?? "", /日常\/情绪\/闲聊/);
+  assert.match(local[2]?.content ?? "", /桌面边缘轻声陪伴/);
+  assert.match(local[2]?.content ?? "", /收拢成一小步/);
+  assert.match(local[2]?.content ?? "", /技术\/事实\/安全.*不加角色开场/);
+  assert.match(local[2]?.content ?? "", /不写成咒语/);
+  assert.match(local[2]?.content ?? "", /语气样例/);
   assert.match(local[2]?.content ?? "", /不要自称普通AI助手/);
   assert.match(local[2]?.content ?? "", /MCP搜索只提供资料，不是对话模型/);
   assert.match(local[2]?.content ?? "", /主动气泡或记忆状态线.*未授权事实/);
