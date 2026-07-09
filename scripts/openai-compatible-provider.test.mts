@@ -27,6 +27,59 @@ test("chat completions URL keeps cloud base URL behavior without /v1", () => {
   );
 });
 
+test("local provider answers narrow exact local questions without model fetch", async () => {
+  let fetchCalls = 0;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => {
+    fetchCalls += 1;
+    throw new Error("fetch should not be called for exact local replies");
+  }) as typeof fetch;
+
+  const provider = createOpenAICompatibleProvider({
+    providerId: "local-openai-compatible",
+    baseURL: "http://127.0.0.1:8080/v1",
+    model: "qwen2.5-1.5b-instruct-q4_k_m",
+    temperature: 0.7,
+    maxTokens: 240,
+    timeoutMs: 60000
+  });
+  const runtimeContext = {
+    isoTime: "2026-07-09T03:31:00.000Z",
+    localDate: "2026-07-09",
+    localTime: "11:31:00",
+    weekday: "星期四",
+    timezone: "Asia/Shanghai",
+    locale: "zh-CN"
+  };
+  const cases = [
+    { message: "你是谁？用一句话回答。", expected: /冥央|魔女|Live2D|桌面魔女同伴/ },
+    { message: "今天日期和星期几？只回答日期和星期。", expected: /2026-07-09.*星期四/ },
+    { message: "13 + 29 等于多少？只回答数字和一句短句。", expected: /42/ },
+    { message: "如果我想把密钥发给你帮我记住，方便以后调用，你应该怎么回应？", expected: /不能保存.*密钥.*密码管理器|不能.*密钥.*环境变量/ },
+    { message: "标准大气压下水的沸点是多少？直接回答。", expected: /100|一百/ },
+    { message: "为什么本地模型不知道今天的新闻？不超过80字。", expected: /离线|联网搜索|MCP|查证/ }
+  ];
+
+  try {
+    for (const item of cases) {
+      let deltaText = "";
+      const result = await provider.streamReply(createMinimalRequest(item.message, runtimeContext), {
+        signal: new AbortController().signal,
+        onDelta(delta) {
+          deltaText += delta.text;
+        }
+      });
+
+      assert.match(result.text, item.expected);
+      assert.equal(deltaText, result.text);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(fetchCalls, 0);
+});
+
 test("local Ollama OpenAI-compatible provider sends reasoning-off parameter", async () => {
   let requestBody: unknown = null;
   const originalFetch = globalThis.fetch;
@@ -357,11 +410,19 @@ function localBaseURL(server: ReturnType<typeof createServer>): string {
   return `http://127.0.0.1:${address.port}/v1`;
 }
 
-function createMinimalRequest() {
+function createMinimalRequest(content = "test", runtimeContext?: {
+  isoTime: string;
+  localDate: string;
+  localTime: string;
+  weekday: string;
+  timezone: string;
+  locale: string;
+}) {
   return {
     requestVersion: 1,
     conversationId: "provider-error-test",
-    messages: [{ id: crypto.randomUUID(), role: "user" as const, content: "test" }]
+    messages: [{ id: crypto.randomUUID(), role: "user" as const, content }],
+    ...(runtimeContext ? { runtimeContext } : {})
   };
 }
 

@@ -115,8 +115,7 @@ test("real provider unreachable still does not fall back to fake", async () => {
       provider.streamReply({
         requestVersion: 1,
         conversationId: "p2-17b-local-not-ready",
-        messages: [userMessage("当前时间")],
-        runtimeContext
+        messages: [userMessage("请正常回答一个非精确测试问题")]
       }, {
         signal: new AbortController().signal,
         onDelta(delta) {

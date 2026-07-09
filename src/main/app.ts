@@ -196,6 +196,7 @@ let bundledLlamaCppRuntime: LlamaCppRuntime | null = null;
 let llamaCppRuntimeSettingsStore: LlamaCppRuntimeSettingsStore | null = null;
 let latestLlamaCppRuntimeSummary: LlamaCppRuntimeSummary | null = null;
 let latestBundledLlamaCppRuntimeSummary: BundledLlamaCppRuntimeSafeSummary | null = null;
+let bundledLlamaCppRuntimeStartupPromise: Promise<BundledLlamaCppRuntimeSafeSummary> | null = null;
 let refreshCurrentProvider: (() => void) | null = null;
 let currentPetPresentationPreferences: PetPresentationPreferences = DEFAULT_PET_PRESENTATION_PREFERENCES;
 let isChatInteractionActive = false;
@@ -472,7 +473,13 @@ function readLowFrequencyCompanionEventAcceptanceMinimumIntervalMs(
 function startBundledLlamaCppRuntimeIfAvailable(options: {
   refreshProvider?: () => void;
 } = {}): void {
-  void startBundledLlamaCppRuntimeNow(options);
+  const startup = startBundledLlamaCppRuntimeNow(options);
+  bundledLlamaCppRuntimeStartupPromise = startup;
+  void startup.catch(() => undefined).finally(() => {
+    if (bundledLlamaCppRuntimeStartupPromise === startup) {
+      bundledLlamaCppRuntimeStartupPromise = null;
+    }
+  });
 }
 
 async function startBundledLlamaCppRuntimeNow(options: {
@@ -2147,6 +2154,37 @@ app.whenReady().then(async () => {
     return config;
   }
 
+  function isStartupLocalFallbackConfig(config: ProviderConfig): boolean {
+    return config.providerId === "fake" &&
+      config.displayName === STARTUP_LOCAL_FALLBACK_PROVIDER_CONFIG.displayName;
+  }
+
+  async function waitForStartupLocalModelProviderIfPending(): Promise<void> {
+    const startup = bundledLlamaCppRuntimeStartupPromise;
+
+    if (!startup || !isStartupLocalFallbackConfig(getRuntimeProviderConfig())) {
+      return;
+    }
+
+    const startedAt = Date.now();
+    logTelemetry("bundled_llama_cpp_chat_wait_started", {
+      providerId: "local-openai-compatible",
+      localPresetId: "embedded-llama-cpp"
+    });
+
+    try {
+      await startup;
+    } finally {
+      refreshCurrentProvider?.();
+      logTelemetry("bundled_llama_cpp_chat_wait_completed", {
+        providerId: chatEngine?.getProviderId() ?? "unknown",
+        localPresetId: "embedded-llama-cpp",
+        runtimeStatus: latestBundledLlamaCppRuntimeSummary?.status ?? "unknown",
+        durationMs: Date.now() - startedAt
+      });
+    }
+  }
+
   function isDefaultEmbeddedLlamaCppConfig(config: ProviderConfig): boolean {
     return config.providerId === "local-openai-compatible" &&
       config.localPresetId === "embedded-llama-cpp" &&
@@ -2603,7 +2641,17 @@ app.whenReady().then(async () => {
   });
 
   ipcMain.on("chat:send", (event, request: unknown) => {
+    void handleChatSend(event, request);
+  });
+
+  async function handleChatSend(event: IpcMainEvent, request: unknown): Promise<void> {
     if (!isChatSender(event) || !isChatSendRequest(request) || !chatEngine || !historyStore || !memoryStore) {
+      return;
+    }
+
+    await waitForStartupLocalModelProviderIfPending();
+
+    if (!chatEngine || !historyStore || !memoryStore) {
       return;
     }
 
@@ -2897,7 +2945,7 @@ app.whenReady().then(async () => {
         settleInterruptedRole();
       }
     });
-  });
+  }
 
   ipcMain.on("chat:abort", (event) => {
     if (!isChatSender(event) || !chatEngine) {

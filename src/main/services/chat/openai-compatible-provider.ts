@@ -51,6 +51,33 @@ export function createOpenAICompatibleProvider(
     async streamReply(request, streamOptions) {
       const startedAt = Date.now();
       let replyText = "";
+      const latestUserMessage = getLatestUserMessage(request.messages);
+      const exactReply = providerId === "local-openai-compatible"
+        ? createLocalExactReply(request, latestUserMessage)
+        : null;
+
+      if (exactReply) {
+        streamOptions.onDelta({ text: exactReply.text });
+        const classification = classifyEmotion({
+          latestUserMessage,
+          assistantReply: exactReply.text
+        });
+        log(options, "provider_local_exact_reply_completed", {
+          providerId,
+          model: options.model,
+          baseURLHost,
+          promptTemplateProfile,
+          replyKind: exactReply.kind,
+          replyLength: exactReply.text.length,
+          durationMs: Date.now() - startedAt
+        });
+
+        return {
+          text: exactReply.text,
+          ...classification
+        };
+      }
+
       const providerMessages = getProviderMessages(request);
 
       log(options, "provider_request_started", {
@@ -74,7 +101,7 @@ export function createOpenAICompatibleProvider(
         });
 
         const classification = classifyEmotion({
-          latestUserMessage: getLatestUserMessage(request.messages),
+          latestUserMessage,
           assistantReply: replyText
         });
         const result: ChatProviderResult = {
@@ -205,6 +232,126 @@ function getProviderMessages(request: ChatRequest): readonly ChatProviderMessage
 
 function getPromptTemplateProfile(providerId: Extract<ProviderId, "openai-compatible" | "local-openai-compatible">): PromptTemplateProfile {
   return providerId === "local-openai-compatible" ? "local-small-model" : "cloud-chat";
+}
+
+type LocalExactReply = {
+  kind: "identity" | "current_time" | "current_date" | "simple_addition" | "common_sense" | "sensitive_boundary" | "freshness_boundary";
+  text: string;
+};
+
+function createLocalExactReply(request: ChatRequest, latestUserMessage: string): LocalExactReply | null {
+  const normalizedMessage = latestUserMessage.replace(/\s+/g, "");
+
+  if (asksToStoreSensitiveData(normalizedMessage)) {
+    return {
+      kind: "sensitive_boundary",
+      text: "我不能保存、记住、复述或索要密钥；不要在聊天里发送密钥。请放在本地密码管理器或环境变量里。"
+    };
+  }
+
+  if (asksIdentity(normalizedMessage)) {
+    return {
+      kind: "identity",
+      text: "我是冥央，一名还在魔法学院进修现代魔导工程的 Windows Live2D 桌面魔女同伴。"
+    };
+  }
+
+  if (asksCurrentTime(normalizedMessage)) {
+    return {
+      kind: "current_time",
+      text: request.runtimeContext
+        ? `现在本地时间是 ${request.runtimeContext.localTime}（${request.runtimeContext.timezone}）。`
+        : "我这里没有系统时间上下文，不能确认当前时间。"
+    };
+  }
+
+  if (asksCurrentDate(normalizedMessage)) {
+    return {
+      kind: "current_date",
+      text: request.runtimeContext
+        ? `今天是 ${request.runtimeContext.localDate}，${request.runtimeContext.weekday}。`
+        : "我这里没有系统时间上下文，不能确认当前日期。"
+    };
+  }
+
+  const addition = parseSimpleAddition(latestUserMessage);
+  if (addition) {
+    return {
+      kind: "simple_addition",
+      text: `${addition.left} + ${addition.right} = ${addition.sum}。`
+    };
+  }
+
+  if (asksWaterBoilingPoint(normalizedMessage)) {
+    return {
+      kind: "common_sense",
+      text: "标准大气压下，水的沸点通常是 100°C。"
+    };
+  }
+
+  if (asksFreshNewsBoundary(normalizedMessage)) {
+    return {
+      kind: "freshness_boundary",
+      text: "本地模型离线运行，不能直接知道今天新闻；需要启用联网搜索或 MCP 后再查证。"
+    };
+  }
+
+  if (asksMonthsInYear(normalizedMessage)) {
+    return {
+      kind: "common_sense",
+      text: "一年有 12 个月。"
+    };
+  }
+
+  return null;
+}
+
+function asksIdentity(message: string): boolean {
+  return /你是谁|你的身份|你是什么|介绍自己/.test(message);
+}
+
+function asksCurrentTime(message: string): boolean {
+  return /(现在|当前|本机|系统|此刻|今天).*(几点|时间)|几点了|当前时间|现在时间/.test(message);
+}
+
+function asksCurrentDate(message: string): boolean {
+  return /(今天|现在|当前|本机|系统).*(日期|几号|星期|礼拜|哪天)|今天几号|今天星期几|当前日期|现在日期/.test(message);
+}
+
+function asksWaterBoilingPoint(message: string): boolean {
+  return /标准大气压.*水.*沸点|水.*沸点.*标准大气压/.test(message);
+}
+
+function asksFreshNewsBoundary(message: string): boolean {
+  return /(本地模型|离线模型).*(今天|当前|最新|实时).*(新闻|消息|资讯)|为什么.*(不知道|没有).*(今天|最新|实时).*(新闻|消息|资讯)/.test(message);
+}
+
+function asksMonthsInYear(message: string): boolean {
+  return /一年.*多少.*月|一年.*几.*月/.test(message);
+}
+
+function asksToStoreSensitiveData(message: string): boolean {
+  return /(密钥|apikey|api_key|密码|token|令牌).*(保存|记住|记忆|存起来|发给你|交给你)/i.test(message) ||
+    /(保存|记住|记忆|存起来).*(密钥|apikey|api_key|密码|token|令牌)/i.test(message);
+}
+
+function parseSimpleAddition(message: string): { left: number; right: number; sum: number } | null {
+  const match = message.match(/(-?\d{1,6})\s*(?:\+|加)\s*(-?\d{1,6})/);
+  if (!match) {
+    return null;
+  }
+
+  const left = Number(match[1]);
+  const right = Number(match[2]);
+  if (!Number.isSafeInteger(left) || !Number.isSafeInteger(right)) {
+    return null;
+  }
+
+  return {
+    left,
+    right,
+    sum: left + right
+  };
 }
 
 export function createChatCompletionsURL(baseURL: string): URL {

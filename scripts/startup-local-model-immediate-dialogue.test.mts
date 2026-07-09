@@ -19,7 +19,7 @@ function extractFunction(name: string): string {
   return appSource.slice(start, nextFunction === -1 ? appSource.length : nextFunction);
 }
 
-test("startup runtime provider falls back to immediate local fake dialogue instead of static embedded URL", () => {
+test("startup runtime provider keeps local fallback instead of static embedded URL while runtime is unresolved", () => {
   const getCurrentProviderConfig = extractFunction("getCurrentProviderConfig");
   const getRuntimeProviderConfig = extractFunction("getRuntimeProviderConfig");
   const createProviderFromCurrentConfig = extractFunction("createProviderFromCurrentConfig");
@@ -28,6 +28,18 @@ test("startup runtime provider falls back to immediate local fake dialogue inste
   assert.match(getCurrentProviderConfig, /return savedConfig \?\? providerConfigStore\?\.getConfig\(\) \?\? DEFAULT_PROVIDER_CONFIG;/);
   assert.match(getRuntimeProviderConfig, /return STARTUP_LOCAL_FALLBACK_PROVIDER_CONFIG;/);
   assert.match(createProviderFromCurrentConfig, /config: getRuntimeProviderConfig\(\)/);
+});
+
+test("chat send waits for pending bundled local model before streaming", () => {
+  const startBundledLlamaCppRuntimeIfAvailable = extractFunction("startBundledLlamaCppRuntimeIfAvailable");
+  const waitForStartupLocalModelProviderIfPending = extractFunction("waitForStartupLocalModelProviderIfPending");
+  const handleChatSend = extractFunction("handleChatSend");
+
+  assert.match(appSource, /let bundledLlamaCppRuntimeStartupPromise: Promise<BundledLlamaCppRuntimeSafeSummary> \| null = null;/);
+  assert.match(startBundledLlamaCppRuntimeIfAvailable, /bundledLlamaCppRuntimeStartupPromise = startup;/);
+  assert.match(waitForStartupLocalModelProviderIfPending, /await startup;/);
+  assert.match(waitForStartupLocalModelProviderIfPending, /refreshCurrentProvider\?\.\(\);/);
+  assert.match(handleChatSend, /await waitForStartupLocalModelProviderIfPending\(\);[\s\S]*const chatEngineForRequest = chatEngine;/);
 });
 
 test("default embedded static config cannot override managed handoff provider configs", () => {

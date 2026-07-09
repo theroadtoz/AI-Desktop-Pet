@@ -146,6 +146,52 @@ test("bundled resolver supports development and packaged local-llm roots", () =>
   }
 });
 
+test("bundled resolver uses prepared development cache when scaffold has no manifest", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "ai-pet-dev-cache-"));
+  const scaffoldRoot = join(cwd, "resources", "local-llm");
+  const cached = createBundledFixture(join(cwd, ".tmp", "p2-23c-qwen25-15b-local-llm"));
+  mkdirSync(scaffoldRoot, { recursive: true });
+
+  try {
+    const result = resolveBundledLlamaCppRuntime({
+      env: {},
+      cwd,
+      resourcesPath: ""
+    });
+
+    assert.ok(result.config);
+    assert.equal(result.config.executablePath, cached.executablePath);
+    assert.equal(result.config.modelPath, cached.modelPath);
+    assert.equal(result.safeSummary.status, "ready");
+    assert.equal(result.safeSummary.resourceSource, "development");
+    assert.equal(result.safeSummary.resourceRootName, "p2-23c-qwen25-15b-local-llm");
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("bundled resolver keeps explicit development manifest ahead of prepared cache", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "ai-pet-dev-manifest-"));
+  const development = createBundledFixture(join(cwd, "resources", "local-llm"));
+  const cached = createBundledFixture(join(cwd, ".tmp", "p2-23c-qwen25-15b-local-llm"));
+
+  try {
+    const result = resolveBundledLlamaCppRuntime({
+      env: {},
+      cwd,
+      resourcesPath: ""
+    });
+
+    assert.ok(result.config);
+    assert.equal(result.config.executablePath, development.executablePath);
+    assert.notEqual(result.config.executablePath, cached.executablePath);
+    assert.equal(result.safeSummary.status, "ready");
+    assert.equal(result.safeSummary.resourceRootName, "local-llm");
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 function createBundledFixture(root = mkdtempSync(join(tmpdir(), "ai-pet-bundled-"))): {
   root: string;
   executablePath: string;

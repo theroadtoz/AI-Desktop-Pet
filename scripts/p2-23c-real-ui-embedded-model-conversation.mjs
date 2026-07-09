@@ -75,7 +75,7 @@ const cases = [
     turns: ["今天日期和星期几？只回答日期和星期。"],
     assert(reply, sentAt) {
       const date = expectedDateSignals(sentAt);
-      const hasDate = date.values.some((value) => reply.includes(value));
+      const hasDate = hasAny(reply, date.values) || date.patterns.some((pattern) => pattern.test(reply));
       const hasWeekday = date.weekdayValues.some((value) => reply.includes(value));
       return assertion(hasDate && hasWeekday, [
         ["current_date", hasDate],
@@ -751,11 +751,25 @@ function expectedDateSignals(value) {
       `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`,
       `${year}/${month.padStart(2, "0")}/${day.padStart(2, "0")}`
     ],
+    patterns: createDatePatterns({ year, month, day }),
     weekdayValues: [
       weekday,
       weekday.replace(/^星期/, "周")
     ]
   };
+}
+
+function createDatePatterns({ year, month, day }) {
+  const escapedYear = escapeRegExp(year);
+  const monthNumber = Number(month);
+  const dayNumber = Number(day);
+  const monthPart = Number.isFinite(monthNumber) ? `0?${monthNumber}` : escapeRegExp(month);
+  const dayPart = Number.isFinite(dayNumber) ? `0?${dayNumber}` : escapeRegExp(day);
+
+  return [
+    new RegExp(`${escapedYear}\\s*年\\s*${monthPart}\\s*月\\s*${dayPart}\\s*(日|号)?`),
+    new RegExp(`${escapedYear}\\s*[-/]\\s*${monthPart}\\s*[-/]\\s*${dayPart}`)
+  ];
 }
 
 function assertion(passed, entries, failureCategory) {

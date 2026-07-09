@@ -26,9 +26,24 @@ const testRuntime = {
   }
 };
 
+const missingBundledLlamaCpp = {
+  runtime: "llama.cpp",
+  enabled: true,
+  status: "missing_manifest",
+  safeSummaryOnly: true,
+  executableConfigured: false,
+  modelConfigured: false,
+  bundled: true,
+  resourceSource: "development",
+  resourceRootName: "local-llm",
+  manifestFound: false,
+  reason: "manifest_missing"
+} as const;
+
 test("diagnostic safe-returns not_ready when runtime is unavailable", async () => {
   const result = await diagnoseLocalRuntimes({
     runtimes: [testRuntime],
+    bundledLlamaCpp: missingBundledLlamaCpp,
     env: {},
     commandExists: async () => false,
     processExists: async () => false,
@@ -66,6 +81,7 @@ test("diagnostic reports model_missing without calling chat", async () => {
     await listen(server);
     const result = await diagnoseLocalRuntimes({
       runtimes: [{ ...testRuntime, baseURL: localBaseURL(server) }],
+      bundledLlamaCpp: missingBundledLlamaCpp,
       env: {},
       commandExists: async () => true,
       processExists: async () => true,
@@ -103,6 +119,7 @@ test("diagnostic reports ready for OpenAI-compatible models and streaming chat",
     await listen(server);
     const result = await diagnoseLocalRuntimes({
       runtimes: [{ ...testRuntime, baseURL: localBaseURL(server) }],
+      bundledLlamaCpp: missingBundledLlamaCpp,
       env: {},
       commandExists: async () => true,
       processExists: async () => true,
