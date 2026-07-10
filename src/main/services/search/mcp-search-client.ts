@@ -2,10 +2,12 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { basename, delimiter, join, resolve } from "node:path";
-import type {
-  WebSearchConnectionTestResult,
-  WebSearchSettings,
-  WebSearchResult
+import {
+  BAIDU_SEARCH_VERIFICATION_REQUIRED_ERROR,
+  BUNDLED_BAIDU_SEARCH_COMMAND,
+  type WebSearchConnectionTestResult,
+  type WebSearchSettings,
+  type WebSearchResult
 } from "../../../shared/web-search";
 import type { WebSearchProvider, WebSearchRequest } from "./web-search-provider";
 
@@ -38,6 +40,11 @@ const MAX_RESULT_SNIPPET_LENGTH = 360;
 const MAX_RESULT_URL_LENGTH = 240;
 const MAX_RESULT_DATE_LENGTH = 40;
 
+export type ParseMcpToolResultsOptions = {
+  trustedBaiduRedirects?: boolean;
+  allowTitleSnippetFallback?: boolean;
+};
+
 export type McpSearchClientConfig = Pick<
   WebSearchSettings,
   "command" | "args" | "toolName" | "timeoutMs" | "maxResults"
@@ -51,13 +58,24 @@ export function createMcpSearchProvider(config: McpSearchClientConfig): WebSearc
   };
 }
 
-function createMcpSearchToolArguments(config: McpSearchClientConfig, request: WebSearchRequest): Record<string, unknown> {
+export function createMcpSearchToolArguments(config: McpSearchClientConfig, request: WebSearchRequest): Record<string, unknown> {
   const limit = Math.min(request.maxResults, config.maxResults);
+  if (isBundledBaiduSearchConfig(config)) {
+    return {
+      query: request.query,
+      limit
+    };
+  }
+
   const args: Record<string, unknown> = {
     query: request.query,
     maxResults: limit,
     limit
   };
+
+  if (isPinnedOpenWebSearchBaiduPreset(config)) {
+    args.engines = ["baidu"];
+  }
 
   if (isGoogleSearchMcpConfig(config)) {
     args.timeout = config.timeoutMs;
@@ -98,7 +116,17 @@ export async function callMcpSearchTool(
       arguments: createMcpSearchToolArguments(config, request)
     });
 
-    return parseMcpToolResults(result, Math.min(request.maxResults, config.maxResults));
+    if (isMcpToolErrorResult(result)) {
+      throw createMcpSearchError(readMcpToolErrorCode(result) ?? "mcp_search_tool_failed");
+    }
+
+    return parseMcpToolResults(
+      result,
+      Math.min(request.maxResults, config.maxResults),
+      isBundledBaiduSearchConfig(config)
+        ? { trustedBaiduRedirects: true, allowTitleSnippetFallback: true }
+        : undefined
+    );
   } finally {
     session.close();
   }
@@ -347,7 +375,14 @@ function readToolSummaries(value: unknown): Array<{ name: string }> {
     .filter((tool): tool is { name: string } => tool !== null);
 }
 
-export function parseMcpToolResults(value: unknown, maxResults: number): WebSearchResult[] {
+export function parseMcpToolResults(
+  value: unknown,
+  maxResults: number,
+  options: ParseMcpToolResultsOptions = {}
+): WebSearchResult[] {
+  if (isMcpToolErrorResult(value)) {
+    return [];
+  }
   const textParts = readMcpTextParts(value);
   const structuredResults = readStructuredResults(value);
   const parsedJsonPayloads = textParts.map(parseResultJsonPayload);
@@ -359,10 +394,19 @@ export function parseMcpToolResults(value: unknown, maxResults: number): WebSear
     : hasRecognizedJsonResults
       ? []
     : textParts.map((text) => ({ title: "搜索结果", snippet: text }));
+  const seenResults = new Set<string>();
 
   return fallbackCandidates
-    .map(sanitizeSearchResult)
+    .map((candidate) => sanitizeSearchResult(candidate, options))
     .filter((result): result is WebSearchResult => result !== null)
+    .filter((result) => {
+      const key = JSON.stringify([result.title, result.snippet, result.url ?? "", result.date ?? ""]);
+      if (seenResults.has(key)) {
+        return false;
+      }
+      seenResults.add(key);
+      return true;
+    })
     .slice(0, maxResults);
 }
 
@@ -426,13 +470,20 @@ function parseResultJsonPayload(text: string): { recognized: boolean; results: A
   }
 }
 
-function sanitizeSearchResult(value: Record<string, unknown>): WebSearchResult | null {
-  const title = sanitizeText(value.title, MAX_RESULT_TITLE_LENGTH) || "搜索结果";
-  const snippet = sanitizeText(
+function sanitizeSearchResult(
+  value: Record<string, unknown>,
+  options: ParseMcpToolResultsOptions
+): WebSearchResult | null {
+  const safeTitle = sanitizeText(value.title, MAX_RESULT_TITLE_LENGTH);
+  const title = safeTitle || "搜索结果";
+  const providedSnippet = sanitizeText(
     value.snippet ?? value.description ?? value.content ?? value.text,
     MAX_RESULT_SNIPPET_LENGTH
   );
-  const url = sanitizeUrl(value.url ?? value.link);
+  const snippet = providedSnippet || (options.allowTitleSnippetFallback
+    ? safeTitle || "百度搜索结果（页面未提供摘要）"
+    : "");
+  const url = sanitizeUrl(value.url ?? value.link, options);
   const date = sanitizeText(value.date ?? value.publishedAt, MAX_RESULT_DATE_LENGTH);
 
   if (!snippet) {
@@ -455,7 +506,7 @@ function sanitizeText(value: unknown, maxLength: number): string {
   return value.replace(/\s+/g, " ").trim().slice(0, maxLength).trim();
 }
 
-function sanitizeUrl(value: unknown): string | null {
+function sanitizeUrl(value: unknown, options: ParseMcpToolResultsOptions): string | null {
   if (typeof value !== "string") {
     return null;
   }
@@ -465,15 +516,51 @@ function sanitizeUrl(value: unknown): string | null {
     if (url.protocol !== "http:" && url.protocol !== "https:") {
       return null;
     }
+    const baiduRedirectToken = options.trustedBaiduRedirects &&
+      url.protocol === "https:" &&
+      url.hostname === "www.baidu.com" &&
+      url.port === "" &&
+      url.pathname === "/link"
+      ? url.searchParams.get("url")
+      : null;
     url.search = "";
     url.hash = "";
+    if (baiduRedirectToken && baiduRedirectToken.length <= 200 && !/[\u0000-\u001f\u007f]/.test(baiduRedirectToken)) {
+      url.searchParams.set("url", baiduRedirectToken);
+    }
     return url.toString().slice(0, MAX_RESULT_URL_LENGTH);
   } catch {
     return null;
   }
 }
 
-function createSafeMcpChildEnv(config: McpSearchClientConfig): NodeJS.ProcessEnv {
+function isMcpToolErrorResult(value: unknown): boolean {
+  return Boolean(value && typeof value === "object" && (value as { isError?: unknown }).isError === true);
+}
+
+function readMcpToolErrorCode(value: unknown): string | null {
+  if (!isMcpToolErrorResult(value)) {
+    return null;
+  }
+
+  const structuredContent = (value as { structuredContent?: unknown }).structuredContent;
+  if (!structuredContent || typeof structuredContent !== "object") {
+    return null;
+  }
+  const error = (structuredContent as { error?: unknown }).error;
+  if (!error || typeof error !== "object") {
+    return null;
+  }
+
+  return (error as { code?: unknown }).code === BAIDU_SEARCH_VERIFICATION_REQUIRED_ERROR
+    ? BAIDU_SEARCH_VERIFICATION_REQUIRED_ERROR
+    : null;
+}
+
+export function createSafeMcpChildEnv(
+  config: McpSearchClientConfig,
+  options: { electronRuntime?: boolean } = {}
+): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
   for (const key of ["SystemRoot", "WINDIR", "COMSPEC", "ComSpec"]) {
     const value = process.env[key];
@@ -492,10 +579,14 @@ function createSafeMcpChildEnv(config: McpSearchClientConfig): NodeJS.ProcessEnv
     env[key] = "";
   }
 
+  if (isBundledBaiduSearchConfig(config) && (options.electronRuntime ?? Boolean(process.versions.electron))) {
+    env.ELECTRON_RUN_AS_NODE = "1";
+  }
+
   if (isOpenWebSearchMcpConfig(config)) {
     env.MODE = "stdio";
-    env.DEFAULT_SEARCH_ENGINE = "sogou";
-    env.ALLOWED_SEARCH_ENGINES = "sogou,baidu,bing";
+    env.DEFAULT_SEARCH_ENGINE = isPinnedOpenWebSearchBaiduPreset(config) ? "baidu" : "sogou";
+    env.ALLOWED_SEARCH_ENGINES = isPinnedOpenWebSearchBaiduPreset(config) ? "baidu" : "sogou,baidu,bing";
     env.SEARCH_MODE = "auto";
   }
 
@@ -527,11 +618,19 @@ function createSafeMcpChildEnv(config: McpSearchClientConfig): NodeJS.ProcessEnv
   return env;
 }
 
-function createMcpSpawnConfig(config: McpSearchClientConfig): McpSpawnConfig {
+export function createMcpSpawnConfig(config: McpSearchClientConfig): McpSpawnConfig {
+  if (isBundledBaiduSearchConfig(config)) {
+    return {
+      command: process.execPath,
+      args: [join(__dirname, "baidu-search-mcp-server.js")],
+      shell: false
+    };
+  }
+
   if (shouldUseWindowsOpenWebSearchNpxBridge(config)) {
     return {
       command: process.env.ComSpec ?? process.env.COMSPEC ?? "cmd.exe",
-      args: ["/d", "/s", "/c", "npx.cmd -y open-websearch@latest"],
+      args: ["/d", "/s", "/c", `npx.cmd -y ${config.args[1]}`],
       shell: false
     };
   }
@@ -580,6 +679,20 @@ function isGoogleSearchMcpConfig(config: McpSearchClientConfig): boolean {
   return config.args.some(isGoogleSearchPackageArg);
 }
 
+function isBundledBaiduSearchConfig(config: McpSearchClientConfig): boolean {
+  return config.command === BUNDLED_BAIDU_SEARCH_COMMAND && config.args.length === 0;
+}
+
+function isPinnedOpenWebSearchBaiduPreset(config: McpSearchClientConfig): boolean {
+  return config.command === "npx.cmd" &&
+    config.args.length === 2 &&
+    config.args[0] === "-y" &&
+    config.args[1] === "open-websearch@2.1.11" &&
+    config.toolName === "search" &&
+    config.timeoutMs === 60_000 &&
+    config.maxResults === 3;
+}
+
 function isBraveSearchPackageArg(value: string): boolean {
   const normalized = value.trim().toLowerCase();
   return [
@@ -613,7 +726,7 @@ function shouldUseWindowsOpenWebSearchNpxBridge(config: McpSearchClientConfig): 
     basename(config.command).trim().toLowerCase() === "npx.cmd" &&
     config.args.length === 2 &&
     config.args[0] === "-y" &&
-    config.args[1] === "open-websearch@latest";
+    (config.args[1] === "open-websearch@2.1.11" || config.args[1] === "open-websearch@latest");
 }
 
 function shouldUseWindowsGoogleSearchNpxBridge(config: McpSearchClientConfig): boolean {

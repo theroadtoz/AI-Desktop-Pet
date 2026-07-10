@@ -16,6 +16,32 @@ const MIN_TIMEOUT_MS = 1_000;
 const MAX_TIMEOUT_MS = 60_000;
 const MIN_RESULTS = 1;
 const MAX_RESULTS = 5;
+const HISTORICAL_GOOGLE_WEB_SEARCH_PRESET = {
+  command: "npx.cmd",
+  args: ["-y", "@mcp-server/google-search-mcp@latest"],
+  toolName: "search",
+  timeoutMs: 60_000,
+  maxResults: 3
+} as const;
+const HISTORICAL_P2_56_WEB_SEARCH_PRESET = {
+  command: "npx.cmd",
+  args: ["-y", "open-websearch@latest"],
+  toolName: "search",
+  timeoutMs: 60_000,
+  maxResults: 3
+} as const;
+const HISTORICAL_PINNED_OPEN_WEB_SEARCH_PRESET = {
+  command: "npx.cmd",
+  args: ["-y", "open-websearch@2.1.11"],
+  toolName: "search",
+  timeoutMs: 60_000,
+  maxResults: 3
+} as const;
+const HISTORICAL_WEB_SEARCH_PRESETS = [
+  HISTORICAL_GOOGLE_WEB_SEARCH_PRESET,
+  HISTORICAL_P2_56_WEB_SEARCH_PRESET,
+  HISTORICAL_PINNED_OPEN_WEB_SEARCH_PRESET
+] as const;
 
 export type WebSearchSettingsStore = {
   getSettings(): WebSearchSettings;
@@ -68,20 +94,36 @@ function normalizeSettings(value: unknown, hasSettingsFile: boolean): WebSearchS
   const input = value as StoreFile | null;
   const command = normalizeCommand(input?.command);
   const shouldUseDefaultPreset = shouldUseDefaultWebSearchPreset(input, hasSettingsFile, command);
-  const normalizedCommand = shouldUseDefaultPreset ? DEFAULT_WEB_SEARCH_SETTINGS.command : command;
+  const shouldMigrateHistoricalPreset = isHistoricalDefaultPreset(input);
+  const shouldUseBundledPreset = shouldUseDefaultPreset || shouldMigrateHistoricalPreset;
+  const normalizedCommand = shouldUseBundledPreset ? DEFAULT_WEB_SEARCH_SETTINGS.command : command;
 
   return {
-    enabled: shouldUseDefaultPreset ? DEFAULT_WEB_SEARCH_SETTINGS.enabled : input?.enabled === true && normalizedCommand.length > 0,
+    enabled: shouldUseBundledPreset
+      ? DEFAULT_WEB_SEARCH_SETTINGS.enabled
+      : input?.enabled === true && normalizedCommand.length > 0,
     command: normalizedCommand,
-    args: shouldUseDefaultPreset ? [...DEFAULT_WEB_SEARCH_SETTINGS.args] : normalizeArgs(input?.args),
-    toolName: shouldUseDefaultPreset ? DEFAULT_WEB_SEARCH_SETTINGS.toolName : normalizeToolName(input?.toolName),
-    timeoutMs: shouldUseDefaultPreset
+    args: shouldUseBundledPreset ? [...DEFAULT_WEB_SEARCH_SETTINGS.args] : normalizeArgs(input?.args),
+    toolName: shouldUseBundledPreset ? DEFAULT_WEB_SEARCH_SETTINGS.toolName : normalizeToolName(input?.toolName),
+    timeoutMs: shouldUseBundledPreset
       ? DEFAULT_WEB_SEARCH_SETTINGS.timeoutMs
       : normalizeInteger(input?.timeoutMs, DEFAULT_WEB_SEARCH_SETTINGS.timeoutMs, MIN_TIMEOUT_MS, MAX_TIMEOUT_MS),
-    maxResults: shouldUseDefaultPreset
+    maxResults: shouldUseBundledPreset
       ? DEFAULT_WEB_SEARCH_SETTINGS.maxResults
       : normalizeInteger(input?.maxResults, DEFAULT_WEB_SEARCH_SETTINGS.maxResults, MIN_RESULTS, MAX_RESULTS)
   };
+}
+
+function isHistoricalDefaultPreset(input: StoreFile | null): boolean {
+  return Boolean(input && typeof input.enabled === "boolean" && HISTORICAL_WEB_SEARCH_PRESETS.some((preset) =>
+    input.command === preset.command &&
+    Array.isArray(input.args) &&
+    input.args.length === preset.args.length &&
+    input.args.every((arg, index) => arg === preset.args[index]) &&
+    input.toolName === preset.toolName &&
+    input.timeoutMs === preset.timeoutMs &&
+    input.maxResults === preset.maxResults
+  ));
 }
 
 function shouldUseDefaultWebSearchPreset(input: StoreFile | null, hasSettingsFile: boolean, command: string): boolean {

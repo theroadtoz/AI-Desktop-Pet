@@ -7,17 +7,41 @@ import {
   validateMotionPresetPath
 } from "./live2d-motion-asset-audit.mts";
 
-test("motion asset audit reports the current model has only idle motion", () => {
+const YAWN_LOCAL_ONLY_INTAKE = {
+  intakeVersion: 1,
+  preset: {
+    id: "yawn",
+    path: "yawn.motion3.json",
+    assetLicenseStatus: "blocked-missing-license"
+  }
+} as const;
+
+test("motion asset audit reports idle plus a blocked local-only yawn candidate", () => {
   const audit = auditWitchMotionAssets();
 
   assert.equal(audit.auditVersion, 1);
   assert.deepEqual(audit.model3DeclaredMotionGroups, []);
-  assert.deepEqual(audit.physicalMotionFiles, ["model/Scene1.motion3.json"]);
+  assert.deepEqual(audit.physicalMotionFiles, [
+    "model/Scene1.motion3.json",
+    "model/yawn.motion3.json"
+  ]);
   assert.equal(audit.idleMotion.path, "model/Scene1.motion3.json");
   assert.equal(audit.idleMotion.loop, true);
   assert.equal(audit.idleMotion.semanticAllowed, false);
+  assert.equal(YAWN_LOCAL_ONLY_INTAKE.intakeVersion, 1);
+  assert.equal(YAWN_LOCAL_ONLY_INTAKE.preset.path, "yawn.motion3.json");
+  assert.equal(YAWN_LOCAL_ONLY_INTAKE.preset.assetLicenseStatus, "blocked-missing-license");
+  assert.equal(isProductionReadyMotionAssetLicenseStatus(YAWN_LOCAL_ONLY_INTAKE.preset.assetLicenseStatus), false);
   assert.equal(audit.semanticMotionPresetCount, 0);
   assert.deepEqual(audit.semanticMotionPresets, []);
+  assert.equal(
+    audit.semanticMotionPresets.some((preset) => preset.id === YAWN_LOCAL_ONLY_INTAKE.preset.id),
+    false
+  );
+  assert.equal(
+    (PET_MOTION_PRESET_IDS as readonly string[]).includes(YAWN_LOCAL_ONLY_INTAKE.preset.id),
+    false
+  );
   assert.deepEqual(audit.safeSkip, {
     status: "expected-safe-skip",
     reason: "no-semantic-motion-presets"

@@ -1,7 +1,7 @@
 import type { ChatProvider, ChatProviderMessage, ChatProviderResult, ChatRequest } from "../../../shared/chat-provider";
 import type { ProviderId } from "../../../shared/provider-config";
-import { DEFAULT_PERSONA_CARD } from "../../../shared/persona-card";
-import { asksGenericAiIdentityQuestion } from "../../../shared/persona-self-identity";
+import { DEFAULT_PERSONA_CARD, getPersonaDialogueAnchor } from "../../../shared/persona-card";
+import { BAIDU_SEARCH_VERIFICATION_REQUIRED_ERROR, type WebSearchErrorType } from "../../../shared/web-search";
 import type { TelemetryPayload } from "../telemetry";
 import {
   mapChatMessagesToOpenAICompatible,
@@ -240,6 +240,7 @@ function getPromptTemplateProfile(providerId: Extract<ProviderId, "openai-compat
 type LocalExactReply = {
   kind:
     | "identity"
+    | "technical_identity"
     | "current_time"
     | "current_date"
     | "simple_addition"
@@ -283,10 +284,17 @@ function createLocalExactReply(request: ChatRequest, latestUserMessage: string):
     };
   }
 
-  if (asksIdentity(normalizedMessage)) {
+  if (asksTechnicalImplementationIdentity(normalizedMessage)) {
+    return {
+      kind: "technical_identity",
+      text: `${createPersonaIdentityReply()}对话由本地模型驱动；这是技术实现，不构成${DEFAULT_PERSONA_CARD.name}的身份。`
+    };
+  }
+
+  if (asksPersonaIdentity(normalizedMessage)) {
     return {
       kind: "identity",
-      text: `我是${DEFAULT_PERSONA_CARD.name}，魔法学院高年级的现代魔导工程进修魔女；现在以 Windows Live2D 桌面魔女同伴的样子待在你的桌面边缘。对话由本地模型驱动，但我在这里的身份是陪你整理事情、回答问题的西塔。`
+      text: createPersonaIdentityReply()
     };
   }
 
@@ -333,16 +341,44 @@ function createLocalExactReply(request: ChatRequest, latestUserMessage: string):
   if (requiresWebSearchWithoutEvidence(request, latestUserMessage)) {
     return {
       kind: "search_required_boundary",
-      text: "本地模型离线运行，今天新闻或最新实时外部事实需要联网查证；我这轮没有拿到 MCP 搜索结果，不能可靠回答具体事实。请先在设置里启用并测试 MCP 搜索，我会只发送净化后的公开查询词。"
+      text: createSearchRequiredBoundaryReply(request.webSearchErrorType)
     };
   }
 
   return null;
 }
 
-function asksIdentity(message: string): boolean {
-  return /你是谁|你的身份|你的人设|你的人格|你是什么|介绍自己/i.test(message) ||
-    asksGenericAiIdentityQuestion(message);
+function createPersonaIdentityReply(): string {
+  const anchor = getPersonaDialogueAnchor(DEFAULT_PERSONA_CARD);
+  return `我是${DEFAULT_PERSONA_CARD.name}，${anchor.identity[0]}。当前社会身份是${anchor.identity[1]}；现在作为${anchor.identity[2]}待在你的桌面边缘，陪你聊天、整理事情和回答问题。`;
+}
+
+const TECHNICAL_IDENTITY_TERM = String.raw`(?:AI助手|人工智能助手|语言模型|聊天机器人|ChatGPT|OpenAI|通用助手|AI|人工智能)`;
+const TECHNICAL_IDENTITY_SEPARATOR = String.raw`(?:[、，,]?还是|[、，,])`;
+const PURE_TECHNICAL_IDENTITY_CANDIDATE = new RegExp(
+  String.raw`^你(?:到底)?(?:是|是不是|是否是|算不算|属于)(?:一个|一名)?${TECHNICAL_IDENTITY_TERM}(?:${TECHNICAL_IDENTITY_SEPARATOR}${TECHNICAL_IDENTITY_TERM})*(?:[、，,]?还是西塔)?(?:吗|么)?[？?]?(?:请(?:直接|用一句话)回答)?[。！!]?$`,
+  "iu"
+);
+
+function asksTechnicalImplementationIdentity(message: string): boolean {
+  if (!PURE_TECHNICAL_IDENTITY_CANDIDATE.test(message)) {
+    return false;
+  }
+
+  return /^你(?:到底)?(?:是不是|是否是|算不算)/.test(message) ||
+    /还是/.test(message) ||
+    /(?:吗|么|[？?])(?:请(?:直接|用一句话)回答)?[。！!]?$/.test(message);
+}
+
+const PERSONA_IDENTITY_QUESTION = String.raw`(?:你是谁|你的(?:身份|人设|人格)是什么|(?:请)?介绍自己)`;
+const PERSONA_IDENTITY_OUTPUT_SUFFIX = String.raw`(?:请直接回答|(?:请)?用一句话回答|(?:请)?用一句话说明你在这个桌面应用里的身份)`;
+const PURE_PERSONA_IDENTITY_QUESTION = new RegExp(
+  String.raw`^(?:请问[，,]?)?${PERSONA_IDENTITY_QUESTION}(?:[？?。！!，,]?${PERSONA_IDENTITY_OUTPUT_SUFFIX})?[？?。！!]?$`,
+  "u"
+);
+
+function asksPersonaIdentity(message: string): boolean {
+  return PURE_PERSONA_IDENTITY_QUESTION.test(message);
 }
 
 function asksCurrentTime(message: string): boolean {
@@ -367,6 +403,18 @@ function requiresWebSearchWithoutEvidence(request: ChatRequest, latestUserMessag
   }
 
   return classifySearchQuery(latestUserMessage).shouldSearch;
+}
+
+function createSearchRequiredBoundaryReply(errorType?: WebSearchErrorType): string {
+  if (errorType === BAIDU_SEARCH_VERIFICATION_REQUIRED_ERROR) {
+    return "百度网页兼容适配器被验证页阻断，本轮无法自动核验最新外部事实；我不能可靠回答具体事实。正式自动检索需要用户授权的官方 MCP/API 配置。";
+  }
+
+  if (errorType === "mcp_search_tool_failed") {
+    return "联网搜索工具本轮失败，本轮无法完成联网核验；我不能可靠回答具体事实。";
+  }
+
+  return "本地模型离线运行，今天新闻或最新实时外部事实需要联网查证；我这轮没有拿到 MCP 搜索结果，不能可靠回答具体事实。请先在设置里启用并测试 MCP 搜索，我会只发送净化后的公开查询词。";
 }
 
 function asksToStoreSensitiveData(message: string): boolean {

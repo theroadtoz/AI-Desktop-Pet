@@ -22,8 +22,8 @@ export type PromptTemplateProfile = "cloud-chat" | "local-small-model";
 
 const SYSTEM_PROMPT = "你是一个低打扰的桌面伙伴。回复要自然、简短，优先使用中文。不要输出 JSON。";
 const LOCAL_SMALL_MODEL_SYSTEM_PROMPT = [
-  "魔法学院高年级进修魔女/现代魔导工程进修生/Windows Live2D 桌面魔女同伴；Provider/本地模型/Live2D/记忆/窗口不魔法化",
-  "对话与思考由本地模型完成；第一身份=西塔，不自称 AI 助手/人工智能助手/语言模型/聊天机器人。MCP 搜索不是对话模型；离线不编实时。",
+  "回复自然、简短，优先中文；不要输出 JSON。",
+  "技术专名准确；离线时不编造实时事实。",
   "API key/密钥/私有标识不存不记不复述不索要"
 ].join("\n");
 
@@ -44,6 +44,7 @@ export function mapChatMessagesToOpenAICompatible(
   const memoryMessage = createMemoryMessage(memoryContext);
   const webSearchMessage = createWebSearchMessage(webSearchContext);
   const sensitiveDataBoundaryMessage = createSensitiveDataBoundaryMessage(messages);
+  const localTurnHintMessage = createLocalTurnHintMessage(messages, promptTemplateProfile);
 
   return [
     systemMessage,
@@ -54,11 +55,43 @@ export function mapChatMessagesToOpenAICompatible(
     ...(memoryMessage ? [memoryMessage] : []),
     ...(webSearchMessage ? [webSearchMessage] : []),
     ...(sensitiveDataBoundaryMessage ? [sensitiveDataBoundaryMessage] : []),
+    ...(localTurnHintMessage ? [localTurnHintMessage] : []),
     ...messages.map((message) => ({
       role: message.role,
       content: message.content
     }))
   ];
+}
+
+function createLocalTurnHintMessage(
+  messages: readonly ChatProviderMessage[],
+  profile: PromptTemplateProfile
+): OpenAICompatibleMessage | null {
+  if (profile !== "local-small-model") {
+    return null;
+  }
+
+  const latestUserMessage = getLatestUserMessage(messages);
+  const hints: string[] = [];
+
+  if (asksAboutRecentAcademyLife(latestUserMessage)) {
+    hints.push("学院近况说2-3项不同活动，各含动作/进度；动作可用准备/整理/调试/写/修改；不照抄提问");
+  }
+
+  if (asksAboutProviderAndMcp(latestUserMessage)) {
+    hints.push("Provider+MCP逐项区分：Provider负责模型访问/推理；MCP客户端经服务端调用工具/资源并接收结果");
+  }
+
+  if (asksAboutIdentityAndMcp(latestUserMessage)) {
+    hints.push("身份+MCP两问都答：身份按人格锚；MCP=Model Context Protocol，客户端(client)调用服务端(server)的工具(tool)/资源，结果(response)返回客户端");
+  }
+
+  return hints.length > 0
+    ? {
+        role: "system",
+        content: `本轮提示：${hints.join("；")}`
+      }
+    : null;
 }
 
 function createWebSearchMessage(context?: WebSearchContext): OpenAICompatibleMessage | null {
@@ -198,4 +231,35 @@ function containsPrivateMarker(text: string): boolean {
   }
 
   return /(?:sk-[A-Za-z0-9_-]{8,}|Bearer\s+\S+|[A-Z0-9-]{2,}_[A-Z0-9_-]*SENTINEL[A-Z0-9_-]*|PRIVATE[_-]?[A-Z0-9_-]*|SECRET[_-]?[A-Z0-9_-]*|TOKEN[_-]?[A-Z0-9_-]*)/u.test(text);
+}
+
+function asksAboutRecentAcademyLife(text: string): boolean {
+  if (!/学院/.test(text) ||
+    !/(最近|近期|近来|近况|这阵子|这段时间|目前|现在|忙些|忙什么|在忙什么|怎么样|如何)/.test(text) ||
+    !isQuestion(text)) {
+    return false;
+  }
+
+  return /(课程|实验|报告|课题|作业)/.test(text) ||
+    /学院(?:里|那边)?.{0,10}(?:忙|近况|怎么样|如何)/.test(text);
+}
+
+function asksAboutProviderAndMcp(text: string): boolean {
+  return /provider/i.test(text) &&
+    /mcp/i.test(text) &&
+    /(分别|各自|区别|区分|混在一起)/.test(text) &&
+    isQuestion(text);
+}
+
+function asksAboutIdentityAndMcp(text: string): boolean {
+  if (!/mcp/i.test(text)) {
+    return false;
+  }
+
+  return /(?:你|西塔).{0,6}(?:是谁|什么身份|什么角色)/.test(text) ||
+    /(?:你|西塔).{0,6}(?:是不是|是否是|算不算|属于|是).{0,10}(?:AI|人工智能|语言模型|聊天机器人)(?:吗|么|？|\?|$)/i.test(text);
+}
+
+function isQuestion(text: string): boolean {
+  return /[？?]|什么|如何|怎么|怎样|是否|是不是|区别|负责|解释|介绍|讲讲/.test(text);
 }

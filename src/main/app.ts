@@ -71,7 +71,14 @@ import {
 import type { LocalOpenAICompatibleConfig, ProviderConfig, ProviderStatus } from "../shared/provider-config";
 import type { ProviderHealthCheckRequest } from "../shared/provider-health";
 import type { LlamaCppRuntimeSettingsUpdate } from "../shared/llama-cpp-runtime";
-import type { WebSearchCitationPayload, WebSearchContext, WebSearchReasonCode } from "../shared/web-search";
+import {
+  BAIDU_SEARCH_VERIFICATION_REQUIRED_ERROR,
+  getWebSearchFailurePrompt,
+  type WebSearchCitationPayload,
+  type WebSearchContext,
+  type WebSearchErrorType,
+  type WebSearchReasonCode
+} from "../shared/web-search";
 import {
   parseLocalModelDiagnosticSafeSummary,
   type LocalModelDiagnosticSafeSummary
@@ -2335,7 +2342,7 @@ app.whenReady().then(async () => {
     status: "allowed" | "blocked" | "redacted" | "failed";
     reasonCodes: WebSearchReasonCode[];
     resultCount: number;
-    errorType?: string;
+    errorType?: WebSearchErrorType;
   };
 
   async function resolveWebSearchForLatestMessage(latestUserMessage: string): Promise<WebSearchResolution> {
@@ -2416,10 +2423,9 @@ app.whenReady().then(async () => {
     }
   }
 
-  function getWebSearchErrorType(error: unknown): string {
+  function getWebSearchErrorType(error: unknown): WebSearchErrorType {
     const name = error instanceof Error ? error.name : "mcp_search_failed";
-
-    return [
+    const supportedErrorTypes: readonly WebSearchErrorType[] = [
       "mcp_search_not_configured",
       "mcp_search_spawn_failed",
       "mcp_search_closed",
@@ -2427,10 +2433,13 @@ app.whenReady().then(async () => {
       "mcp_search_not_started",
       "mcp_search_timeout",
       "mcp_search_write_failed",
+      BAIDU_SEARCH_VERIFICATION_REQUIRED_ERROR,
       "mcp_search_tool_failed",
       "mcp_search_tool_missing"
-    ].includes(name)
-      ? name
+    ];
+
+    return supportedErrorTypes.includes(name as WebSearchErrorType)
+      ? name as WebSearchErrorType
       : "mcp_search_failed";
   }
 
@@ -2869,16 +2878,23 @@ app.whenReady().then(async () => {
         ...(webSearchResolution.errorType ? { webSearchErrorType: webSearchResolution.errorType } : {})
       });
 
+      const webSearchFailurePrompt = getWebSearchFailurePrompt(webSearchResolution.errorType);
       const providerRequest: ChatRequest = {
         requestVersion: request.requestVersion,
         conversationId: request.conversationId,
         messages: request.messages,
-        providerMessages: contextBudget.providerMessages,
+        providerMessages: [
+          ...contextBudget.providerMessages,
+          ...(webSearchFailurePrompt
+            ? [{ role: "system" as const, content: webSearchFailurePrompt }]
+            : [])
+        ],
         contextBudget: contextBudget.summary,
         memoryContext,
         dialogueStyleContext,
         runtimeContext,
         ...(webSearchResolution.context ? { webSearchContext: webSearchResolution.context } : {}),
+        ...(webSearchResolution.errorType ? { webSearchErrorType: webSearchResolution.errorType } : {}),
         ...(userProfileContext ? { userProfileContext } : {})
       };
 

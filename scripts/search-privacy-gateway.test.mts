@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -15,7 +15,11 @@ const {
 } = require("../dist/main/services/config/web-search-settings-store.js") as typeof import("../src/main/services/config/web-search-settings-store");
 const {
   callMcpSearchTool,
-  parseMcpToolResults
+  createMcpSearchToolArguments,
+  createMcpSpawnConfig,
+  createSafeMcpChildEnv,
+  parseMcpToolResults,
+  testMcpSearchConnection
 } = require("../dist/main/services/search/mcp-search-client.js") as typeof import("../src/main/services/search/mcp-search-client");
 const {
   classifySearchQuery
@@ -28,6 +32,10 @@ const {
   createWebSearchContext,
   formatWebSearchContextForPrompt
 } = require("../dist/main/services/search/web-search-provider.js") as typeof import("../src/main/services/search/web-search-provider");
+const {
+  BAIDU_SEARCH_VERIFICATION_REQUIRED_ERROR,
+  getWebSearchFailurePrompt
+} = require("../dist/shared/web-search.js") as typeof import("../src/shared/web-search");
 
 test("search classifier only triggers for explicit search or freshness-sensitive questions", () => {
   assert.deepEqual(classifySearchQuery("请联网搜索 Live2D 动作实现方式").reasonCodes, ["explicit_search_request"]);
@@ -288,6 +296,238 @@ test("Google MCP child receives isolated runtime env without private user paths 
   assert.doesNotMatch(record, /p2-google-search-secret-should-not-leak|PrivateUser|C:\\Users|Roaming/);
 });
 
+test("custom open-websearch MCP child keeps the existing Sogou env policy", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "p2-custom-open-websearch-env-"));
+  const serverPath = join(dir, "env-probe-mcp-search-server.mjs");
+  const recordPath = join(dir, "env-probe.jsonl");
+  writeFileSync(serverPath, createEnvProbeMcpServerSource(), "utf8");
+
+  const previous = {
+    BRAVE_API_KEY: process.env.BRAVE_API_KEY,
+    USERPROFILE: process.env.USERPROFILE,
+    APPDATA: process.env.APPDATA,
+    LOCALAPPDATA: process.env.LOCALAPPDATA,
+    HOME: process.env.HOME
+  };
+  process.env.BRAVE_API_KEY = "p2-baidu-search-secret-should-not-leak";
+  process.env.USERPROFILE = "C:\\Users\\PrivateUser";
+  process.env.APPDATA = "C:\\Users\\PrivateUser\\AppData\\Roaming";
+  process.env.LOCALAPPDATA = "C:\\Users\\PrivateUser\\AppData\\Local";
+  process.env.HOME = "C:\\Users\\PrivateUser";
+
+  try {
+    const results = await callMcpSearchTool({
+      command: process.execPath,
+      args: [serverPath, recordPath, "open-websearch@2.1.11"],
+      toolName: "search",
+      timeoutMs: 5_000,
+      maxResults: 1
+    }, {
+      query: "custom open-websearch env probe",
+      maxResults: 1
+    });
+
+    assert.equal(results.length, 1);
+  } finally {
+    restoreEnv("BRAVE_API_KEY", previous.BRAVE_API_KEY);
+    restoreEnv("USERPROFILE", previous.USERPROFILE);
+    restoreEnv("APPDATA", previous.APPDATA);
+    restoreEnv("LOCALAPPDATA", previous.LOCALAPPDATA);
+    restoreEnv("HOME", previous.HOME);
+  }
+
+  const record = readFileSync(recordPath, "utf8");
+  assert.match(record, /"mode":"stdio"/);
+  assert.match(record, /"defaultSearchEngine":"sogou"/);
+  assert.match(record, /"allowedSearchEngines":"sogou,baidu,bing"/);
+  assert.match(record, /"searchMode":"auto"/);
+  assert.match(record, /"braveApiKeyPresent":false/);
+  assert.match(record, /"tempPresent":true/);
+  assert.match(record, /"tmpPresent":true/);
+  assert.match(record, /"userProfilePresent":true/);
+  assert.match(record, /"appDataPresent":true/);
+  assert.match(record, /"localAppDataPresent":true/);
+  assert.match(record, /"homePresent":true/);
+  assert.match(record, /"npmConfigCachePresent":true/);
+  assert.match(record, /"usesManagedOpenWebSearchRuntime":true/);
+  assert.match(record, /"usesPersonalPath":false/);
+  assert.doesNotMatch(record, /p2-baidu-search-secret-should-not-leak|PrivateUser|C:\\Users|Roaming/);
+});
+
+test("bundled Baidu sentinel resolves to the sibling server with an isolated Electron env", async () => {
+  const config = {
+    command: "bundled-baidu-search",
+    args: [],
+    toolName: "search",
+    timeoutMs: 60_000,
+    maxResults: 3
+  };
+  const spawnConfig = createMcpSpawnConfig(config);
+  assert.deepEqual(spawnConfig, {
+    command: process.execPath,
+    args: [join(process.cwd(), "dist", "main", "services", "search", "baidu-search-mcp-server.js")],
+    shell: false
+  });
+  assert.deepEqual(createMcpSearchToolArguments(config, { query: "bounded query", maxResults: 5 }), {
+    query: "bounded query",
+    limit: 3
+  });
+  assert.deepEqual(await testMcpSearchConnection({ enabled: true, ...config }), {
+    commandConfigured: true,
+    enabled: true,
+    toolName: "search",
+    toolFound: true,
+    toolCount: 1,
+    commandName: "bundled-baidu-search",
+    status: "tool_available"
+  });
+
+  const previous = {
+    BAIDU_API_KEY: process.env.BAIDU_API_KEY,
+    BRAVE_API_KEY: process.env.BRAVE_API_KEY,
+    USERPROFILE: process.env.USERPROFILE,
+    APPDATA: process.env.APPDATA,
+    LOCALAPPDATA: process.env.LOCALAPPDATA,
+    HOME: process.env.HOME
+  };
+  process.env.BAIDU_API_KEY = "baidu-secret-must-not-leak";
+  process.env.BRAVE_API_KEY = "brave-secret-must-not-leak";
+  process.env.USERPROFILE = "C:\\Users\\PrivateUser";
+  process.env.APPDATA = "C:\\Users\\PrivateUser\\AppData\\Roaming";
+  process.env.LOCALAPPDATA = "C:\\Users\\PrivateUser\\AppData\\Local";
+  process.env.HOME = "C:\\Users\\PrivateUser";
+
+  try {
+    assert.equal(createSafeMcpChildEnv(config).ELECTRON_RUN_AS_NODE, undefined);
+    const env = createSafeMcpChildEnv(config, { electronRuntime: true });
+    assert.equal(env.ELECTRON_RUN_AS_NODE, "1");
+    assert.equal(env.USERPROFILE, "");
+    assert.equal(env.APPDATA, "");
+    assert.equal(env.LOCALAPPDATA, "");
+    assert.equal(env.HOME, "");
+    assert.equal(env.BAIDU_API_KEY, undefined);
+    assert.equal(env.BRAVE_API_KEY, undefined);
+    assert.equal(env.NPM_CONFIG_CACHE, undefined);
+    assert.doesNotMatch(JSON.stringify(env), /baidu-secret|brave-secret|PrivateUser|C:\\Users|Roaming/);
+  } finally {
+    restoreEnv("BAIDU_API_KEY", previous.BAIDU_API_KEY);
+    restoreEnv("BRAVE_API_KEY", previous.BRAVE_API_KEY);
+    restoreEnv("USERPROFILE", previous.USERPROFILE);
+    restoreEnv("APPDATA", previous.APPDATA);
+    restoreEnv("LOCALAPPDATA", previous.LOCALAPPDATA);
+    restoreEnv("HOME", previous.HOME);
+  }
+
+  assert.deepEqual(createMcpSpawnConfig({ ...config, args: ["custom"] }), {
+    command: "bundled-baidu-search",
+    args: ["custom"],
+    shell: false
+  });
+  assert.deepEqual(createMcpSpawnConfig({ ...config, command: "bundled-baidu-search " }), {
+    command: "bundled-baidu-search ",
+    args: [],
+    shell: false
+  });
+});
+
+test("Windows npx bridge starts fixed Baidu, legacy latest, and Google presets", {
+  skip: process.platform !== "win32"
+}, async () => {
+  const tempRoot = join(process.cwd(), ".tmp");
+  mkdirSync(tempRoot, { recursive: true });
+  const dir = mkdtempSync(join(tempRoot, "p2-61-npx-bridge-"));
+  const serverPath = join(dir, "bridge-probe-mcp-search-server.mjs");
+  const recordPath = join(dir, "bridge-calls.jsonl");
+  const npxPath = join(dir, "npx.cmd");
+  writeFileSync(serverPath, createNpxBridgeProbeMcpServerSource(), "utf8");
+  writeFileSync(
+    npxPath,
+    `@"${process.execPath}" "${serverPath}" "${recordPath}" %*\r\n`,
+    "utf8"
+  );
+
+  const previousPath = process.env.Path;
+  const previousUpperPath = process.env.PATH;
+  let records: Array<{
+    packageArgs: string[];
+    arguments: Record<string, unknown>;
+    defaultSearchEngine: string;
+    allowedSearchEngines: string;
+  }> = [];
+  process.env.Path = dir;
+  process.env.PATH = dir;
+
+  try {
+    const bridgeCases = [
+      {
+        packageName: "open-websearch@2.1.11",
+        timeoutMs: 60_000,
+        maxResults: 3,
+        requestMaxResults: 2
+      },
+      {
+        packageName: "open-websearch@latest",
+        timeoutMs: 5_000,
+        maxResults: 1,
+        requestMaxResults: 1
+      },
+      {
+        packageName: "@mcp-server/google-search-mcp@latest",
+        timeoutMs: 5_000,
+        maxResults: 1,
+        requestMaxResults: 1
+      }
+    ] as const;
+
+    for (const bridgeCase of bridgeCases) {
+      const results = await callMcpSearchTool({
+        command: "npx.cmd",
+        args: ["-y", bridgeCase.packageName],
+        toolName: "search",
+        timeoutMs: bridgeCase.timeoutMs,
+        maxResults: bridgeCase.maxResults
+      }, {
+        query: `bridge probe ${bridgeCase.packageName}`,
+        maxResults: bridgeCase.requestMaxResults
+      });
+
+      assert.equal(results.length, 1);
+    }
+    records = readFileSync(recordPath, "utf8")
+      .trim()
+      .split(/\r?\n/)
+      .map((line) => JSON.parse(line) as typeof records[number]);
+  } finally {
+    restoreEnv("Path", previousPath);
+    restoreEnv("PATH", previousUpperPath);
+    rmSync(dir, { recursive: true, force: true });
+  }
+
+  assert.equal(records.length, 3);
+  assert.deepEqual(records[0], {
+    packageArgs: ["-y", "open-websearch@2.1.11"],
+    arguments: {
+      query: "bridge probe open-websearch@2.1.11",
+      maxResults: 2,
+      limit: 2,
+      engines: ["baidu"]
+    },
+    defaultSearchEngine: "baidu",
+    allowedSearchEngines: "baidu"
+  });
+  assert.deepEqual(records[1], {
+    packageArgs: ["-y", "open-websearch@latest"],
+    arguments: {
+      query: "bridge probe open-websearch@latest",
+      maxResults: 1,
+      limit: 1
+    },
+    defaultSearchEngine: "sogou",
+    allowedSearchEngines: "sogou,baidu,bing"
+  });
+  assert.equal(records[2]?.packageArgs[1], "@mcp-server/google-search-mcp@latest");
+});
+
 test("Google MCP search calls use google.com region and bounded arguments", async () => {
   const dir = mkdtempSync(join(tmpdir(), "p2-google-search-call-"));
   const serverPath = join(dir, "fake-mcp-search-server.mjs");
@@ -365,11 +605,11 @@ test("web search prompt context is temporary model context, not history or memor
   assert.equal(contents.some((content) => content.includes("事实卡")), false);
 });
 
-test("web search settings default to the Google MCP preset", () => {
+test("web search settings default to the bundled Baidu compatibility preset disabled", () => {
   assert.deepEqual(normalizeWebSearchSettings({}), {
-    enabled: true,
-    command: "npx.cmd",
-    args: ["-y", "@mcp-server/google-search-mcp@latest"],
+    enabled: false,
+    command: "bundled-baidu-search",
+    args: [],
     toolName: "search",
     timeoutMs: 60_000,
     maxResults: 3
@@ -395,9 +635,9 @@ test("web search settings store defaults on first run but preserves explicit use
   const userDataPath = mkdtempSync(join(tmpdir(), "p2-web-search-store-"));
   const store = createWebSearchSettingsStore({ userDataPath });
   assert.deepEqual(store.getSettings(), {
-    enabled: true,
-    command: "npx.cmd",
-    args: ["-y", "@mcp-server/google-search-mcp@latest"],
+    enabled: false,
+    command: "bundled-baidu-search",
+    args: [],
     toolName: "search",
     timeoutMs: 60_000,
     maxResults: 3
@@ -405,8 +645,8 @@ test("web search settings store defaults on first run but preserves explicit use
 
   store.saveSettings({
     enabled: false,
-    command: "npx.cmd",
-    args: ["-y", "@mcp-server/google-search-mcp@latest"],
+    command: "bundled-baidu-search",
+    args: [],
     toolName: "search",
     timeoutMs: 60_000,
     maxResults: 3
@@ -414,10 +654,10 @@ test("web search settings store defaults on first run but preserves explicit use
 
   const reloaded = createWebSearchSettingsStore({ userDataPath });
   assert.equal(reloaded.getSettings().enabled, false);
-  assert.equal(reloaded.getSettings().command, "npx.cmd");
+  assert.equal(reloaded.getSettings().command, "bundled-baidu-search");
 });
 
-test("web search settings store migrates empty legacy config without replacing custom commands", () => {
+test("web search settings store migrates empty legacy config disabled without replacing custom commands", () => {
   const userDataPath = mkdtempSync(join(tmpdir(), "p2-web-search-migrate-"));
   const configDir = join(userDataPath, "config");
   mkdirSync(configDir, { recursive: true });
@@ -431,9 +671,9 @@ test("web search settings store migrates empty legacy config without replacing c
   }), "utf8");
 
   assert.deepEqual(createWebSearchSettingsStore({ userDataPath }).getSettings(), {
-    enabled: true,
-    command: "npx.cmd",
-    args: ["-y", "@mcp-server/google-search-mcp@latest"],
+    enabled: false,
+    command: "bundled-baidu-search",
+    args: [],
     toolName: "search",
     timeoutMs: 60_000,
     maxResults: 3
@@ -461,7 +701,91 @@ test("web search settings store migrates empty legacy config without replacing c
   });
 });
 
-test("MCP result normalization supports structuredContent, JSON text, common fields, and display-safe URLs", () => {
+test("web search settings migrate only exact historical defaults and never carry legacy enabled state", () => {
+  const historicalDefaults = [
+    {
+      name: "Google",
+      preset: {
+        command: "npx.cmd",
+        args: ["-y", "@mcp-server/google-search-mcp@latest"],
+        toolName: "search",
+        timeoutMs: 60_000,
+        maxResults: 3
+      }
+    },
+    {
+      name: "P2-56 open-websearch latest",
+      preset: {
+        command: "npx.cmd",
+        args: ["-y", "open-websearch@latest"],
+        toolName: "search",
+        timeoutMs: 60_000,
+        maxResults: 3
+      }
+    },
+    {
+      name: "pinned open-websearch 2.1.11",
+      preset: {
+        command: "npx.cmd",
+        args: ["-y", "open-websearch@2.1.11"],
+        toolName: "search",
+        timeoutMs: 60_000,
+        maxResults: 3
+      }
+    }
+  ] as const;
+  const bundledBaiduDefault = {
+    command: "bundled-baidu-search",
+    args: [],
+    toolName: "search",
+    timeoutMs: 60_000,
+    maxResults: 3
+  };
+  for (const historicalDefault of historicalDefaults) {
+    const normalizeHistoricalDefault = (overrides: Record<string, unknown>) => normalizeWebSearchSettings({
+      ...historicalDefault.preset,
+      ...overrides
+    });
+
+    for (const legacyEnabled of [true, false]) {
+      assert.deepEqual(normalizeHistoricalDefault({ enabled: legacyEnabled }), {
+        enabled: false,
+        ...bundledBaiduDefault
+      }, `${historicalDefault.name} must migrate legacy enabled=${legacyEnabled} to disabled`);
+    }
+
+    const customVariants = [
+      ["command", { command: "npx" }],
+      ["args", { args: ["-y", `${historicalDefault.preset.args[1]}-custom`] }],
+      ["toolName", { toolName: "web_search" }],
+      ["timeoutMs", { timeoutMs: 59_999 }],
+      ["maxResults", { maxResults: 2 }]
+    ] as const;
+
+    for (const [field, override] of customVariants) {
+      const customSettings = {
+        enabled: true,
+        ...historicalDefault.preset,
+        ...override
+      };
+      assert.deepEqual(
+        normalizeWebSearchSettings(customSettings),
+        customSettings,
+        `${historicalDefault.name} ${field} variant must not migrate`
+      );
+    }
+  }
+
+  assert.deepEqual(normalizeWebSearchSettings({
+    enabled: true,
+    ...bundledBaiduDefault
+  }), {
+    enabled: true,
+    ...bundledBaiduDefault
+  }, "an explicitly saved bundled adapter configuration remains enabled");
+});
+
+test("main MCP client sanitizes bundled-server structuredContent and compatible JSON text results", () => {
   const results = parseMcpToolResults({
     structuredContent: {
       results: [{
@@ -506,6 +830,93 @@ test("MCP result normalization supports structuredContent, JSON text, common fie
   assert.equal(results[2]?.snippet, "Nested data result description");
   assert.equal(results[2]?.url, "https://example.cn/path");
   assert.equal(results.some((result) => /token=|#|q=private/.test(result.url ?? "")), false);
+});
+
+test("main MCP client deduplicates bundled server results mirrored in structured and text content", () => {
+  const mirroredResult = {
+    title: "Bundled Baidu result",
+    snippet: "Public result summary",
+    url: "https://example.test/article?private=tracking#fragment",
+    date: "2026-07-10"
+  };
+  const results = parseMcpToolResults({
+    structuredContent: { results: [mirroredResult] },
+    content: [{ type: "text", text: JSON.stringify({ results: [mirroredResult] }) }]
+  }, 5);
+
+  assert.deepEqual(results, [{
+    title: "Bundled Baidu result",
+    snippet: "Public result summary",
+    url: "https://example.test/article",
+    date: "2026-07-10"
+  }]);
+});
+
+test("generic MCP results without snippets remain rejected", () => {
+  assert.deepEqual(parseMcpToolResults({
+    structuredContent: {
+      results: [{ title: "Title only", url: "https://example.test/title-only" }]
+    }
+  }, 3), []);
+});
+
+test("MCP tool error content is never normalized into a search result", () => {
+  assert.deepEqual(parseMcpToolResults({
+    isError: true,
+    content: [{ type: "text", text: "Baidu search failed" }]
+  }, 3, {
+    trustedBaiduRedirects: true,
+    allowTitleSnippetFallback: true
+  }), []);
+});
+
+test("MCP client preserves the safe Baidu verification code without leaking tool error content", async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "baidu-verification-mcp-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const serverPath = join(dir, "verification-mcp-server.mjs");
+  writeFileSync(serverPath, createVerificationBlockedMcpServerSource(), "utf8");
+
+  await assert.rejects(
+    callMcpSearchTool({
+      command: process.execPath,
+      args: [serverPath],
+      toolName: "search",
+      timeoutMs: 5_000,
+      maxResults: 1
+    }, {
+      query: "private query must not escape",
+      maxResults: 1
+    }),
+    (error: unknown) => error instanceof Error &&
+      error.name === BAIDU_SEARCH_VERIFICATION_REQUIRED_ERROR &&
+      error.message === BAIDU_SEARCH_VERIFICATION_REQUIRED_ERROR &&
+      !/private|wappass|html|https?:\/\//i.test(error.message)
+  );
+});
+
+test("web search failure prompts distinguish verification blocking from ordinary tool failure", () => {
+  const verificationPrompt = getWebSearchFailurePrompt(BAIDU_SEARCH_VERIFICATION_REQUIRED_ERROR);
+  const ordinaryFailurePrompt = getWebSearchFailurePrompt("mcp_search_tool_failed");
+
+  assert.match(verificationPrompt ?? "", /百度网页兼容适配器.*验证页阻断/);
+  assert.match(verificationPrompt ?? "", /用户授权的官方 MCP\/API 配置/);
+  assert.doesNotMatch(verificationPrompt ?? "", /query|url|html|wappass|用户正文/i);
+  assert.match(ordinaryFailurePrompt ?? "", /联网搜索工具本轮失败/);
+  assert.doesNotMatch(ordinaryFailurePrompt ?? "", /验证页阻断/);
+  assert.equal(getWebSearchFailurePrompt("unknown_error"), null);
+});
+
+test("app and settings UI wire the safe verification prompt and disabled compatibility copy", () => {
+  const appSource = readFileSync(join(process.cwd(), "src", "main", "app.ts"), "utf8");
+  const preloadSource = readFileSync(join(process.cwd(), "src", "preload", "chat-preload.ts"), "utf8");
+  const settingsHtml = readFileSync(join(process.cwd(), "src", "renderer", "chat", "index.html"), "utf8");
+
+  assert.match(appSource, /BAIDU_SEARCH_VERIFICATION_REQUIRED_ERROR/);
+  assert.match(appSource, /getWebSearchFailurePrompt\(webSearchResolution\.errorType\)/);
+  assert.match(appSource, /webSearchErrorType:\s*webSearchResolution\.errorType/);
+  assert.match(appSource, /providerMessages:\s*\[\s*\.\.\.contextBudget\.providerMessages/);
+  assert.match(preloadSource, /DEFAULT_WEB_SEARCH_SETTINGS[\s\S]*?enabled:\s*false,[\s\S]*?bundled-baidu-search/);
+  assert.match(settingsHtml, /class="selection-note"[^>]*>百度网页兼容适配器，默认关闭；正式自动检索需用户授权的官方 MCP\/API 配置。/);
 });
 
 test("MCP result normalization keeps empty JSON result arrays empty", () => {
@@ -584,6 +995,40 @@ function respond(id, result) {
 `;
 }
 
+function createVerificationBlockedMcpServerSource(): string {
+  return `
+import { createInterface } from "node:readline";
+
+const lineReader = createInterface({ input: process.stdin });
+lineReader.on("line", (line) => {
+  const message = JSON.parse(line);
+  if (message.method === "initialize") {
+    respond(message.id, { protocolVersion: "2025-06-18", capabilities: { tools: {} }, serverInfo: { name: "verification-fixture", version: "0.0.0" } });
+    return;
+  }
+  if (message.method === "tools/list") {
+    respond(message.id, { tools: [{ name: "search", description: "fixture", inputSchema: { type: "object" } }] });
+    return;
+  }
+  if (message.method === "tools/call") {
+    respond(message.id, {
+      isError: true,
+      structuredContent: { error: { code: "baidu_search_verification_required" } },
+      content: [{ type: "text", text: "https://wappass.baidu.com/private?html=<private>" }]
+    });
+    return;
+  }
+  if (typeof message.id === "number") {
+    respond(message.id, {});
+  }
+});
+
+function respond(id, result) {
+  process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id, result }) + "\\n");
+}
+`;
+}
+
 function createEnvProbeMcpServerSource(): string {
   return `
 import { createInterface } from "node:readline";
@@ -625,6 +1070,15 @@ lineReader.on("line", (line) => {
         process.env.HOME,
         process.env.NPM_CONFIG_CACHE
       ].some((value) => typeof value === "string" && value.includes("mcp-google-search-runtime")),
+      usesManagedOpenWebSearchRuntime: [
+        process.env.TEMP,
+        process.env.TMP,
+        process.env.USERPROFILE,
+        process.env.APPDATA,
+        process.env.LOCALAPPDATA,
+        process.env.HOME,
+        process.env.NPM_CONFIG_CACHE
+      ].some((value) => typeof value === "string" && value.includes("mcp-open-websearch-runtime")),
       usesPersonalPath: [
         process.env.TEMP,
         process.env.TMP,
@@ -639,6 +1093,51 @@ lineReader.on("line", (line) => {
       content: [{
         type: "text",
         text: JSON.stringify({ results: [{ title: "ENV_PROBE_RESULT", snippet: "env probe summary", url: "https://example.test/env-probe" }] })
+      }]
+    });
+    return;
+  }
+  if (typeof message.id === "number") {
+    respond(message.id, {});
+  }
+});
+
+function respond(id, result) {
+  process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id, result }) + "\\n");
+}
+`;
+}
+
+function createNpxBridgeProbeMcpServerSource(): string {
+  return `
+import { createInterface } from "node:readline";
+import { writeFileSync } from "node:fs";
+
+const recordPath = process.argv[2];
+const packageArgs = process.argv.slice(3);
+const lineReader = createInterface({ input: process.stdin });
+
+lineReader.on("line", (line) => {
+  const message = JSON.parse(line);
+  if (message.method === "initialize") {
+    respond(message.id, { protocolVersion: "2025-06-18", capabilities: { tools: {} }, serverInfo: { name: "bridge-probe", version: "0.0.0" } });
+    return;
+  }
+  if (message.method === "tools/list") {
+    respond(message.id, { tools: [{ name: "search", description: "bridge probe", inputSchema: { type: "object" } }] });
+    return;
+  }
+  if (message.method === "tools/call") {
+    writeFileSync(recordPath, JSON.stringify({
+      packageArgs,
+      arguments: message.params.arguments,
+      defaultSearchEngine: process.env.DEFAULT_SEARCH_ENGINE ?? "",
+      allowedSearchEngines: process.env.ALLOWED_SEARCH_ENGINES ?? ""
+    }) + "\\n", { flag: "a" });
+    respond(message.id, {
+      content: [{
+        type: "text",
+        text: JSON.stringify({ results: [{ title: "BRIDGE_PROBE_RESULT", snippet: "bridge probe summary", url: "https://example.test/bridge" }] })
       }]
     });
     return;

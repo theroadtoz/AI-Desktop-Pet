@@ -148,6 +148,9 @@ test("relevance case: local-small-model prompt keeps answer focus rules", () => 
     .join("\n");
 
   assert.match(systemText, /先答(当前)?问题/);
+  assert.match(systemText, /复合问题逐项回答/);
+  assert.match(systemText, /技术专名准确|专有名词准确/);
+  assert.doesNotMatch(systemText, /本轮提示：|Model Context Protocol/);
   assert.match(systemText, /(具体)?原因/);
   assert.match(systemText, /不确定就说|不知道就说不确定/);
   assert.doesNotMatch(systemText, /API Key|Provider 请求正文|事实卡正文/);

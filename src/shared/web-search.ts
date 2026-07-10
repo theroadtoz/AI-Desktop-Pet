@@ -36,6 +36,18 @@ export type WebSearchContext = {
   generatedAt: string;
 };
 
+export type WebSearchErrorType =
+  | "mcp_search_not_configured"
+  | "mcp_search_spawn_failed"
+  | "mcp_search_closed"
+  | "mcp_search_failed"
+  | "mcp_search_not_started"
+  | "mcp_search_timeout"
+  | "mcp_search_write_failed"
+  | "baidu_search_verification_required"
+  | "mcp_search_tool_failed"
+  | "mcp_search_tool_missing";
+
 export type WebSearchCitation = {
   title: string;
   domain: string;
@@ -87,10 +99,24 @@ export type WebSearchConnectionTestResult = {
   commandName?: string;
 };
 
+export const BUNDLED_BAIDU_SEARCH_COMMAND = "bundled-baidu-search";
+export const BAIDU_SEARCH_VERIFICATION_REQUIRED_ERROR = "baidu_search_verification_required";
+
+export function getWebSearchFailurePrompt(errorType?: WebSearchErrorType): string | null {
+  if (errorType === BAIDU_SEARCH_VERIFICATION_REQUIRED_ERROR) {
+    return "百度网页兼容适配器被验证页阻断，本轮无法获得可核验结果。请直接说明暂时无法完成自动检索；正式自动检索需使用用户授权的官方 MCP/API 配置，不要编造实时信息。";
+  }
+  if (errorType === "mcp_search_tool_failed") {
+    return "联网搜索工具本轮失败，未获得可核验结果。请直接说明暂时无法完成联网核验，不要编造实时信息。";
+  }
+
+  return null;
+}
+
 export const DEFAULT_WEB_SEARCH_SETTINGS: WebSearchSettings = {
-  enabled: true,
-  command: "npx.cmd",
-  args: ["-y", "@mcp-server/google-search-mcp@latest"],
+  enabled: false,
+  command: BUNDLED_BAIDU_SEARCH_COMMAND,
+  args: [],
   toolName: "search",
   timeoutMs: 60_000,
   maxResults: 3

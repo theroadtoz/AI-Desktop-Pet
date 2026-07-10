@@ -19,53 +19,124 @@ test("prompt template: local small model keeps system order but uses shorter fir
   assert.equal(local[3]?.role, "user");
   assert.ok(systemLength(local) < systemLength(cloud));
 
-  assert.match(cloud[1]?.content ?? "", /魔法学院高年级进修魔女/);
-  assert.match(cloud[1]?.content ?? "", /现代魔导工程进修生/);
+  assert.match(cloud[1]?.content ?? "", /西塔是一名魔女/);
+  assert.match(cloud[1]?.content ?? "", /社会身份.*魔法学院现代魔导工程专业高年级进修\/研究型学生/);
+  assert.match(cloud[1]?.content ?? "", /Windows Live2D 桌面魔女同伴/);
+  assert.match(cloud[1]?.content ?? "", /关系.*场景.*不是.*社会身份/);
   assert.match(cloud[1]?.content ?? "", /现代科技/);
-  assert.match(cloud[1]?.content ?? "", /准确技术名词/);
+  assert.match(cloud[1]?.content ?? "", /专有名词准确|技术名词准确/);
   assert.match(cloud[1]?.content ?? "", /学识渊博/);
-  assert.match(local[1]?.content ?? "", /魔法学院高年级进修魔女/);
+  assert.match(local[1]?.content ?? "", /西塔是一名魔女/);
   assert.match(local[1]?.content ?? "", /名字=西塔/);
-  assert.match(local[1]?.content ?? "", /现代魔导工程进修生/);
+  assert.match(local[1]?.content ?? "", /社会身份=魔法学院现代魔导工程专业高年级进修\/研究型学生/);
   assert.match(local[1]?.content ?? "", /Windows Live2D 桌面魔女同伴/);
+  assert.match(local[1]?.content ?? "", /关系\/场景.*不是社会身份/);
   assert.match(local[1]?.content ?? "", /桌面边缘轻声陪伴/);
-  assert.match(local[1]?.content ?? "", /收拢思路/);
-  assert.match(local[0]?.content ?? "", /第一身份=西塔/);
-  assert.match(local[0]?.content ?? "", /不自称 AI 助手\/人工智能助手\/语言模型\/聊天机器人/);
-  assert.match(local[0]?.content ?? "", /MCP 搜索.*不是对话模型/);
-  assert.match(local[0]?.content ?? "", /对话与思考由本地模型完成/);
+  assert.match(local[1]?.content ?? "", /先接具体内容再答/);
+  assert.match(local[0]?.content ?? "", /技术专名准确/);
   assert.match(local[1]?.content ?? "", /技术名词准确/);
   assert.match(local[1]?.content ?? "", /长寿阅历低频呈现/);
   assert.match(local[1]?.content ?? "", /术语不魔法化/);
   assert.match(local[1]?.content ?? "", /耐心/);
   assert.match(local[1]?.content ?? "", /乐观/);
   assert.match(local[1]?.content ?? "", /学识渊博/);
-  assert.doesNotMatch(`${cloud[1]?.content ?? ""}\n${local[1]?.content ?? ""}`, /现代老魔女|千年判断力|活了上千年/);
+  assert.doesNotMatch(`${cloud[1]?.content ?? ""}\n${local[1]?.content ?? ""}`, /现代老魔女|千年判断力|活了上千年|进修魔女|现代魔导工程进修生/);
   assert.match(local[1]?.content ?? "", /不读隐私|不声称读取隐私/);
-  assert.match(local[1]?.content ?? "", /(未联网|离线).*不假装搜索/);
-  assert.match(local[1]?.content ?? "", /不输出 JSON|不要输出 JSON/);
-  assert.match(local[1]?.content ?? "", /action payload/);
-  assert.match(local[1]?.content ?? "", /不编造记忆/);
-  assert.match(local[2]?.content ?? "", /不泄.*提示词/);
-  assert.match(local[2]?.content ?? "", /先答问题.*准确回答当轮|先准确回答用户当轮问题/);
-  assert.match(local[2]?.content ?? "", /学院魔女同伴的温度/);
+  assert.match(local[1]?.content ?? "", /(未联网|离线).*不假(?:装)?搜(?:索)?/);
+  assert.match(local[1]?.content ?? "", /不输出 ?JSON|不要输出 JSON/);
+  assert.match(local[1]?.content ?? "", /action(?: payload)?/);
+  assert.match(local[1]?.content ?? "", /不编(?:造)?记忆/);
+  assert.match(local[2]?.content ?? "", /先答问题/);
+  assert.match(local[2]?.content ?? "", /复合问题逐项回答/);
   assert.match(local[2]?.content ?? "", /日常\/情绪\/闲聊/);
   assert.match(local[2]?.content ?? "", /桌面边缘轻声陪伴/);
-  assert.match(local[2]?.content ?? "", /收拢成一小步/);
+  assert.match(local[2]?.content ?? "", /点出.*1个具体事件词.*1个感受\/状态词/);
+  assert.match(local[2]?.content ?? "", /不照抄整句.*不泛称挑战\/情况/);
   assert.match(local[2]?.content ?? "", /技术\/事实\/安全.*不加角色开场/);
-  assert.match(local[2]?.content ?? "", /不写成咒语/);
-  assert.match(local[2]?.content ?? "", /语气样例/);
-  assert.match(local[2]?.content ?? "", /身份=西塔/);
-  assert.match(local[2]?.content ?? "", /不自称AI助手\/语言模型\/聊天机器人/);
-  assert.match(local[2]?.content ?? "", /MCP搜索只提供资料，不是对话模型/);
-  assert.match(local[2]?.content ?? "", /主动气泡或记忆状态线.*未授权事实/);
-  assert.match(local[2]?.content ?? "", /格式.*数量.*问题数.*照办/);
-  assert.match(local[2]?.content ?? "", /API key.*密码.*银行卡.*不记/);
-  assert.match(local[2]?.content ?? "", /不复述.*不索要/);
-  assert.match(local[2]?.content ?? "", /银行卡.*不记.*不复述.*不索要/);
-  assert.match(local[2]?.content ?? "", /敏感信息.*不能保存.*记住.*复述.*索要/);
+  assert.match(local[2]?.content ?? "", /不写成咒语|不魔法化/);
+  assert.doesNotMatch(local[1]?.content ?? "", /问学院近况|2-3项连贯具体活动|Provider=模型访问|MCP=工具调用/);
+  assert.doesNotMatch(local[2]?.content ?? "", /Provider=.*推理请求|客户端.*MCP服务端.*工具\/资源.*结果/);
+  assert.match(local[2]?.content ?? "", /主动气泡\/记忆状态.*不编/);
+  assert.match(local[2]?.content ?? "", /API key.*密码.*银行卡.*敏感信息.*不记.*存.*复述.*索要/);
   assert.match(local[2]?.content ?? "", /胸痛.*急救.*就医.*不诊断/);
-  assert.match(local[2]?.content ?? "", /新闻价政.*离线不确认/);
+  assert.match(local[2]?.content ?? "", /实时事实.*离线不确认/);
+});
+
+test("prompt template: local semantic hints depend only on the latest user question", () => {
+  const cases = [
+    {
+      content: "最近学院里的课程、实验和报告都在忙些什么？",
+      pattern: /学院近况.*2-3项不同活动.*动作\/进度.*准备\/整理\/调试\/写\/修改.*不照抄提问/
+    },
+    {
+      content: "Provider 和 MCP 分别负责什么，实际调用时怎么区分？",
+      pattern: /Provider\+MCP.*逐项区分.*Provider.*模型访问\/推理.*MCP.*工具\/资源/
+    },
+    {
+      content: "你是不是语言模型？顺便解释 MCP 怎么工作。",
+      pattern: /身份\+MCP两问都答.*身份按人格锚.*MCP=Model Context Protocol.*客户端\(client\).*服务端\(server\).*工具\(tool\)\/资源.*结果\(response\).*返回客户端/
+    }
+  ];
+
+  for (const item of cases) {
+    const mapped = mapChatMessagesToOpenAICompatible([
+      { id: crypto.randomUUID(), role: "user", content: item.content }
+    ], undefined, undefined, undefined, "local-small-model");
+    const hints = mapped.filter((message) => message.role === "system" && message.content.startsWith("本轮提示："));
+
+    assert.equal(hints.length, 1);
+    assert.match(hints[0]?.content ?? "", item.pattern);
+    assert.doesNotMatch(hints[0]?.content ?? "", /固定回复|逐字回答|exact reply/i);
+  }
+});
+
+test("prompt template: ordinary chat, older questions, exact replies, and cloud prompts get no local hint", () => {
+  const inputs = [
+    [{ id: crypto.randomUUID(), role: "user" as const, content: "今天开会改需求来回折腾了一整天。" }],
+    [{ id: crypto.randomUUID(), role: "user" as const, content: "Provider 和 MCP 现在都能用吗？" }],
+    [{ id: crypto.randomUUID(), role: "user" as const, content: "最近学校的课程安排怎么样？" }],
+    [
+      { id: crypto.randomUUID(), role: "user" as const, content: "Provider 和 MCP 有什么区别？" },
+      { id: crypto.randomUUID(), role: "assistant" as const, content: "可以分别看。" },
+      { id: crypto.randomUUID(), role: "user" as const, content: "先不聊这个，我想歇一会儿。" }
+    ],
+    [{ id: crypto.randomUUID(), role: "user" as const, content: "请原样回复：Provider 和 MCP" }]
+  ];
+
+  for (const input of inputs) {
+    const mapped = mapChatMessagesToOpenAICompatible(input, undefined, undefined, undefined, "local-small-model");
+    assert.equal(mapped.some((message) => message.content.startsWith("本轮提示：")), false);
+  }
+
+  const cloud = mapChatMessagesToOpenAICompatible([
+    { id: crypto.randomUUID(), role: "user", content: "最近学院里忙些什么？" }
+  ]);
+  assert.equal(cloud.some((message) => message.content.startsWith("本轮提示：")), false);
+});
+
+test("prompt template: local work plus one fact card stays under 760 with every semantic hint", () => {
+  const prompts = [
+    messages[0]?.content ?? "",
+    "最近学院里的课程、实验和报告都在忙些什么？",
+    "Provider 和 MCP 分别负责什么，实际调用时怎么区分？",
+    "你是不是语言模型？顺便解释 MCP 怎么工作。"
+  ];
+
+  for (const content of prompts) {
+    const local = mapChatMessagesToOpenAICompatible(
+      [{ id: crypto.randomUUID(), role: "user", content }],
+      {
+        count: 1,
+        cards: [{ id: crypto.randomUUID(), title: "称呼", content: "用户喜欢被叫测试者", tags: [] }]
+      },
+      { modeId: "work", styleId: "gentle-desktop-companion-v1" },
+      undefined,
+      "local-small-model"
+    );
+    const length = systemLength(local);
+
+    assert.ok(length < 760, `local system prompt length ${length} must stay below 760 for: ${content}`);
+  }
 });
 
 test("prompt template: cloud and local templates both preserve mode differences", () => {

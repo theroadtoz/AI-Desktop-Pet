@@ -51,20 +51,48 @@ test("persona consistency: cloud and local prompts share the fixed anchor", () =
 
   assert.match(cloudPersona, /固定人格锚/);
   for (const text of [cloudPersona, localPersona]) {
-    assert.match(text, /魔法学院高年级进修魔女/);
-    assert.match(text, /现代魔导工程进修生/);
-    assert.match(text, /Windows .*Live2D.*桌面魔女同伴/);
-    assert.match(text, /技术名词准确|准确技术名词/);
+    assert.match(text, /西塔是一名魔女/);
+    assert.match(text, /社会身份.*魔法学院现代魔导工程专业高年级进修\/研究型学生/);
+    assert.match(text, /桌面魔女同伴.*关系.*场景/);
+    assert.match(text, /Windows Live2D 桌面魔女同伴/);
+    assert.match(text, /不是.*社会身份/);
+    assert.match(text, /课程.*实验.*报告.*长期课题.*低频.*连续/);
+    assert.match(text, /技术名词准确|准确技术名词|专有名词准确/);
     assert.match(text, /长寿阅历|很长阅历/);
     assert.match(text, new RegExp(anchor.temperament.join(".*")));
+    assert.match(text, /普通聊天.*先接.*具体内容.*再答|先接具体内容再答/);
     assert.match(text, /先答问题/);
-    assert.match(text, /不编造记忆/);
-    assert.match(text, /不假装联网|离线不假装搜索/);
+    assert.match(text, /复合问题逐项回答/);
+    assert.match(text, /技术.*事实.*安全.*直接.*专有名词准确|技术名词准确/);
+    assert.match(text, /不编(?:造)?记忆/);
+    assert.match(text, /不假装联网|离线不假(?:装)?搜(?:索)?/);
     assert.match(text, /不假装读取隐私|不读隐私/);
-    assert.match(text, /不输出.*action payload|action payload/);
-    assert.doesNotMatch(text, /现代老魔女|千年判断力|活了上千年/);
+    assert.match(text, /不输出.*action(?: payload)?|action(?: payload)?/);
+    assert.doesNotMatch(text, /现代老魔女|千年判断力|活了上千年|进修魔女/);
+    assert.doesNotMatch(text, /AI助手|语言模型|聊天机器人/);
     assert.doesNotMatch(text, /API Key|Provider 请求正文|事实卡正文/);
   }
+});
+
+test("persona consistency: local system boundary leaves identity to the shared persona prompt", () => {
+  const mapped = mapChatMessagesToOpenAICompatible(
+    [userMessage("你是谁？")],
+    undefined,
+    undefined,
+    undefined,
+    "local-small-model"
+  );
+  const systemMessages = mapped.filter((message) => message.role === "system");
+  const runtimeBoundary = systemMessages[0]?.content ?? "";
+  const personaPrompt = systemMessages[1]?.content ?? "";
+  const completeSystemPrompt = systemMessages.map((message) => message.content).join("\n");
+
+  assert.match(personaPrompt, /西塔是一名魔女/);
+  assert.doesNotMatch(runtimeBoundary, /西塔|魔女|魔法学院|现代魔导工程|桌面同伴/);
+  assert.doesNotMatch(
+    completeSystemPrompt,
+    /进修魔女|现代魔导工程进修生/
+  );
 });
 
 test("persona consistency: identity answer is stable across dialogue modes", async () => {
@@ -76,12 +104,12 @@ test("persona consistency: identity answer is stable across dialogue modes", asy
   ]);
 
   for (const reply of replies) {
-    assert.match(reply.text, /魔法学院高年级进修魔女/);
-    assert.match(reply.text, /现代魔导工程进修生/);
+    assert.match(reply.text, /我是西塔，一名魔女/);
+    assert.match(reply.text, /魔法学院现代魔导工程专业高年级进修\/研究型学生/);
     assert.match(reply.text, /Windows Live2D 桌面魔女同伴/);
     assert.match(reply.text, /技术问题.*准确术语/);
     assert.match(reply.text, /先答事/);
-    assert.doesNotMatch(reply.text, /现代老魔女|千年判断力|活了上千年/);
+    assert.doesNotMatch(reply.text, /现代老魔女|千年判断力|活了上千年|进修魔女/);
     assertNoPersonaDrift(reply.text);
   }
   assert.equal(new Set(replies.map((reply) => reply.text)).size, 1);
@@ -109,10 +137,17 @@ test("persona consistency: local prompt gives roleful warmth without overriding 
 
   assert.match(systemText, /日常\/情绪\/闲聊/);
   assert.match(systemText, /桌面边缘轻声陪伴/);
-  assert.match(systemText, /收拢成一小步/);
-  assert.match(systemText, /技术\/事实\/安全.*不加角色开场/);
-  assert.match(systemText, /Provider\/本地模型\/Live2D\/MCP\/记忆\/窗口.*原名/);
+  assert.match(systemText, /点出.*1个具体事件词.*1个感受\/状态词/);
+  assert.match(systemText, /不照抄整句.*不泛称挑战\/情况/);
+  assert.match(systemText, /课程.*实验.*报告.*长期课题.*低频.*连续/);
+  assert.match(systemText, /不使用客服式开场|不客服化|不客服/);
+  assert.match(systemText, /技术(?:\/事实\/安全|事实安全).*(?:直接回答|直答).*(?:专有名词准确|术语准确)|技术名词准确/);
+  assert.match(systemText, /先答问题/);
+  assert.match(systemText, /复合问题逐项回答/);
+  assert.doesNotMatch(systemText, /问学院近况|2-3项连贯具体活动|Provider=.*推理请求|客户端.*MCP服务端.*工具\/资源.*结果/);
+  assert.match(systemText, /技术专名准确|专有名词准确/);
   assert.match(systemText, /不要每轮自报身份|不固定口癖/);
+  assert.doesNotMatch(systemText, /AI助手|语言模型|聊天机器人/);
   assert.doesNotMatch(systemText, /水晶球|法阵|本魔女|吾|汝/);
 });
 

@@ -13,11 +13,14 @@ test("action capability audit covers every catalog action", () => {
   );
 });
 
-test("action capability audit records that the current model has no native semantic motions", () => {
+test("action capability audit records physical motions without admitting the yawn candidate", () => {
   const audit = auditWitchActionCapabilities();
 
   assert.deepEqual(audit.model3DeclaredMotionGroups, []);
-  assert.deepEqual(audit.physicalMotionFiles, ["model/Scene1.motion3.json"]);
+  assert.deepEqual(audit.physicalMotionFiles, [
+    "model/Scene1.motion3.json",
+    "model/yawn.motion3.json"
+  ]);
   assert.equal(audit.idleMotion.loop, true);
   assert.equal(audit.semanticMotionPresetCount, 0);
   assert.deepEqual(audit.motionSafeSkip, {
@@ -25,6 +28,10 @@ test("action capability audit records that the current model has no native seman
     reason: "no-semantic-motion-presets"
   });
   assert.equal(audit.targetActions.every((entry) => entry.supportLevel !== "native-motion"), true);
+  assert.equal(
+    audit.targetActions.some((entry) => entry.nativeMotions.some((motion) => motion.path === "model/yawn.motion3.json")),
+    false
+  );
 });
 
 test("action capability audit captures accessory-backed candidates for later phases", () => {

@@ -127,9 +127,9 @@ const localModelDiagnosticEndpointStatuses = [
   "skipped"
 ] as const;
 const DEFAULT_WEB_SEARCH_SETTINGS: WebSearchSettings = {
-  enabled: true,
-  command: "npx.cmd",
-  args: ["-y", "@mcp-server/google-search-mcp@latest"],
+  enabled: false,
+  command: "bundled-baidu-search",
+  args: [],
   toolName: "search",
   timeoutMs: 60_000,
   maxResults: 3
