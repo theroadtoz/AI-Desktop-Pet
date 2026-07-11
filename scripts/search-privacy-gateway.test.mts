@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import type { ChildProcessWithoutNullStreams } from "node:child_process";
+import { EventEmitter } from "node:events";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { PassThrough } from "node:stream";
 import test from "node:test";
 
 const require = createRequire(import.meta.url);
@@ -14,13 +18,38 @@ const {
   normalizeWebSearchSettings
 } = require("../dist/main/services/config/web-search-settings-store.js") as typeof import("../src/main/services/config/web-search-settings-store");
 const {
-  callMcpSearchTool,
+  callMcpSearchTool: callMcpSearchToolWithProductCapability,
+  createMcpSearchSessionRegistry,
   createMcpSearchToolArguments,
   createMcpSpawnConfig,
   createSafeMcpChildEnv,
   parseMcpToolResults,
   testMcpSearchConnection
 } = require("../dist/main/services/search/mcp-search-client.js") as typeof import("../src/main/services/search/mcp-search-client");
+type McpSearchClientConfig = import("../src/main/services/search/mcp-search-client").McpSearchClientConfig;
+type McpSpawnAdapter = import("../src/main/services/search/mcp-search-client").McpSpawnAdapter;
+
+const fixtureMcpSpawnAdapter: McpSpawnAdapter = {
+  spawn(config) {
+    return spawn(config.command, config.args, {
+      shell: false,
+      windowsHide: true,
+      stdio: ["pipe", "pipe", "pipe"],
+      env: createSafeMcpChildEnv(config)
+    });
+  }
+};
+
+function callMcpSearchTool(
+  config: McpSearchClientConfig,
+  request: Parameters<typeof callMcpSearchToolWithProductCapability>[1]
+) {
+  return callMcpSearchToolWithProductCapability(
+    config,
+    request,
+    config.command === process.execPath ? { spawnAdapter: fixtureMcpSpawnAdapter } : undefined
+  );
+}
 const {
   classifySearchQuery
 } = require("../dist/main/services/search/search-query-classifier.js") as typeof import("../src/main/services/search/search-query-classifier");
@@ -418,114 +447,82 @@ test("bundled Baidu sentinel resolves to the sibling server with an isolated Ele
     restoreEnv("HOME", previous.HOME);
   }
 
-  assert.deepEqual(createMcpSpawnConfig({ ...config, args: ["custom"] }), {
-    command: "bundled-baidu-search",
-    args: ["custom"],
-    shell: false
-  });
-  assert.deepEqual(createMcpSpawnConfig({ ...config, command: "bundled-baidu-search " }), {
-    command: "bundled-baidu-search ",
-    args: [],
-    shell: false
-  });
+  assert.throws(() => createMcpSpawnConfig({ ...config, args: ["custom"] }), { name: "mcp_process_not_allowed" });
+  assert.throws(
+    () => createMcpSpawnConfig({ ...config, command: "bundled-baidu-search " }),
+    { name: "mcp_process_not_allowed" }
+  );
 });
 
-test("Windows npx bridge starts fixed Baidu, legacy latest, and Google presets", {
-  skip: process.platform !== "win32"
-}, async () => {
-  const tempRoot = join(process.cwd(), ".tmp");
-  mkdirSync(tempRoot, { recursive: true });
-  const dir = mkdtempSync(join(tempRoot, "p2-61-npx-bridge-"));
-  const serverPath = join(dir, "bridge-probe-mcp-search-server.mjs");
-  const recordPath = join(dir, "bridge-calls.jsonl");
-  const npxPath = join(dir, "npx.cmd");
-  writeFileSync(serverPath, createNpxBridgeProbeMcpServerSource(), "utf8");
-  writeFileSync(
-    npxPath,
-    `@"${process.execPath}" "${serverPath}" "${recordPath}" %*\r\n`,
-    "utf8"
-  );
+test("MCP client rejects ordinary executable settings before spawning without leaking command details", async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "p2-62b-mcp-capability-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const connectionMarker = join(dir, "connection-spawned.txt");
+  const searchMarker = join(dir, "search-spawned.txt");
+  const createUnsafeConfig = (markerPath: string) => ({
+    enabled: true,
+    command: process.execPath,
+    args: ["-e", `require('node:fs').writeFileSync(${JSON.stringify(markerPath)}, 'spawned')`],
+    toolName: "search",
+    timeoutMs: 1_000,
+    maxResults: 1
+  });
 
-  const previousPath = process.env.Path;
-  const previousUpperPath = process.env.PATH;
-  let records: Array<{
-    packageArgs: string[];
-    arguments: Record<string, unknown>;
-    defaultSearchEngine: string;
-    allowedSearchEngines: string;
-  }> = [];
-  process.env.Path = dir;
-  process.env.PATH = dir;
+  const connectionResult = await testMcpSearchConnection(createUnsafeConfig(connectionMarker));
+  assert.deepEqual(connectionResult, {
+    commandConfigured: true,
+    enabled: true,
+    toolName: "search",
+    toolFound: false,
+    toolCount: 0,
+    status: "failed"
+  });
+  assert.equal(existsSync(connectionMarker), false);
 
-  try {
-    const bridgeCases = [
-      {
-        packageName: "open-websearch@2.1.11",
-        timeoutMs: 60_000,
-        maxResults: 3,
-        requestMaxResults: 2
-      },
-      {
-        packageName: "open-websearch@latest",
-        timeoutMs: 5_000,
-        maxResults: 1,
-        requestMaxResults: 1
-      },
-      {
-        packageName: "@mcp-server/google-search-mcp@latest",
-        timeoutMs: 5_000,
-        maxResults: 1,
-        requestMaxResults: 1
-      }
-    ] as const;
-
-    for (const bridgeCase of bridgeCases) {
-      const results = await callMcpSearchTool({
-        command: "npx.cmd",
-        args: ["-y", bridgeCase.packageName],
-        toolName: "search",
-        timeoutMs: bridgeCase.timeoutMs,
-        maxResults: bridgeCase.maxResults
-      }, {
-        query: `bridge probe ${bridgeCase.packageName}`,
-        maxResults: bridgeCase.requestMaxResults
-      });
-
-      assert.equal(results.length, 1);
+  await assert.rejects(
+    callMcpSearchToolWithProductCapability(createUnsafeConfig(searchMarker), {
+      query: "capability boundary",
+      maxResults: 1
+    }),
+    (error: unknown) => {
+      assert.equal(error instanceof Error, true);
+      assert.equal((error as Error).name, "mcp_process_not_allowed");
+      assert.equal((error as Error).message, "mcp_process_not_allowed");
+      assert.doesNotMatch(String(error), /node|electron|p2-62b|connection-spawned|search-spawned/i);
+      return true;
     }
-    records = readFileSync(recordPath, "utf8")
-      .trim()
-      .split(/\r?\n/)
-      .map((line) => JSON.parse(line) as typeof records[number]);
-  } finally {
-    restoreEnv("Path", previousPath);
-    restoreEnv("PATH", previousUpperPath);
-    rmSync(dir, { recursive: true, force: true });
-  }
+  );
+  assert.equal(existsSync(searchMarker), false);
+});
 
-  assert.equal(records.length, 3);
-  assert.deepEqual(records[0], {
-    packageArgs: ["-y", "open-websearch@2.1.11"],
-    arguments: {
-      query: "bridge probe open-websearch@2.1.11",
-      maxResults: 2,
-      limit: 2,
-      engines: ["baidu"]
-    },
-    defaultSearchEngine: "baidu",
-    allowedSearchEngines: "baidu"
-  });
-  assert.deepEqual(records[1], {
-    packageArgs: ["-y", "open-websearch@latest"],
-    arguments: {
-      query: "bridge probe open-websearch@latest",
-      maxResults: 1,
-      limit: 1
-    },
-    defaultSearchEngine: "sogou",
-    allowedSearchEngines: "sogou,baidu,bing"
-  });
-  assert.equal(records[2]?.packageArgs[1], "@mcp-server/google-search-mcp@latest");
+test("MCP process capability rejects the former pinned npx profile", () => {
+  const pinnedConfig = {
+    command: "npx.cmd",
+    args: ["-y", "open-websearch@2.1.11"],
+    toolName: "search",
+    timeoutMs: 60_000,
+    maxResults: 3
+  };
+  const rejectedConfigs = [
+    pinnedConfig,
+    { ...pinnedConfig, command: "cmd.exe" },
+    { ...pinnedConfig, command: "powershell.exe" },
+    { ...pinnedConfig, command: process.execPath },
+    { ...pinnedConfig, args: ["-y", "open-websearch@latest"] },
+    { ...pinnedConfig, args: ["-y", "@mcp-server/google-search-mcp@latest"] },
+    { ...pinnedConfig, args: ["-y", "open-websearch@2.1.11\n--unsafe"] },
+    { ...pinnedConfig, command: "custom-mcp" }
+  ];
+
+  for (const rejectedConfig of rejectedConfigs) {
+    assert.throws(() => createMcpSpawnConfig(rejectedConfig), (error: unknown) => {
+      assert.equal(error instanceof Error, true);
+      assert.equal((error as Error).name, "mcp_process_not_allowed");
+      assert.equal((error as Error).message, "mcp_process_not_allowed");
+      assert.doesNotMatch(String(error), /cmd|powershell|node|electron|latest|unsafe|custom/i);
+      return true;
+    });
+  }
 });
 
 test("Google MCP search calls use google.com region and bounded arguments", async () => {
@@ -692,13 +689,196 @@ test("web search settings store migrates empty legacy config disabled without re
   }), "utf8");
 
   assert.deepEqual(createWebSearchSettingsStore({ userDataPath: customUserDataPath }).getSettings(), {
-    enabled: true,
+    enabled: false,
     command: "custom-mcp.cmd",
     args: ["--stdio"],
     toolName: "custom_search",
     timeoutMs: 5_000,
     maxResults: 2
   });
+});
+
+test("web search settings store rejects unsupported command profiles without persisting details", () => {
+  const userDataPath = mkdtempSync(join(tmpdir(), "p2-web-search-reject-"));
+  const store = createWebSearchSettingsStore({ userDataPath });
+  const unsupportedProfiles = [{
+    enabled: true,
+    command: "private-custom-mcp.cmd",
+    args: ["--private-path=C:\\Users\\PrivateUser"],
+    toolName: "search",
+    timeoutMs: 5_000,
+    maxResults: 2
+  }, {
+    enabled: true,
+    command: "npx.cmd",
+    args: ["-y", "open-websearch@2.1.11"],
+    toolName: "search",
+    timeoutMs: 60_000,
+    maxResults: 3
+  }, {
+    enabled: true,
+    command: "bundled-baidu-search",
+    args: [],
+    toolName: "arbitrary_search",
+    timeoutMs: 60_000,
+    maxResults: 3
+  }];
+
+  for (const unsupported of unsupportedProfiles) {
+    assert.throws(() => store.saveSettings(unsupported), (error: unknown) => {
+      assert.equal(error instanceof Error, true);
+      assert.equal((error as Error).name, "web_search_settings_not_supported");
+      assert.equal((error as Error).message, "web_search_settings_not_supported");
+      assert.doesNotMatch(String(error), /private|custom|users|path|npx|open-websearch/i);
+      return true;
+    });
+  }
+  assert.deepEqual(store.getSettings(), {
+    enabled: false,
+    command: "bundled-baidu-search",
+    args: [],
+    toolName: "search",
+    timeoutMs: 60_000,
+    maxResults: 3
+  });
+  assert.equal(existsSync(join(userDataPath, "config", "web-search-settings.json")), false);
+});
+
+test("web search settings store pins loaded bundled profiles to the default tool name", () => {
+  const userDataPath = mkdtempSync(join(tmpdir(), "p2-web-search-tool-name-"));
+  const configDir = join(userDataPath, "config");
+  mkdirSync(configDir, { recursive: true });
+  writeFileSync(join(configDir, "web-search-settings.json"), JSON.stringify({
+    enabled: true,
+    command: "bundled-baidu-search",
+    args: [],
+    toolName: "arbitrary_search",
+    timeoutMs: 60_000,
+    maxResults: 3
+  }), "utf8");
+
+  assert.deepEqual(createWebSearchSettingsStore({ userDataPath }).getSettings(), {
+    enabled: true,
+    command: "bundled-baidu-search",
+    args: [],
+    toolName: "search",
+    timeoutMs: 60_000,
+    maxResults: 3
+  });
+});
+
+test("MCP session registry shutdown is idempotent and waits for active warmup and search sessions", async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "p2-62b-mcp-shutdown-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const serverPath = join(dir, "hanging-mcp-server.mjs");
+  writeFileSync(serverPath, "process.stdin.resume();\n", "utf8");
+  const registry = createMcpSearchSessionRegistry();
+  let exited = 0;
+  const adapter: McpSpawnAdapter = {
+    spawn(config) {
+      const child = fixtureMcpSpawnAdapter.spawn(config);
+      child.once("exit", () => {
+        exited += 1;
+      });
+      return child;
+    }
+  };
+  const config = {
+    enabled: true,
+    command: process.execPath,
+    args: [serverPath],
+    toolName: "search",
+    timeoutMs: 60_000,
+    maxResults: 1
+  };
+  const search = callMcpSearchToolWithProductCapability(config, {
+    query: "shutdown active search",
+    maxResults: 1
+  }, { spawnAdapter: adapter, sessionRegistry: registry });
+  const warmup = testMcpSearchConnection(config, { spawnAdapter: adapter, sessionRegistry: registry });
+
+  const firstShutdown = registry.shutdown();
+  const secondShutdown = registry.shutdown();
+  assert.equal(firstShutdown, secondShutdown);
+  await firstShutdown;
+
+  assert.equal(exited, 2);
+  await assert.rejects(search, { name: "mcp_search_closed" });
+  assert.equal((await warmup).status, "failed");
+});
+
+test("MCP shutdown stays bounded when kill fails and process-tree termination never settles", async () => {
+  const registry = createMcpSearchSessionRegistry();
+  const children = [createNonExitingChild("throw"), createNonExitingChild("false")];
+  let forceTerminationCalls = 0;
+  const adapter: McpSpawnAdapter = {
+    spawn() {
+      const child = children.shift();
+      assert.ok(child);
+      queueMicrotask(() => child.emit("spawn"));
+      return child;
+    },
+    terminateProcessTree() {
+      forceTerminationCalls += 1;
+      return new Promise<void>(() => undefined);
+    }
+  };
+  const config = {
+    enabled: true,
+    command: process.execPath,
+    args: [],
+    toolName: "search",
+    timeoutMs: 60_000,
+    maxResults: 1
+  };
+  const search = callMcpSearchToolWithProductCapability(config, {
+    query: "bounded shutdown",
+    maxResults: 1
+  }, { spawnAdapter: adapter, sessionRegistry: registry });
+  const searchClosed = assert.rejects(search, { name: "mcp_search_closed" });
+  const warmup = testMcpSearchConnection(config, { spawnAdapter: adapter, sessionRegistry: registry });
+
+  const startedAt = Date.now();
+  const firstShutdown = registry.shutdown();
+  assert.equal(registry.shutdown(), firstShutdown);
+  await firstShutdown;
+  const elapsedMs = Date.now() - startedAt;
+
+  assert.ok(elapsedMs < 2_000, `shutdown took ${elapsedMs}ms`);
+  assert.equal(forceTerminationCalls, 2);
+  await searchClosed;
+  assert.equal((await warmup).status, "failed");
+});
+
+test("MCP request timeout survives a throwing kill and escalates through session close", async () => {
+  const registry = createMcpSearchSessionRegistry();
+  const child = createNonExitingChild("throw");
+  let forceTerminationCalls = 0;
+  const adapter: McpSpawnAdapter = {
+    spawn() {
+      queueMicrotask(() => child.emit("spawn"));
+      return child;
+    },
+    terminateProcessTree(process) {
+      forceTerminationCalls += 1;
+      queueMicrotask(() => process.emit("exit", null, "SIGKILL"));
+    }
+  };
+
+  await assert.rejects(callMcpSearchToolWithProductCapability({
+    enabled: true,
+    command: process.execPath,
+    args: [],
+    toolName: "search",
+    timeoutMs: 1_000,
+    maxResults: 1
+  }, {
+    query: "timeout kill failure",
+    maxResults: 1
+  }, { spawnAdapter: adapter, sessionRegistry: registry }), { name: "mcp_search_timeout" });
+
+  assert.equal(forceTerminationCalls, 1);
+  await registry.shutdown();
 });
 
 test("web search settings migrate only exact historical defaults and never carry legacy enabled state", () => {
@@ -910,6 +1090,7 @@ test("app and settings UI wire the safe verification prompt and disabled compati
   const appSource = readFileSync(join(process.cwd(), "src", "main", "app.ts"), "utf8");
   const preloadSource = readFileSync(join(process.cwd(), "src", "preload", "chat-preload.ts"), "utf8");
   const settingsHtml = readFileSync(join(process.cwd(), "src", "renderer", "chat", "index.html"), "utf8");
+  const rendererSource = readFileSync(join(process.cwd(), "src", "renderer", "chat", "main.ts"), "utf8");
 
   assert.match(appSource, /BAIDU_SEARCH_VERIFICATION_REQUIRED_ERROR/);
   assert.match(appSource, /getWebSearchFailurePrompt\(webSearchResolution\.errorType\)/);
@@ -917,6 +1098,11 @@ test("app and settings UI wire the safe verification prompt and disabled compati
   assert.match(appSource, /providerMessages:\s*\[\s*\.\.\.contextBudget\.providerMessages/);
   assert.match(preloadSource, /DEFAULT_WEB_SEARCH_SETTINGS[\s\S]*?enabled:\s*false,[\s\S]*?bundled-baidu-search/);
   assert.match(settingsHtml, /class="selection-note"[^>]*>百度网页兼容适配器，默认关闭；正式自动检索需用户授权的官方 MCP\/API 配置。/);
+  assert.match(settingsHtml, /<select id="web-search-profile">[\s\S]*?内置百度网页搜索（兼容适配器）/);
+  assert.doesNotMatch(settingsHtml, /web-search-(?:command|args|tool-name)/);
+  assert.match(rendererSource, /command:\s*BUNDLED_BAIDU_SEARCH_COMMAND,\s*args:\s*\[\],\s*toolName:\s*DEFAULT_WEB_SEARCH_SETTINGS\.toolName/);
+  assert.match(rendererSource, /历史自定义配置（不受支持）/);
+  assert.doesNotMatch(rendererSource, /webSearch(?:Command|Args|ToolName)(?:Field)?/);
 });
 
 test("MCP result normalization keeps empty JSON result arrays empty", () => {
@@ -1108,49 +1294,24 @@ function respond(id, result) {
 `;
 }
 
-function createNpxBridgeProbeMcpServerSource(): string {
-  return `
-import { createInterface } from "node:readline";
-import { writeFileSync } from "node:fs";
-
-const recordPath = process.argv[2];
-const packageArgs = process.argv.slice(3);
-const lineReader = createInterface({ input: process.stdin });
-
-lineReader.on("line", (line) => {
-  const message = JSON.parse(line);
-  if (message.method === "initialize") {
-    respond(message.id, { protocolVersion: "2025-06-18", capabilities: { tools: {} }, serverInfo: { name: "bridge-probe", version: "0.0.0" } });
-    return;
-  }
-  if (message.method === "tools/list") {
-    respond(message.id, { tools: [{ name: "search", description: "bridge probe", inputSchema: { type: "object" } }] });
-    return;
-  }
-  if (message.method === "tools/call") {
-    writeFileSync(recordPath, JSON.stringify({
-      packageArgs,
-      arguments: message.params.arguments,
-      defaultSearchEngine: process.env.DEFAULT_SEARCH_ENGINE ?? "",
-      allowedSearchEngines: process.env.ALLOWED_SEARCH_ENGINES ?? ""
-    }) + "\\n", { flag: "a" });
-    respond(message.id, {
-      content: [{
-        type: "text",
-        text: JSON.stringify({ results: [{ title: "BRIDGE_PROBE_RESULT", snippet: "bridge probe summary", url: "https://example.test/bridge" }] })
-      }]
-    });
-    return;
-  }
-  if (typeof message.id === "number") {
-    respond(message.id, {});
-  }
-});
-
-function respond(id, result) {
-  process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id, result }) + "\\n");
-}
-`;
+function createNonExitingChild(killBehavior: "throw" | "false"): ChildProcessWithoutNullStreams {
+  const child = new EventEmitter();
+  Object.assign(child, {
+    stdin: new PassThrough(),
+    stdout: new PassThrough(),
+    stderr: new PassThrough(),
+    pid: killBehavior === "throw" ? 41001 : 41002,
+    exitCode: null,
+    signalCode: null,
+    kill() {
+      if (killBehavior === "throw") {
+        throw new Error("synthetic_kill_failure");
+      }
+      return false;
+    },
+    unref() {}
+  });
+  return child as unknown as ChildProcessWithoutNullStreams;
 }
 
 function createBraveToolAliasMcpServerSource(): string {

@@ -27,6 +27,7 @@ class FakeChild extends EventEmitter {
   stdout = new PassThrough();
   stderr = new PassThrough();
   killed = false;
+  pid = 4321;
 
   kill(): boolean {
     this.killed = true;
@@ -191,6 +192,144 @@ test("ready runtime start is idempotent and stop is repeatable", async () => {
   }
 });
 
+test("stop timeout escalates the retained child process tree before returning", async () => {
+  const files = createTempRuntimeFiles();
+  const server = createHealthServer();
+  const fake = createFakeSpawn();
+  const forcedPids: number[] = [];
+
+  try {
+    await listen(server);
+    const runtime = createLlamaCppRuntime({
+      enabled: true,
+      executablePath: files.executablePath,
+      modelPath: files.modelPath,
+      port: readServerPort(server),
+      startupTimeoutMs: 1_000,
+      stopTimeoutMs: 10,
+      healthPollIntervalMs: 20
+    }, {
+      spawn: fake.spawn,
+      async forceKillProcessTree(pid) {
+        forcedPids.push(pid);
+        fake.calls[0]?.child.emit("close", null, "SIGKILL");
+      }
+    });
+    await runtime.start();
+    fake.calls[0]!.child.kill = function killWithoutClose(): boolean {
+      this.killed = true;
+      return true;
+    };
+
+    const summary = await runtime.stop();
+
+    assert.deepEqual(forcedPids, [4321]);
+    assert.equal(summary.status, "exited");
+    assert.equal(summary.reason, undefined);
+  } finally {
+    await close(server);
+    files.cleanup();
+  }
+});
+
+test("concurrent stops terminate the same child process tree only once", async () => {
+  const files = createTempRuntimeFiles();
+  const server = createHealthServer();
+  const fake = createFakeSpawn();
+  const forcedPids: number[] = [];
+
+  try {
+    await listen(server);
+    const runtime = createLlamaCppRuntime({
+      enabled: true,
+      executablePath: files.executablePath,
+      modelPath: files.modelPath,
+      port: readServerPort(server),
+      startupTimeoutMs: 1_000,
+      stopTimeoutMs: 10,
+      healthPollIntervalMs: 20
+    }, {
+      spawn: fake.spawn,
+      async forceKillProcessTree(pid) {
+        forcedPids.push(pid);
+        await new Promise((resolve) => setImmediate(resolve));
+        fake.calls[0]?.child.emit("close", null, "SIGKILL");
+      }
+    });
+    await runtime.start();
+    const child = fake.calls[0]!.child;
+    let killCalls = 0;
+    child.kill = function killWithoutClose(): boolean {
+      killCalls += 1;
+      this.killed = true;
+      return true;
+    };
+
+    const firstStop = runtime.stop();
+    const secondStop = runtime.stop();
+    const [firstSummary, secondSummary] = await Promise.all([firstStop, secondStop]);
+
+    assert.equal(killCalls, 1);
+    assert.deepEqual(forcedPids, [4321]);
+    assert.equal(firstSummary.status, "exited");
+    assert.equal(secondSummary.status, "exited");
+  } finally {
+    await close(server);
+    files.cleanup();
+  }
+});
+
+test("concurrent stops finish when forced process-tree termination never settles", async () => {
+  const files = createTempRuntimeFiles();
+  const server = createHealthServer();
+  const fake = createFakeSpawn();
+  const forcedPids: number[] = [];
+
+  try {
+    await listen(server);
+    const runtime = createLlamaCppRuntime({
+      enabled: true,
+      executablePath: files.executablePath,
+      modelPath: files.modelPath,
+      port: readServerPort(server),
+      startupTimeoutMs: 1_000,
+      stopTimeoutMs: 10,
+      healthPollIntervalMs: 20
+    }, {
+      spawn: fake.spawn,
+      forceKillProcessTree(pid) {
+        forcedPids.push(pid);
+        return new Promise<void>(() => undefined);
+      }
+    });
+    await runtime.start();
+    const child = fake.calls[0]!.child;
+    let killCalls = 0;
+    child.kill = function killWithoutClose(): boolean {
+      killCalls += 1;
+      this.killed = true;
+      return true;
+    };
+
+    const firstStop = runtime.stop();
+    const secondStop = runtime.stop();
+    const summaries = await rejectIfPendingAfter(
+      Promise.all([firstStop, secondStop]),
+      250,
+      "stop did not settle"
+    );
+
+    assert.equal(killCalls, 1);
+    assert.deepEqual(forcedPids, [4321]);
+    assert.equal(summaries[0].status, "timeout");
+    assert.equal(summaries[0].reason, "stop_timeout");
+    assert.deepEqual(summaries[1], summaries[0]);
+  } finally {
+    await close(server);
+    files.cleanup();
+  }
+});
+
 test("child exit before health ready is reported without raw process output", async () => {
   const files = createTempRuntimeFiles();
   const fake = createFakeSpawn((child) => {
@@ -236,6 +375,22 @@ function createFakeSpawn(onSpawn?: (child: FakeChild) => void): {
       return child as unknown as ChildProcess;
     }
   };
+}
+
+function rejectIfPendingAfter<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timeoutId = setTimeout(() => reject(new Error(message)), timeoutMs);
+    promise.then(
+      (value) => {
+        clearTimeout(timeoutId);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timeoutId);
+        reject(error);
+      }
+    );
+  });
 }
 
 function createTempRuntimeFiles(): {

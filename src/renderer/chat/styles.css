@@ -539,6 +539,10 @@ body {
   gap: 10px;
 }
 
+.field-grid-compact {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .api-key-section {
   display: flex;
   flex-direction: column;

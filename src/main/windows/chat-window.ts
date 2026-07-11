@@ -1,9 +1,15 @@
-import { BrowserWindow } from "electron";
+import { BrowserWindow, shell } from "electron";
 import { join } from "node:path";
 import { getWindowIconPath } from "./app-icon";
 import { showChatWindowAbovePet } from "./topmost-policy";
+import { installTrustedWindowPolicy } from "./trusted-window-policy";
+import { shouldHideChatWindowOnClose } from "../lifecycle/app-shutdown-coordinator";
 
-export function createChatWindow(): BrowserWindow {
+type ChatWindowOptions = {
+  shouldClose?: () => boolean;
+};
+
+export function createChatWindow(options: ChatWindowOptions = {}): BrowserWindow {
   const preload = join(__dirname, "../../preload/chat-preload.js");
   const window = new BrowserWindow({
     width: 420,
@@ -19,9 +25,14 @@ export function createChatWindow(): BrowserWindow {
     }
   });
 
+  installTrustedWindowPolicy(window.webContents, (url) => shell.openExternal(url));
   window.loadFile(join(__dirname, "../../renderer/chat/index.html"));
 
   window.on("close", (event) => {
+    if (!shouldHideChatWindowOnClose(options.shouldClose?.() === true)) {
+      return;
+    }
+
     event.preventDefault();
     window.hide();
   });

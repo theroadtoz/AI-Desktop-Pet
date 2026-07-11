@@ -348,18 +348,13 @@
                 </span>
               </label>
               <label class="field-label">
-                MCP 命令
-                <input id="web-search-command" type="text" autocomplete="off" placeholder="bundled-baidu-search" />
+                搜索配置
+                <select id="web-search-profile">
+                  <option value="bundled-baidu-search">内置百度网页搜索（兼容适配器）</option>
+                </select>
               </label>
-              <label class="field-label">
-                MCP 参数
-                <input id="web-search-args" type="text" autocomplete="off" placeholder="内置百度搜索无需参数" />
-              </label>
-              <div class="field-grid">
-                <label class="field-label">
-                  工具名
-                  <input id="web-search-tool-name" type="text" autocomplete="off" />
-                </label>
+              <p id="web-search-profile-note" class="selection-note" aria-live="polite">使用应用内置且经过批准的百度搜索配置，无需填写命令或参数。</p>
+              <div class="field-grid field-grid-compact">
                 <label class="field-label">
                   超时（毫秒）
                   <input id="web-search-timeout" type="number" min="1000" max="60000" step="1000" />

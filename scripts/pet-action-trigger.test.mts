@@ -293,6 +293,14 @@ test("pet preload mirrors the fixed action trigger reason allowlist without acce
 
 test("main mode changes trigger only fixed state reasons and preserve bubble suppression", async () => {
   const source = await readFile(new URL("../src/main/app.ts", import.meta.url), "utf8");
+  const quiesceSource = source.slice(
+    source.indexOf("function quiesceApp(): void"),
+    source.indexOf("async function stopLocalRuntimesForShutdown")
+  );
+  const beforeQuitSource = source.slice(
+    source.indexOf('app.on("before-quit"'),
+    source.indexOf('app.on("activate"')
+  );
 
   assert.match(source, /selectPetActionStateForModeChange/);
   assert.match(source, /PET_MODE_ACTION_STATE_TRIGGER_DELAY_MS = 2_000/);
@@ -303,7 +311,10 @@ test("main mode changes trigger only fixed state reasons and preserve bubble sup
   assert.match(source, /dialogueActionState\.stateId !== "idle"/);
   assert.match(source, /schedulePetModeActionStateTrigger\(dialogueActionState\.triggerReason\)/);
   assert.match(source, /schedulePetModeActionStateTrigger\(presenceActionState\.triggerReason\)/);
-  assert.match(source, /will-quit[\s\S]*cancelPendingModeActionStateTrigger\(\);/);
+  assert.match(source, /createAppShutdownCoordinator\(\{\s*quiesce: quiesceApp,/);
+  assert.match(quiesceSource, /cancelPendingModeActionStateTrigger\(\);/);
+  assert.match(beforeQuitSource, /event\.preventDefault\(\);/);
+  assert.match(beforeQuitSource, /shutdownCoordinator\.shutdown\(\)/);
   assert.match(source, /openChatWindow\(\): void[\s\S]*cancelStartupProactiveSpeechBubbleTimer\(\);[\s\S]*cancelIdleProactiveSpeechBubbleTimer\(\);[\s\S]*markProactiveSpeechBubbleHidden\(\);[\s\S]*sendPetActionTrigger\("chat_opened"\);/);
   assert.match(source, /currentPresenceModeId === "sleep"[\s\S]*cancelStartupProactiveSpeechBubbleTimer\(\);[\s\S]*cancelIdleProactiveSpeechBubbleTimer\(\);[\s\S]*markProactiveSpeechBubbleHidden\(\);[\s\S]*nextIdleProactiveSpeechBubbleReason = "idle_presence";/);
   assert.doesNotMatch(source, /sendPetActionTrigger\([^)]*actionType|pet:action-trigger",\s*\{\s*reason,\s*type/);

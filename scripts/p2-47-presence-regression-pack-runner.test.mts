@@ -30,13 +30,15 @@ test("p2-47 runner is included in the live2d parameter verification path", () =>
     /scripts\/p2-47-presence-regression-pack-runner\.test\.mts/
   );
   assert.match(
+    packageJson.scripts?.["test:live2d-core"] ?? "",
+    /scripts\/p2-47-presence-regression-pack-runner\.test\.mts/
+  );
+  assert.match(
     packageJson.scripts?.["test:history"] ?? "",
     /scripts\/proactive-companion-settings-store\.test\.mts/
   );
-  assert.equal(
-    packageJson.scripts?.verify,
-    "npm run build && npm run typecheck && npm run test:live2d-parameters && npm run test:history"
-  );
+  assert.match(packageJson.scripts?.verify ?? "", /npm run verify:core/u);
+  assert.match(packageJson.scripts?.verify ?? "", /npm run verify:local-assets/u);
 });
 
 test("p2-47 runner serializes the current desktop presence regression chain", () => {

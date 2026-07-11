@@ -27,6 +27,7 @@ import { isPetAccessoryPresetId, type PetAccessoryPresetId } from "../../shared/
 import type { ShortcutActionId, ShortcutPreferenceView } from "../../shared/shortcut-preferences";
 import type { UserProfile } from "../../shared/user-profile";
 import {
+  BUNDLED_BAIDU_SEARCH_COMMAND,
   DEFAULT_WEB_SEARCH_SETTINGS,
   type WebSearchCitationPayload,
   type WebSearchConnectionTestResult,
@@ -170,9 +171,8 @@ const shortcutList = document.querySelector<HTMLElement>("#shortcut-list");
 const shortcutStatus = document.querySelector<HTMLElement>("#shortcut-status");
 const webSearchStatus = document.querySelector<HTMLElement>("#web-search-status");
 const webSearchEnabled = document.querySelector<HTMLInputElement>("#web-search-enabled");
-const webSearchCommand = document.querySelector<HTMLInputElement>("#web-search-command");
-const webSearchArgs = document.querySelector<HTMLInputElement>("#web-search-args");
-const webSearchToolName = document.querySelector<HTMLInputElement>("#web-search-tool-name");
+const webSearchProfile = document.querySelector<HTMLSelectElement>("#web-search-profile");
+const webSearchProfileNote = document.querySelector<HTMLElement>("#web-search-profile-note");
 const webSearchTimeout = document.querySelector<HTMLInputElement>("#web-search-timeout");
 const webSearchMaxResults = document.querySelector<HTMLInputElement>("#web-search-max-results");
 const webSearchSaveButton = document.querySelector<HTMLButtonElement>("#web-search-save-button");
@@ -247,7 +247,7 @@ if (
   !settingsDialogueModeSummary || !settingsPresenceModeSummary || !proactiveCompanionStatus || !proactiveCadenceControls ||
   !proactiveMemorySourceBubbles || !proactiveSearchSourceBubbles || !saveProactiveCompanionSettingsButton ||
   !shortcutList || !shortcutStatus ||
-  !webSearchStatus || !webSearchEnabled || !webSearchCommand || !webSearchArgs || !webSearchToolName ||
+  !webSearchStatus || !webSearchEnabled || !webSearchProfile || !webSearchProfileNote ||
   !webSearchTimeout || !webSearchMaxResults || !webSearchSaveButton || !webSearchRefreshButton || !webSearchTestButton ||
   !chatTab || !historyTab || !memoryTab || !chatPage || !companionControlShelf || !dialogueModeControls || !presenceModeControls ||
   !shelfAccessoryButton || !shelfScaleButton || !shelfLockButton || !shelfActionEcho || !historyPage ||
@@ -351,9 +351,8 @@ const shortcutListElement = shortcutList;
 const shortcutStatusBox = shortcutStatus;
 const webSearchStatusBox = webSearchStatus;
 const webSearchEnabledField = webSearchEnabled;
-const webSearchCommandField = webSearchCommand;
-const webSearchArgsField = webSearchArgs;
-const webSearchToolNameField = webSearchToolName;
+const webSearchProfileField = webSearchProfile;
+const webSearchProfileNoteBox = webSearchProfileNote;
 const webSearchTimeoutField = webSearchTimeout;
 const webSearchMaxResultsField = webSearchMaxResults;
 const webSearchSaveAction = webSearchSaveButton;
@@ -528,19 +527,39 @@ function setProviderStatus(status: ProviderStatus): void {
 }
 
 function setWebSearchStatus(status: WebSearchStatus): void {
+  const usesBundledProfile = status.commandName === BUNDLED_BAIDU_SEARCH_COMMAND && status.argsCount === 0;
   webSearchStatusBox.dataset.state = status.enabled ? "ready" : "fallback";
   webSearchStatusBox.textContent = status.enabled
-    ? `MCP 搜索已启用 · 工具 ${status.toolName} · 结果 ${status.maxResults} 条 · 超时 ${status.timeoutMs}ms`
-    : status.commandConfigured
-      ? `MCP 搜索未启用 · 已配置 ${status.commandName ?? "命令"}`
-      : "未配置 MCP 搜索命令。";
+    ? `内置百度搜索已启用 · 结果 ${status.maxResults} 条 · 超时 ${status.timeoutMs}ms`
+    : usesBundledProfile
+      ? "内置百度搜索已配置，当前未启用。"
+      : status.commandConfigured
+        ? "检测到历史自定义搜索配置，已停用且不受支持。"
+        : "尚未配置联网搜索。";
 }
 
 function setWebSearchFields(settings: WebSearchSettings): void {
+  const usesBundledProfile = settings.command === BUNDLED_BAIDU_SEARCH_COMMAND && settings.args.length === 0;
+  webSearchProfileField.replaceChildren();
+
+  if (!usesBundledProfile) {
+    const unsupportedOption = document.createElement("option");
+    unsupportedOption.value = "unsupported";
+    unsupportedOption.textContent = "历史自定义配置（不受支持）";
+    unsupportedOption.disabled = true;
+    webSearchProfileField.append(unsupportedOption);
+  }
+
+  const bundledOption = document.createElement("option");
+  bundledOption.value = BUNDLED_BAIDU_SEARCH_COMMAND;
+  bundledOption.textContent = "内置百度网页搜索（兼容适配器）";
+  webSearchProfileField.append(bundledOption);
+  webSearchProfileField.value = usesBundledProfile ? BUNDLED_BAIDU_SEARCH_COMMAND : "unsupported";
+  webSearchProfileNoteBox.textContent = usesBundledProfile
+    ? "使用应用内置且经过批准的百度搜索配置，无需填写命令或参数。"
+    : "检测到历史自定义配置。该配置已停用且不受支持；保存后会安全迁移到内置百度搜索，不会显示原命令或参数。";
+  webSearchProfileNoteBox.dataset.state = usesBundledProfile ? "ready" : "error";
   webSearchEnabledField.checked = settings.enabled;
-  webSearchCommandField.value = settings.command;
-  webSearchArgsField.value = settings.args.join(" ");
-  webSearchToolNameField.value = settings.toolName;
   webSearchTimeoutField.value = String(settings.timeoutMs);
   webSearchMaxResultsField.value = String(settings.maxResults);
 }
@@ -662,9 +681,9 @@ function buildWebSearchSettings(): WebSearchSettings | null {
 
   return {
     enabled: webSearchEnabledField.checked,
-    command: webSearchCommandField.value.trim(),
-    args: webSearchArgsField.value.split(/\s+/).map((arg) => arg.trim()).filter((arg) => arg.length > 0),
-    toolName: webSearchToolNameField.value.trim() || DEFAULT_WEB_SEARCH_SETTINGS.toolName,
+    command: BUNDLED_BAIDU_SEARCH_COMMAND,
+    args: [],
+    toolName: DEFAULT_WEB_SEARCH_SETTINGS.toolName,
     timeoutMs,
     maxResults
   };
@@ -686,9 +705,9 @@ async function saveWebSearchSettings(): Promise<void> {
     const savedSettings = await window.webSearchApi.setSettings(settings);
     setWebSearchFields(savedSettings);
     setWebSearchStatus(await window.webSearchApi.getStatus());
-    setSettingsFeedback(savedSettings.enabled ? "MCP 搜索设置已启用。" : "MCP 搜索设置已保存，当前仍关闭。", "ready");
+    setSettingsFeedback(savedSettings.enabled ? "内置百度搜索已启用。" : "内置百度搜索设置已保存，当前仍关闭。", "ready");
   } catch {
-    setSettingsFeedback("无法保存 MCP 搜索设置，请检查命令、工具名和参数。");
+    setSettingsFeedback("无法保存内置百度搜索设置，请稍后重试。");
   }
 }
 
@@ -730,7 +749,7 @@ function formatWebSearchConnectionTestResult(result: WebSearchConnectionTestResu
     case "not_configured":
       return "未配置 MCP 命令。";
     case "configured_disabled":
-      return `已配置 ${result.commandName ?? "MCP 命令"}，当前未启用。`;
+      return "内置百度搜索已配置，当前未启用。";
     case "tool_available":
       return `工具可用 · ${result.toolName} · 已发现 ${result.toolCount} 个工具。`;
     case "tool_missing":
@@ -3130,6 +3149,15 @@ webSearchSaveAction.addEventListener("click", () => {
   if (!chatTurnState.isReplying) {
     void saveWebSearchSettings();
   }
+});
+
+webSearchProfileField.addEventListener("change", () => {
+  if (webSearchProfileField.value !== BUNDLED_BAIDU_SEARCH_COMMAND) {
+    return;
+  }
+
+  webSearchProfileNoteBox.textContent = "使用应用内置且经过批准的百度搜索配置，无需填写命令或参数。";
+  webSearchProfileNoteBox.dataset.state = "ready";
 });
 
 webSearchRefreshAction.addEventListener("click", () => {

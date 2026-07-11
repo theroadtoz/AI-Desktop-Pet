@@ -51,7 +51,7 @@ export type WebSearchSettingsStore = {
 
 export function createWebSearchSettingsStore(options: { userDataPath: string }): WebSearchSettingsStore {
   const settingsPath = join(options.userDataPath, "config", "web-search-settings.json");
-  let settings = normalizeSettings(readSettingsFile(settingsPath), existsSync(settingsPath));
+  let settings = normalizeSettings(readSettingsFile(settingsPath), existsSync(settingsPath), true);
 
   function save(): void {
     mkdirSync(dirname(settingsPath), { recursive: true });
@@ -66,7 +66,10 @@ export function createWebSearchSettingsStore(options: { userDataPath: string }):
       return createStatus(settings);
     },
     saveSettings(update) {
-      settings = normalizeSettings(update, true);
+      assertSupportedUpdate(update);
+      const nextSettings = normalizeSettings(update, true);
+      assertSupportedSettings(nextSettings);
+      settings = nextSettings;
       save();
       return cloneSettings(settings);
     }
@@ -90,21 +93,25 @@ function readSettingsFile(settingsPath: string): StoreFile {
   }
 }
 
-function normalizeSettings(value: unknown, hasSettingsFile: boolean): WebSearchSettings {
+function normalizeSettings(value: unknown, hasSettingsFile: boolean, disableUnsupported = false): WebSearchSettings {
   const input = value as StoreFile | null;
   const command = normalizeCommand(input?.command);
   const shouldUseDefaultPreset = shouldUseDefaultWebSearchPreset(input, hasSettingsFile, command);
   const shouldMigrateHistoricalPreset = isHistoricalDefaultPreset(input);
   const shouldUseBundledPreset = shouldUseDefaultPreset || shouldMigrateHistoricalPreset;
   const normalizedCommand = shouldUseBundledPreset ? DEFAULT_WEB_SEARCH_SETTINGS.command : command;
+  const normalizedArgs = shouldUseBundledPreset ? [...DEFAULT_WEB_SEARCH_SETTINGS.args] : normalizeArgs(input?.args);
+  const shouldPinBundledToolName = isSupportedCommandProfile(normalizedCommand, normalizedArgs);
 
   return {
     enabled: shouldUseBundledPreset
       ? DEFAULT_WEB_SEARCH_SETTINGS.enabled
-      : input?.enabled === true && normalizedCommand.length > 0,
+      : input?.enabled === true &&
+        normalizedCommand.length > 0 &&
+        (!disableUnsupported || isSupportedCommandProfile(normalizedCommand, normalizeArgs(input?.args))),
     command: normalizedCommand,
-    args: shouldUseBundledPreset ? [...DEFAULT_WEB_SEARCH_SETTINGS.args] : normalizeArgs(input?.args),
-    toolName: shouldUseBundledPreset ? DEFAULT_WEB_SEARCH_SETTINGS.toolName : normalizeToolName(input?.toolName),
+    args: normalizedArgs,
+    toolName: shouldPinBundledToolName ? DEFAULT_WEB_SEARCH_SETTINGS.toolName : normalizeToolName(input?.toolName),
     timeoutMs: shouldUseBundledPreset
       ? DEFAULT_WEB_SEARCH_SETTINGS.timeoutMs
       : normalizeInteger(input?.timeoutMs, DEFAULT_WEB_SEARCH_SETTINGS.timeoutMs, MIN_TIMEOUT_MS, MAX_TIMEOUT_MS),
@@ -112,6 +119,32 @@ function normalizeSettings(value: unknown, hasSettingsFile: boolean): WebSearchS
       ? DEFAULT_WEB_SEARCH_SETTINGS.maxResults
       : normalizeInteger(input?.maxResults, DEFAULT_WEB_SEARCH_SETTINGS.maxResults, MIN_RESULTS, MAX_RESULTS)
   };
+}
+
+function assertSupportedUpdate(value: unknown): void {
+  const input = value as StoreFile | null;
+  assertSupportedProfile(
+    normalizeCommand(input?.command),
+    normalizeArgs(input?.args),
+    normalizeToolName(input?.toolName)
+  );
+}
+
+function assertSupportedSettings(settings: WebSearchSettings): void {
+  assertSupportedProfile(settings.command, settings.args, settings.toolName);
+}
+
+function assertSupportedProfile(command: string, args: readonly string[], toolName: string): void {
+  if (isSupportedCommandProfile(command, args) && toolName === DEFAULT_WEB_SEARCH_SETTINGS.toolName) {
+    return;
+  }
+  const error = new Error("web_search_settings_not_supported");
+  error.name = "web_search_settings_not_supported";
+  throw error;
+}
+
+function isSupportedCommandProfile(command: string, args: readonly string[]): boolean {
+  return command === DEFAULT_WEB_SEARCH_SETTINGS.command && args.length === 0;
 }
 
 function isHistoricalDefaultPreset(input: StoreFile | null): boolean {

@@ -236,19 +236,10 @@ function findCandidateRoot(options: BundledLlamaCppRuntimeResolveOptions): Candi
 
   const cwd = options.cwd ?? process.cwd();
   const developmentRoot = join(cwd, "resources", "local-llm");
-  const developmentCacheRoot = join(cwd, ".tmp", "p2-23c-qwen25-15b-local-llm");
 
   if (isExistingFile(join(developmentRoot, MANIFEST_NAME))) {
     return {
       root: developmentRoot,
-      source: "development",
-      envOverride: false
-    };
-  }
-
-  if (isExistingFile(join(developmentCacheRoot, MANIFEST_NAME))) {
-    return {
-      root: developmentCacheRoot,
       source: "development",
       envOverride: false
     };

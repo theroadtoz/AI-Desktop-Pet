@@ -1,7 +1,7 @@
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { execFile, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { createInterface } from "node:readline";
-import { basename, delimiter, join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import {
   BAIDU_SEARCH_VERIFICATION_REQUIRED_ERROR,
   BUNDLED_BAIDU_SEARCH_COMMAND,
@@ -10,6 +10,11 @@ import {
   type WebSearchResult
 } from "../../../shared/web-search";
 import type { WebSearchProvider, WebSearchRequest } from "./web-search-provider";
+import {
+  createMcpProcessNotAllowedError,
+  resolveMcpProcessCapability,
+  type McpSpawnConfig
+} from "./mcp-process-capability";
 
 type JsonRpcMessage = {
   jsonrpc?: string;
@@ -27,14 +32,11 @@ type PendingRequest = {
   reject(error: Error): void;
 };
 
-type McpSpawnConfig = {
-  command: string;
-  args: string[];
-  shell: boolean;
-};
-
 const MCP_PROTOCOL_VERSION = "2025-06-18";
 const MAX_STDERR_BYTES = 4096;
+const MCP_CLOSE_GRACE_MS = 250;
+const MCP_CLOSE_FORCE_MS = 750;
+const MCP_REGISTRY_CLOSE_MS = MCP_CLOSE_GRACE_MS + MCP_CLOSE_FORCE_MS + 250;
 const MAX_RESULT_TITLE_LENGTH = 96;
 const MAX_RESULT_SNIPPET_LENGTH = 360;
 const MAX_RESULT_URL_LENGTH = 240;
@@ -50,10 +52,89 @@ export type McpSearchClientConfig = Pick<
   "command" | "args" | "toolName" | "timeoutMs" | "maxResults"
 >;
 
-export function createMcpSearchProvider(config: McpSearchClientConfig): WebSearchProvider {
+export type McpSpawnAdapter = {
+  spawn(config: McpSearchClientConfig): ChildProcessWithoutNullStreams;
+  terminateProcessTree?(process: ChildProcessWithoutNullStreams): Promise<void> | void;
+};
+
+type McpSessionClose = () => Promise<void>;
+
+export type McpSearchSessionRegistry = {
+  register(close: McpSessionClose): () => void;
+  shutdown(): Promise<void>;
+};
+
+export type McpSearchClientOptions = {
+  spawnAdapter?: McpSpawnAdapter;
+  sessionRegistry?: McpSearchSessionRegistry;
+};
+
+export function createMcpSearchSessionRegistry(): McpSearchSessionRegistry {
+  const activeSessions = new Set<McpSessionClose>();
+  let shutdownPromise: Promise<void> | null = null;
+
+  return {
+    register(close) {
+      if (shutdownPromise) {
+        throw createMcpSearchError("mcp_search_closed");
+      }
+      activeSessions.add(close);
+      return () => {
+        activeSessions.delete(close);
+      };
+    },
+    shutdown() {
+      if (shutdownPromise) {
+        return shutdownPromise;
+      }
+      shutdownPromise = Promise.allSettled(Array.from(activeSessions, (close) => settleWithin(
+        close(),
+        MCP_REGISTRY_CLOSE_MS
+      ))).then((results) => {
+        const failures = results.filter((result) => result.status === "rejected");
+        if (failures.length > 0) {
+          throw new Error("mcp_session_shutdown_failed");
+        }
+      });
+      return shutdownPromise;
+    }
+  };
+}
+
+export const mcpSearchSessionRegistry = createMcpSearchSessionRegistry();
+
+const DEFAULT_MCP_SPAWN_ADAPTER: McpSpawnAdapter = {
+  spawn(config) {
+    const spawnConfig = createMcpSpawnConfig(config);
+    return spawn(spawnConfig.command, spawnConfig.args, {
+      shell: spawnConfig.shell,
+      windowsHide: true,
+      stdio: ["pipe", "pipe", "pipe"],
+      env: createSafeMcpChildEnv(config)
+    });
+  },
+  terminateProcessTree(process) {
+    if (globalThis.process.platform === "win32" && process.pid) {
+      return new Promise((resolve) => {
+        execFile(
+          "taskkill.exe",
+          ["/pid", String(process.pid), "/T", "/F"],
+          { windowsHide: true, timeout: MCP_CLOSE_FORCE_MS },
+          () => resolve()
+        );
+      });
+    }
+    process.kill("SIGKILL");
+  }
+};
+
+export function createMcpSearchProvider(
+  config: McpSearchClientConfig,
+  options: McpSearchClientOptions = {}
+): WebSearchProvider {
   return {
     search(request) {
-      return callMcpSearchTool(config, request);
+      return callMcpSearchTool(config, request, options);
     }
   };
 }
@@ -88,13 +169,18 @@ export function createMcpSearchToolArguments(config: McpSearchClientConfig, requ
 
 export async function callMcpSearchTool(
   config: McpSearchClientConfig,
-  request: WebSearchRequest
+  request: WebSearchRequest,
+  options: McpSearchClientOptions = {}
 ): Promise<WebSearchResult[]> {
   if (!config.command.trim()) {
     throw createMcpSearchError("mcp_search_not_configured");
   }
 
-  const session = createMcpJsonRpcSession(config);
+  const session = createMcpJsonRpcSession(
+    config,
+    options.spawnAdapter,
+    options.sessionRegistry ?? mcpSearchSessionRegistry
+  );
 
   try {
     await session.start();
@@ -128,11 +214,14 @@ export async function callMcpSearchTool(
         : undefined
     );
   } finally {
-    session.close();
+    await session.close();
   }
 }
 
-export async function testMcpSearchConnection(config: WebSearchSettings): Promise<WebSearchConnectionTestResult> {
+export async function testMcpSearchConnection(
+  config: WebSearchSettings,
+  options: McpSearchClientOptions = {}
+): Promise<WebSearchConnectionTestResult> {
   const baseResult = {
     commandConfigured: config.command.trim().length > 0,
     enabled: config.enabled,
@@ -150,7 +239,11 @@ export async function testMcpSearchConnection(config: WebSearchSettings): Promis
     return { ...baseResult, status: "configured_disabled" };
   }
 
-  const session = createMcpJsonRpcSession(config);
+  const session = createMcpJsonRpcSession(
+    config,
+    options.spawnAdapter,
+    options.sessionRegistry ?? mcpSearchSessionRegistry
+  );
 
   try {
     await session.start();
@@ -178,6 +271,13 @@ export async function testMcpSearchConnection(config: WebSearchSettings): Promis
     };
   } catch (error: unknown) {
     const errorType = error instanceof Error ? error.name : "mcp_search_failed";
+    if (errorType === "mcp_process_not_allowed") {
+      const { commandName: _commandName, ...safeBaseResult } = baseResult;
+      return {
+        ...safeBaseResult,
+        status: "failed"
+      };
+    }
     return {
       ...baseResult,
       status: errorType === "mcp_search_timeout"
@@ -187,17 +287,24 @@ export async function testMcpSearchConnection(config: WebSearchSettings): Promis
           : "failed"
     };
   } finally {
-    session.close();
+    await session.close();
   }
 }
 
-function createMcpJsonRpcSession(config: McpSearchClientConfig): {
+function createMcpJsonRpcSession(
+  config: McpSearchClientConfig,
+  spawnAdapter: McpSpawnAdapter = DEFAULT_MCP_SPAWN_ADAPTER,
+  sessionRegistry: McpSearchSessionRegistry = mcpSearchSessionRegistry
+): {
   start(): Promise<void>;
   request(method: string, params: unknown): Promise<unknown>;
   notify(method: string, params: unknown): void;
-  close(): void;
+  close(): Promise<void>;
 } {
   let child: ChildProcessWithoutNullStreams | null = null;
+  let childExit: Promise<void> | null = null;
+  let closePromise: Promise<void> | null = null;
+  let closed = false;
   let nextId = 1;
   let stderrBytes = 0;
   const pending = new Map<number, PendingRequest>();
@@ -210,17 +317,59 @@ function createMcpJsonRpcSession(config: McpSearchClientConfig): {
     pending.clear();
   }
 
+  const unregister = sessionRegistry.register(close);
+
+  function close(): Promise<void> {
+    if (closePromise) {
+      return closePromise;
+    }
+
+    closed = true;
+    rejectAll(createMcpSearchError("mcp_search_closed"));
+    const process = child;
+    child = null;
+    closePromise = (async () => {
+      if (process && process.exitCode === null && process.signalCode === null) {
+        try {
+          process.kill();
+        } catch {
+          // Escalation below still gets a chance to terminate the process tree.
+        }
+        if (!await settlesWithin(childExit, MCP_CLOSE_GRACE_MS)) {
+          try {
+            const termination = spawnAdapter.terminateProcessTree
+              ? spawnAdapter.terminateProcessTree(process)
+              : process.kill("SIGKILL");
+            void Promise.resolve(termination).catch(() => undefined);
+          } catch {
+            // Closing is bounded even when the platform termination API fails.
+          }
+          await settlesWithin(childExit, MCP_CLOSE_FORCE_MS);
+        }
+        releaseChildProcess(process);
+      }
+    })().finally(unregister);
+    return closePromise;
+  }
+
   return {
     start() {
+      if (closed) {
+        return Promise.reject(createMcpSearchError("mcp_search_closed"));
+      }
       return new Promise((resolve, reject) => {
-        const spawnConfig = createMcpSpawnConfig(config);
-        const process = spawn(spawnConfig.command, spawnConfig.args, {
-          shell: spawnConfig.shell,
-          windowsHide: true,
-          stdio: ["pipe", "pipe", "pipe"],
-          env: createSafeMcpChildEnv(config)
-        });
+        let process: ChildProcessWithoutNullStreams;
+        try {
+          process = spawnAdapter.spawn(config);
+        } catch (error: unknown) {
+          reject(error instanceof Error ? error : createMcpProcessNotAllowedError());
+          return;
+        }
         child = process;
+        childExit = new Promise<void>((resolveExit) => {
+          process.once("exit", () => resolveExit());
+          process.once("error", () => resolveExit());
+        });
 
         const lineReader = createInterface({ input: process.stdout });
         lineReader.on("line", (line) => {
@@ -245,6 +394,9 @@ function createMcpJsonRpcSession(config: McpSearchClientConfig): {
       });
     },
     request(method, params) {
+      if (closed) {
+        return Promise.reject(createMcpSearchError("mcp_search_closed"));
+      }
       if (!child) {
         return Promise.reject(createMcpSearchError("mcp_search_not_started"));
       }
@@ -264,7 +416,11 @@ function createMcpJsonRpcSession(config: McpSearchClientConfig): {
         const timeoutId = setTimeout(() => {
           pending.delete(id);
           reject(createMcpSearchError("mcp_search_timeout"));
-          currentChild.kill();
+          try {
+            currentChild.kill();
+          } catch {
+            // The bounded session close path will perform the final escalation.
+          }
         }, timeoutMs);
 
         pending.set(id, {
@@ -292,14 +448,62 @@ function createMcpJsonRpcSession(config: McpSearchClientConfig): {
       child?.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method, params })}\n`, "utf8");
     },
     close() {
-      rejectAll(createMcpSearchError("mcp_search_closed"));
       if (stderrBytes > MAX_STDERR_BYTES) {
         stderrBytes = MAX_STDERR_BYTES;
       }
-      child?.kill();
-      child = null;
+      return close();
     }
   };
+}
+
+function settlesWithin(promise: Promise<unknown> | null, timeoutMs: number): Promise<boolean> {
+  if (!promise) {
+    return Promise.resolve(true);
+  }
+  return new Promise((resolve) => {
+    const timeoutId = setTimeout(() => resolve(false), timeoutMs);
+    promise.then(
+      () => {
+        clearTimeout(timeoutId);
+        resolve(true);
+      },
+      () => {
+        clearTimeout(timeoutId);
+        resolve(true);
+      }
+    );
+  });
+}
+
+async function settleWithin(promise: Promise<unknown>, timeoutMs: number): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const timeoutId = setTimeout(resolve, timeoutMs);
+    promise.then(
+      () => {
+        clearTimeout(timeoutId);
+        resolve();
+      },
+      (error: unknown) => {
+        clearTimeout(timeoutId);
+        reject(error);
+      }
+    );
+  });
+}
+
+function releaseChildProcess(process: ChildProcessWithoutNullStreams): void {
+  for (const stream of [process.stdin, process.stdout, process.stderr]) {
+    try {
+      stream.destroy();
+    } catch {
+      // Best-effort handle cleanup must not make shutdown unbounded.
+    }
+  }
+  try {
+    process.unref();
+  } catch {
+    // Test adapters and partially spawned children may not expose a live handle.
+  }
 }
 
 function handleJsonRpcLine(line: string, pending: Map<number, PendingRequest>): void {
@@ -569,12 +773,6 @@ export function createSafeMcpChildEnv(
     }
   }
 
-  const pathValue = process.env.Path ?? process.env.PATH;
-  const safePath = sanitizeMcpPath(pathValue);
-  if (safePath) {
-    env[process.platform === "win32" ? "Path" : "PATH"] = safePath;
-  }
-
   for (const key of ["TEMP", "TMP", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "HOME"]) {
     env[key] = "";
   }
@@ -619,52 +817,10 @@ export function createSafeMcpChildEnv(
 }
 
 export function createMcpSpawnConfig(config: McpSearchClientConfig): McpSpawnConfig {
-  if (isBundledBaiduSearchConfig(config)) {
-    return {
-      command: process.execPath,
-      args: [join(__dirname, "baidu-search-mcp-server.js")],
-      shell: false
-    };
-  }
-
-  if (shouldUseWindowsOpenWebSearchNpxBridge(config)) {
-    return {
-      command: process.env.ComSpec ?? process.env.COMSPEC ?? "cmd.exe",
-      args: ["/d", "/s", "/c", `npx.cmd -y ${config.args[1]}`],
-      shell: false
-    };
-  }
-
-  if (shouldUseWindowsGoogleSearchNpxBridge(config)) {
-    return {
-      command: process.env.ComSpec ?? process.env.COMSPEC ?? "cmd.exe",
-      args: ["/d", "/s", "/c", "npx.cmd -y @mcp-server/google-search-mcp@latest"],
-      shell: false
-    };
-  }
-
-  return {
-    command: config.command,
-    args: config.args,
-    shell: false
-  };
-}
-
-function sanitizeMcpPath(value: string | undefined): string | undefined {
-  if (!value) {
-    return undefined;
-  }
-
-  const safeEntries = value
-    .split(delimiter)
-    .map((entry) => entry.trim())
-    .filter((entry) => entry.length > 0 && !isPersonalPathEntry(entry));
-
-  return safeEntries.length > 0 ? safeEntries.join(delimiter) : undefined;
-}
-
-function isPersonalPathEntry(value: string): boolean {
-  return /(?:\\Users\\|\/Users\/|\/home\/|\/mnt\/|\\AppData\\|\/\.local\/|\/\.config\/)/iu.test(value);
+  return resolveMcpProcessCapability(config, {
+    bundledExecutable: process.execPath,
+    bundledServerPath: join(__dirname, "baidu-search-mcp-server.js")
+  });
 }
 
 function isBraveSearchMcpConfig(config: McpSearchClientConfig): boolean {
@@ -719,22 +875,6 @@ function getManagedSearchRuntimeDir(config: McpSearchClientConfig): string {
   return isGoogleSearchMcpConfig(config)
     ? "mcp-google-search-runtime"
     : "mcp-open-websearch-runtime";
-}
-
-function shouldUseWindowsOpenWebSearchNpxBridge(config: McpSearchClientConfig): boolean {
-  return process.platform === "win32" &&
-    basename(config.command).trim().toLowerCase() === "npx.cmd" &&
-    config.args.length === 2 &&
-    config.args[0] === "-y" &&
-    (config.args[1] === "open-websearch@2.1.11" || config.args[1] === "open-websearch@latest");
-}
-
-function shouldUseWindowsGoogleSearchNpxBridge(config: McpSearchClientConfig): boolean {
-  return process.platform === "win32" &&
-    basename(config.command).trim().toLowerCase() === "npx.cmd" &&
-    config.args.length === 2 &&
-    config.args[0] === "-y" &&
-    config.args[1] === "@mcp-server/google-search-mcp@latest";
 }
 
 function normalizeTimeoutMs(value: number): number {

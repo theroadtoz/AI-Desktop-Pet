@@ -70,6 +70,9 @@ export function createChatEngine(provider: ChatProvider = createFakeChatProvider
             streamGuard.push(delta.text);
           }
         });
+        if (abortController.signal.aborted) {
+          throw new DOMException("Chat reply aborted", "AbortError");
+        }
         streamGuard.flush();
 
         return {

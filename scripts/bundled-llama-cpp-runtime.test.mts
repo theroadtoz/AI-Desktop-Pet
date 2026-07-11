@@ -146,10 +146,10 @@ test("bundled resolver supports development and packaged local-llm roots", () =>
   }
 });
 
-test("bundled resolver uses prepared development cache when scaffold has no manifest", () => {
+test("bundled resolver does not use the prepared development cache implicitly", () => {
   const cwd = mkdtempSync(join(tmpdir(), "ai-pet-dev-cache-"));
   const scaffoldRoot = join(cwd, "resources", "local-llm");
-  const cached = createBundledFixture(join(cwd, ".tmp", "p2-23c-qwen25-15b-local-llm"));
+  createBundledFixture(join(cwd, ".tmp", "p2-23c-qwen25-15b-local-llm"));
   mkdirSync(scaffoldRoot, { recursive: true });
 
   try {
@@ -159,12 +159,10 @@ test("bundled resolver uses prepared development cache when scaffold has no mani
       resourcesPath: ""
     });
 
-    assert.ok(result.config);
-    assert.equal(result.config.executablePath, cached.executablePath);
-    assert.equal(result.config.modelPath, cached.modelPath);
-    assert.equal(result.safeSummary.status, "ready");
+    assert.equal(result.config, null);
+    assert.equal(result.safeSummary.status, "missing_manifest");
     assert.equal(result.safeSummary.resourceSource, "development");
-    assert.equal(result.safeSummary.resourceRootName, "p2-23c-qwen25-15b-local-llm");
+    assert.equal(result.safeSummary.resourceRootName, "local-llm");
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }

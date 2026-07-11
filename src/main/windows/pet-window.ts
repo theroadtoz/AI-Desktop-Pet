@@ -1,7 +1,8 @@
-import { BrowserWindow } from "electron";
+import { BrowserWindow, shell } from "electron";
 import { join } from "node:path";
 import { getWindowIconPath } from "./app-icon";
 import { restorePetWindowOnTop } from "./topmost-policy";
+import { installTrustedWindowPolicy } from "./trusted-window-policy";
 
 export function createPetWindow(): BrowserWindow {
   const preload = join(__dirname, "../../preload/pet-preload.js");
@@ -39,6 +40,7 @@ export function createPetWindow(): BrowserWindow {
     console.warn("[pet] render process gone", details);
   });
 
+  installTrustedWindowPolicy(window.webContents, (url) => shell.openExternal(url));
   window.loadFile(join(__dirname, "../../renderer/pet/index.html"));
 
   return window;

@@ -11,7 +11,7 @@ import {
   type IpcMainInvokeEvent
 } from "electron";
 import { release as getOsRelease } from "node:os";
-import { isAbsolute } from "node:path";
+import { isAbsolute, join } from "node:path";
 import type { ChatContextBudgetSummary, ChatProviderId, ChatRequest, ChatRuntimeContext } from "../shared/chat-provider";
 import type {
   ChatContextTransparencyPayload,
@@ -113,7 +113,11 @@ import { createHistoryStore, type HistoryStore } from "./services/chat/history-s
 import { createMemoryStore, type AutoMemoryCaptureSummary, type MemoryStore } from "./services/chat/memory-store";
 import { createChatProviderFromConfig } from "./services/chat/provider-factory";
 import { checkProviderHealth } from "./services/chat/provider-health";
-import { createMcpSearchProvider, testMcpSearchConnection } from "./services/search/mcp-search-client";
+import {
+  createMcpSearchProvider,
+  mcpSearchSessionRegistry,
+  testMcpSearchConnection
+} from "./services/search/mcp-search-client";
 import { createSearchPrivacyDecision } from "./services/search/search-privacy-gateway";
 import { createWebSearchCitationPayload, createWebSearchContext } from "./services/search/web-search-provider";
 import { readEnvProviderConfig, type EnvProviderConfig } from "./services/config/env-config";
@@ -150,6 +154,8 @@ import { registerModelAssetProtocol } from "./services/model-asset-protocol";
 import { createPointerController, type PointerController } from "./services/pointer-controller";
 import { createShortcutRegistry, type ShortcutRegistry } from "./services/shortcut-registry";
 import { createTelemetryService, type TelemetryPayload, type TelemetryService } from "./services/telemetry";
+import { isTrustedIpcSender } from "./ipc/trusted-ipc-sender";
+import { createAppShutdownCoordinator } from "./lifecycle/app-shutdown-coordinator";
 import {
   createLlamaCppRuntime,
   readLlamaCppRuntimeConfigFromEnv,
@@ -274,6 +280,18 @@ const chatReplySustainTrigger = createChatReplySustainTriggerController({
   delayMs: PET_CHAT_REPLY_SUSTAIN_DELAY_MS,
   sendReason(reason) {
     sendPetActionTrigger(reason);
+  }
+});
+
+const shutdownCoordinator = createAppShutdownCoordinator({
+  quiesce: quiesceApp,
+  stopAsyncResources: stopAsyncResourcesForShutdown,
+  destroyWindows: destroyAppWindows,
+  finalQuit() {
+    app.quit();
+  },
+  reportError(error) {
+    console.error("[app] shutdown step failed", error);
   }
 });
 
@@ -641,11 +659,13 @@ async function stopLlamaCppRuntime(): Promise<LlamaCppRuntimeSummary | null> {
     return latestLlamaCppRuntimeSummary;
   }
 
-  llamaCppRuntime = null;
   managedLlamaCppProviderConfig = null;
   refreshCurrentProvider?.();
   return runtime.stop()
     .then((summary) => {
+      if (summary.status !== "timeout" && llamaCppRuntime === runtime) {
+        llamaCppRuntime = null;
+      }
       latestLlamaCppRuntimeSummary = llamaCppRuntimeSettingsStore?.getSafeSettingsView(summary) ?? summary;
       logTelemetry("llama_cpp_runtime_stopped", summary);
       return latestLlamaCppRuntimeSummary;
@@ -2047,7 +2067,9 @@ app.whenReady().then(async () => {
   });
 
   ensurePetWindow("startup");
-  chatWindow = createChatWindow();
+  chatWindow = createChatWindow({
+    shouldClose: () => shutdownCoordinator.isQuiescing()
+  });
   setTimeout(warmUpWebSearchMcpConnection, 1_500);
   function handleChatWindowInactive(): void {
     isChatInteractionActive = false;
@@ -2102,7 +2124,9 @@ app.whenReady().then(async () => {
 
   function openChatWindow(): void {
     if (!chatWindow) {
-      chatWindow = createChatWindow();
+      chatWindow = createChatWindow({
+        shouldClose: () => shutdownCoordinator.isQuiescing()
+      });
       attachChatWindowLifecycle(chatWindow);
     }
 
@@ -2117,11 +2141,11 @@ app.whenReady().then(async () => {
   }
 
   function isPetSender(event: IpcMainEvent | IpcMainInvokeEvent): boolean {
-    return Boolean(petWindow && event.sender === petWindow.webContents);
+    return isTrustedIpcSender(event, petWindow, "pet", join(__dirname, "../renderer"));
   }
 
   function isChatSender(event: IpcMainEvent | IpcMainInvokeEvent): boolean {
-    return Boolean(chatWindow && event.sender === chatWindow.webContents);
+    return isTrustedIpcSender(event, chatWindow, "chat", join(__dirname, "../renderer"));
   }
 
   function getCurrentProviderConfig(): ProviderConfig {
@@ -3545,15 +3569,19 @@ app.whenReady().then(async () => {
 
   ipcMain.handle("pet-lock:get", (event) => {
     if (!isChatSender(event)) {
-      return { isLocked: isPetLocked };
+      throw new Error("Unauthorized pet lock request");
     }
 
     return { isLocked: isPetLocked };
   });
 
   ipcMain.handle("pet-lock:set", (event, value: unknown) => {
-    if (!isChatSender(event) || typeof value !== "boolean") {
-      return { isLocked: isPetLocked };
+    if (!isChatSender(event)) {
+      throw new Error("Unauthorized pet lock request");
+    }
+
+    if (typeof value !== "boolean") {
+      throw new Error("Invalid pet lock request");
     }
 
     return setPetLocked(value, "chat_pet_lock_toggle");
@@ -3629,18 +3657,99 @@ app.on("window-all-closed", () => {
   }
 });
 
-app.on("will-quit", () => {
+function quiesceApp(): void {
+  if (activeChatRequestVersion !== null) {
+    chatEngine?.abortActiveStream();
+    transitionPetRole({ type: "request:cancelled", requestVersion: activeChatRequestVersion });
+    activeChatRequestVersion = null;
+  }
+
   cancelPendingModeActionStateTrigger();
   cancelStartupProactiveSpeechBubbleTimer();
   cancelIdleProactiveSpeechBubbleTimer();
-  bundledLlamaCppRuntime?.stop();
-  stopLlamaCppRuntime();
+  clearChatReplySustainTimer();
+  if (initialEdgeGlanceTimer) {
+    clearTimeout(initialEdgeGlanceTimer);
+    initialEdgeGlanceTimer = null;
+  }
+  if (performanceHeartbeat) {
+    clearInterval(performanceHeartbeat);
+    performanceHeartbeat = null;
+  }
   petPresentationPersistence?.flush();
   shortcutRegistry?.unregisterAll();
   shortcutRegistry = null;
   globalShortcut.unregisterAll();
+}
+
+async function stopLocalRuntimesForShutdown(): Promise<void> {
+  const runtimes = Array.from(new Set([
+    bundledLlamaCppRuntime,
+    llamaCppRuntime
+  ].filter((runtime): runtime is LlamaCppRuntime => runtime !== null)));
+
+  const results = await Promise.allSettled(runtimes.map(async (runtime) => {
+    const summary = await runtime.stop();
+    if (summary.status === "timeout") {
+      throw new Error("llama.cpp runtime stop timed out after escalation");
+    }
+    if (bundledLlamaCppRuntime === runtime) {
+      bundledLlamaCppRuntime = null;
+    }
+    if (llamaCppRuntime === runtime) {
+      llamaCppRuntime = null;
+    }
+  }));
+
+  const failures = results.filter((result) => result.status === "rejected");
+  if (failures.length > 0) {
+    throw new AggregateError(
+      failures.map((result) => result.reason),
+      "One or more local runtimes failed to stop"
+    );
+  }
+}
+
+async function stopAsyncResourcesForShutdown(): Promise<void> {
+  const results = await Promise.allSettled([
+    mcpSearchSessionRegistry.shutdown(),
+    stopLocalRuntimesForShutdown()
+  ]);
+  const failures = results.filter((result) => result.status === "rejected");
+  if (failures.length > 0) {
+    throw new AggregateError(
+      failures.map((result) => result.reason),
+      "One or more async resources failed to stop"
+    );
+  }
+}
+
+function destroyAppWindows(): void {
+  pointerController?.dispose();
+  pointerController = null;
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (!window.isDestroyed()) {
+      window.destroy();
+    }
+  }
+  petWindow = null;
+  chatWindow = null;
+}
+
+app.on("before-quit", (event) => {
+  if (shutdownCoordinator.shouldAllowFinalQuit()) {
+    return;
+  }
+
+  event.preventDefault();
+  shutdownCoordinator.shutdown().catch((error: unknown) => {
+    console.error("[app] shutdown coordinator failed", error);
+  });
 });
 
 app.on("activate", () => {
+  if (shutdownCoordinator.isQuiescing()) {
+    return;
+  }
   ensurePetWindow("activate");
 });

@@ -49,6 +49,7 @@ type RuntimeSettings = {
 type RuntimeDependencies = {
   spawn?: SpawnLike;
   fetch?: FetchLike;
+  forceKillProcessTree?: (pid: number) => Promise<void>;
 };
 
 const DEFAULT_HOST = "127.0.0.1";
@@ -138,9 +139,15 @@ export function createLlamaCppRuntime(
 ): LlamaCppRuntime {
   const spawn = dependencies.spawn ?? nodeSpawn;
   const fetchFn = dependencies.fetch ?? fetch;
+  const forceKillProcessTree = dependencies.forceKillProcessTree ?? (
+    process.platform === "win32"
+      ? (pid: number) => forceKillWindowsProcessTree(pid, getStopTimeoutMs())
+      : null
+  );
   let status: LlamaCppRuntimeStatus = "disabled";
   let child: ChildProcess | null = null;
   let startPromise: Promise<LlamaCppRuntimeSummary> | null = null;
+  let stopPromise: Promise<LlamaCppRuntimeSummary> | null = null;
   let baseURLHost: string | undefined;
   let activeHost: string = normalizeHost(config.host);
   let activePort: number | undefined;
@@ -233,16 +240,34 @@ export function createLlamaCppRuntime(
     return stopInternal();
   }
 
-  async function stopInternal(options: { preserveStatus?: LlamaCppRuntimeStatus } = {}): Promise<LlamaCppRuntimeSummary> {
+  function stopInternal(options: { preserveStatus?: LlamaCppRuntimeStatus } = {}): Promise<LlamaCppRuntimeSummary> {
+    if (stopPromise) {
+      return stopPromise;
+    }
+
     const startedAt = Date.now();
     const target = child;
 
     if (!target) {
-      return createSummary({
+      return Promise.resolve(createSummary({
         durationMs: Date.now() - startedAt
-      });
+      }));
     }
 
+    const currentStop = stopChild(target, startedAt, options).finally(() => {
+      if (stopPromise === currentStop) {
+        stopPromise = null;
+      }
+    });
+    stopPromise = currentStop;
+    return currentStop;
+  }
+
+  async function stopChild(
+    target: ChildProcess,
+    startedAt: number,
+    options: { preserveStatus?: LlamaCppRuntimeStatus }
+  ): Promise<LlamaCppRuntimeSummary> {
     const closedPromise = waitForClose(target, getStopTimeoutMs());
 
     try {
@@ -258,6 +283,27 @@ export function createLlamaCppRuntime(
     const closed = await closedPromise;
 
     if (!closed) {
+      const pid = target.pid;
+      if (forceKillProcessTree && typeof pid === "number" && pid > 0) {
+        const stopTimeoutMs = getStopTimeoutMs();
+        const forcedClosePromise = waitForClose(target, stopTimeoutMs);
+        const forceKillPromise = Promise.resolve().then(() => forceKillProcessTree(pid));
+        const [, forcedClosed] = await Promise.all([
+          settleWithin(forceKillPromise, stopTimeoutMs),
+          forcedClosePromise
+        ]);
+
+        if (forcedClosed) {
+          if (child === target) {
+            child = null;
+          }
+          status = options.preserveStatus ?? "exited";
+          return createSummary({
+            durationMs: Date.now() - startedAt
+          });
+        }
+      }
+
       status = options.preserveStatus ?? "timeout";
       return createSummary({
         durationMs: Date.now() - startedAt,
@@ -475,6 +521,72 @@ function allocatePort(host: string): Promise<number> {
         resolve(port);
       });
     });
+  });
+}
+
+function forceKillWindowsProcessTree(pid: number, timeoutMs: number): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const taskkill = nodeSpawn("taskkill", ["/pid", String(pid), "/T", "/F"], {
+      shell: false,
+      windowsHide: true,
+      stdio: "ignore"
+    });
+    let settled = false;
+    const timeoutId = setTimeout(() => {
+      try {
+        taskkill.kill();
+      } catch {
+        // The bounded caller can continue even if taskkill cannot be interrupted.
+      }
+      settle(new Error("taskkill timed out"));
+    }, timeoutMs);
+
+    function settle(error?: Error): void {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timeoutId);
+      taskkill.off("error", onError);
+      taskkill.off("close", onClose);
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve();
+    }
+
+    function onError(error: Error): void {
+      settle(error);
+    }
+
+    function onClose(code: number | null): void {
+      if (code === 0 || code === 128) {
+        settle();
+        return;
+      }
+      settle(new Error(`taskkill exited with code ${String(code)}`));
+    }
+
+    taskkill.once("error", onError);
+    taskkill.once("close", onClose);
+    taskkill.unref();
+  });
+}
+
+function settleWithin(promise: Promise<unknown>, timeoutMs: number): Promise<void> {
+  return new Promise((resolve) => {
+    const timeoutId = setTimeout(resolve, timeoutMs);
+    promise.then(
+      () => {
+        clearTimeout(timeoutId);
+        resolve();
+      },
+      () => {
+        clearTimeout(timeoutId);
+        resolve();
+      }
+    );
   });
 }
 

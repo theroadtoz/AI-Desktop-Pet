@@ -6,7 +6,8 @@ const require = createRequire(import.meta.url);
 const {
   createAssistantReplyPrivacyStreamGuard,
   redactAssistantPersonaSelfIdentityDrift,
-  redactAssistantReplyPrivateMarkers
+  redactAssistantReplyPrivateMarkers,
+  sanitizeAssistantReplyForDisplay
 } = require("../dist/main/services/chat/assistant-reply-privacy.js") as typeof import("../src/main/services/chat/assistant-reply-privacy");
 const {
   createChatEngine
@@ -14,6 +15,46 @@ const {
 const {
   hasGenericAiSelfIdentityDrift
 } = require("../dist/shared/persona-self-identity.js") as typeof import("../src/shared/persona-self-identity");
+
+function collectSafeReplyDeltas(chunks: readonly string[]): string {
+  let streamed = "";
+  const guard = createAssistantReplyPrivacyStreamGuard((text) => {
+    streamed += text;
+  });
+
+  for (const chunk of chunks) {
+    guard.push(chunk);
+  }
+
+  guard.flush();
+  return streamed;
+}
+
+function assertSafeAcrossAllPartitions(source: string): void {
+  const characters = Array.from(source);
+  const safeFinal = sanitizeAssistantReplyForDisplay(source);
+  const partitionCount = 2 ** Math.max(characters.length - 1, 0);
+
+  for (let partition = 0; partition < partitionCount; partition += 1) {
+    const chunks: string[] = [];
+    let chunk = characters[0] ?? "";
+
+    for (let index = 1; index < characters.length; index += 1) {
+      if ((partition & (1 << (index - 1))) !== 0) {
+        chunks.push(chunk);
+        chunk = characters[index];
+      } else {
+        chunk += characters[index];
+      }
+    }
+
+    if (chunk) {
+      chunks.push(chunk);
+    }
+
+    assert.equal(collectSafeReplyDeltas(chunks), safeFinal, `stream differs at partition ${partition}`);
+  }
+}
 
 test("assistant reply redaction preserves ordinary companion text", () => {
   const text = "我明白了，我们先把下一步定清楚。";
@@ -74,6 +115,77 @@ test("assistant reply stream guard redacts markers split across deltas", () => {
   assert.doesNotMatch(streamed, /sk-p230b-secret-should-not-appear/);
   assert.match(streamed, /\[私有标记\]/);
   assert.match(streamed, /\[敏感密钥\]/);
+});
+
+test("assistant reply stream guard does not leak a long Windows path across any partition", () => {
+  const windowsPath = `C:\\Users\\Alice\\${"private-directory\\".repeat(16)}model.gguf`;
+  const source = `Windows path: "${windowsPath}"。`;
+  const safeFinal = sanitizeAssistantReplyForDisplay(source);
+
+  assert.doesNotMatch(safeFinal, /private-directory|model\.gguf/);
+
+  for (let split = 0; split <= source.length; split += 1) {
+    const streamed = collectSafeReplyDeltas([
+      source.slice(0, split),
+      source.slice(split)
+    ]);
+
+    assert.equal(streamed, safeFinal, `stream differs at split ${split}`);
+  }
+
+  assert.equal(
+    collectSafeReplyDeltas(Array.from(source)),
+    safeFinal,
+    "stream differs when every character is a chunk"
+  );
+});
+
+test("assistant reply stream guard is invariant across sensitive-text split points", () => {
+  const windowsPath = `C:\\Users\\Alice\\${"private-directory\\".repeat(16)}model.gguf`;
+  const uncPath = `\\\\fileserver\\private-share\\${"restricted-folder\\".repeat(16)}notes.txt`;
+  const source = [
+    `Windows path: "${windowsPath}"。`,
+    `UNC path: "${uncPath}"。`,
+    "Authorization: Bearer abc.def-123_sensitive。",
+    "Secret: sk-p262a-secret-should-never-appear。",
+    "Markers: TOKEN_private-session P2-62A_STREAM_SENTINEL。",
+    "我是一个AI助手，但这些内容都不能泄漏。"
+  ].join("\n");
+  const safeFinal = sanitizeAssistantReplyForDisplay(source);
+
+  assert.doesNotMatch(safeFinal, /private-directory|restricted-folder|fileserver|abc\.def-123_sensitive|sk-p262a-secret|TOKEN_private-session|P2-62A_STREAM_SENTINEL/);
+  assert.match(safeFinal, /\[本地路径\]/);
+  assert.match(safeFinal, /\[敏感令牌\]/);
+  assert.match(safeFinal, /\[敏感密钥\]/);
+  assert.match(safeFinal, /\[私有标记\]/);
+
+  for (let split = 0; split <= source.length; split += 1) {
+    const streamed = collectSafeReplyDeltas([
+      source.slice(0, split),
+      source.slice(split)
+    ]);
+
+    assert.equal(streamed, safeFinal, `stream differs at split ${split}`);
+  }
+
+  assert.equal(
+    collectSafeReplyDeltas(Array.from(source)),
+    safeFinal,
+    "stream differs when every character is a chunk"
+  );
+});
+
+test("assistant reply stream guard is invariant across all short sensitive-text partitions", () => {
+  for (const source of [
+    "C:\\x",
+    "\\\\a\\b",
+    "Bearer x",
+    "sk-12345678",
+    "TOKEN_x",
+    "AA_SENTINEL"
+  ]) {
+    assertSafeAcrossAllPartitions(source);
+  }
 });
 
 test("assistant reply stream guard redacts generic AI self identity split across deltas", () => {
@@ -140,4 +252,54 @@ test("chat engine redacts streamed deltas and final provider result", async () =
   assert.match(result.text, /\[敏感密钥\]/);
   assert.match(streamed, /作为西塔/);
   assert.match(result.text, /作为西塔/);
+});
+
+test("chat engine rejects an aborted reply when the provider resolves late", async () => {
+  let resolveReply: ((result: {
+    text: string;
+    emotion: "neutral";
+    intensity: "low";
+  }) => void) | undefined;
+  const provider = {
+    id: "local-openai-compatible" as const,
+    streamReply(_request: Parameters<ReturnType<typeof createChatEngine>["startChatStream"]>[0], options: {
+      signal: AbortSignal;
+      onDelta(delta: { text: string }): void;
+    }) {
+      options.onDelta({ text: "late provider reply" });
+      return new Promise<{
+        text: string;
+        emotion: "neutral";
+        intensity: "low";
+      }>((resolve) => {
+        resolveReply = resolve;
+      });
+    }
+  };
+  const engine = createChatEngine(provider);
+  let streamed = "";
+  const replyPromise = engine.startChatStream({
+    requestVersion: 2,
+    conversationId: "late-abort-test",
+    messages: [{ id: crypto.randomUUID(), role: "user", content: "stop" }]
+  }, {
+    onDelta(delta) {
+      streamed += delta.text;
+    }
+  });
+
+  assert.equal(engine.abortActiveStream(), true);
+  assert.ok(resolveReply);
+  resolveReply({
+    text: "late provider reply",
+    emotion: "neutral",
+    intensity: "low"
+  });
+
+  await assert.rejects(replyPromise, (error: unknown) => {
+    assert.ok(error instanceof DOMException);
+    assert.equal(error.name, "AbortError");
+    return true;
+  });
+  assert.equal(streamed, "");
 });
