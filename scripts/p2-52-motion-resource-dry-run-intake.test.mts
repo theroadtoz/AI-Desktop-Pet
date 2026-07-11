@@ -113,6 +113,34 @@ test("motion intake marks a valid user-provided fixture ready for manifest revie
   }
 });
 
+test("motion intake safely blocks semantic motions longer than 60 seconds", () => {
+  const root = makeFixture();
+
+  try {
+    writeJson(join(root, "motion-intake.json"), {
+      intakeVersion: 1,
+      preset: validPreset()
+    });
+    writeFileSync(join(root, "LICENSE.txt"), "User provided evidence.\n", "utf8");
+
+    const motion = validMotion();
+    motion.Meta = {
+      ...(motion.Meta as Record<string, unknown>),
+      Duration: 60.001
+    };
+    writeJson(join(root, "motions", "soft-greeting.motion3.json"), motion);
+
+    const summary = dryRunMotionResourceIntake({ candidateRoot: root });
+
+    assert.equal(summary.status, "blocked");
+    assert.equal(summary.safeSummaryOnly, true);
+    assert.equal(summary.durationSeconds, 60.001);
+    assert.deepEqual(summary.blockers, ["motion-duration-exceeds-safe-limit"]);
+  } finally {
+    rmSync(root, { force: true, recursive: true });
+  }
+});
+
 test("motion intake blocks reference-only and missing-license statuses", () => {
   const root = makeFixture();
 
@@ -208,7 +236,169 @@ test("motion intake blocks unsafe state ids and missing motion curves", () => {
     const missingCurvesSummary = dryRunMotionResourceIntake({ candidateRoot: root });
 
     assert.equal(missingCurvesSummary.status, "blocked");
-    assert.deepEqual(missingCurvesSummary.blockers, ["invalid-motion-json"]);
+    assert.equal(missingCurvesSummary.blockers.includes("invalid-motion-json"), true);
+  } finally {
+    rmSync(root, { force: true, recursive: true });
+  }
+});
+
+test("motion intake accepts complete standard Cubism segment encodings", () => {
+  const root = makeFixture();
+
+  try {
+    writeJson(join(root, "motion-intake.json"), {
+      intakeVersion: 1,
+      preset: validPreset()
+    });
+    writeFileSync(join(root, "LICENSE.txt"), "User provided evidence.\n", "utf8");
+
+    const motion = validMotion();
+    motion.Meta = {
+      ...(motion.Meta as Record<string, unknown>),
+      TotalSegmentCount: 4,
+      TotalPointCount: 7
+    };
+    (motion.Curves as Array<Record<string, unknown>>)[0].Segments = [
+      0, 0,
+      1, 0.2, 1, 0.4, 2, 0.6, 3,
+      2, 0.8, 4,
+      3, 1, 5,
+      0, 1.8, 6
+    ];
+    writeJson(join(root, "motions", "soft-greeting.motion3.json"), motion);
+
+    const summary = dryRunMotionResourceIntake({ candidateRoot: root });
+
+    assert.equal(summary.status, "ready-for-manifest-review");
+    assert.equal(summary.curveCount, 1);
+    assert.equal(summary.segmentCount, 4);
+    assert.equal(summary.pointCount, 7);
+    assert.deepEqual(summary.blockers, []);
+  } finally {
+    rmSync(root, { force: true, recursive: true });
+  }
+});
+
+test("motion intake truthfully blocks unsupported versions and Meta count mismatches", () => {
+  const root = makeFixture();
+
+  try {
+    writeJson(join(root, "motion-intake.json"), {
+      intakeVersion: 1,
+      preset: validPreset()
+    });
+    writeFileSync(join(root, "LICENSE.txt"), "User provided evidence.\n", "utf8");
+
+    writeJson(join(root, "motions", "soft-greeting.motion3.json"), {
+      ...validMotion(),
+      Version: 0
+    });
+
+    const versionSummary = dryRunMotionResourceIntake({ candidateRoot: root });
+
+    assert.equal(versionSummary.status, "blocked");
+    assert.equal(versionSummary.blockers.includes("invalid-motion-version"), true);
+
+    const pointMismatchMotion = validMotion();
+    pointMismatchMotion.Meta = {
+      ...(pointMismatchMotion.Meta as Record<string, unknown>),
+      TotalPointCount: 3
+    };
+    writeJson(join(root, "motions", "soft-greeting.motion3.json"), pointMismatchMotion);
+
+    const pointMismatchSummary = dryRunMotionResourceIntake({ candidateRoot: root });
+
+    assert.equal(pointMismatchSummary.status, "blocked");
+    assert.equal(pointMismatchSummary.blockers.includes("motion-meta-count-mismatch"), true);
+  } finally {
+    rmSync(root, { force: true, recursive: true });
+  }
+});
+
+test("motion intake truthfully blocks malformed and non-finite segment encodings", () => {
+  const root = makeFixture();
+
+  try {
+    writeJson(join(root, "motion-intake.json"), {
+      intakeVersion: 1,
+      preset: validPreset()
+    });
+    writeFileSync(join(root, "LICENSE.txt"), "User provided evidence.\n", "utf8");
+
+    const badSegmentMotion = validMotion();
+    (badSegmentMotion.Curves as Array<Record<string, unknown>>)[0].Segments = [0, 0, 9, 1.8, 10];
+    writeJson(join(root, "motions", "soft-greeting.motion3.json"), badSegmentMotion);
+
+    const badSegmentSummary = dryRunMotionResourceIntake({ candidateRoot: root });
+
+    assert.equal(badSegmentSummary.status, "blocked");
+    assert.equal(badSegmentSummary.blockers.includes("invalid-motion-segments"), true);
+
+    const truncatedSegmentMotion = validMotion();
+    (truncatedSegmentMotion.Curves as Array<Record<string, unknown>>)[0].Segments = [0, 0, 1, 0.2, 1];
+    writeJson(join(root, "motions", "soft-greeting.motion3.json"), truncatedSegmentMotion);
+
+    const truncatedSegmentSummary = dryRunMotionResourceIntake({ candidateRoot: root });
+
+    assert.equal(truncatedSegmentSummary.status, "blocked");
+    assert.equal(truncatedSegmentSummary.blockers.includes("invalid-motion-segments"), true);
+
+    const finiteMotionText = JSON.stringify(validMotion()).replace("[0,0,0,1.8,10]", "[0,0,0,1.8,1e400]");
+    writeFileSync(join(root, "motions", "soft-greeting.motion3.json"), finiteMotionText, "utf8");
+
+    const infinitySummary = dryRunMotionResourceIntake({ candidateRoot: root });
+
+    assert.equal(infinitySummary.status, "blocked");
+    assert.equal(infinitySummary.blockers.includes("invalid-motion-segments"), true);
+
+    const nanMotionText = JSON.stringify(validMotion()).replace("[0,0,0,1.8,10]", "[0,0,0,1.8,NaN]");
+    writeFileSync(join(root, "motions", "soft-greeting.motion3.json"), nanMotionText, "utf8");
+
+    const nanSummary = dryRunMotionResourceIntake({ candidateRoot: root });
+
+    assert.equal(nanSummary.status, "blocked");
+    assert.equal(nanSummary.blockers.includes("invalid-motion-json"), true);
+  } finally {
+    rmSync(root, { force: true, recursive: true });
+  }
+});
+
+test("motion intake truthfully blocks non-monotonic and out-of-duration segment times", () => {
+  const root = makeFixture();
+
+  try {
+    writeJson(join(root, "motion-intake.json"), {
+      intakeVersion: 1,
+      preset: validPreset()
+    });
+    writeFileSync(join(root, "LICENSE.txt"), "User provided evidence.\n", "utf8");
+
+    const nonMonotonicMotion = validMotion();
+    nonMonotonicMotion.Meta = {
+      ...(nonMonotonicMotion.Meta as Record<string, unknown>),
+      TotalSegmentCount: 2,
+      TotalPointCount: 3
+    };
+    (nonMonotonicMotion.Curves as Array<Record<string, unknown>>)[0].Segments = [
+      0, 0,
+      0, 1.2, 10,
+      0, 0.8, 5
+    ];
+    writeJson(join(root, "motions", "soft-greeting.motion3.json"), nonMonotonicMotion);
+
+    const nonMonotonicSummary = dryRunMotionResourceIntake({ candidateRoot: root });
+
+    assert.equal(nonMonotonicSummary.status, "blocked");
+    assert.equal(nonMonotonicSummary.blockers.includes("invalid-motion-segment-time"), true);
+
+    const outOfDurationMotion = validMotion();
+    (outOfDurationMotion.Curves as Array<Record<string, unknown>>)[0].Segments = [0, 0, 0, 1.81, 10];
+    writeJson(join(root, "motions", "soft-greeting.motion3.json"), outOfDurationMotion);
+
+    const outOfDurationSummary = dryRunMotionResourceIntake({ candidateRoot: root });
+
+    assert.equal(outOfDurationSummary.status, "blocked");
+    assert.equal(outOfDurationSummary.blockers.includes("invalid-motion-segment-time"), true);
   } finally {
     rmSync(root, { force: true, recursive: true });
   }

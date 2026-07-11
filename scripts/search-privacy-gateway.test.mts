@@ -795,6 +795,7 @@ test("MCP session registry shutdown is idempotent and waits for active warmup an
     query: "shutdown active search",
     maxResults: 1
   }, { spawnAdapter: adapter, sessionRegistry: registry });
+  const searchClosed = assert.rejects(search, { name: "mcp_search_closed" });
   const warmup = testMcpSearchConnection(config, { spawnAdapter: adapter, sessionRegistry: registry });
 
   const firstShutdown = registry.shutdown();
@@ -803,7 +804,7 @@ test("MCP session registry shutdown is idempotent and waits for active warmup an
   await firstShutdown;
 
   assert.equal(exited, 2);
-  await assert.rejects(search, { name: "mcp_search_closed" });
+  await searchClosed;
   assert.equal((await warmup).status, "failed");
 });
 

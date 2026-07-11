@@ -28,7 +28,13 @@ type IntakeBlockerCode =
   | "unsafe-motion-path"
   | "missing-motion-file"
   | "invalid-motion-json"
+  | "invalid-motion-version"
+  | "invalid-motion-meta"
   | "invalid-motion-duration"
+  | "motion-duration-exceeds-safe-limit"
+  | "motion-meta-count-mismatch"
+  | "invalid-motion-segments"
+  | "invalid-motion-segment-time"
   | "motion-loop-mismatch"
   | "unsupported-curve-target"
   | "unknown-parameter-id"
@@ -54,6 +60,9 @@ export type MotionResourceDryRunSummary = {
   loop: boolean | null;
   metaLoop: boolean | null;
   durationSeconds: number | null;
+  curveCount: number;
+  segmentCount: number;
+  pointCount: number;
   parameterCount: number;
   hashPrefix: string | null;
   assetLicenseStatus: ModelMotionAssetLicenseStatus | null;
@@ -92,6 +101,8 @@ const MOTION_ASSET_LICENSE_STATUSES: readonly ModelMotionAssetLicenseStatus[] = 
 ];
 const PRESENCE_MODE_IDS = ["default", "focus", "quiet", "sleep"] as const;
 const DIALOGUE_MODE_IDS = ["default", "work", "game", "reading"] as const;
+const MAX_SEMANTIC_MOTION_DURATION_SECONDS = 60;
+const CUBISM_SEGMENT_LENGTHS: readonly number[] = [3, 7, 3, 3];
 
 function createBaseSummary(candidateRoot: string | undefined): MotionResourceDryRunSummary {
   return {
@@ -108,6 +119,9 @@ function createBaseSummary(candidateRoot: string | undefined): MotionResourceDry
     loop: null,
     metaLoop: null,
     durationSeconds: null,
+    curveCount: 0,
+    segmentCount: 0,
+    pointCount: 0,
     parameterCount: 0,
     hashPrefix: null,
     assetLicenseStatus: null,
@@ -136,6 +150,12 @@ function requireString(value: unknown): string | null {
 
 function requireNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function requireNonNegativeInteger(value: unknown): number | null {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+    ? value
+    : null;
 }
 
 function requireBoolean(value: unknown): boolean | null {
@@ -272,17 +292,109 @@ function parsePreset(value: unknown): IntakePreset | null {
   };
 }
 
+function summarizeSegments(value: unknown, durationSeconds: number | null): {
+  segmentCount: number;
+  pointCount: number;
+  validEncoding: boolean;
+  validTime: boolean;
+} {
+  if (!Array.isArray(value) || value.length < 2) {
+    return { segmentCount: 0, pointCount: 0, validEncoding: false, validTime: false };
+  }
+
+  const segments = value.map(requireNumber);
+
+  if (segments.some((item) => item === null)) {
+    return { segmentCount: 0, pointCount: 0, validEncoding: false, validTime: false };
+  }
+
+  const values = segments as number[];
+  let previousTime = values[0];
+  let segmentCount = 0;
+  let pointCount = 1;
+  let validEncoding = true;
+  let validTime = durationSeconds !== null && previousTime >= 0 && previousTime <= durationSeconds;
+  let cursor = 2;
+
+  while (cursor < values.length) {
+    const segmentType = values[cursor];
+    const segmentLength = Number.isInteger(segmentType)
+      ? CUBISM_SEGMENT_LENGTHS[segmentType] ?? 0
+      : 0;
+
+    if (segmentLength === 0 || cursor + segmentLength > values.length) {
+      validEncoding = false;
+      break;
+    }
+
+    for (let pointOffset = 1; pointOffset < segmentLength; pointOffset += 2) {
+      const time = values[cursor + pointOffset];
+
+      if (
+        durationSeconds === null ||
+        time < previousTime ||
+        time < 0 ||
+        time > durationSeconds
+      ) {
+        validTime = false;
+      }
+
+      previousTime = time;
+      pointCount += 1;
+    }
+
+    segmentCount += 1;
+    cursor += segmentLength;
+  }
+
+  if (cursor !== values.length) {
+    validEncoding = false;
+  }
+
+  return { segmentCount, pointCount, validEncoding, validTime };
+}
+
 function summarizeMotion(motion: JsonRecord, parameterIds: Set<string>, blockers: Set<IntakeBlockerCode>): {
   durationSeconds: number | null;
   loop: boolean | null;
+  curveCount: number;
+  segmentCount: number;
+  pointCount: number;
   parameterCount: number;
 } {
   const meta = requireRecord(motion.Meta);
   const durationSeconds = meta ? requireNumber(meta.Duration) : null;
   const loop = meta ? requireBoolean(meta.Loop) : null;
+  const fps = meta ? requireNumber(meta.Fps) : null;
+  const declaredCurveCount = meta ? requireNonNegativeInteger(meta.CurveCount) : null;
+  const declaredSegmentCount = meta ? requireNonNegativeInteger(meta.TotalSegmentCount) : null;
+  const declaredPointCount = meta ? requireNonNegativeInteger(meta.TotalPointCount) : null;
+
+  if (motion.Version !== 3) {
+    blockers.add("invalid-motion-version");
+  }
 
   if (durationSeconds === null || durationSeconds <= 0) {
     blockers.add("invalid-motion-duration");
+  }
+
+  if (
+    durationSeconds !== null &&
+    durationSeconds > MAX_SEMANTIC_MOTION_DURATION_SECONDS
+  ) {
+    blockers.add("motion-duration-exceeds-safe-limit");
+  }
+
+  if (
+    !meta ||
+    loop === null ||
+    fps === null ||
+    fps <= 0 ||
+    declaredCurveCount === null ||
+    declaredSegmentCount === null ||
+    declaredPointCount === null
+  ) {
+    blockers.add("invalid-motion-meta");
   }
 
   const usedParameterIds = new Set<string>();
@@ -293,16 +405,33 @@ function summarizeMotion(motion: JsonRecord, parameterIds: Set<string>, blockers
     return {
       durationSeconds,
       loop,
+      curveCount: 0,
+      segmentCount: 0,
+      pointCount: 0,
       parameterCount: 0
     };
   }
 
   const curves = motion.Curves;
+  let segmentCount = 0;
+  let pointCount = 0;
 
   for (const item of curves) {
     const curve = requireRecord(item);
     const target = curve ? requireString(curve.Target) : null;
     const id = curve ? requireString(curve.Id) : null;
+    const segmentSummary = summarizeSegments(curve?.Segments, durationSeconds);
+
+    segmentCount += segmentSummary.segmentCount;
+    pointCount += segmentSummary.pointCount;
+
+    if (!segmentSummary.validEncoding) {
+      blockers.add("invalid-motion-segments");
+    }
+
+    if (!segmentSummary.validTime) {
+      blockers.add("invalid-motion-segment-time");
+    }
 
     if (target !== "Parameter") {
       blockers.add("unsupported-curve-target");
@@ -317,9 +446,20 @@ function summarizeMotion(motion: JsonRecord, parameterIds: Set<string>, blockers
     usedParameterIds.add(id);
   }
 
+  if (
+    declaredCurveCount !== null && declaredCurveCount !== curves.length ||
+    declaredSegmentCount !== null && declaredSegmentCount !== segmentCount ||
+    declaredPointCount !== null && declaredPointCount !== pointCount
+  ) {
+    blockers.add("motion-meta-count-mismatch");
+  }
+
   return {
     durationSeconds,
     loop,
+    curveCount: curves.length,
+    segmentCount,
+    pointCount,
     parameterCount: usedParameterIds.size
   };
 }
@@ -430,6 +570,9 @@ export function dryRunMotionResourceIntake(options: {
       );
       summary.metaLoop = motionSummary.loop;
       summary.durationSeconds = motionSummary.durationSeconds;
+      summary.curveCount = motionSummary.curveCount;
+      summary.segmentCount = motionSummary.segmentCount;
+      summary.pointCount = motionSummary.pointCount;
       summary.parameterCount = motionSummary.parameterCount;
 
       if (motionSummary.loop !== null && motionSummary.loop !== preset.loop) {
