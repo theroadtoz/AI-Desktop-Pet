@@ -13,6 +13,7 @@ import {
   isProductionReadyMotionAssetLicenseStatus,
   validateMotionPresetPath
 } from "./live2d-motion-asset-audit.mts";
+import { parseMotion3Segments } from "./support/motion3-canonicalizer.mts";
 
 const REPOSITORY_ROOT = resolve(import.meta.dirname, "..");
 const WITCH_DISPLAY_INFO_PATH = "model/魔女.cdi3.json";
@@ -102,7 +103,6 @@ const MOTION_ASSET_LICENSE_STATUSES: readonly ModelMotionAssetLicenseStatus[] = 
 const PRESENCE_MODE_IDS = ["default", "focus", "quiet", "sleep"] as const;
 const DIALOGUE_MODE_IDS = ["default", "work", "game", "reading"] as const;
 const MAX_SEMANTIC_MOTION_DURATION_SECONDS = 60;
-const CUBISM_SEGMENT_LENGTHS: readonly number[] = [3, 7, 3, 3];
 
 function createBaseSummary(candidateRoot: string | undefined): MotionResourceDryRunSummary {
   return {
@@ -292,68 +292,6 @@ function parsePreset(value: unknown): IntakePreset | null {
   };
 }
 
-function summarizeSegments(value: unknown, durationSeconds: number | null): {
-  segmentCount: number;
-  pointCount: number;
-  validEncoding: boolean;
-  validTime: boolean;
-} {
-  if (!Array.isArray(value) || value.length < 2) {
-    return { segmentCount: 0, pointCount: 0, validEncoding: false, validTime: false };
-  }
-
-  const segments = value.map(requireNumber);
-
-  if (segments.some((item) => item === null)) {
-    return { segmentCount: 0, pointCount: 0, validEncoding: false, validTime: false };
-  }
-
-  const values = segments as number[];
-  let previousTime = values[0];
-  let segmentCount = 0;
-  let pointCount = 1;
-  let validEncoding = true;
-  let validTime = durationSeconds !== null && previousTime >= 0 && previousTime <= durationSeconds;
-  let cursor = 2;
-
-  while (cursor < values.length) {
-    const segmentType = values[cursor];
-    const segmentLength = Number.isInteger(segmentType)
-      ? CUBISM_SEGMENT_LENGTHS[segmentType] ?? 0
-      : 0;
-
-    if (segmentLength === 0 || cursor + segmentLength > values.length) {
-      validEncoding = false;
-      break;
-    }
-
-    for (let pointOffset = 1; pointOffset < segmentLength; pointOffset += 2) {
-      const time = values[cursor + pointOffset];
-
-      if (
-        durationSeconds === null ||
-        time < previousTime ||
-        time < 0 ||
-        time > durationSeconds
-      ) {
-        validTime = false;
-      }
-
-      previousTime = time;
-      pointCount += 1;
-    }
-
-    segmentCount += 1;
-    cursor += segmentLength;
-  }
-
-  if (cursor !== values.length) {
-    validEncoding = false;
-  }
-
-  return { segmentCount, pointCount, validEncoding, validTime };
-}
-
 function summarizeMotion(motion: JsonRecord, parameterIds: Set<string>, blockers: Set<IntakeBlockerCode>): {
   durationSeconds: number | null;
   loop: boolean | null;
@@ -420,7 +358,7 @@ function summarizeMotion(motion: JsonRecord, parameterIds: Set<string>, blockers
     const curve = requireRecord(item);
     const target = curve ? requireString(curve.Target) : null;
     const id = curve ? requireString(curve.Id) : null;
-    const segmentSummary = summarizeSegments(curve?.Segments, durationSeconds);
+    const segmentSummary = parseMotion3Segments(curve?.Segments, durationSeconds ?? Number.NaN);
 
     segmentCount += segmentSummary.segmentCount;
     pointCount += segmentSummary.pointCount;

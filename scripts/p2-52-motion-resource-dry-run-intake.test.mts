@@ -326,6 +326,14 @@ test("motion intake truthfully blocks malformed and non-finite segment encodings
     writeFileSync(join(root, "LICENSE.txt"), "User provided evidence.\n", "utf8");
 
     const badSegmentMotion = validMotion();
+    (badSegmentMotion.Curves as Array<Record<string, unknown>>)[0].Segments = [0, 0];
+    writeJson(join(root, "motions", "soft-greeting.motion3.json"), badSegmentMotion);
+
+    const initialPointOnlySummary = dryRunMotionResourceIntake({ candidateRoot: root });
+
+    assert.equal(initialPointOnlySummary.status, "blocked");
+    assert.equal(initialPointOnlySummary.blockers.includes("invalid-motion-segments"), true);
+
     (badSegmentMotion.Curves as Array<Record<string, unknown>>)[0].Segments = [0, 0, 9, 1.8, 10];
     writeJson(join(root, "motions", "soft-greeting.motion3.json"), badSegmentMotion);
 

@@ -1,18 +1,32 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
   assertNoPreTriggerYawnLoad,
   classifyProbeOutcome,
   createIsolatedMotionFixture,
+  createSourceGateBlockedSummary,
+  deriveYawnProbeTiming,
   injectIsolatedCubismProbe,
   injectIsolatedMotionPreset,
   injectIsolatedStateSleepPath,
   isAcceptedProbeSummary,
+  shouldKeepP263BArtifacts,
   summarizeProbeOutcome
 } from "./p2-63a-yawn-motion-isolated-state-trigger-real-ui.mjs";
 
 const RUN_ID = "unit-run";
+const TIMING = deriveYawnProbeTiming(4.986);
+const CANONICALIZATION = {
+  sourceVersion: 0,
+  outputVersion: 3,
+  sourceCurveCount: 237,
+  retainedCurveCount: 9,
+  retainedSegmentCount: 106,
+  retainedPointCount: 327,
+  consistencyCheck: true
+};
 const CLEANUP_OK = {
   electronStopped: true,
   tmpRemoved: true,
@@ -21,13 +35,80 @@ const CLEANUP_OK = {
   errors: []
 };
 
-test("isolated yawn fixture forces Loop false without rewriting Version", () => {
-  const source = { Version: 0, Meta: { Duration: 4.98, Loop: true }, Curves: [] };
-  const fixture = createIsolatedMotionFixture(source);
+test("strict source Meta gate blocks the current yawn before it becomes a canonical candidate", () => {
+  const source = JSON.parse(readFileSync("model/yawn.motion3.json", "utf8"));
+  const displayInfo = JSON.parse(readFileSync("model/魔女.cdi3.json", "utf8"));
+  const result = createIsolatedMotionFixture(source, displayInfo.Parameters.map(({ Id }: { Id: string }) => Id));
 
-  assert.equal(fixture.Version, 0);
-  assert.equal(fixture.Meta.Loop, false);
-  assert.equal(source.Meta.Loop, true);
+  assert.equal(result.status, "blocked");
+  assert.deepEqual(result.summary, {
+    safeSummaryOnly: true,
+    status: "blocked",
+    sourceVersion: 0,
+    outputVersion: null,
+    sourceCurveCount: 237,
+    sourceSegmentCount: 3361,
+    sourcePointCount: 10320,
+    retainedCurveCount: 0,
+    retainedSegmentCount: 0,
+    retainedPointCount: 0,
+    consistencyCheck: false,
+    blockers: ["source-meta-count-mismatch"]
+  });
+  assert.equal(source.Version, 0);
+});
+
+test("blocked source summary routes to VTS recorder without a real UI launch or renderer probe", () => {
+  const summary = createSourceGateBlockedSummary({
+    sourceVersion: 0,
+    sourceCurveCount: 237,
+    sourceSegmentCount: 3361,
+    sourcePointCount: 10320,
+    blockers: ["source-meta-count-mismatch", "E:\\private\\motion", '{"Curves":[]}'],
+    rawSource: { Curves: ["must-not-leak"] },
+    sourcePath: "E:\\private\\yawn.motion3.json"
+  }, 12);
+
+  assert.equal(summary.status, "blocked");
+  assert.equal(summary.acceptance, "source-meta-count-mismatch");
+  assert.equal(summary.realUi.launchAttempted, false);
+  assert.equal(summary.rendererProbe.created, false);
+  assert.deepEqual(summary.rendererProbe.events, []);
+  assert.equal(summary.fallback.status, "vts-recorder-required");
+  assert.equal(summary.fallback.inspectCommand, "npm run vts:motion-recorder -- inspect");
+  assert.equal(summary.fallback.recordingRequiresExplicitConfirmation, true);
+  const serialized = JSON.stringify(summary);
+  assert.doesNotMatch(serialized, /must-not-leak|E:\\\\private|Curves/u);
+});
+
+test("runner exits at the source gate with a sanitized truthful blocked summary", () => {
+  const run = spawnSync(process.execPath, [
+    "--no-warnings",
+    "scripts/p2-63a-yawn-motion-isolated-state-trigger-real-ui.mjs"
+  ], { cwd: process.cwd(), encoding: "utf8" });
+
+  assert.equal(run.status, 1);
+  assert.equal(run.stderr, "");
+  const summary = JSON.parse(run.stdout);
+  assert.equal(summary.status, "blocked");
+  assert.equal(summary.acceptance, "source-meta-count-mismatch");
+  assert.equal(summary.realUi.launchAttempted, false);
+  assert.equal(summary.rendererProbe.created, false);
+  assert.deepEqual(summary.rendererProbe.events, []);
+  assert.equal(summary.fallback.status, "vts-recorder-required");
+  assert.doesNotMatch(run.stdout, /[A-Z]:[\\/]|"Curves"|"Segments"/u);
+});
+
+test("probe timing and artifact retention are explicit and canonical-duration derived", () => {
+  assert.deepEqual(TIMING, {
+    durationSeconds: 4.986,
+    durationMs: 4_986,
+    watchdogMinMs: 4_686,
+    watchdogMaxMs: 5_786,
+    sampleOffsetsMs: [200, 2_500, 4_900]
+  });
+  assert.equal(shouldKeepP263BArtifacts({}), false);
+  assert.equal(shouldKeepP263BArtifacts({ P2_63B_KEEP_ARTIFACTS: "1" }), true);
 });
 
 test("isolated transforms bind yawn only on the state_sleep path for the real duration", () => {
@@ -36,8 +117,8 @@ test("isolated transforms bind yawn only on the state_sleep path for the real du
   const interactionSource = readFileSync("src/renderer/pet/interaction-actions.ts", "utf8");
   const cubismSource = readFileSync("src/renderer/pet/live2d/cubism-motion.ts", "utf8");
 
-  assert.match(injectIsolatedMotionPreset(presetSource), /id: "yawn-once"[\s\S]*durationHintSeconds: 4\.986[\s\S]*loop: false/u);
-  const patchedMain = injectIsolatedStateSleepPath(mainSource, RUN_ID);
+  assert.match(injectIsolatedMotionPreset(presetSource, TIMING), /id: "yawn-once"[\s\S]*durationHintSeconds: 4\.986[\s\S]*loop: false/u);
+  const patchedMain = injectIsolatedStateSleepPath(mainSource, TIMING, RUN_ID);
   assert.match(patchedMain, /trigger\.reason === "state_sleep"[\s\S]*durationMs: 4986[\s\S]*motionPresetId: "yawn-once"/u);
   assert.doesNotMatch(interactionSource, /motionPresetId: "yawn-once"/u);
   const probed = injectIsolatedCubismProbe(cubismSource, RUN_ID);
@@ -45,6 +126,8 @@ test("isolated transforms bind yawn only on the state_sleep path for the real du
     assert.match(probed, new RegExp(`"${stage}"`, "u"));
   }
   assert.match(probed, /runId: "unit-run"/u);
+  assert.match(probed, /CubismMotion\.create\(buffer, buffer\.byteLength, undefined, undefined, true\)/u);
+  assert.match(probed, /"parse_succeeded", \{ motionPresetId, consistencyCheck: true \}/u);
 });
 
 test("pre-trigger gate rejects any yawn load before sleep", () => {
@@ -68,6 +151,9 @@ test("state event, successful probe chain and strict 4.986s timing are correlate
   assert.equal(outcome.watchdogStop.elapsedMs, 4_990);
   assert.equal(outcome.watchdogStop.bounded, true);
   assert.equal(outcome.restored.timely, true);
+  assert.equal(outcome.fixture.sourceVersion, 0);
+  assert.equal(outcome.fixture.outputVersion, 3);
+  assert.equal(outcome.fixture.cubismConsistencyCheck, true);
   assert.equal(classifyProbeOutcome(outcome, {}, CLEANUP_OK).code, "native-started-visual-unproven");
 });
 
@@ -119,7 +205,7 @@ test("canvas visibility and hash changes alone require manual review", () => {
   assert.equal(outcome.visual.visibleFrameObserved, true);
   assert.equal(outcome.visual.frameChangeObserved, true);
   assert.equal(outcome.visual.evidenceLevel, "canvas-diagnostic-only");
-  assert.equal(acceptance.status, "needs-manual-review");
+  assert.equal(acceptance.status, "needs-manual-visual-review");
   assert.equal(acceptance.code, "native-started-visual-unproven");
   assert.equal(isAcceptedProbeSummary(acceptance), false);
 });
@@ -148,7 +234,7 @@ test("state, loop, sampling, watchdog, restore, and cleanup are classification g
   assert.equal(acceptance.gates.cleanup, false);
 });
 
-test("passed status and ok cannot diverge when manual visual evidence exists", () => {
+test("manual visual evidence cannot auto-pass a diagnostic-only candidate", () => {
   const acceptance = classifyProbeOutcome(
     makeOutcome({ parse: "parsed" }),
     {},
@@ -156,8 +242,17 @@ test("passed status and ok cannot diverge when manual visual evidence exists", (
     { manualVisualEvidence: true }
   );
 
-  assert.equal(acceptance.status, "passed");
-  assert.equal(isAcceptedProbeSummary(acceptance), true);
+  assert.equal(acceptance.status, "needs-manual-visual-review");
+  assert.equal(acceptance.code, "manual-evidence-recorded-diagnostic-only");
+  assert.equal(isAcceptedProbeSummary(acceptance), false);
+});
+
+test("explicitly retained artifacts satisfy cleanup policy without pretending tmp was removed", () => {
+  const cleanup = { ...CLEANUP_OK, tmpRemoved: false, artifactsRetained: true };
+  const acceptance = classifyProbeOutcome(makeOutcome({ parse: "parsed" }), {}, cleanup);
+
+  assert.equal(acceptance.gates.cleanup, true);
+  assert.equal(acceptance.status, "needs-manual-visual-review");
 });
 
 function makeOutcome(options: {
@@ -174,7 +269,7 @@ function makeOutcome(options: {
     { stage: "load_succeeded", atMs: 110, runId: RUN_ID, motionPresetId: "yawn-once", byteLength: 123 },
     { stage: "parse_attempt", atMs: 115, runId: RUN_ID, motionPresetId: "yawn-once" },
     parse === "parsed"
-      ? { stage: "parse_succeeded", atMs: 120, runId: RUN_ID, motionPresetId: "yawn-once" }
+      ? { stage: "parse_succeeded", atMs: 120, runId: RUN_ID, motionPresetId: "yawn-once", consistencyCheck: true }
       : { stage: "parser_blocked", atMs: 120, runId: RUN_ID, motionPresetId: "yawn-once", errorName: "unsupported-version" },
     ...(parse === "parsed" ? [
       { stage: "start_attempt", atMs: 125, runId: RUN_ID, motionPresetId: "yawn-once" },
@@ -190,14 +285,16 @@ function makeOutcome(options: {
   options.probeEventsMutation?.(probeEvents);
 
   return summarizeProbeOutcome({
-    fixtureMotion: { Version: 0, Meta: { Loop: false } },
+    fixtureMotion: { Version: 3, Meta: { Loop: false } },
+    canonicalization: CANONICALIZATION,
+    timing: TIMING,
     preTriggerProbeEvents: options.preTriggerProbeEvents ?? [],
     stateEvent: {
       payload: {
         reason: "state_sleep",
         stateId: "sleep",
         type: "doze",
-        durationMs: 4_986,
+        durationMs: TIMING.durationMs,
         selectedActionType: "doze",
         candidateActionTypes: ["doze"],
         ...options.statePayload
