@@ -3,17 +3,19 @@ import { createHash } from "node:crypto";
 import {
   cpSync,
   existsSync,
+  lstatSync,
   linkSync,
   mkdirSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync
 } from "node:fs";
-import { dirname, join, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { canonicalizeMotion3 } from "./support/motion3-canonicalizer.mts";
+import { canonicalizeMotion3, parseMotion3Segments } from "./support/motion3-canonicalizer.mts";
 import {
   connectToElectron,
   createRealUiRunContext,
@@ -29,6 +31,7 @@ import {
 const ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const RUN_NAME = "p2-63a-yawn-motion-isolated-state-trigger-real-ui";
 const YAWN_PRESET_ID = "yawn-once";
+const DRAFT_RELATIVE_PATH = Object.freeze(["motion-drafts", "vts-drafts", "yawn-draft.motion3.json"]);
 export const YAWN_SEMANTIC_ALLOWLIST = Object.freeze([
   "ParamAngleX",
   "ParamAngleY",
@@ -43,12 +46,230 @@ export const YAWN_SEMANTIC_ALLOWLIST = Object.freeze([
 const PROTECTED_PATHS = [
   "resources/models/witch/model-manifest.json",
   "model/yawn.motion3.json",
+  "model/yawn-once.motion3.json",
   "src/shared/pet-motion-presets.ts",
+  "src/shared/pet-motion-catalog.ts",
   "src/shared/interaction-action-catalog.ts",
   "src/renderer/pet/interaction-actions.ts",
   "src/renderer/pet/main.ts",
   "src/renderer/pet/live2d/cubism-motion.ts"
 ];
+export const ABSENT_PROTECTED_PATH = "absent";
+
+const MOTION_FIELDS = new Set(["Version", "Meta", "Curves", "UserData"]);
+const META_FIELDS = new Set([
+  "Duration", "Fps", "Loop", "AreBeziersRestricted", "CurveCount",
+  "TotalSegmentCount", "TotalPointCount", "UserDataCount", "TotalUserDataSize",
+  "FadeInTime", "FadeOutTime"
+]);
+const CURVE_FIELDS = new Set(["Target", "Id", "Segments", "FadeInTime", "FadeOutTime"]);
+const MOTION_VARIATION_PARAMETER_IDS = new Set([
+  "ParamAngleX", "ParamAngleY", "ParamAngleZ",
+  "ParamEyeLOpen", "ParamEyeROpen",
+  "ParamMouthOpenY", "ParamMouthForm"
+]);
+const MOTION_VARIATION_THRESHOLD = 0.0001;
+
+export function parseRunnerArgs(argv) {
+  if (argv.length === 0) return { mode: "default" };
+  if (argv.length !== 2 || argv[0] !== "--source-user-data" || typeof argv[1] !== "string" || argv[1].length === 0) {
+    throw new Error("invalid-cli-arguments");
+  }
+  if (!isAbsolute(argv[1])) throw new Error("source-user-data-must-be-absolute");
+  return { mode: "explicit-draft", sourceUserDataRoot: argv[1] };
+}
+
+export function validateExplicitDraftMotion(candidate, modelParameterIds) {
+  const blockers = new Set();
+  const isRecord = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+  const finite = (value) => typeof value === "number" && Number.isFinite(value);
+  const nonNegativeInteger = (value) => Number.isSafeInteger(value) && value >= 0;
+  const optionalNonNegative = (value) => value === undefined || finite(value) && value >= 0;
+  const hasOnly = (value, fields) => Object.keys(value).every((key) => fields.has(key));
+  const modelIds = Array.isArray(modelParameterIds) ? new Set(modelParameterIds) : null;
+  const allowlist = new Set(YAWN_SEMANTIC_ALLOWLIST);
+
+  if (!isRecord(candidate)) {
+    return { status: "blocked", blockers: ["invalid-candidate"] };
+  }
+  if (candidate.Version !== 3) blockers.add("invalid-version");
+  if (!hasOnly(candidate, MOTION_FIELDS)) blockers.add("unsupported-motion-field");
+
+  const meta = isRecord(candidate.Meta) ? candidate.Meta : null;
+  const curves = Array.isArray(candidate.Curves) ? candidate.Curves : null;
+  if (!meta) {
+    blockers.add("invalid-meta");
+  } else {
+    if (!hasOnly(meta, META_FIELDS)) blockers.add("unsupported-meta-field");
+    if (!finite(meta.Duration) || meta.Duration <= 0) blockers.add("invalid-duration");
+    if (!finite(meta.Fps) || meta.Fps <= 0) blockers.add("invalid-fps");
+    if (meta.Loop !== false) blockers.add("invalid-loop");
+    if (
+      typeof meta.AreBeziersRestricted !== "boolean" ||
+      !nonNegativeInteger(meta.CurveCount) ||
+      !nonNegativeInteger(meta.TotalSegmentCount) ||
+      !nonNegativeInteger(meta.TotalPointCount) ||
+      meta.UserDataCount !== 0 ||
+      meta.TotalUserDataSize !== 0 ||
+      !optionalNonNegative(meta.FadeInTime) ||
+      !optionalNonNegative(meta.FadeOutTime)
+    ) blockers.add("invalid-meta");
+  }
+  if (!curves || curves.length === 0) blockers.add("invalid-curves");
+  if (candidate.UserData !== undefined && (!Array.isArray(candidate.UserData) || candidate.UserData.length !== 0)) {
+    blockers.add("non-empty-user-data");
+  }
+  if (!modelIds || [...modelIds].some((id) => typeof id !== "string" || id.length === 0)) {
+    blockers.add("invalid-model-parameter-ids");
+  }
+
+  let segmentCount = 0;
+  let pointCount = 0;
+  const parameterIds = new Set();
+  const variedParameterIds = new Set();
+  if (curves) {
+    for (const curve of curves) {
+      if (!isRecord(curve)) {
+        blockers.add("invalid-curve");
+        continue;
+      }
+      if (!hasOnly(curve, CURVE_FIELDS)) blockers.add("unsupported-curve-field");
+      if (curve.Target !== "Parameter") blockers.add("unsupported-curve-target");
+      if (typeof curve.Id !== "string" || curve.Id.length === 0) {
+        blockers.add("invalid-parameter-id");
+      } else {
+        if (parameterIds.has(curve.Id)) blockers.add("duplicate-parameter-id");
+        parameterIds.add(curve.Id);
+        if (!allowlist.has(curve.Id)) blockers.add("parameter-not-allowlisted");
+        if (modelIds && !modelIds.has(curve.Id)) blockers.add("unknown-parameter-id");
+      }
+      if (!optionalNonNegative(curve.FadeInTime) || !optionalNonNegative(curve.FadeOutTime)) blockers.add("invalid-curve");
+      const parsed = parseMotion3Segments(curve.Segments, meta?.Duration);
+      segmentCount += parsed.segmentCount;
+      pointCount += parsed.pointCount;
+      if (!parsed.validEncoding) blockers.add("invalid-segments");
+      if (!parsed.validTime) blockers.add("invalid-segment-time");
+      if (
+        parsed.validEncoding && parsed.validTime &&
+        typeof curve.Id === "string" && MOTION_VARIATION_PARAMETER_IDS.has(curve.Id)
+      ) {
+        const values = extractValidatedMotion3PointValues(curve.Segments);
+        if (values.length > 1 && Math.max(...values) - Math.min(...values) > MOTION_VARIATION_THRESHOLD) {
+          variedParameterIds.add(curve.Id);
+        }
+      }
+    }
+  }
+  for (const id of allowlist) {
+    if (!parameterIds.has(id)) blockers.add("allowlist-id-not-present");
+  }
+  const consistencyCheck = Boolean(
+    meta && curves && meta.CurveCount === curves.length &&
+    meta.TotalSegmentCount === segmentCount && meta.TotalPointCount === pointCount
+  );
+  if (!consistencyCheck) blockers.add("meta-count-mismatch");
+  if (blockers.size > 0) return { status: "blocked", blockers: [...blockers].sort() };
+  return {
+    status: "validated",
+    motion: candidate,
+    structure: {
+      version: 3,
+      durationSeconds: meta.Duration,
+      fps: meta.Fps,
+      loop: false,
+      curveCount: curves.length,
+      segmentCount,
+      pointCount,
+      consistencyCheck: true,
+      semanticMotionVariation: variedParameterIds.size > 0,
+      variedParameterCount: variedParameterIds.size,
+      variedParameterIds: [...variedParameterIds].sort()
+    }
+  };
+}
+
+function extractValidatedMotion3PointValues(segments) {
+  const pointCountsBySegmentType = [1, 3, 1, 1];
+  const values = [segments[1]];
+  let cursor = 2;
+  while (cursor < segments.length) {
+    const pointCount = pointCountsBySegmentType[segments[cursor]];
+    for (let pointIndex = 0; pointIndex < pointCount; pointIndex += 1) {
+      values.push(segments[cursor + 2 + pointIndex * 2]);
+    }
+    cursor += 1 + pointCount * 2;
+  }
+  return values;
+}
+
+export function readExplicitDraftFromUserData(sourceUserDataRoot) {
+  if (!isAbsolute(sourceUserDataRoot)) throw new Error("source-user-data-must-be-absolute");
+  const root = resolve(sourceUserDataRoot);
+  const candidatePath = join(root, ...DRAFT_RELATIVE_PATH);
+  const relativeCandidate = relative(root, candidatePath);
+  if (relativeCandidate.startsWith(`..${sep}`) || relativeCandidate === ".." || isAbsolute(relativeCandidate)) {
+    throw new Error("draft-path-escape");
+  }
+  let current = root;
+  for (const component of DRAFT_RELATIVE_PATH) {
+    assertRegularNonReparsePath(current, "directory");
+    current = join(current, component);
+  }
+  assertRegularNonReparsePath(current, "file");
+  let realRoot;
+  let realCandidate;
+  try {
+    realRoot = realpathSync.native(root);
+    realCandidate = realpathSync.native(candidatePath);
+  } catch {
+    throw new Error("draft-path-resolution-failed");
+  }
+  const realRelative = relative(realRoot, realCandidate);
+  if (realRelative.startsWith(`..${sep}`) || realRelative === ".." || isAbsolute(realRelative)) {
+    throw new Error("draft-path-escape");
+  }
+  let sourceBytes;
+  try {
+    sourceBytes = readFileSync(candidatePath);
+  } catch {
+    throw new Error("draft-file-read-failed");
+  }
+  let candidate;
+  try {
+    candidate = JSON.parse(sourceBytes.toString("utf8"));
+  } catch {
+    throw new Error("draft-invalid-json");
+  }
+  const displayInfo = JSON.parse(readFileSync(join(ROOT, "model", "魔女.cdi3.json"), "utf8"));
+  const validation = validateExplicitDraftMotion(candidate, displayInfo.Parameters.map(({ Id }) => Id));
+  if (validation.status !== "validated") throw new Error(validation.blockers[0] ?? "draft-validation-blocked");
+  return {
+    sourceUserDataRoot: root,
+    sourcePath: candidatePath,
+    sourceBytes,
+    motion: validation.motion,
+    summary: {
+      safeSummaryOnly: true,
+      basename: basename(candidatePath),
+      sha256: createHash("sha256").update(sourceBytes).digest("hex"),
+      byteLength: sourceBytes.byteLength,
+      structure: validation.structure
+    }
+  };
+}
+
+function assertRegularNonReparsePath(path, expectedType) {
+  let stats;
+  try {
+    stats = lstatSync(path);
+  } catch {
+    throw new Error(expectedType === "file" ? "draft-file-missing" : "draft-parent-missing");
+  }
+  if (stats.isSymbolicLink()) throw new Error("draft-reparse-path-rejected");
+  if (expectedType === "file" ? !stats.isFile() : !stats.isDirectory()) {
+    throw new Error(expectedType === "file" ? "draft-not-regular-file" : "draft-parent-not-directory");
+  }
+}
 
 export function createIsolatedMotionFixture(sourceMotion, modelParameterIds) {
   return canonicalizeMotion3(sourceMotion, modelParameterIds, YAWN_SEMANTIC_ALLOWLIST);
@@ -197,8 +418,7 @@ ${helperMarker}`;
       } catch (error) {
         reportP263AProbe("parser_blocked", {
           motionPresetId,
-          errorName: error instanceof Error ? error.name : "unknown",
-          errorMessage: error instanceof Error ? error.message.slice(0, 180) : "unknown"
+          errorName: error instanceof Error ? error.name : "unknown"
         });
         throw error;
       }
@@ -207,6 +427,7 @@ ${helperMarker}`;
         reportP263AProbe("parser_blocked", { motionPresetId, errorName: "null-motion" });
         return null;
       }
+      motion.setEffectIds([], []);
       reportP263AProbe("parse_succeeded", { motionPresetId, consistencyCheck: true });`,
     "Cubism load/parse probe"
   );
@@ -272,8 +493,8 @@ export function summarizeProbeOutcome({ fixtureMotion, canonicalization, timing,
   const startAttempt = findStage("start_attempt");
   const startSucceeded = findStage("start_succeeded");
   const watchdogStop = findStage("watchdog_stop");
-  const watchdogElapsedMs = Number.isFinite(loadAttempt?.atMs) && Number.isFinite(watchdogStop?.atMs)
-    ? watchdogStop.atMs - loadAttempt.atMs
+  const watchdogElapsedMs = Number.isFinite(startSucceeded?.atMs) && Number.isFinite(watchdogStop?.atMs)
+    ? watchdogStop.atMs - startSucceeded.atMs
     : null;
   const visibleSamples = frameSamples.filter((sample) => sample.nonTransparentPixels > 1_000);
   const changedHashes = new Set(frameSamples.map((sample) => sample.frameHash));
@@ -310,7 +531,9 @@ export function summarizeProbeOutcome({ fixtureMotion, canonicalization, timing,
   ));
   const requiredSampleOffsets = timing.sampleOffsetsMs;
   const sampleTimingCovered = frameSamples.length === requiredSampleOffsets.length && frameSamples.every((sample, index) => (
-    Number.isFinite(sample.offsetMs) && Math.abs(sample.offsetMs - requiredSampleOffsets[index]) <= 120
+    sample.referenceName === "start_succeeded" &&
+    Number.isFinite(sample.offsetMs) &&
+    Math.abs(sample.offsetMs - requiredSampleOffsets[index]) <= 120
   ));
 
   return {
@@ -333,12 +556,16 @@ export function summarizeProbeOutcome({ fixtureMotion, canonicalization, timing,
       motionPresetId: YAWN_PRESET_ID
     },
     fixture: {
+      explicitDraftMode: canonicalization.explicitDraftMode === true,
       sourceVersion: canonicalization.sourceVersion,
       outputVersion: fixtureMotion.Version ?? null,
       sourceCurveCount: canonicalization.sourceCurveCount,
       retainedCurveCount: canonicalization.retainedCurveCount,
       retainedSegmentCount: canonicalization.retainedSegmentCount,
       retainedPointCount: canonicalization.retainedPointCount,
+      semanticMotionVariation: canonicalization.semanticMotionVariation === true,
+      variedParameterCount: canonicalization.variedParameterCount ?? 0,
+      variedParameterIds: canonicalization.variedParameterIds ?? [],
       canonicalConsistencyCheck: canonicalization.consistencyCheck,
       cubismConsistencyCheck: parseSucceeded?.consistencyCheck === true,
       loopForcedFalse: fixtureMotion.Meta?.Loop === false,
@@ -400,18 +627,25 @@ export function classifyProbeOutcome(outcome, runtimeDiagnostics, cleanup, visua
   const gates = {
     state: outcome.stateSelection.proven,
     canonicalRuntime: Boolean(
-      outcome.fixture.sourceVersion === 0 &&
+      (outcome.fixture.explicitDraftMode
+        ? outcome.fixture.sourceVersion === 3 &&
+          outcome.fixture.sourceCurveCount === 9 &&
+          outcome.fixture.retainedCurveCount === 9
+        : outcome.fixture.sourceVersion === 0 &&
+          outcome.fixture.sourceCurveCount === 237 &&
+          outcome.fixture.retainedCurveCount === 9 &&
+          outcome.fixture.retainedSegmentCount === 106 &&
+          outcome.fixture.retainedPointCount === 327) &&
       outcome.fixture.outputVersion === 3 &&
-      outcome.fixture.sourceCurveCount === 237 &&
-      outcome.fixture.retainedCurveCount === 9 &&
-      outcome.fixture.retainedSegmentCount === 106 &&
-      outcome.fixture.retainedPointCount === 327 &&
       outcome.fixture.canonicalConsistencyCheck &&
       outcome.fixture.cubismConsistencyCheck &&
       outcome.fixture.diagnosticOnly
     ),
     loop: outcome.fixture.loopForcedFalse,
+    semanticMotionVariation: outcome.fixture.semanticMotionVariation,
     sampling: outcome.visual.sampleTimingCovered,
+    motionVisible: outcome.visual.visibleFrameObserved,
+    motionChanged: outcome.visual.frameChangeObserved,
     watchdog: outcome.watchdogStop.bounded,
     restore: outcome.restored.visible && outcome.restored.timely,
     cleanup: cleanupPassed
@@ -420,6 +654,9 @@ export function classifyProbeOutcome(outcome, runtimeDiagnostics, cleanup, visua
     sourceVersion: outcome.fixture.sourceVersion,
     parserStatus: outcome.parse.status,
     rendererError,
+    semanticMotionVariation: outcome.fixture.semanticMotionVariation,
+    variedParameterCount: outcome.fixture.variedParameterCount,
+    variedParameterIds: outcome.fixture.variedParameterIds,
     visibleFrameObserved: outcome.visual.visibleFrameObserved,
     frameChangeObserved: outcome.visual.frameChangeObserved,
     gates
@@ -449,35 +686,70 @@ export function isAcceptedProbeSummary(acceptance) {
   return acceptance.status === "passed" && Object.values(acceptance.gates).every(Boolean);
 }
 
+export function createExplicitDraftInputBlockedSummary(error, explicitDraftMode = true) {
+  const sanitizedError = sanitizeError(error);
+  return {
+    safeSummaryOnly: true,
+    ok: false,
+    status: "blocked",
+    acceptance: sanitizedError.message || "explicit-draft-input-blocked",
+    error: sanitizedError,
+    phase: "explicit-draft-input",
+    explicitDraftMode,
+    diagnosticOnly: true,
+    manualVisualPass: false,
+    realUi: { launchAttempted: false }
+  };
+}
+
 async function main() {
   const startedAt = Date.now();
-  let sourceGate;
+  let runnerArgs;
+  let explicitDraft = null;
   try {
-    sourceGate = readCurrentYawnSourceGate();
-  } catch {
-    sourceGate = {
-      status: "blocked",
-      summary: {
-        safeSummaryOnly: true,
-        status: "blocked",
-        sourceVersion: null,
-        outputVersion: null,
-        sourceCurveCount: 0,
-        sourceSegmentCount: 0,
-        sourcePointCount: 0,
-        retainedCurveCount: 0,
-        retainedSegmentCount: 0,
-        retainedPointCount: 0,
-        consistencyCheck: false,
-        blockers: ["source-motion-gate-unavailable"]
-      }
-    };
-  }
-  if (sourceGate.status !== "canonicalized") {
-    const summary = createSourceGateBlockedSummary(sourceGate.summary, Date.now() - startedAt);
-    console.log(JSON.stringify(summary, null, 2));
+    runnerArgs = parseRunnerArgs(process.argv.slice(2));
+    if (runnerArgs.mode === "explicit-draft") {
+      explicitDraft = readExplicitDraftFromUserData(runnerArgs.sourceUserDataRoot);
+    }
+  } catch (error) {
+    console.log(JSON.stringify(
+      createExplicitDraftInputBlockedSummary(error, process.argv.includes("--source-user-data")),
+      null,
+      2
+    ));
     process.exitCode = 1;
     return;
+  }
+
+  if (runnerArgs.mode === "default") {
+    let sourceGate;
+    try {
+      sourceGate = readCurrentYawnSourceGate();
+    } catch {
+      sourceGate = {
+        status: "blocked",
+        summary: {
+          safeSummaryOnly: true,
+          status: "blocked",
+          sourceVersion: null,
+          outputVersion: null,
+          sourceCurveCount: 0,
+          sourceSegmentCount: 0,
+          sourcePointCount: 0,
+          retainedCurveCount: 0,
+          retainedSegmentCount: 0,
+          retainedPointCount: 0,
+          consistencyCheck: false,
+          blockers: ["source-motion-gate-unavailable"]
+        }
+      };
+    }
+    if (sourceGate.status !== "canonicalized") {
+      const summary = createSourceGateBlockedSummary(sourceGate.summary, Date.now() - startedAt);
+      console.log(JSON.stringify(summary, null, 2));
+      process.exitCode = 1;
+      return;
+    }
   }
 
   const protectedBefore = hashProtectedPaths();
@@ -505,7 +777,7 @@ async function main() {
   };
 
   try {
-    const prepared = prepareIsolatedApp(fixtureRoot, runId);
+    const prepared = prepareIsolatedApp(fixtureRoot, runId, explicitDraft);
     canonicalization = prepared.canonicalization;
     timing = prepared.timing;
     await buildIsolatedRenderer(fixtureRoot, context);
@@ -523,6 +795,7 @@ async function main() {
     await sleep(2_000);
     const preTriggerProbeEvents = await readProbeEvents(pet);
     assertNoPreTriggerYawnLoad(preTriggerProbeEvents);
+    screenshotPaths.push(await captureScreenshot(pet, context, "baseline-before-trigger"));
     await armTimedFrameSampler(pet, runId, timing.sampleOffsetsMs);
     const screenshotPromise = captureTimedScreenshots(pet, context, runId, timing.sampleOffsetsMs);
     const telemetryStartIndex = readTelemetryEvents(context).length - 1;
@@ -538,11 +811,14 @@ async function main() {
       event.payload?.selectedActionType === "doze"
     ), 8_000);
 
-    const [samples, capturedScreenshots] = await Promise.all([readTimedFrameSamples(pet), screenshotPromise]);
-    screenshotPaths = capturedScreenshots;
+    const [frameSamples, capturedScreenshots] = await Promise.all([readTimedFrameSamples(pet), screenshotPromise]);
+    screenshotPaths.push(...capturedScreenshots);
     await waitForProbeStage(pet, "watchdog_stop", timing.watchdogMaxMs + 1_000);
     const probeEvents = await readProbeEvents(pet);
     await setPresenceMode(chat, "default");
+    await sleep(300);
+    const restoredFrame = await captureCurrentFrame(pet, "stop-plus-300ms", 300);
+    screenshotPaths.push(await captureScreenshot(pet, context, "restored"));
     outcome = summarizeProbeOutcome({
       fixtureMotion: JSON.parse(readFileSync(join(fixtureRoot, "model-fixture", "yawn.motion3.json"), "utf8")),
       canonicalization,
@@ -550,8 +826,8 @@ async function main() {
       preTriggerProbeEvents,
       stateEvent,
       probeEvents,
-      frameSamples: samples.motion,
-      restoredFrame: samples.restored,
+      frameSamples,
+      restoredFrame,
       runId
     });
     runtimeDiagnostics = readRuntimeDiagnostics(context);
@@ -561,6 +837,9 @@ async function main() {
       acceptance: "pending-cleanup",
       isolatedFixture: true,
       diagnosticOnly: true,
+      explicitDraftMode: explicitDraft !== null,
+      sourceDraft: explicitDraft?.summary ?? null,
+      manualVisualPass: false,
       canonicalization,
       timing,
       productionCatalogModified: false,
@@ -578,6 +857,9 @@ async function main() {
       acceptance: "probe-failed",
       isolatedFixture: true,
       diagnosticOnly: true,
+      explicitDraftMode: explicitDraft !== null,
+      sourceDraft: explicitDraft?.summary ?? null,
+      manualVisualPass: false,
       canonicalization,
       timing,
       productionCatalogModified: false,
@@ -602,8 +884,7 @@ async function main() {
         cleanup.artifactsRetained = true;
         return;
       }
-      rmSync(context.runParentDir, { force: true, recursive: true });
-      cleanup.tmpRemoved = !existsSync(context.runParentDir);
+      cleanup.tmpRemoved = removeCurrentRunArtifacts(context);
       if (!cleanup.tmpRemoved) throw new Error("run temp directory remained");
     });
     await runCleanupStep(cleanup, "protected-paths", async () => {
@@ -613,6 +894,12 @@ async function main() {
   }
 
   summary.cleanup = cleanup;
+  summary.visualCheckpoints = {
+    manualInspectionRequired: true,
+    automaticVisualPass: false,
+    captured: screenshotPaths.length === 5,
+    basenames: screenshotPaths.map((path) => basename(path))
+  };
   if (outcome) {
     const acceptance = classifyProbeOutcome(outcome, runtimeDiagnostics, cleanup);
     summary.status = acceptance.status;
@@ -621,11 +908,9 @@ async function main() {
     summary.gates = acceptance.gates;
     summary.ok = isAcceptedProbeSummary(acceptance);
   }
-  summary.artifacts = keepArtifacts ? {
-    runDirectory: context.runDir,
-    fixturePath: join(fixtureRoot, "model-fixture", "yawn.motion3.json"),
-    screenshotPaths
-  } : null;
+  summary.artifacts = keepArtifacts
+    ? createPublicArtifactSummary(context, fixtureRoot, screenshotPaths)
+    : null;
   if (keepArtifacts) {
     writeFileSync(context.resultPath, `${JSON.stringify(summary, null, 2)}\n`, "utf8");
   }
@@ -635,16 +920,20 @@ async function main() {
   }
 }
 
-export function prepareIsolatedApp(fixtureRoot, runId) {
-  const sourceYawnPath = join(ROOT, "model", "yawn.motion3.json");
-  const sourceBytes = readFileSync(sourceYawnPath);
+export function prepareIsolatedApp(fixtureRoot, runId, explicitDraft = null) {
+  const refreshedDraft = explicitDraft ? readExplicitDraftFromUserData(explicitDraft.sourceUserDataRoot) : null;
+  if (refreshedDraft && refreshedDraft.summary.sha256 !== explicitDraft.summary.sha256) {
+    throw new Error("draft-source-changed-after-validation");
+  }
+  const sourceYawnPath = refreshedDraft?.sourcePath ?? join(ROOT, "model", "yawn.motion3.json");
+  const sourceBytes = refreshedDraft?.sourceBytes ?? readFileSync(sourceYawnPath);
   const sourceHashBefore = createHash("sha256").update(sourceBytes).digest("hex");
   const displayInfo = JSON.parse(readFileSync(join(ROOT, "model", "魔女.cdi3.json"), "utf8"));
   const modelParameterIds = displayInfo.Parameters.map(({ Id }) => Id);
-  const canonicalResult = createIsolatedMotionFixture(JSON.parse(sourceBytes.toString("utf8")), modelParameterIds);
-  if (canonicalResult.status !== "canonicalized") {
-    throw new Error(`yawn source gate blocked: ${canonicalResult.summary.blockers.join(",") || "unknown"}`);
-  }
+  const canonicalResult = refreshedDraft
+    ? createValidatedDraftFixture(refreshedDraft.motion, modelParameterIds)
+    : createIsolatedMotionFixture(JSON.parse(sourceBytes.toString("utf8")), modelParameterIds);
+  if (canonicalResult.status !== "canonicalized") throw new Error("yawn-source-gate-blocked");
   const timing = deriveYawnProbeTiming(canonicalResult.motion.Meta.Duration);
 
   mkdirSync(fixtureRoot, { recursive: true });
@@ -657,12 +946,15 @@ export function prepareIsolatedApp(fixtureRoot, runId) {
   symlinkSync(join(ROOT, "node_modules"), join(fixtureRoot, "node_modules"), "junction");
   createModelFixture(join(ROOT, "model"), join(fixtureRoot, "model-fixture"));
 
-  const sourceHashAfter = createHash("sha256").update(readFileSync(sourceYawnPath)).digest("hex");
+  const sourceHashAfter = refreshedDraft
+    ? readExplicitDraftFromUserData(explicitDraft.sourceUserDataRoot).summary.sha256
+    : createHash("sha256").update(readFileSync(sourceYawnPath)).digest("hex");
   if (sourceHashBefore !== sourceHashAfter) {
     throw new Error("source yawn hash changed during canonicalization");
   }
   const canonicalization = {
     ...canonicalResult.summary,
+    explicitDraftMode: explicitDraft !== null,
     sourceHashBefore,
     sourceHashAfter,
     sourceHashUnchanged: true,
@@ -690,6 +982,51 @@ export function prepareIsolatedApp(fixtureRoot, runId) {
   patchFile(join(fixtureRoot, "src", "renderer", "pet", "main.ts"), (source) => injectIsolatedStateSleepPath(source, timing, runId));
   patchFile(join(fixtureRoot, "src", "renderer", "pet", "live2d", "cubism-motion.ts"), (source) => injectIsolatedCubismProbe(source, runId));
   return { canonicalization, timing };
+}
+
+export function removeCurrentRunArtifacts(context) {
+  const runParentDir = resolve(context.runParentDir);
+  const runDir = resolve(context.runDir);
+  const relativeRunDir = relative(runParentDir, runDir);
+  if (!relativeRunDir || relativeRunDir.startsWith(`..${sep}`) || relativeRunDir === ".." || isAbsolute(relativeRunDir)) {
+    throw new Error("invalid-current-run-directory");
+  }
+  rmSync(runDir, { force: true, recursive: true });
+  return !existsSync(runDir);
+}
+
+export function createPublicArtifactSummary(context, fixtureRoot, screenshotPaths) {
+  return {
+    runDirectory: relative(ROOT, context.runDir).split(sep).join("/"),
+    fixturePath: relative(context.runDir, join(fixtureRoot, "model-fixture", "yawn.motion3.json")).split(sep).join("/"),
+    screenshotBasenames: screenshotPaths.map((path) => basename(path))
+  };
+}
+
+function createValidatedDraftFixture(motion, modelParameterIds) {
+  const validation = validateExplicitDraftMotion(motion, modelParameterIds);
+  if (validation.status !== "validated") return { status: "blocked", summary: { blockers: validation.blockers } };
+  return {
+    status: "canonicalized",
+    motion,
+    summary: {
+      safeSummaryOnly: true,
+      status: "validated-draft",
+      sourceVersion: 3,
+      outputVersion: 3,
+      sourceCurveCount: validation.structure.curveCount,
+      sourceSegmentCount: validation.structure.segmentCount,
+      sourcePointCount: validation.structure.pointCount,
+      retainedCurveCount: validation.structure.curveCount,
+      retainedSegmentCount: validation.structure.segmentCount,
+      retainedPointCount: validation.structure.pointCount,
+      semanticMotionVariation: validation.structure.semanticMotionVariation,
+      variedParameterCount: validation.structure.variedParameterCount,
+      variedParameterIds: validation.structure.variedParameterIds,
+      consistencyCheck: validation.structure.consistencyCheck,
+      blockers: []
+    }
+  };
 }
 
 function readCurrentYawnSourceGate() {
@@ -821,18 +1158,24 @@ async function armTimedFrameSampler(pet, runId, sampleOffsetsMs) {
           referenceName
         };
       };
+      const captureRenderedFrame = async (label, offsetMs, referenceAtMs, referenceName) => {
+        const deadline = performance.now() + 250;
+        let sample = null;
+        do {
+          await new Promise((resolveFrame) => requestAnimationFrame(() => resolveFrame()));
+          sample = capture(label, offsetMs, referenceAtMs, referenceName);
+          if (sample.nonTransparentPixels > 1_000) return sample;
+        } while (performance.now() < deadline);
+        return sample;
+      };
       globalThis.__P2_63A_TIMED_FRAME_SAMPLES__ = (async () => {
-        const trigger = await waitForStage("state_sleep_trigger", 10000);
+        const trigger = await waitForStage("start_succeeded", 10000);
         const motion = [];
         for (const offsetMs of sampleOffsetsMs) {
           await sleepFor(trigger.atMs + offsetMs - performance.now());
-          motion.push(capture("sleep-" + offsetMs + "ms", offsetMs, trigger.atMs, "state_sleep_trigger"));
+          motion.push(await captureRenderedFrame("motion-" + offsetMs + "ms", offsetMs, trigger.atMs, "start_succeeded"));
         }
-        const stop = await waitForStage("watchdog_stop", 1500);
-        await sleepFor(stop.atMs + 300 - performance.now());
-        const restored = capture("stop-plus-300ms", 300, stop.atMs, "watchdog_stop");
-        restored.afterStopMs = restored.offsetMs;
-        return { motion, restored };
+        return motion;
       })();
       return true;
     })()
@@ -845,25 +1188,72 @@ async function captureTimedScreenshots(pet, context, runId, sampleOffsetsMs) {
       const deadline = performance.now() + 10000;
       while (performance.now() < deadline) {
         const event = (globalThis.__P2_63A_YAWN_PROBE__ ?? [])
-          .find((item) => item.runId === ${JSON.stringify(runId)} && item.stage === "state_sleep_trigger");
+          .find((item) => item.runId === ${JSON.stringify(runId)} && item.stage === "start_succeeded");
         if (event) return event;
         await new Promise((resolveSleep) => setTimeout(resolveSleep, 10));
       }
-      throw new Error("timed-screenshot-trigger-timeout");
+      throw new Error("timed-screenshot-start-timeout");
     })()
   `);
   const paths = [];
-  for (const offsetMs of sampleOffsetsMs) {
-    await evaluate(pet, `new Promise((resolveSleep) => setTimeout(resolveSleep, Math.max(0, ${trigger.atMs + offsetMs} - performance.now())))`);
-    const screenshot = await pet.cdp.send("Page.captureScreenshot", {
-      format: "png",
-      captureBeyondViewport: false
-    });
-    const path = join(context.runDir, `p2-63b-yawn-${offsetMs}ms.png`);
-    writeFileSync(path, Buffer.from(screenshot.data, "base64"));
-    paths.push(path);
+  const labels = ["start", "mid", "end"];
+  for (const [index, offsetMs] of sampleOffsetsMs.entries()) {
+    await evaluate(pet, `(async () => {
+      await new Promise((resolveSleep) => setTimeout(resolveSleep, Math.max(0, ${trigger.atMs + offsetMs} - performance.now())));
+      await new Promise((resolveFrame) => requestAnimationFrame(() => resolveFrame()));
+    })()`);
+    paths.push(await captureScreenshot(pet, context, `${labels[index]}-${offsetMs}ms`));
   }
   return paths;
+}
+
+async function captureScreenshot(pet, context, label) {
+  const screenshot = await pet.cdp.send("Page.captureScreenshot", {
+    format: "png",
+    captureBeyondViewport: false
+  });
+  const path = join(context.runDir, `p2-63b-yawn-${label}.png`);
+  writeFileSync(path, Buffer.from(screenshot.data, "base64"));
+  return path;
+}
+
+async function captureCurrentFrame(pet, label, afterStopMs) {
+  return evaluate(pet, `
+    (async () => {
+      const canvas = document.querySelector("#pet-canvas");
+      const gl = canvas?.getContext("webgl2");
+      if (!canvas || !gl) throw new Error("missing-webgl2-pet-canvas");
+      const deadline = performance.now() + 250;
+      let nonTransparentPixels = 0;
+      let frameHash = "00000000";
+      do {
+        await new Promise((resolveFrame) => requestAnimationFrame(() => resolveFrame()));
+        const pixels = new Uint8Array(canvas.width * canvas.height * 4);
+        gl.readPixels(0, 0, canvas.width, canvas.height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+        nonTransparentPixels = 0;
+        let hash = 2166136261;
+        for (let index = 0; index < pixels.length; index += 4) {
+          const alpha = pixels[index + 3] ?? 0;
+          if (alpha > 8) nonTransparentPixels += 1;
+          if (index % 64 === 0) {
+            hash ^= (pixels[index] ?? 0) + ((pixels[index + 1] ?? 0) << 8) + ((pixels[index + 2] ?? 0) << 16) + (alpha << 24);
+            hash = Math.imul(hash, 16777619) >>> 0;
+          }
+        }
+        frameHash = hash.toString(16).padStart(8, "0");
+        if (nonTransparentPixels > 1_000) break;
+      } while (performance.now() < deadline);
+      return {
+        label: ${JSON.stringify(label)},
+        width: canvas.width,
+        height: canvas.height,
+        contextLost: gl.isContextLost(),
+        nonTransparentPixels,
+        frameHash,
+        afterStopMs: ${afterStopMs}
+      };
+    })()
+  `);
 }
 
 async function readTimedFrameSamples(pet) {
@@ -958,30 +1348,40 @@ function replaceExactlyOnce(source, marker, replacement, label) {
   return `${source.slice(0, first)}${replacement}${source.slice(first + marker.length)}`;
 }
 
-function hashProtectedPaths() {
-  return Object.fromEntries(PROTECTED_PATHS.map((path) => {
-    const content = readFileSync(join(ROOT, path));
-    return [path, createHash("sha256").update(content).digest("hex")];
+export function hashProtectedPaths(root = ROOT, paths = PROTECTED_PATHS) {
+  return Object.fromEntries(paths.map((path) => {
+    const absolutePath = join(root, path);
+    if (!existsSync(absolutePath)) return [path, ABSENT_PROTECTED_PATH];
+    const content = readFileSync(absolutePath);
+    return [path, `sha256:${createHash("sha256").update(content).digest("hex")}`];
   }));
 }
 
-function protectedHashesEqual(left, right) {
-  return PROTECTED_PATHS.every((path) => left[path] === right[path]);
+export function protectedHashesEqual(left, right, paths = PROTECTED_PATHS) {
+  return paths.every((path) => left[path] === right[path]);
 }
 
 function sanitizeError(error) {
   const message = error instanceof Error ? error.message : String(error);
   return {
     name: error instanceof Error ? error.name : "Error",
-    message: message.replaceAll(ROOT, "<workspace>").slice(0, 800)
+    message: sanitizePublicText(message).slice(0, 800)
   };
+}
+
+export function sanitizePublicText(value) {
+  return String(value)
+    .replaceAll(ROOT, "<workspace>")
+    .replace(/file:\/\/\/[A-Za-z]:\/[^\s"'<>]*/giu, "<absolute-path>")
+    .replace(/(?<![A-Za-z])[A-Za-z]:[\\/][^\s"'<>]*/gu, "<absolute-path>")
+    .replace(/\\\\[^\\\s"'<>]+\\[^\s"'<>]*/gu, "<absolute-path>");
 }
 
 function readRuntimeDiagnostics(context) {
   return Object.fromEntries(["electron.stdout.log", "electron.stderr.log"].map((name) => {
     const path = join(context.runDir, name);
     const text = existsSync(path) ? readFileSync(path, "utf8") : "";
-    return [name, text.replaceAll(ROOT, "<workspace>").slice(-1_500)];
+    return [name, sanitizePublicText(text).slice(-1_500)];
   }));
 }
 
