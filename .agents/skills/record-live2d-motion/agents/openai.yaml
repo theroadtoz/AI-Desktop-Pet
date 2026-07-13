@@ -1,0 +1,4 @@
+interface:
+  display_name: "Record Live2D Motion"
+  short_description: "Safely record and review a Live2D Motion3 draft"
+  default_prompt: "Use $record-live2d-motion to safely record and review this Live2D Motion3 take."
