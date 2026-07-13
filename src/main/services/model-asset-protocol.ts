@@ -44,7 +44,12 @@ function normalizeRequestPath(relativePath: string): string | null {
 
   const normalized = path.posix.normalize(relativePath);
 
-  if (normalized === "." || normalized === ".." || normalized.startsWith("../")) {
+  if (
+    normalized !== relativePath ||
+    normalized === "." ||
+    normalized === ".." ||
+    normalized.startsWith("../")
+  ) {
     return null;
   }
 
@@ -59,23 +64,59 @@ function isInsideRoot(sourceRoot: string, assetPath: string): boolean {
     !path.isAbsolute(relativeToRoot);
 }
 
-function resolveAssetPath(manifest: LoadedModelManifest, relativePath: string): string | null {
+type AssetPathCandidate = {
+  assetPath: string;
+  assetRoot: string;
+};
+
+function resolveAssetPathCandidate(manifest: LoadedModelManifest, relativePath: string): AssetPathCandidate | null {
   const normalized = normalizeRequestPath(relativePath);
 
-  if (!normalized || !manifest.allowedRelativePaths.has(normalized)) {
+  if (!normalized) {
     return null;
   }
 
-  const assetPath = path.resolve(manifest.sourceRoot, normalized);
+  const isManagedMotion = manifest.managedMotionRelativePaths.has(normalized);
+  const isSourceAsset = manifest.sourceRelativePaths.has(normalized);
 
-  if (!isInsideRoot(manifest.sourceRoot, assetPath)) {
+  if (isManagedMotion === isSourceAsset) {
     return null;
   }
 
-  return assetPath;
+  const assetRoot = isManagedMotion ? manifest.managedMotionRoot : manifest.sourceRoot;
+
+  const assetPath = path.resolve(assetRoot, normalized);
+
+  if (!isInsideRoot(assetRoot, assetPath)) {
+    return null;
+  }
+
+  return { assetPath, assetRoot };
 }
 
-async function handleModelAssetRequest(request: Request): Promise<Response> {
+export async function resolveModelAssetPath(
+  manifest: LoadedModelManifest,
+  relativePath: string
+): Promise<string | null> {
+  const candidate = resolveAssetPathCandidate(manifest, relativePath);
+
+  if (!candidate) {
+    return null;
+  }
+
+  try {
+    const [realAssetRoot, realAssetPath] = await Promise.all([
+      fs.realpath(candidate.assetRoot),
+      fs.realpath(candidate.assetPath)
+    ]);
+
+    return isInsideRoot(realAssetRoot, realAssetPath) ? realAssetPath : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function handleModelAssetRequest(request: Request): Promise<Response> {
   const url = new URL(request.url);
 
   if (url.host !== WITCH_MODEL_ID) {
@@ -91,7 +132,7 @@ async function handleModelAssetRequest(request: Request): Promise<Response> {
   const manifest = witchManifest ?? loadModelManifest(WITCH_MODEL_ID);
   witchManifest = manifest;
 
-  const assetPath = resolveAssetPath(manifest, decodedPath);
+  const assetPath = await resolveModelAssetPath(manifest, decodedPath);
 
   if (!assetPath) {
     return response(403);

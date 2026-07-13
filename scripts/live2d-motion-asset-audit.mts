@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve, win32, posix } from "node:path";
 import { pathToFileURL } from "node:url";
 import type {
@@ -163,6 +163,43 @@ function relativePath(root: string, path: string): string {
   return relative(root, path).replaceAll("\\", "/");
 }
 
+function isInsideRoot(root: string, path: string): boolean {
+  const relativeToRoot = relative(root, path);
+
+  return relativeToRoot !== "" &&
+    !relativeToRoot.startsWith("..") &&
+    !isAbsolute(relativeToRoot);
+}
+
+function resolveManifestAssetPath(root: string, relativePath: string, label: string): string {
+  if (
+    isAbsolute(relativePath) ||
+    win32.isAbsolute(relativePath) ||
+    relativePath.includes("\\") ||
+    posix.normalize(relativePath) !== relativePath
+  ) {
+    throw new Error(`${label} 必须是受管根目录内的规范 POSIX 相对路径`);
+  }
+
+  const assetPath = resolve(root, relativePath);
+
+  if (!isInsideRoot(root, assetPath)) {
+    throw new Error(`${label} 必须位于其受管根目录内`);
+  }
+
+  if (!existsSync(assetPath)) {
+    throw new Error(`${label} 文件不存在`);
+  }
+
+  const [realRoot, realAssetPath] = [realpathSync(root), realpathSync(assetPath)];
+
+  if (!isInsideRoot(realRoot, realAssetPath)) {
+    throw new Error(`${label} 不得通过符号链接离开其受管根目录`);
+  }
+
+  return assetPath;
+}
+
 function listFilesByExtension(directory: string, extension: string): string[] {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
     const path = resolve(directory, entry.name);
@@ -187,6 +224,7 @@ export function validateMotionPresetPath(relativePath: string, label = "motionPr
   const normalized = posix.normalize(relativePath);
 
   if (
+    normalized !== relativePath ||
     normalized === "." ||
     normalized === ".." ||
     normalized.startsWith("../") ||
@@ -303,11 +341,20 @@ function readMotionPresets(value: unknown): ModelMotionPreset[] {
 export function auditWitchMotionAssets(repositoryRoot = REPOSITORY_ROOT): MotionAssetAuditResult {
   const manifestPath = resolve(repositoryRoot, MANIFEST_PATH);
   const manifest = readJson(manifestPath) as MotionManifest;
-  const modelDirectory = resolve(dirname(manifestPath), requireString(manifest.sourceDir, "manifest.sourceDir"));
-  const model3Path = resolve(modelDirectory, requireString(manifest.model3, "manifest.model3"));
-  const displayInfoPath = resolve(modelDirectory, requireString(manifest.displayInfo, "manifest.displayInfo"));
+  const manifestDirectory = dirname(manifestPath);
+  const modelDirectory = resolve(manifestDirectory, requireString(manifest.sourceDir, "manifest.sourceDir"));
+  const model3Path = resolveManifestAssetPath(
+    modelDirectory,
+    requireString(manifest.model3, "manifest.model3"),
+    "manifest.model3"
+  );
+  const displayInfoPath = resolveManifestAssetPath(
+    modelDirectory,
+    requireString(manifest.displayInfo, "manifest.displayInfo"),
+    "manifest.displayInfo"
+  );
   const idleMotionRelativePath = validateMotionPresetPath(requireString(manifest.idleMotion, "manifest.idleMotion"), "manifest.idleMotion");
-  const idleMotionPath = resolve(modelDirectory, idleMotionRelativePath);
+  const idleMotionPath = resolveManifestAssetPath(modelDirectory, idleMotionRelativePath, "manifest.idleMotion");
   const model3 = readJson(model3Path);
   const fileReferences = requireRecord(model3.FileReferences, "model3.FileReferences");
   const model3Motions = fileReferences.Motions;
@@ -323,11 +370,11 @@ export function auditWitchMotionAssets(repositoryRoot = REPOSITORY_ROOT): Motion
       throw new Error(`semantic motion preset 不得复用 idleMotion：${preset.id}`);
     }
 
-    const motionPath = resolve(modelDirectory, preset.path);
-
-    if (!existsSync(motionPath)) {
-      throw new Error(`motion preset 文件不存在：${preset.id}`);
-    }
+    const motionPath = resolveManifestAssetPath(
+      manifestDirectory,
+      preset.path,
+      `motion preset 文件：${preset.id}`
+    );
 
     const summary = readMotionSummary(readJson(motionPath), parameterIds, `motionPresets.${preset.id}`);
 
@@ -363,7 +410,10 @@ export function auditWitchMotionAssets(repositoryRoot = REPOSITORY_ROOT): Motion
     model3Path: relativePath(repositoryRoot, model3Path),
     displayInfoPath: relativePath(repositoryRoot, displayInfoPath),
     model3DeclaredMotionGroups,
-    physicalMotionFiles: listFilesByExtension(modelDirectory, ".motion3.json")
+    physicalMotionFiles: [...new Set([
+      ...listFilesByExtension(modelDirectory, ".motion3.json"),
+      ...listFilesByExtension(manifestDirectory, ".motion3.json")
+    ])]
       .map((path) => relativePath(repositoryRoot, path))
       .sort(),
     idleMotion: {

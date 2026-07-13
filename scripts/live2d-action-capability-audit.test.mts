@@ -15,7 +15,7 @@ test("action capability audit covers every catalog action", () => {
   );
 });
 
-test("action capability audit records physical motions without admitting the yawn candidate", () => {
+test("action capability audit preserves legacy source candidates while reporting the registered yawn preset", () => {
   const audit = auditWitchActionCapabilities();
 
   assert.deepEqual(audit.model3DeclaredMotionGroups, []);
@@ -28,11 +28,8 @@ test("action capability audit records physical motions without admitting the yaw
     true
   );
   assert.equal(audit.idleMotion.loop, true);
-  assert.equal(audit.semanticMotionPresetCount, 0);
-  assert.deepEqual(audit.motionSafeSkip, {
-    status: "expected-safe-skip",
-    reason: "no-semantic-motion-presets"
-  });
+  assert.equal(audit.semanticMotionPresetCount, 1);
+  assert.equal(audit.motionSafeSkip, null);
   assert.equal(audit.targetActions.every((entry) => entry.supportLevel !== "native-motion"), true);
   assert.equal(
     audit.targetActions.some((entry) => entry.nativeMotions.some((motion) => motion.path === "model/yawn.motion3.json")),

@@ -276,6 +276,7 @@ export const PET_INTERACTION_ACTIONS: readonly PetInteractionAction[] = [
     weight: 0.4,
     durationMs: 1_450,
     presentation: { emotion: "neutral", intensity: "low", mode: "neutral" },
+    motionPresetId: "yawn-once",
     lookTarget: { x: 0, y: -0.22 }
   },
   {

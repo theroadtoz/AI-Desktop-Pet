@@ -327,7 +327,7 @@ test("safe echo helpers reject unknown actions and strip window shake payload de
   }
 });
 
-test("action trigger reasons map to fixed actions and emit safe started telemetry", () => {
+test("action trigger reasons map to fixed actions and emit safe started telemetry", async () => {
   const expected = {
     chat_opened: "listen",
     chat_input_focus: "listen",
@@ -354,17 +354,31 @@ test("action trigger reasons map to fixed actions and emit safe started telemetr
   } as const;
 
   for (const reason of PET_ACTION_TRIGGER_REASONS) {
-    const harness = createFakeInteractionActionPlayer();
     const actionType = getPetActionTriggerActionType(reason);
+    const action = getPetInteractionAction(actionType);
+    const motion = action.motionPresetId ? createFakeMotionPlayback(action.motionPresetId) : null;
+    const harness = createFakeInteractionActionPlayer(motion ? {
+      playMotionPreset: async () => ({
+        status: "started",
+        motionPresetId: action.motionPresetId!,
+        durationMs: action.durationMs,
+        playback: motion.playback
+      })
+    } : {});
 
     assert.equal(actionType, expected[reason]);
-    assert.equal(harness.player.playAction(getPetInteractionAction(actionType), reason), true);
+    assert.equal(harness.player.playAction(action, reason), true);
+    if (motion) {
+      await Promise.resolve();
+      motion.transition("started");
+    }
     assert.deepEqual(harness.telemetry.at(0), {
       type: "pet_interaction_action_started",
       payload: {
         type: actionType,
         reason,
-        durationMs: getPetInteractionAction(actionType).durationMs
+        durationMs: action.durationMs,
+        ...(action.motionPresetId ? { motionPresetId: action.motionPresetId } : {})
       }
     });
   }
@@ -734,6 +748,13 @@ test("pet interaction action manifest includes audited expression and accessory 
   assert.equal(byType.get("focus")?.accessoryPartIds, undefined);
   assert.equal(byType.get("workFocus")?.expressionName, undefined);
   assert.deepEqual(byType.get("workFocus")?.lookTarget, { x: 0.05, y: 0.1 });
+  assert.equal(byType.get("doze")?.motionPresetId, "yawn-once");
+  assert.deepEqual(
+    PET_INTERACTION_ACTIONS
+      .filter((action) => action.motionPresetId === "yawn-once")
+      .map((action) => action.type),
+    ["doze"]
+  );
   assert.deepEqual(byType.get("doze")?.lookTarget, { x: 0, y: -0.22 });
   assert.deepEqual(byType.get("edgeGlance")?.lookTarget, { x: 0.38, y: 0.02 });
   assert.deepEqual(byType.get("edgeGlance")?.poseTarget, { bodyAngleX: 4, bodyAngleZ: -2 });
@@ -758,6 +779,7 @@ test("pet interaction action manifest includes audited expression and accessory 
   assert.deepEqual(byType.get("readingThink")?.accessoryPartIds, ["Part53"]);
   assert.deepEqual(byType.get("readingThink")?.lookTarget, { x: -0.08, y: -0.16 });
   assert.equal(byType.get("sleepySettle")?.expressionName, undefined);
+  assert.equal(byType.get("sleepySettle")?.motionPresetId, undefined);
   assert.deepEqual(byType.get("sleepySettle")?.lookTarget, { x: 0, y: -0.25 });
 
   for (const [type, expressionPresetId] of Object.entries(expectedExpressionPresets)) {
@@ -1231,11 +1253,17 @@ test("interaction action player waits for native completion without stopping mot
     "applyPresentation:confused:none"
   ]);
   await Promise.resolve();
-  assert.equal(harness.timers.length, 0);
+  assert.equal(harness.timers.length, 1);
+  assert.equal(harness.timers[0]?.delayMs, 2_000);
 
   motion.transition("started");
-  assert.equal(harness.timers.length, 1);
-  assert.equal(harness.timers[0]?.delayMs, 5_600);
+  assert.equal(harness.timers[0]?.cleared, true);
+  assert.equal(harness.timers.length, 2);
+  assert.equal(harness.timers[1]?.delayMs, 5_600);
+  assert.equal(harness.calls.filter((call) => call === "boost:5600").length, 1);
+
+  harness.timers[0]?.callback();
+  assert.equal(harness.calls.some((call) => call.startsWith("stopMotion:")), false);
 
   harness.setPersistentAccessory("glasses");
   harness.setPersistentPresentation({ emotion: "happy", intensity: "high", mode: "emphasis" });
@@ -1243,14 +1271,284 @@ test("interaction action player waits for native completion without stopping mot
   await Promise.resolve();
 
   assert.deepEqual(harness.calls.slice(6), [
+    "boost:5600",
     "restoreParts",
     "clearExpression",
     "resetLookTarget",
     "resumeLook",
     "applyPresentation:happy:glasses"
   ]);
-  assert.equal(harness.timers[0]?.cleared, true);
+  assert.equal(harness.timers[1]?.cleared, true);
   assert.equal(harness.calls.some((call) => call.startsWith("stopMotion:")), false);
+  assert.deepEqual(harness.telemetry.at(-1), {
+    type: "pet_interaction_action_finished",
+    payload: {
+      type: "thinking",
+      reason: "click_body",
+      motionPresetId: "future-wave",
+      terminalStatus: "completed",
+      restoredAccessoryPresetId: "glasses"
+    }
+  });
+});
+
+test("interaction action player times out native motion that remains queued", async () => {
+  const motion = createFakeMotionPlayback();
+  const harness = createFakeInteractionActionPlayer({
+    playMotionPreset: async () => ({
+      status: "started",
+      motionPresetId: "future-wave",
+      durationMs: 5_100,
+      playback: motion.playback
+    })
+  });
+  const motionAction = {
+    ...getPetInteractionAction("thinking"),
+    motionPresetId: "future-wave" as const
+  };
+
+  assert.equal(harness.player.playAction(motionAction, "state_sleep"), true);
+  await Promise.resolve();
+
+  assert.equal(harness.timers.length, 1);
+  assert.equal(harness.timers[0]?.delayMs, 2_000);
+  harness.timers[0]?.callback();
+
+  assert.equal(harness.calls.filter((call) => call === "stopMotion:timed_out").length, 1);
+  assert.equal(harness.calls.filter((call) => call === "restoreParts").length, 1);
+  assert.equal(harness.player.isActive(), false);
+  assert.deepEqual(harness.telemetry.at(-1), {
+    type: "pet_interaction_action_finished",
+    payload: {
+      type: "thinking",
+      reason: "state_sleep",
+      motionPresetId: "future-wave",
+      terminalStatus: "timed_out",
+      restoredAccessoryPresetId: "none"
+    }
+  });
+
+  motion.transition("queued");
+  motion.settle("completed");
+  await Promise.resolve();
+  harness.timers[0]?.callback();
+  assert.equal(harness.calls.filter((call) => call === "restoreParts").length, 1);
+  assert.equal(harness.telemetry.filter((event) => event.type === "pet_interaction_action_finished").length, 1);
+});
+
+test("interaction action player times out a native motion load that never resolves", () => {
+  const harness = createFakeInteractionActionPlayer({
+    playMotionPreset: () => new Promise<CubismMotionPlaybackResult>(() => undefined)
+  });
+  const motionAction = {
+    ...getPetInteractionAction("thinking"),
+    motionPresetId: "future-wave" as const
+  };
+
+  assert.equal(harness.player.playAction(motionAction, "state_sleep"), true);
+  assert.equal(harness.timers.length, 1);
+  assert.equal(harness.timers[0]?.delayMs, 2_000);
+  assert.equal(harness.telemetry.some((event) => event.type === "pet_interaction_action_started"), false);
+
+  harness.timers[0]?.callback();
+  harness.timers[0]?.callback();
+
+  assert.equal(harness.player.isActive(), false);
+  assert.equal(harness.calls.filter((call) => call === "restoreParts").length, 1);
+  assert.equal(harness.calls.filter((call) => call === "stopMotion:timed_out").length, 1);
+  assert.equal(harness.telemetry.filter((event) => event.type === "pet_interaction_action_finished").length, 1);
+  assert.equal(harness.telemetry.at(-1)?.payload.terminalStatus, "timed_out");
+});
+
+test("interaction action player cancels a loading motion without reporting native interruption", async () => {
+  let resolveResult: (result: CubismMotionPlaybackResult) => void = () => undefined;
+  const pendingResult = new Promise<CubismMotionPlaybackResult>((resolve) => {
+    resolveResult = resolve;
+  });
+  const motion = createFakeMotionPlayback();
+  const harness = createFakeInteractionActionPlayer({
+    playMotionPreset: () => pendingResult
+  });
+  const motionAction = {
+    ...getPetInteractionAction("thinking"),
+    motionPresetId: "future-wave" as const
+  };
+
+  assert.equal(harness.player.playAction(motionAction, "state_sleep"), true);
+  assert.equal(harness.player.interruptActiveMotionAction(), true);
+
+  assert.equal(harness.player.isActive(), false);
+  assert.equal(harness.calls.filter((call) => call === "stopMotion:interrupted").length, 1);
+  assert.equal(harness.calls.filter((call) => call === "restoreParts").length, 1);
+  assert.equal(harness.telemetry.at(-1)?.type, "pet_interaction_action_finished");
+  assert.equal(Object.hasOwn(harness.telemetry.at(-1)?.payload ?? {}, "terminalStatus"), false);
+
+  resolveResult({
+    status: "started",
+    motionPresetId: "future-wave",
+    durationMs: 5_100,
+    playback: motion.playback
+  });
+  await Promise.resolve();
+  motion.transition("started");
+  motion.settle("completed");
+  await Promise.resolve();
+
+  assert.equal(harness.calls.filter((call) => call === "restoreParts").length, 1);
+  assert.equal(harness.telemetry.filter((event) => event.type === "pet_interaction_action_started").length, 0);
+  assert.equal(harness.telemetry.filter((event) => event.type === "pet_interaction_action_finished").length, 1);
+});
+
+test("interaction action player does not report native interruption while motion is queued", async () => {
+  const motion = createFakeMotionPlayback();
+  const harness = createFakeInteractionActionPlayer({
+    playMotionPreset: async () => ({
+      status: "started",
+      motionPresetId: "future-wave",
+      durationMs: 5_100,
+      playback: motion.playback
+    })
+  });
+  const motionAction = {
+    ...getPetInteractionAction("thinking"),
+    motionPresetId: "future-wave" as const
+  };
+
+  assert.equal(harness.player.playAction(motionAction, "state_sleep"), true);
+  await Promise.resolve();
+  assert.equal(harness.player.interruptActiveMotionAction(), true);
+
+  assert.equal(harness.calls.filter((call) => call === "stopMotion:interrupted").length, 1);
+  assert.equal(harness.calls.filter((call) => call === "restoreParts").length, 1);
+  assert.equal(Object.hasOwn(harness.telemetry.at(-1)?.payload ?? {}, "terminalStatus"), false);
+
+  motion.settle("interrupted");
+  await Promise.resolve();
+  assert.equal(harness.calls.filter((call) => call === "restoreParts").length, 1);
+});
+
+test("interaction action player ignores late playback and terminal identities after load timeout", async () => {
+  let resolveResult: (result: CubismMotionPlaybackResult) => void = () => undefined;
+  const pendingResult = new Promise<CubismMotionPlaybackResult>((resolve) => {
+    resolveResult = resolve;
+  });
+  const motion = createFakeMotionPlayback();
+  const harness = createFakeInteractionActionPlayer({ playMotionPreset: () => pendingResult });
+  const motionAction = {
+    ...getPetInteractionAction("thinking"),
+    motionPresetId: "future-wave" as const
+  };
+
+  assert.equal(harness.player.playAction(motionAction, "state_sleep"), true);
+  harness.timers[0]?.callback();
+  resolveResult({
+    status: "started",
+    motionPresetId: "future-wave",
+    durationMs: 5_100,
+    playback: motion.playback
+  });
+  await Promise.resolve();
+  motion.transition("started");
+  motion.settle("completed");
+  await Promise.resolve();
+
+  assert.equal(harness.calls.filter((call) => call === "stopMotion:timed_out").length, 1);
+  assert.equal(harness.calls.filter((call) => call === "restoreParts").length, 1);
+  assert.equal(harness.telemetry.filter((event) => event.type === "pet_interaction_action_started").length, 0);
+  assert.equal(harness.telemetry.filter((event) => event.type === "pet_interaction_action_finished").length, 1);
+  assert.equal(harness.telemetry.at(-1)?.payload.terminalStatus, "timed_out");
+});
+
+test("interaction action player interrupts an active motion action before allowing the next state action", async () => {
+  const motion = createFakeMotionPlayback();
+  const harness = createFakeInteractionActionPlayer({
+    playMotionPreset: async () => ({
+      status: "started",
+      motionPresetId: "future-wave",
+      durationMs: 5_100,
+      playback: motion.playback
+    })
+  });
+  const motionAction = {
+    ...getPetInteractionAction("thinking"),
+    motionPresetId: "future-wave" as const
+  };
+
+  harness.player.playAction(motionAction, "state_sleep");
+  await Promise.resolve();
+  motion.transition("started");
+
+  assert.equal(harness.player.interruptActiveMotionAction(), true);
+  assert.deepEqual(harness.calls.slice(-6), [
+    "stopMotion:interrupted",
+    "restoreParts",
+    "clearExpression",
+    "resetLookTarget",
+    "resumeLook",
+    "applyPresentation:neutral:none"
+  ]);
+  assert.deepEqual(harness.telemetry.at(-1), {
+    type: "pet_interaction_action_finished",
+    payload: {
+      type: "thinking",
+      reason: "state_sleep",
+      motionPresetId: "future-wave",
+      terminalStatus: "interrupted",
+      restoredAccessoryPresetId: "none"
+    }
+  });
+
+  motion.settle("completed");
+  await Promise.resolve();
+  assert.equal(harness.calls.filter((call) => call === "restoreParts").length, 1);
+  assert.equal(harness.telemetry.filter((event) => event.type === "pet_interaction_action_finished").length, 1);
+
+  harness.setNow(2_000);
+  assert.equal(harness.player.playAction(getPetInteractionAction("workFocus"), "state_work"), true);
+});
+
+test("interaction action player skips clicks and repeated sleep while a motion action is active", async () => {
+  const motion = createFakeMotionPlayback();
+  const harness = createFakeInteractionActionPlayer({
+    playMotionPreset: async () => ({
+      status: "started",
+      motionPresetId: "future-wave",
+      durationMs: 5_100,
+      playback: motion.playback
+    })
+  });
+  const motionAction = {
+    ...getPetInteractionAction("thinking"),
+    motionPresetId: "future-wave" as const
+  };
+
+  assert.equal(harness.player.playAction(motionAction, "state_sleep"), true);
+  await Promise.resolve();
+  assert.equal(harness.player.playAction(getPetInteractionAction("headPat"), "click_head"), false);
+  assert.deepEqual(harness.telemetry.at(-1), {
+    type: "pet_interaction_action_skipped",
+    payload: {
+      type: "headPat",
+      reason: "click_head",
+      skipReason: "active_action",
+      activeType: "thinking",
+      motionPresetId: "future-wave"
+    }
+  });
+
+  assert.equal(harness.player.playAction(motionAction, "state_sleep"), false);
+  assert.equal(harness.calls.filter((call) => call === "playMotionPreset:future-wave").length, 1);
+  assert.equal(harness.telemetry.at(-1)?.payload.motionPresetId, "future-wave");
+});
+
+test("interaction action player motion interruption leaves non-motion actions active", () => {
+  const harness = createFakeInteractionActionPlayer();
+
+  assert.equal(harness.player.playAction(getPetInteractionAction("thinking"), "click_body"), true);
+  assert.equal(harness.player.interruptActiveMotionAction(), false);
+  assert.equal(harness.player.isActive(), true);
+  assert.equal(harness.calls.some((call) => call.startsWith("stopMotion:")), false);
+  assert.equal(harness.calls.some((call) => call === "restoreParts"), false);
 });
 
 test("interaction action player restores interrupted, timed_out, and failed native actions exactly once", async (t) => {
@@ -1281,12 +1579,14 @@ test("interaction action player restores interrupted, timed_out, and failed nati
       assert.equal(harness.calls.filter((call) => call === "restoreParts").length, 1);
       assert.equal(harness.calls.filter((call) => call === "applyPresentation:neutral:none").length, 1);
       assert.equal(harness.telemetry.filter((event) => event.type === "pet_interaction_action_finished").length, 1);
+      assert.equal(harness.telemetry.at(-1)?.payload.terminalStatus, status);
+      assert.equal(harness.telemetry.at(-1)?.payload.motionPresetId, "future-wave");
       assert.equal(harness.calls.some((call) => call.startsWith("stopMotion:")), false);
     });
   }
 });
 
-test("interaction action player watchdog starts after native started, stops, and ignores late terminal", async () => {
+test("interaction action player runtime watchdog starts after native started, stops, and ignores late terminal", async () => {
   const motion = createFakeMotionPlayback();
   const harness = createFakeInteractionActionPlayer({
     playMotionPreset: async () => ({
@@ -1303,9 +1603,11 @@ test("interaction action player watchdog starts after native started, stops, and
 
   harness.player.playAction(motionAction, "click_body");
   await Promise.resolve();
-  assert.equal(harness.timers.length, 0);
+  assert.equal(harness.timers.length, 1);
   motion.transition("started");
-  harness.timers[0]?.callback();
+  assert.equal(harness.timers[0]?.cleared, true);
+  assert.equal(harness.timers[1]?.delayMs, 5_600);
+  harness.timers[1]?.callback();
 
   assert.equal(harness.calls.filter((call) => call === "stopMotion:timed_out").length, 1);
   assert.equal(harness.calls.filter((call) => call === "restoreParts").length, 1);
@@ -1313,6 +1615,52 @@ test("interaction action player watchdog starts after native started, stops, and
   await Promise.resolve();
   assert.equal(harness.calls.filter((call) => call === "restoreParts").length, 1);
   assert.equal(harness.telemetry.filter((event) => event.type === "pet_interaction_action_finished").length, 1);
+  assert.equal(harness.telemetry.at(-1)?.payload.terminalStatus, "timed_out");
+  assert.equal(harness.telemetry.at(-1)?.payload.motionPresetId, "future-wave");
+});
+
+test("interaction action player reports native motion start failures as failed terminals", async (t) => {
+  const cases = [
+    {
+      name: "skipped",
+      playMotionPreset: async () => ({
+        status: "skipped" as const,
+        skipReason: "motion_start_failed" as const,
+        motionPresetId: "future-wave"
+      })
+    },
+    {
+      name: "rejected",
+      playMotionPreset: () => Promise.reject(new Error("sentinel"))
+    },
+    {
+      name: "thrown",
+      playMotionPreset: () => {
+        throw new Error("sentinel");
+      }
+    }
+  ];
+
+  for (const failureCase of cases) {
+    await t.test(failureCase.name, async () => {
+      const harness = createFakeInteractionActionPlayer({
+        playMotionPreset: failureCase.playMotionPreset
+      });
+      const motionAction = {
+        ...getPetInteractionAction("thinking"),
+        motionPresetId: "future-wave" as const
+      };
+
+      assert.equal(harness.player.playAction(motionAction, "state_sleep"), true);
+      await Promise.resolve();
+      await Promise.resolve();
+
+      assert.equal(harness.calls.filter((call) => call === "restoreParts").length, 1);
+      assert.equal(harness.calls.some((call) => call.startsWith("stopMotion:")), false);
+      assert.equal(harness.telemetry.at(-1)?.payload.terminalStatus, "failed");
+      assert.equal(harness.telemetry.at(-1)?.payload.motionPresetId, "future-wave");
+    });
+  }
 });
 
 test("interaction action player ignores a late native playback Promise after dispose", async () => {
@@ -1627,6 +1975,41 @@ test("pet renderer reads presence mode without owning mode writes", async () => 
   assert.match(appSource, /notifyPetPresenceModeChanged\(currentPresenceModeId\)/);
   assert.match(rendererSource, /getPresenceFilteredPetInteractionActions/);
   assert.match(rendererSource, /presenceModeId: currentPresenceModeId/);
+});
+
+test("pet renderer interrupts an active sleep motion before applying a non-sleep presence mode", async () => {
+  const rendererSource = await readFile(new URL("../src/renderer/pet/main.ts", import.meta.url), "utf8");
+  const listenerStart = rendererSource.indexOf("const removePresenceModeChangedListener");
+  const listenerEnd = rendererSource.indexOf("const removeActionTriggerListener", listenerStart);
+  const listenerSource = rendererSource.slice(listenerStart, listenerEnd);
+
+  assert.match(
+    listenerSource,
+    /if \(currentPresenceModeId === "sleep" && modeId !== "sleep"\) \{\s*interactionActionPlayer\.interruptActiveMotionAction\(\);\s*\}/
+  );
+  const interruptIndex = listenerSource.indexOf("interruptActiveMotionAction");
+  const updateIndex = listenerSource.indexOf("currentPresenceModeId = modeId");
+  assert.equal(
+    interruptIndex >= 0 && interruptIndex < updateIndex,
+    true,
+    "interrupt should run before updating currentPresenceModeId"
+  );
+});
+
+test("main schedules the current dialogue state action after leaving sleep", async () => {
+  const appSource = await readFile(new URL("../src/main/app.ts", import.meta.url), "utf8");
+  const handlerStart = appSource.indexOf('ipcMain.handle("presenceMode:set"');
+  const handlerEnd = appSource.indexOf('ipcMain.handle("proactiveCompanion:get-settings"', handlerStart);
+  const handlerSource = appSource.slice(handlerStart, handlerEnd);
+
+  assert.match(
+    handlerSource,
+    /selectPetActionStateForModeChange\(\{\s*dialogueModeId: currentDialogueModeId,\s*presenceModeId: currentPresenceModeId\s*\}\)/
+  );
+  assert.match(
+    handlerSource,
+    /if \(presenceActionState && presenceActionState\.stateId !== "idle"\) \{\s*schedulePetModeActionStateTrigger\(presenceActionState\.triggerReason\);\s*\}/
+  );
 });
 
 test("renderer telemetry sanitizer delegates to the shared pet telemetry contract", async () => {

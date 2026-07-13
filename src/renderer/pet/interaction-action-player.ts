@@ -18,10 +18,13 @@ import type {
 } from "./interaction-actions";
 import type {
   CubismMotionPlaybackResult,
-  CubismMotionStopReason
+  CubismMotionStopReason,
+  CubismMotionTerminalState
 } from "./live2d/cubism-motion";
 
 type TimeoutHandle = ReturnType<typeof setTimeout>;
+type NativeMotionPlaybackPhase = "loading" | "queued" | "started";
+const NATIVE_MOTION_START_WATCHDOG_MS = 2_000;
 const NATIVE_MOTION_WATCHDOG_GRACE_MS = 500;
 
 export type InteractionActionReason =
@@ -53,6 +56,8 @@ type InteractionActionTelemetryType =
 type ActiveInteractionAction = {
   action: PetInteractionAction;
   reason: InteractionActionReason;
+  strategy?: InteractionActionStrategy;
+  playbackPhase?: NativeMotionPlaybackPhase;
   timeoutId?: TimeoutHandle;
   unsubscribeMotionState?: () => void;
 };
@@ -65,6 +70,7 @@ export type InteractionActionPlayer = {
     reason: InteractionActionReason,
     strategy?: InteractionActionStrategy
   ): boolean;
+  interruptActiveMotionAction(): boolean;
   playWindowShakeLightFeedback(): boolean;
   dispose(): void;
 };
@@ -162,7 +168,10 @@ export function createInteractionActionPlayer({
     delete activeAction.unsubscribeMotionState;
   }
 
-  function finishActiveAction(activeAction: ActiveInteractionAction): boolean {
+  function finishActiveAction(
+    activeAction: ActiveInteractionAction,
+    terminalStatus?: CubismMotionTerminalState
+  ): boolean {
     if (activeInteractionAction !== activeAction) {
       return false;
     }
@@ -193,9 +202,22 @@ export function createInteractionActionPlayer({
     reportTelemetry("pet_interaction_action_finished", {
       type: action.type,
       reason,
+      ...(action.motionPresetId ? { motionPresetId: action.motionPresetId } : {}),
+      ...(terminalStatus ? { terminalStatus } : {}),
       restoredAccessoryPresetId: persistent.accessoryPresetId
     });
     return true;
+  }
+
+  function reportActionStarted(activeAction: ActiveInteractionAction): void {
+    const { action, reason, strategy } = activeAction;
+    reportTelemetry("pet_interaction_action_started", {
+      type: action.type,
+      reason,
+      durationMs: action.durationMs,
+      ...createStrategyTelemetry(strategy, action),
+      ...(action.motionPresetId ? { motionPresetId: action.motionPresetId } : {})
+    });
   }
 
   function waitForNativeMotion(
@@ -208,34 +230,52 @@ export function createInteractionActionPlayer({
       }
 
       if (result.status !== "started") {
-        finishActiveAction(activeAction);
+        finishActiveAction(activeAction, "failed");
         return;
       }
 
+      activeAction.playbackPhase = "queued";
       activeAction.unsubscribeMotionState = result.playback.onStateChange((state) => {
         if (
           state !== "started" ||
           activeInteractionAction !== activeAction ||
-          activeAction.timeoutId !== undefined
+          activeAction.playbackPhase === "started"
         ) {
           return;
         }
 
-        activeAction.timeoutId = scheduleTimeout(() => {
-          if (activeInteractionAction !== activeAction) {
+        activeAction.playbackPhase = "started";
+        if (activeAction.timeoutId !== undefined) {
+          clearScheduledTimeout(activeAction.timeoutId);
+          delete activeAction.timeoutId;
+        }
+        reportActionStarted(activeAction);
+        const watchdogBudgetMs = result.durationMs + NATIVE_MOTION_WATCHDOG_GRACE_MS;
+        boostInteraction(watchdogBudgetMs);
+        const runtimeWatchdogId = scheduleTimeout(() => {
+          if (
+            activeInteractionAction !== activeAction ||
+            activeAction.timeoutId !== runtimeWatchdogId
+          ) {
             return;
           }
 
           stopMotion("timed_out");
-          finishActiveAction(activeAction);
-        }, result.durationMs + NATIVE_MOTION_WATCHDOG_GRACE_MS);
+          finishActiveAction(activeAction, "timed_out");
+        }, watchdogBudgetMs);
+        activeAction.timeoutId = runtimeWatchdogId;
       });
 
       void result.playback.terminal.then(
-        () => finishActiveAction(activeAction),
-        () => finishActiveAction(activeAction)
+        (terminal) => finishActiveAction(
+          activeAction,
+          terminal.status === "interrupted" && activeAction.playbackPhase !== "started"
+            ? undefined
+            : terminal.status
+        ),
+        () => finishActiveAction(activeAction, "failed")
       );
-    }, () => finishActiveAction(activeAction));
+    }, () => finishActiveAction(activeAction, "failed"));
   }
 
   function playAction(
@@ -256,17 +296,37 @@ export function createInteractionActionPlayer({
         reason,
         skipReason,
         ...createStrategyTelemetry(strategy, action),
-        ...(activeInteractionAction ? { activeType: activeInteractionAction.action.type } : {})
+        ...(activeInteractionAction ? { activeType: activeInteractionAction.action.type } : {}),
+        ...(activeInteractionAction?.action.motionPresetId || action.motionPresetId
+          ? { motionPresetId: activeInteractionAction?.action.motionPresetId ?? action.motionPresetId }
+          : {})
       });
       return false;
     }
 
-    reportTelemetry("pet_interaction_action_started", {
-      type: action.type,
+    const activeAction: ActiveInteractionAction = {
+      action,
       reason,
-      durationMs: action.durationMs,
-      ...createStrategyTelemetry(strategy, action)
-    });
+      ...(strategy ? { strategy } : {}),
+      ...(action.motionPresetId ? { playbackPhase: "loading" } : {})
+    };
+    activeInteractionAction = activeAction;
+    if (action.motionPresetId) {
+      const startWatchdogId = scheduleTimeout(() => {
+        if (
+          activeInteractionAction !== activeAction ||
+          activeAction.timeoutId !== startWatchdogId
+        ) {
+          return;
+        }
+
+        stopMotion("timed_out");
+        finishActiveAction(activeAction, "timed_out");
+      }, NATIVE_MOTION_START_WATCHDOG_MS);
+      activeAction.timeoutId = startWatchdogId;
+    } else {
+      reportActionStarted(activeAction);
+    }
     boostInteraction(action.durationMs + 250);
     if (action.lookTarget) {
       resumeLook();
@@ -297,11 +357,9 @@ export function createInteractionActionPlayer({
       applyPresentation(action.presentation, getPersistentPresentation().accessoryPresetId);
     }
 
-    const activeAction: ActiveInteractionAction = { action, reason };
-    activeInteractionAction = activeAction;
     if (action.motionPresetId) {
       if (nativeMotionStartFailed || !pendingNativePlayback) {
-        finishActiveAction(activeAction);
+        finishActiveAction(activeAction, "failed");
       } else {
         waitForNativeMotion(activeAction, pendingNativePlayback);
       }
@@ -361,6 +419,18 @@ export function createInteractionActionPlayer({
       return activeInteractionAction?.action.type;
     },
     playAction,
+    interruptActiveMotionAction(): boolean {
+      if (!activeInteractionAction?.action.motionPresetId) {
+        return false;
+      }
+
+      const activeAction = activeInteractionAction;
+      stopMotion("interrupted");
+      return finishActiveAction(
+        activeAction,
+        activeAction.playbackPhase === "started" ? "interrupted" : undefined
+      );
+    },
     playWindowShakeLightFeedback,
     dispose(): void {
       if (!activeInteractionAction) {

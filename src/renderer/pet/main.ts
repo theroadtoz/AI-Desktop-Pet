@@ -672,6 +672,10 @@ const removeDialogueModeChangedListener = window.petApi?.onDialogueModeChanged((
   currentDialogueModeId = modeId;
 }) ?? null;
 const removePresenceModeChangedListener = window.petApi?.onPresenceModeChanged((modeId) => {
+  if (currentPresenceModeId === "sleep" && modeId !== "sleep") {
+    interactionActionPlayer.interruptActiveMotionAction();
+  }
+
   currentPresenceModeId = modeId;
   live2DRenderer?.setPresenceMode(modeId);
   if (modeId === "sleep") {

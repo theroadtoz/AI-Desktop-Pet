@@ -3413,8 +3413,11 @@ app.whenReady().then(async () => {
       });
       notifyChatPresenceModeChanged(currentPresenceModeId);
       notifyPetPresenceModeChanged(currentPresenceModeId);
-      const presenceActionState = selectPetActionStateForModeChange({ presenceModeId: currentPresenceModeId });
-      if (presenceActionState) {
+      const presenceActionState = selectPetActionStateForModeChange({
+        dialogueModeId: currentDialogueModeId,
+        presenceModeId: currentPresenceModeId
+      });
+      if (presenceActionState && presenceActionState.stateId !== "idle") {
         schedulePetModeActionStateTrigger(presenceActionState.triggerReason);
       }
       if (currentPresenceModeId !== "sleep") {

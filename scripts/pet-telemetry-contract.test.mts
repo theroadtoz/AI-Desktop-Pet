@@ -132,6 +132,50 @@ test("pet interaction action started keeps only safe action summary fields", () 
   assertNoForbiddenKeys(event?.payload);
 });
 
+test("native action terminal telemetry keeps only safe preset and terminal enums", () => {
+  const event = parsePetRendererTelemetryEvent({
+    type: "pet_interaction_action_finished",
+    payload: {
+      type: "doze",
+      reason: "state_sleep",
+      motionPresetId: "yawn-once",
+      terminalStatus: "interrupted",
+      restoredAccessoryPresetId: "none",
+      path: "C:\\private\\yawn-once.motion3.json",
+      motion: { Curves: ["sentinel"] }
+    }
+  });
+  const unsafeStatus = parsePetRendererTelemetryEvent({
+    type: "pet_interaction_action_finished",
+    payload: {
+      type: "doze",
+      reason: "state_sleep",
+      motionPresetId: "C:\\private\\yawn-once.motion3.json",
+      terminalStatus: "disposed"
+    }
+  });
+
+  assert.deepEqual(event, {
+    type: "pet_interaction_action_finished",
+    payload: {
+      type: "doze",
+      reason: "state_sleep",
+      motionPresetId: "yawn-once",
+      terminalStatus: "interrupted",
+      restoredAccessoryPresetId: "none"
+    }
+  });
+  assert.deepEqual(unsafeStatus, {
+    type: "pet_interaction_action_finished",
+    payload: {
+      type: "doze",
+      reason: "state_sleep"
+    }
+  });
+  assertNoForbiddenKeys(event?.payload);
+  assertNoForbiddenKeys(unsafeStatus?.payload);
+});
+
 test("action trigger telemetry keeps only fixed safe trigger reasons", () => {
   const event = parsePetRendererTelemetryEvent({
     type: "pet_interaction_action_started",

@@ -52,6 +52,7 @@ export const PET_TELEMETRY_ALLOWED_FIELDS = [
   "activeType",
   "expressionPresetId",
   "motionPresetId",
+  "terminalStatus",
   "restoredAccessoryPresetId",
   "isLocked",
   "isDragging",
@@ -211,6 +212,7 @@ const PET_INTERACTION_SKIP_REASONS = [
   "same_action_cooldown",
   "window_shake_feedback_cooldown"
 ] as const;
+const PET_MOTION_TERMINAL_STATUSES = ["completed", "interrupted", "timed_out", "failed"] as const;
 const PET_WINDOW_MOTION_EVENT_TYPES = ["window_shake_candidate", "window_move_observed"] as const;
 const PET_WINDOW_MOTION_REASONS = ["drag_direction_changes", "fast_linear_drag"] as const;
 const PET_WINDOW_MOTION_FEEDBACK_TYPES = ["shake_light_feedback"] as const;
@@ -418,6 +420,7 @@ function sanitizeInteractionActionPayload(payload: Record<string, unknown>): Pet
   putString(safe, payload, "activeType", PET_INTERACTION_ACTION_TYPES);
   putString(safe, payload, "expressionPresetId", PET_EXPRESSION_PRESET_IDS);
   putString(safe, payload, "motionPresetId", PET_MOTION_PRESET_IDS);
+  putString(safe, payload, "terminalStatus", PET_MOTION_TERMINAL_STATUSES);
   putString(safe, payload, "restoredAccessoryPresetId", PET_ACCESSORY_PRESET_IDS);
   putString(safe, payload, "skipReason", PET_INTERACTION_SKIP_REASONS);
   return safe;

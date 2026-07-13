@@ -16,6 +16,7 @@ import {
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { inflateSync } from "node:zlib";
+import ts from "typescript";
 import { canonicalizeMotion3, parseMotion3Segments } from "./support/motion3-canonicalizer.mts";
 import {
   connectToElectron,
@@ -488,21 +489,35 @@ export function shouldKeepP263BArtifacts(env = process.env) {
 }
 
 export function injectIsolatedMotionPreset(source, timing, timeoutControl = false) {
-  const marker = "export const PET_MOTION_PRESETS: readonly ModelMotionPreset[] = Object.freeze([]);";
+  const marker = "export const PET_MOTION_PRESETS: readonly ModelMotionPreset[] = Object.freeze([";
   const replacement = `export const PET_MOTION_PRESETS: readonly ModelMotionPreset[] = Object.freeze([
   {
     id: "${YAWN_PRESET_ID}",
-    path: "yawn.motion3.json",
-    durationHintSeconds: ${timing.durationSeconds},
+    path: "motions/yawn-once.motion3.json",
+    semanticKind: "sleep",
     fadeInSeconds: 0.15,
     fadeOutSeconds: 0.2,
+    durationHintSeconds: ${timing.durationSeconds},
     loop: ${timeoutControl},
     priority: 3,
-    allowedStates: ["sleep"]
+    cooldownMs: 2_000,
+    restorePolicy: "restore-current-state",
+    allowedStates: ["sleep"],
+    allowedPresenceModes: ["sleep"],
+    allowedDialogueModes: ["default"],
+    visualRisk: "needs-visual-check",
+    assetLicenseStatus: "user-provided"
   }
 ]);`;
 
-  return replaceExactlyOnce(source, marker, replacement, "motion preset catalog");
+  const start = source.indexOf(marker);
+  const end = source.indexOf("\n]);", start);
+
+  if (start < 0 || end < 0 || source.indexOf(marker, start + marker.length) >= 0) {
+    throw new Error("expected exactly one motion preset catalog marker");
+  }
+
+  return `${source.slice(0, start)}${replacement}${source.slice(end + "\n]);".length)}`;
 }
 
 export function injectIsolatedStateSleepPath(source, timing, runId = "p2-63a-test-run") {
@@ -642,6 +657,171 @@ export function injectNativeLifecycleProbe(source, runId = "p2-63b2-test-run") {
   return output;
 }
 
+function findPlayerWatchdog(sourceFile, variableName, delayExpression, ownerName) {
+  const declarations = [];
+  const visit = (node) => {
+    if (
+      ts.isVariableDeclaration(node) &&
+      ts.isIdentifier(node.name) &&
+      node.name.text === variableName
+    ) {
+      declarations.push(node);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+
+  if (declarations.length !== 1) {
+    throw new Error(`expected exactly one ${variableName} declaration`);
+  }
+  const declaration = declarations[0];
+  const call = declaration.initializer;
+  if (
+    !call ||
+    !ts.isCallExpression(call) ||
+    !ts.isIdentifier(call.expression) ||
+    call.expression.text !== "scheduleTimeout" ||
+    call.arguments.length !== 2
+  ) {
+    throw new Error(`${variableName} must be a scheduleTimeout call`);
+  }
+  const callback = call.arguments[0];
+  const delay = call.arguments[1];
+  if (
+    (!ts.isArrowFunction(callback) && !ts.isFunctionExpression(callback)) ||
+    !ts.isBlock(callback.body) ||
+    delay.getText(sourceFile) !== delayExpression
+  ) {
+    throw new Error(`${variableName} has an invalid callback or delay`);
+  }
+
+  let owner = declaration.parent;
+  while (owner && !ts.isFunctionDeclaration(owner)) {
+    owner = owner.parent;
+  }
+  if (!owner?.name || owner.name.text !== ownerName) {
+    throw new Error(`${variableName} must belong to ${ownerName}`);
+  }
+
+  const callbackText = callback.body.getText(sourceFile);
+  if (
+    !callbackText.includes("activeInteractionAction !== activeAction") ||
+    !callbackText.includes(`activeAction.timeoutId !== ${variableName}`)
+  ) {
+    throw new Error(`${variableName} must retain active action and timer identity guards`);
+  }
+
+  const directStops = callback.body.statements.filter((statement) => (
+    ts.isExpressionStatement(statement) &&
+    ts.isCallExpression(statement.expression) &&
+    ts.isIdentifier(statement.expression.expression) &&
+    statement.expression.expression.text === "stopMotion" &&
+    statement.expression.arguments.length === 1 &&
+    ts.isStringLiteral(statement.expression.arguments[0]) &&
+    statement.expression.arguments[0].text === "timed_out"
+  ));
+  if (directStops.length !== 1) {
+    throw new Error(`${variableName} must directly cancel loading, queued, or started motion`);
+  }
+  const declarationStatement = declaration.parent.parent;
+  if (!ts.isVariableStatement(declarationStatement)) {
+    throw new Error(`${variableName} must be declared as a watchdog statement`);
+  }
+
+  return {
+    declarationStatement,
+    stopStatement: directStops[0]
+  };
+}
+
+function getPlayerWatchdogStructure(source) {
+  const sourceFile = ts.createSourceFile(
+    "interaction-action-player.ts",
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS
+  );
+  if (sourceFile.parseDiagnostics.length > 0) {
+    throw new Error("interaction action player source must parse before watchdog inspection");
+  }
+  const playbackPhases = new Set();
+  const visit = (node) => {
+    if (
+      ts.isPropertyAssignment(node) &&
+      node.name.getText(sourceFile) === "playbackPhase" &&
+      ts.isStringLiteral(node.initializer) &&
+      node.initializer.text === "loading"
+    ) {
+      playbackPhases.add("loading");
+    }
+    if (
+      ts.isBinaryExpression(node) &&
+      node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+      node.left.getText(sourceFile) === "activeAction.playbackPhase" &&
+      ts.isStringLiteral(node.right) &&
+      ["queued", "started"].includes(node.right.text)
+    ) {
+      playbackPhases.add(node.right.text);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  for (const phase of ["loading", "queued", "started"]) {
+    if (!playbackPhases.has(phase)) {
+      throw new Error(`missing native motion ${phase} phase`);
+    }
+  }
+
+  return {
+    sourceFile,
+    start: findPlayerWatchdog(
+      sourceFile,
+      "startWatchdogId",
+      "NATIVE_MOTION_START_WATCHDOG_MS",
+      "playAction"
+    ),
+    runtime: findPlayerWatchdog(
+      sourceFile,
+      "runtimeWatchdogId",
+      "watchdogBudgetMs",
+      "waitForNativeMotion"
+    )
+  };
+}
+
+export function inspectPlayerWatchdogStructure(source) {
+  getPlayerWatchdogStructure(source);
+  return {
+    playbackPhases: ["loading", "queued", "started"],
+    startWatchdog: {
+      owner: "playAction",
+      delay: "NATIVE_MOTION_START_WATCHDOG_MS",
+      directlyCancelsPendingStart: true
+    },
+    runtimeWatchdog: {
+      owner: "waitForNativeMotion",
+      delay: "watchdogBudgetMs",
+      directlyCancelsStartedMotion: true
+    }
+  };
+}
+
+function insertPlayerProbeObservations(source, observations) {
+  const edits = observations.map(({ node, statement }) => {
+    const position = node.getStart();
+    const lineStart = source.lastIndexOf("\n", position - 1) + 1;
+    const indent = source.slice(lineStart, position);
+    return { position, text: `${statement}\n${indent}` };
+  }).sort((left, right) => right.position - left.position);
+
+  let output = source;
+  for (const edit of edits) {
+    output = `${output.slice(0, edit.position)}${edit.text}${output.slice(edit.position)}`;
+  }
+  return output;
+}
+
 export function injectPlayerLifecycleProbe(source, runId = "p2-63b2-test-run") {
   let output = replaceExactlyOnce(
     source,
@@ -669,25 +849,25 @@ export function injectPlayerLifecycleProbe(source, runId = "p2-63b2-test-run") {
     reportTelemetry("pet_interaction_action_finished", {`,
     "restore completion observation"
   );
-  output = replaceExactlyOnce(
-    output,
-    `        activeAction.timeoutId = scheduleTimeout(() => {
-          if (activeInteractionAction !== activeAction) {
-            return;
-          }
-
-          stopMotion("timed_out");`,
-    `        reportP263B2Probe("player_watchdog_armed", { durationMs: result.durationMs, motionPresetId: result.motionPresetId });
-        activeAction.timeoutId = scheduleTimeout(() => {
-          if (activeInteractionAction !== activeAction) {
-            return;
-          }
-
-          reportP263B2Probe("player_watchdog_fired", { durationMs: result.durationMs, motionPresetId: result.motionPresetId });
-          stopMotion("timed_out");`,
-    "player watchdog observation"
-  );
-  return output;
+  const watchdogs = getPlayerWatchdogStructure(output);
+  return insertPlayerProbeObservations(output, [
+    {
+      node: watchdogs.start.declarationStatement,
+      statement: `reportP263B2Probe("player_start_watchdog_armed", { motionPresetId: action.motionPresetId ?? null });`
+    },
+    {
+      node: watchdogs.start.stopStatement,
+      statement: `reportP263B2Probe("player_start_watchdog_fired", { motionPresetId: action.motionPresetId ?? null });`
+    },
+    {
+      node: watchdogs.runtime.declarationStatement,
+      statement: `reportP263B2Probe("player_runtime_watchdog_armed", { durationMs: result.durationMs, motionPresetId: result.motionPresetId });`
+    },
+    {
+      node: watchdogs.runtime.stopStatement,
+      statement: `reportP263B2Probe("player_runtime_watchdog_fired", { durationMs: result.durationMs, motionPresetId: result.motionPresetId });`
+    }
+  ]);
 }
 
 export function injectFramePipelineProbe(source, runId = "p2-63b2-test-run") {
@@ -1022,26 +1202,32 @@ export function summarizeLifecycleEvidence(probeEvents, timeoutControl = false) 
     completed: countIn(events, "terminal_status", "completed"),
     timedOut: countIn(events, "terminal_status", "timed_out"),
     stopAllMotions: countIn(events, "stop_all_motions"),
-    watchdogArmed: countIn(events, "player_watchdog_armed"),
-    watchdogFired: countIn(events, "player_watchdog_fired"),
+    startWatchdogArmed: countIn(events, "player_start_watchdog_armed"),
+    startWatchdogFired: countIn(events, "player_start_watchdog_fired"),
+    runtimeWatchdogArmed: countIn(events, "player_runtime_watchdog_armed"),
+    runtimeWatchdogFired: countIn(events, "player_runtime_watchdog_fired"),
     restoreStarted: countIn(events, "restore_started"),
     restoreCompleted: countIn(events, "restore_completed")
   });
   const terminalStatus = timeoutControl ? "timed_out" : "completed";
   const orderedStages = timeoutControl
-    ? [["queued"], ["native_started"], ["player_watchdog_armed"], ["player_watchdog_fired"], ["terminal_status", "timed_out"], ["stop_all_motions"], ["restore_started"], ["restore_completed"]]
-    : [["queued"], ["native_started"], ["player_watchdog_armed"], ["handle_finished_after_update"], ["terminal_status", "completed"], ["restore_started"], ["restore_completed"]];
+    ? [["queued"], ["native_started"], ["player_start_watchdog_armed"], ["player_runtime_watchdog_armed"], ["player_runtime_watchdog_fired"], ["terminal_status", "timed_out"], ["stop_all_motions"], ["restore_started"], ["restore_completed"]]
+    : [["queued"], ["native_started"], ["player_start_watchdog_armed"], ["player_runtime_watchdog_armed"], ["handle_finished_after_update"], ["terminal_status", "completed"], ["restore_started"], ["restore_completed"]];
   const indices = orderedStages.map(([stage, status]) => firstIndex(stage, status));
   const strictOrder = indices.every((index, position) => index >= 0 && (position === 0 || index > indices[position - 1]));
   const counts = makeCounts(targetEvents);
   const observedGlobalCounts = makeCounts(probeEvents);
   const passed = timeoutControl
-    ? strictOrder && counts.queued === 1 && counts.nativeStarted === 1 && counts.watchdogArmed === 1 &&
-      counts.watchdogFired === 1 && counts.timedOut === 1 && counts.completed === 0 &&
+    ? strictOrder && counts.queued === 1 && counts.nativeStarted === 1 &&
+      counts.startWatchdogArmed === 1 && counts.startWatchdogFired === 0 &&
+      counts.runtimeWatchdogArmed === 1 && counts.runtimeWatchdogFired === 1 &&
+      counts.timedOut === 1 && counts.completed === 0 &&
       counts.stopAllMotions === 1 && counts.restoreStarted === 1 && counts.restoreCompleted === 1
     : strictOrder && counts.queued === 1 && counts.nativeStarted === 1 && counts.handleFinishedAfterUpdate === 1 &&
       counts.completed === 1 && counts.timedOut === 0 && counts.stopAllMotions === 0 &&
-      counts.watchdogArmed === 1 && counts.watchdogFired === 0 && counts.restoreStarted === 1 && counts.restoreCompleted === 1;
+      counts.startWatchdogArmed === 1 && counts.startWatchdogFired === 0 &&
+      counts.runtimeWatchdogArmed === 1 && counts.runtimeWatchdogFired === 0 &&
+      counts.restoreStarted === 1 && counts.restoreCompleted === 1;
   return {
     mode: timeoutControl ? "timeout-control" : "normal",
     targetMotionPresetId: YAWN_PRESET_ID,
@@ -1644,7 +1830,7 @@ export function prepareIsolatedApp(fixtureRoot, runId, source = null, timeoutCon
     sourceHashUnchanged: true,
     diagnosticOnly: true
   };
-  const yawnPath = join(fixtureRoot, "model-fixture", "yawn.motion3.json");
+  const yawnPath = join(fixtureRoot, "resources", "models", "witch", "motions", "yawn-once.motion3.json");
   writeFileSync(yawnPath, `${JSON.stringify(fixtureMotion)}\n`, "utf8");
 
   const manifestPath = join(fixtureRoot, "resources", "models", "witch", "model-manifest.json");
@@ -1652,13 +1838,20 @@ export function prepareIsolatedApp(fixtureRoot, runId, source = null, timeoutCon
   manifest.sourceDir = "../../../model-fixture";
   manifest.motionPresets = [{
     id: YAWN_PRESET_ID,
-    path: "yawn.motion3.json",
-    durationHintSeconds: timing.durationSeconds,
+    path: "motions/yawn-once.motion3.json",
+    semanticKind: "sleep",
+    loop: timeoutControl,
     fadeInSeconds: 0.15,
     fadeOutSeconds: 0.2,
-    loop: timeoutControl,
+    durationHintSeconds: timing.durationSeconds,
     priority: 3,
-    allowedStates: ["sleep"]
+    cooldownMs: 2_000,
+    restorePolicy: "restore-current-state",
+    allowedStates: ["sleep"],
+    allowedPresenceModes: ["sleep"],
+    allowedDialogueModes: ["default"],
+    visualRisk: "needs-visual-check",
+    assetLicenseStatus: "user-provided"
   }];
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
 
@@ -1951,6 +2144,7 @@ export async function captureVisiblePageFrame({
         height: png.height,
         pngNonTransparentPixels: png.nonTransparentPixels,
         rendererNonTransparentPixels: renderer.nonTransparentPixels,
+        rendererContextLost: renderer.contextLost,
         rendererProbeAttempts: renderer.attempts,
         screenshotAttempts
       };
@@ -1973,7 +2167,7 @@ export async function captureVisiblePageFrame({
   throw error;
 }
 
-async function waitForVisibleRendererFrame(pet) {
+export async function waitForVisibleRendererFrame(pet) {
   return evaluate(pet, `
     (async () => {
       const canvas = document.querySelector("#pet-canvas");

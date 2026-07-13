@@ -22,6 +22,7 @@ import {
   injectIsolatedStateSleepPath,
   injectNativeLifecycleProbe,
   injectPlayerLifecycleProbe,
+  inspectPlayerWatchdogStructure,
   isAcceptedProbeSummary,
   hashProtectedPaths,
   parseRunnerArgs,
@@ -519,9 +520,10 @@ test("isolated transforms bind yawn only on the state_sleep path for the real du
   const cubismSource = readFileSync("src/renderer/pet/live2d/cubism-motion.ts", "utf8");
 
   assert.match(injectIsolatedMotionPreset(presetSource, TIMING), /id: "yawn-once"[\s\S]*durationHintSeconds: 4\.986[\s\S]*loop: false/u);
+  assert.match(injectIsolatedMotionPreset(presetSource, TIMING), /path: "motions\/yawn-once\.motion3\.json"[\s\S]*semanticKind: "sleep"/u);
   const patchedMain = injectIsolatedStateSleepPath(mainSource, TIMING, RUN_ID);
   assert.match(patchedMain, /trigger\.reason === "state_sleep"[\s\S]*durationMs: 4986[\s\S]*motionPresetId: "yawn-once"/u);
-  assert.doesNotMatch(interactionSource, /motionPresetId: "yawn-once"/u);
+  assert.equal((interactionSource.match(/motionPresetId: "yawn-once"/gu) ?? []).length, 1);
   const probed = injectNativeLifecycleProbe(cubismSource, RUN_ID);
   for (const stage of [
     "load_attempt", "parse_attempt", "parser_blocked", "start_attempt", "queued",
@@ -550,15 +552,62 @@ test("isolated transforms bind yawn only on the state_sleep path for the real du
   assert.match(injectIsolatedMotionPreset(presetSource, TIMING), /loop: false/u);
 });
 
-test("player and frame transforms observe the production watchdog, restore, and protected parameter pipeline", () => {
-  const player = injectPlayerLifecycleProbe(
-    readFileSync("src/renderer/pet/interaction-action-player.ts", "utf8"),
-    RUN_ID
+test("player and frame transforms structurally observe bounded start and independent runtime watchdogs", () => {
+  const playerSource = readFileSync("src/renderer/pet/interaction-action-player.ts", "utf8");
+  assert.deepEqual(inspectPlayerWatchdogStructure(playerSource), {
+    playbackPhases: ["loading", "queued", "started"],
+    startWatchdog: {
+      owner: "playAction",
+      delay: "NATIVE_MOTION_START_WATCHDOG_MS",
+      directlyCancelsPendingStart: true
+    },
+    runtimeWatchdog: {
+      owner: "waitForNativeMotion",
+      delay: "watchdogBudgetMs",
+      directlyCancelsStartedMotion: true
+    }
+  });
+  const phaseGatedStartCancellation = playerSource.replace(
+    `        stopMotion("timed_out");
+        finishActiveAction(activeAction, "timed_out");`,
+    `        if (activeAction.playbackPhase === "queued") {
+          stopMotion("timed_out");
+        }
+        finishActiveAction(activeAction, "timed_out");`
   );
-  for (const stage of ["player_watchdog_armed", "player_watchdog_fired", "restore_started", "restore_completed"]) {
+  assert.throws(
+    () => inspectPlayerWatchdogStructure(phaseGatedStartCancellation),
+    /startWatchdogId must directly cancel loading, queued, or started motion/u
+  );
+  assert.throws(
+    () => inspectPlayerWatchdogStructure(
+      playerSource.replace(
+        `      activeAction.playbackPhase = "queued";`,
+        `      void activeAction.playbackPhase;`
+      )
+    ),
+    /missing native motion queued phase/u
+  );
+  assert.throws(
+    () => inspectPlayerWatchdogStructure(
+      playerSource.replace("}, watchdogBudgetMs);", "}, NATIVE_MOTION_START_WATCHDOG_MS);")
+    ),
+    /runtimeWatchdogId has an invalid callback or delay/u
+  );
+
+  const player = injectPlayerLifecycleProbe(playerSource, RUN_ID);
+  for (const stage of [
+    "player_start_watchdog_armed",
+    "player_start_watchdog_fired",
+    "player_runtime_watchdog_armed",
+    "player_runtime_watchdog_fired",
+    "restore_started",
+    "restore_completed"
+  ]) {
     assert.match(player, new RegExp(`"${stage}"`, "u"));
   }
-  assert.match(player, /stopMotion\("timed_out"\)/u);
+  assert.match(player, /"player_start_watchdog_fired"[\s\S]*stopMotion\("timed_out"\)/u);
+  assert.match(player, /"player_runtime_watchdog_fired"[\s\S]*stopMotion\("timed_out"\)/u);
 
   const pipeline = injectFramePipelineProbe(
     readFileSync("src/renderer/pet/live2d/cubism-frame-pipeline.ts", "utf8"),
@@ -589,7 +638,8 @@ test("normal lifecycle requires natural completion and forbids watchdog fire and
     event("restore_completed", 2, { motionPresetId: "wave-once" }),
     event("queued", 10),
     event("native_started", 20),
-    event("player_watchdog_armed", 21),
+    event("player_start_watchdog_armed", 21),
+    event("player_runtime_watchdog_armed", 22),
     event("handle_finished_after_update", 5_120),
     event("terminal_status", 5_121, { status: "completed" }),
     event("restore_started", 5_122),
@@ -598,18 +648,19 @@ test("normal lifecycle requires natural completion and forbids watchdog fire and
 
   assert.equal(evidence.passed, true);
   assert.equal(evidence.counts.completed, 1);
-  assert.equal(evidence.counts.watchdogFired, 0);
+  assert.equal(evidence.counts.startWatchdogFired, 0);
+  assert.equal(evidence.counts.runtimeWatchdogFired, 0);
   assert.equal(evidence.counts.stopAllMotions, 0);
   assert.equal(evidence.counts.restoreCompleted, 1);
   assert.equal(evidence.observedGlobalCounts.restoreCompleted, 2);
   assert.equal(summarizeLifecycleEvidence([
-    event("queued", 10), event("native_started", 20), event("player_watchdog_armed", 21),
+    event("queued", 10), event("native_started", 20), event("player_start_watchdog_armed", 21), event("player_runtime_watchdog_armed", 22),
     event("handle_finished_after_update", 5_120), event("terminal_status", 5_121, { status: "completed" }),
     event("restore_started", 5_122), event("restore_completed", 5_123), event("restore_completed", 5_124)
   ]).passed, false);
   assert.equal(summarizeLifecycleEvidence([
-    event("queued", 10), event("native_started", 20), event("player_watchdog_armed", 21),
-    event("player_watchdog_fired", 5_620), event("stop_all_motions", 5_621)
+    event("queued", 10), event("native_started", 20), event("player_start_watchdog_armed", 21), event("player_runtime_watchdog_armed", 22),
+    event("player_runtime_watchdog_fired", 5_620), event("stop_all_motions", 5_621)
   ]).passed, false);
 });
 
@@ -617,8 +668,9 @@ test("timeout control proves started to watchdog to timed_out to stop to restore
   const evidence = summarizeLifecycleEvidence([
     event("queued", 10),
     event("native_started", 20),
-    event("player_watchdog_armed", 21),
-    event("player_watchdog_fired", 5_620),
+    event("player_start_watchdog_armed", 21),
+    event("player_runtime_watchdog_armed", 22),
+    event("player_runtime_watchdog_fired", 5_620),
     event("terminal_status", 5_621, { status: "timed_out" }),
     event("stop_all_motions", 5_622),
     event("restore_started", 5_623),
@@ -629,6 +681,10 @@ test("timeout control proves started to watchdog to timed_out to stop to restore
   assert.equal(evidence.counts.completed, 0);
   assert.equal(evidence.counts.timedOut, 1);
   assert.equal(evidence.counts.stopAllMotions, 1);
+  assert.equal(evidence.counts.startWatchdogFired, 0);
+  assert.equal(evidence.counts.runtimeWatchdogFired, 1);
+  assert.equal(evidence.counts.restoreStarted, 1);
+  assert.equal(evidence.counts.restoreCompleted, 1);
 });
 
 test("parameter evidence requires dense, nearby checkpoints with positive and negative peaks", () => {

@@ -6,7 +6,9 @@ export type LoadedModelManifest = {
   manifest: ModelManifest;
   manifestPath: string;
   sourceRoot: string;
-  allowedRelativePaths: ReadonlySet<string>;
+  managedMotionRoot: string;
+  sourceRelativePaths: ReadonlySet<string>;
+  managedMotionRelativePaths: ReadonlySet<string>;
 };
 
 const MANIFEST_FILE_NAME = "model-manifest.json";
@@ -30,7 +32,12 @@ function normalizeModelRelativePath(relativePath: string): string {
 
   const normalized = path.posix.normalize(relativePath);
 
-  if (normalized === "." || normalized.startsWith("../") || normalized === "..") {
+  if (
+    normalized !== relativePath ||
+    normalized === "." ||
+    normalized.startsWith("../") ||
+    normalized === ".."
+  ) {
     throw new Error(`invalid model manifest path: ${relativePath}`);
   }
 
@@ -75,7 +82,15 @@ function addManifestMotionPresetPaths(allowedPaths: Set<string>, value: unknown,
       throw new Error(`invalid model manifest field: ${fieldName}[${index}]`);
     }
 
-    addManifestPath(allowedPaths, (entry as { path?: unknown }).path, `${fieldName}[${index}].path`);
+    const relativePath = normalizeModelRelativePath(
+      assertString((entry as { path?: unknown }).path, `${fieldName}[${index}].path`)
+    );
+
+    if (!relativePath.endsWith(".motion3.json")) {
+      throw new Error(`invalid model manifest path: ${fieldName}[${index}].path`);
+    }
+
+    allowedPaths.add(relativePath);
   });
 }
 
@@ -93,21 +108,30 @@ export function loadModelManifest(modelId: string): LoadedModelManifest {
   const manifestDir = path.dirname(manifestPath);
   const sourceDir = assertString(manifest.sourceDir, "sourceDir");
   const sourceRoot = path.resolve(manifestDir, sourceDir);
-  const allowedRelativePaths = new Set<string>();
+  const sourceRelativePaths = new Set<string>();
+  const managedMotionRelativePaths = new Set<string>();
 
-  addManifestPath(allowedRelativePaths, manifest.model3, "model3");
-  addManifestPath(allowedRelativePaths, manifest.moc3, "moc3");
-  addManifestPath(allowedRelativePaths, manifest.physics, "physics");
-  addManifestPath(allowedRelativePaths, manifest.displayInfo, "displayInfo");
-  addManifestPath(allowedRelativePaths, manifest.idleMotion, "idleMotion");
-  addManifestMotionPresetPaths(allowedRelativePaths, manifest.motionPresets, "motionPresets");
-  addManifestPathList(allowedRelativePaths, manifest.textures, "textures");
-  addManifestPathMap(allowedRelativePaths, manifest.expressions, "expressions");
+  addManifestPath(sourceRelativePaths, manifest.model3, "model3");
+  addManifestPath(sourceRelativePaths, manifest.moc3, "moc3");
+  addManifestPath(sourceRelativePaths, manifest.physics, "physics");
+  addManifestPath(sourceRelativePaths, manifest.displayInfo, "displayInfo");
+  addManifestPath(sourceRelativePaths, manifest.idleMotion, "idleMotion");
+  addManifestMotionPresetPaths(managedMotionRelativePaths, manifest.motionPresets, "motionPresets");
+  addManifestPathList(sourceRelativePaths, manifest.textures, "textures");
+  addManifestPathMap(sourceRelativePaths, manifest.expressions, "expressions");
+
+  for (const relativePath of managedMotionRelativePaths) {
+    if (sourceRelativePaths.has(relativePath)) {
+      throw new Error(`ambiguous model manifest asset path: ${relativePath}`);
+    }
+  }
 
   return {
     manifest,
     manifestPath,
     sourceRoot,
-    allowedRelativePaths
+    managedMotionRoot: manifestDir,
+    sourceRelativePaths,
+    managedMotionRelativePaths
   };
 }

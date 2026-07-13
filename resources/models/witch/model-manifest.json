@@ -8,7 +8,31 @@
   "physics": "魔女.physics3.json",
   "displayInfo": "魔女.cdi3.json",
   "idleMotion": "Scene1.motion3.json",
-  "motionPresets": [],
+  "motionPresets": [
+    {
+      "id": "yawn-once",
+      "path": "motions/yawn-once.motion3.json",
+      "semanticKind": "sleep",
+      "loop": false,
+      "fadeInSeconds": 0.2,
+      "fadeOutSeconds": 0.2,
+      "durationHintSeconds": 5.1,
+      "priority": 50,
+      "cooldownMs": 2000,
+      "restorePolicy": "restore-current-state",
+      "allowedStates": [
+        "sleep"
+      ],
+      "allowedPresenceModes": [
+        "sleep"
+      ],
+      "allowedDialogueModes": [
+        "default"
+      ],
+      "visualRisk": "needs-visual-check",
+      "assetLicenseStatus": "user-provided"
+    }
+  ],
   "textures": [
     "魔女.8192/texture_00.png",
     "魔女.8192/texture_01.png"
