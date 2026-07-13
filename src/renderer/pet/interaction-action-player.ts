@@ -16,8 +16,13 @@ import type {
   WindowShakeLightFeedbackCooldownState,
   WindowShakeLightFeedbackSkipReason
 } from "./interaction-actions";
+import type {
+  CubismMotionPlaybackResult,
+  CubismMotionStopReason
+} from "./live2d/cubism-motion";
 
 type TimeoutHandle = ReturnType<typeof setTimeout>;
+const NATIVE_MOTION_WATCHDOG_GRACE_MS = 500;
 
 export type InteractionActionReason =
   | "startup_first_visible_frame"
@@ -48,7 +53,8 @@ type InteractionActionTelemetryType =
 type ActiveInteractionAction = {
   action: PetInteractionAction;
   reason: InteractionActionReason;
-  timeoutId: TimeoutHandle;
+  timeoutId?: TimeoutHandle;
+  unsubscribeMotionState?: () => void;
 };
 
 export type InteractionActionPlayer = {
@@ -86,8 +92,10 @@ export type InteractionActionPlayerOptions = {
   resetLookTarget(): void;
   setPoseTarget(target: NonNullable<PetInteractionAction["poseTarget"]>): void;
   resetPoseTarget(): void;
-  playMotionPreset(motionPresetId: NonNullable<PetInteractionAction["motionPresetId"]>): void;
-  stopMotion(): void;
+  playMotionPreset(
+    motionPresetId: NonNullable<PetInteractionAction["motionPresetId"]>
+  ): Promise<CubismMotionPlaybackResult>;
+  stopMotion(reason: CubismMotionStopReason): void;
   applyTemporaryPartOpacities(partIds: readonly string[]): void;
   restoreTemporaryPartOpacities(): void;
   setExpression(expressionName: string): void;
@@ -145,17 +153,24 @@ export function createInteractionActionPlayer({
     };
   }
 
-  function finishActiveAction(action: PetInteractionAction): boolean {
-    if (activeInteractionAction?.action !== action) {
+  function clearActiveActionScheduling(activeAction: ActiveInteractionAction): void {
+    if (activeAction.timeoutId !== undefined) {
+      clearScheduledTimeout(activeAction.timeoutId);
+      delete activeAction.timeoutId;
+    }
+    activeAction.unsubscribeMotionState?.();
+    delete activeAction.unsubscribeMotionState;
+  }
+
+  function finishActiveAction(activeAction: ActiveInteractionAction): boolean {
+    if (activeInteractionAction !== activeAction) {
       return false;
     }
 
-    const reason = activeInteractionAction.reason;
+    const { action, reason } = activeAction;
+    clearActiveActionScheduling(activeAction);
     activeInteractionAction = null;
     restoreTemporaryPartOpacities();
-    if (action.motionPresetId) {
-      stopMotion();
-    }
     clearExpression();
     resetLookTarget();
     if (action.poseTarget) {
@@ -181,6 +196,46 @@ export function createInteractionActionPlayer({
       restoredAccessoryPresetId: persistent.accessoryPresetId
     });
     return true;
+  }
+
+  function waitForNativeMotion(
+    activeAction: ActiveInteractionAction,
+    pendingPlayback: Promise<CubismMotionPlaybackResult>
+  ): void {
+    void pendingPlayback.then((result) => {
+      if (activeInteractionAction !== activeAction) {
+        return;
+      }
+
+      if (result.status !== "started") {
+        finishActiveAction(activeAction);
+        return;
+      }
+
+      activeAction.unsubscribeMotionState = result.playback.onStateChange((state) => {
+        if (
+          state !== "started" ||
+          activeInteractionAction !== activeAction ||
+          activeAction.timeoutId !== undefined
+        ) {
+          return;
+        }
+
+        activeAction.timeoutId = scheduleTimeout(() => {
+          if (activeInteractionAction !== activeAction) {
+            return;
+          }
+
+          stopMotion("timed_out");
+          finishActiveAction(activeAction);
+        }, result.durationMs + NATIVE_MOTION_WATCHDOG_GRACE_MS);
+      });
+
+      void result.playback.terminal.then(
+        () => finishActiveAction(activeAction),
+        () => finishActiveAction(activeAction)
+      );
+    }, () => finishActiveAction(activeAction));
   }
 
   function playAction(
@@ -223,8 +278,14 @@ export function createInteractionActionPlayer({
     if (action.poseTarget) {
       setPoseTarget(action.poseTarget);
     }
+    let pendingNativePlayback: Promise<CubismMotionPlaybackResult> | undefined;
+    let nativeMotionStartFailed = false;
     if (action.motionPresetId) {
-      playMotionPreset(action.motionPresetId);
+      try {
+        pendingNativePlayback = playMotionPreset(action.motionPresetId);
+      } catch {
+        nativeMotionStartFailed = true;
+      }
     }
     applyTemporaryPartOpacities(action.accessoryPartIds ?? []);
 
@@ -236,11 +297,19 @@ export function createInteractionActionPlayer({
       applyPresentation(action.presentation, getPersistentPresentation().accessoryPresetId);
     }
 
-    const timeoutId = scheduleTimeout(() => {
-      finishActiveAction(action);
-    }, action.durationMs);
-
-    activeInteractionAction = { action, reason, timeoutId };
+    const activeAction: ActiveInteractionAction = { action, reason };
+    activeInteractionAction = activeAction;
+    if (action.motionPresetId) {
+      if (nativeMotionStartFailed || !pendingNativePlayback) {
+        finishActiveAction(activeAction);
+      } else {
+        waitForNativeMotion(activeAction, pendingNativePlayback);
+      }
+    } else {
+      activeAction.timeoutId = scheduleTimeout(() => {
+        finishActiveAction(activeAction);
+      }, action.durationMs);
+    }
     return true;
   }
 
@@ -298,11 +367,12 @@ export function createInteractionActionPlayer({
         return;
       }
 
-      clearScheduledTimeout(activeInteractionAction.timeoutId);
-      if (activeInteractionAction.action.motionPresetId) {
-        stopMotion();
-      }
+      const activeAction = activeInteractionAction;
       activeInteractionAction = null;
+      clearActiveActionScheduling(activeAction);
+      if (activeAction.action.motionPresetId) {
+        stopMotion("interrupted");
+      }
     }
   };
 }

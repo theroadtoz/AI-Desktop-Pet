@@ -3,6 +3,8 @@ import test from "node:test";
 import { PET_INTERACTION_ACTION_TYPES } from "../src/renderer/pet/interaction-actions.ts";
 import { auditWitchActionCapabilities } from "./live2d-action-capability-audit.mts";
 
+const ISOLATED_YAWN_CANDIDATE_PATH = "model/yawn-once.motion3.json";
+
 test("action capability audit covers every catalog action", () => {
   const audit = auditWitchActionCapabilities();
 
@@ -17,10 +19,14 @@ test("action capability audit records physical motions without admitting the yaw
   const audit = auditWitchActionCapabilities();
 
   assert.deepEqual(audit.model3DeclaredMotionGroups, []);
-  assert.deepEqual(audit.physicalMotionFiles, [
+  assert.deepEqual(audit.physicalMotionFiles.filter((path) => path !== ISOLATED_YAWN_CANDIDATE_PATH), [
     "model/Scene1.motion3.json",
     "model/yawn.motion3.json"
   ]);
+  assert.equal(
+    audit.physicalMotionFiles.filter((path) => path === ISOLATED_YAWN_CANDIDATE_PATH).length <= 1,
+    true
+  );
   assert.equal(audit.idleMotion.loop, true);
   assert.equal(audit.semanticMotionPresetCount, 0);
   assert.deepEqual(audit.motionSafeSkip, {
@@ -30,6 +36,12 @@ test("action capability audit records physical motions without admitting the yaw
   assert.equal(audit.targetActions.every((entry) => entry.supportLevel !== "native-motion"), true);
   assert.equal(
     audit.targetActions.some((entry) => entry.nativeMotions.some((motion) => motion.path === "model/yawn.motion3.json")),
+    false
+  );
+  assert.equal(
+    audit.targetActions.some((entry) =>
+      entry.nativeMotions.some((motion) => motion.path === ISOLATED_YAWN_CANDIDATE_PATH)
+    ),
     false
   );
 });

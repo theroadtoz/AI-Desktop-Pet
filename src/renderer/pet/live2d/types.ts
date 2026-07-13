@@ -2,7 +2,7 @@ import type { CubismUserModel } from "./vendor/framework/model/cubismusermodel";
 import type { EmotionPresentation } from "../../../shared/emotion-presentation";
 import type { PresenceModeId } from "../../../shared/presence-mode";
 import type { CubismPoseTarget } from "./cubism-pose-target";
-import type { CubismMotionPlaybackResult } from "./cubism-motion";
+import type { CubismMotionPlaybackResult, CubismMotionStopReason } from "./cubism-motion";
 import type { PetMotionPresetId } from "../../../shared/pet-motion-presets.ts";
 
 export type Model3Json = {
@@ -21,7 +21,7 @@ export type LoadedLive2DModel = {
   clearExpression(): void;
   getAvailableExpressions(): string[];
   playMotionPreset(motionPresetId: PetMotionPresetId): Promise<CubismMotionPlaybackResult>;
-  stopMotion(): void;
+  stopMotion(reason: CubismMotionStopReason): void;
   applyTemporaryPartOpacities(partIds: readonly string[], opacity: number): void;
   restoreTemporaryPartOpacities(): void;
   setLookTarget(x: number, y: number): void;

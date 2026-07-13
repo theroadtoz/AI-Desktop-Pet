@@ -359,10 +359,14 @@ const interactionActionPlayer = createInteractionActionPlayer({
     live2DModel?.resetTemporaryPoseTarget();
   },
   playMotionPreset: (motionPresetId) => {
-    void live2DModel?.playMotionPreset(motionPresetId);
+    return live2DModel?.playMotionPreset(motionPresetId) ?? Promise.resolve({
+      status: "skipped",
+      skipReason: "motion_start_cancelled",
+      motionPresetId
+    });
   },
-  stopMotion: () => {
-    live2DModel?.stopMotion();
+  stopMotion: (reason) => {
+    live2DModel?.stopMotion(reason);
   },
   applyTemporaryPartOpacities: (partIds) => {
     live2DModel?.applyTemporaryPartOpacities(partIds, 1);
@@ -579,6 +583,7 @@ function handleWebGLContextLost(): void {
     renderer,
     recoveryCount
   });
+  interactionActionPlayer.dispose();
   live2DRenderer?.stop();
   live2DRenderer = null;
   live2DModel = null;

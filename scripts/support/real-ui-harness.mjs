@@ -78,16 +78,21 @@ async function waitForJson(url, timeoutMs) {
   throw lastError ?? new Error(`Timed out waiting for ${url}`);
 }
 
-class CdpClient {
+export class CdpClient {
   constructor(webSocketUrl) {
     this.webSocketUrl = webSocketUrl;
     this.nextId = 1;
     this.pending = new Map();
+    this.listeners = new Map();
   }
 
   async open() {
     this.socket = new WebSocket(this.webSocketUrl);
     this.socket.addEventListener("message", (event) => this.onMessage(event));
+    this.socket.addEventListener("close", () => this.onDisconnect(new Error("CDP socket closed")));
+    this.socket.addEventListener("error", (event) => {
+      this.onDisconnect(event?.error instanceof Error ? event.error : new Error("CDP socket error"));
+    });
     await new Promise((resolveOpen, rejectOpen) => {
       this.socket.addEventListener("open", resolveOpen, { once: true });
       this.socket.addEventListener("error", rejectOpen, { once: true });
@@ -96,7 +101,14 @@ class CdpClient {
 
   onMessage(event) {
     const message = JSON.parse(String(event.data));
-    if (!message.id) {
+    if (message.id === undefined) {
+      if (message.method) {
+        for (const listener of this.listeners.get(message.method) ?? []) {
+          try {
+            listener(message.params ?? {});
+          } catch {}
+        }
+      }
       return;
     }
 
@@ -111,6 +123,29 @@ class CdpClient {
       return;
     }
     pending.resolve(message.result ?? {});
+  }
+
+  on(method, listener) {
+    const listeners = this.listeners.get(method) ?? new Set();
+    listeners.add(listener);
+    this.listeners.set(method, listeners);
+    return () => this.off(method, listener);
+  }
+
+  off(method, listener) {
+    const listeners = this.listeners.get(method);
+    listeners?.delete(listener);
+    if (listeners?.size === 0) {
+      this.listeners.delete(method);
+    }
+  }
+
+  onDisconnect(error) {
+    for (const pending of this.pending.values()) {
+      pending.reject(error);
+    }
+    this.pending.clear();
+    this.listeners.clear();
   }
 
   send(method, params = {}) {

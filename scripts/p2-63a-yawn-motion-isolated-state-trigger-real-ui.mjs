@@ -15,6 +15,7 @@ import {
 } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { inflateSync } from "node:zlib";
 import { canonicalizeMotion3, parseMotion3Segments } from "./support/motion3-canonicalizer.mts";
 import {
   connectToElectron,
@@ -32,6 +33,8 @@ const ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const RUN_NAME = "p2-63a-yawn-motion-isolated-state-trigger-real-ui";
 const YAWN_PRESET_ID = "yawn-once";
 const DRAFT_RELATIVE_PATH = Object.freeze(["motion-drafts", "vts-drafts", "yawn-draft.motion3.json"]);
+const MODEL_CANDIDATE_RELATIVE_PATH = Object.freeze(["model", "yawn-once.motion3.json"]);
+const MODEL_DISPLAY_INFO_RELATIVE_PATH = Object.freeze(["model", "魔女.cdi3.json"]);
 export const YAWN_SEMANTIC_ALLOWLIST = Object.freeze([
   "ParamAngleX",
   "ParamAngleY",
@@ -69,14 +72,95 @@ const MOTION_VARIATION_PARAMETER_IDS = new Set([
   "ParamMouthOpenY", "ParamMouthForm"
 ]);
 const MOTION_VARIATION_THRESHOLD = 0.0001;
+export const P2_63B2_CAPTURE_INTERVAL_MS = 1_000 / 12;
+export const P2_63B2_MAX_CAPTURE_FRAMES = 80;
+export const P2_63B2_MAX_SCREENCAST_FRAMES = 600;
+export const P2_63B2_MAX_SCREENCAST_BYTES = 64 * 1024 * 1024;
+export const P2_63B2_MAX_SCREENCAST_WIDTH = 420;
+export const P2_63B2_MAX_SCREENCAST_HEIGHT = 600;
+export const P2_63B2_RUN_TIMEOUT_MS = 90_000;
+export const P2_63B2_MIN_CHANGED_PIXEL_RATIO = 0.002;
+export const P2_63B2_MIN_CHANGED_PAIR_COVERAGE = 0.5;
+export const P2_63B2_MAX_STATIC_RUN_FRAMES = 6;
+const P2_63B2_RESTORE_TAIL_MS = 300;
+const P2_63B2_MODEL_CANDIDATE_SHA256 = "eca4ad06bb4665c3d4ae2a619a1d6528360044935508d08b06310ea3125b52b4";
+const P2_63B2_MIN_PARAMETER_SAMPLES = 30;
+const P2_63B2_MAX_CHECKPOINT_DISTANCE_MS = 120;
+const P2_63B2_MIN_EFFECTIVE_FPS = 10;
+const P2_63B2_MAX_EFFECTIVE_FPS = 15;
+const P2_63B2_MAX_P95_INTERVAL_MS = 150;
+const P2_63B2_MAX_ABSOLUTE_GAP_MS = 200;
+const PNG_CRC32_TABLE = Uint32Array.from({ length: 256 }, (_, value) => {
+  let crc = value;
+  for (let bit = 0; bit < 8; bit += 1) crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1));
+  return crc >>> 0;
+});
 
 export function parseRunnerArgs(argv) {
   if (argv.length === 0) return { mode: "default" };
-  if (argv.length !== 2 || argv[0] !== "--source-user-data" || typeof argv[1] !== "string" || argv[1].length === 0) {
+  const timeoutControl = argv.includes("--timeout-control");
+  const remaining = argv.filter((argument) => argument !== "--timeout-control");
+  if (argv.filter((argument) => argument === "--timeout-control").length > 1) {
     throw new Error("invalid-cli-arguments");
   }
-  if (!isAbsolute(argv[1])) throw new Error("source-user-data-must-be-absolute");
-  return { mode: "explicit-draft", sourceUserDataRoot: argv[1] };
+  if (remaining.length === 1 && remaining[0] === "--source-model-candidate") {
+    return { mode: "model-candidate", timeoutControl };
+  }
+  if (remaining.length !== 2 || remaining[0] !== "--source-user-data" || typeof remaining[1] !== "string" || remaining[1].length === 0) {
+    throw new Error("invalid-cli-arguments");
+  }
+  if (!isAbsolute(remaining[1])) throw new Error("source-user-data-must-be-absolute");
+  return { mode: "explicit-draft", sourceUserDataRoot: remaining[1], timeoutControl };
+}
+
+export function sourceModeForRunnerArgs(args) {
+  if (args.mode === "explicit-draft") return "user-data-draft";
+  if (args.mode === "model-candidate") return "model-candidate";
+  return "default-source";
+}
+
+export async function setPetPointerInputIsolation(page, enabled) {
+  await evaluate(page, `
+    (() => {
+      const key = "__P2_63B2_POINTER_INPUT_BLOCKER__";
+      const eventTypes = ["pointermove", "pointerdown", "pointerup", "pointercancel", "dblclick"];
+      const existing = window[key];
+      if (${JSON.stringify(enabled)}) {
+        if (existing) return;
+        const block = (event) => {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+        };
+        const options = { capture: true };
+        for (const type of eventTypes) window.addEventListener(type, block, options);
+        window[key] = { block, options };
+        return;
+      }
+      if (!existing) return;
+      for (const type of eventTypes) window.removeEventListener(type, existing.block, existing.options);
+      delete window[key];
+    })()
+  `);
+}
+
+export function diagnoseStateSleepFailure(events, telemetryStartIndex) {
+  const relevantEvents = events.filter((event) => event.__index > telemetryStartIndex);
+  const skippedIndex = relevantEvents.findIndex((event) => (
+    event.type === "pet_interaction_action_skipped" &&
+    event.payload?.reason === "state_sleep" &&
+    event.payload?.skipReason === "active_action" &&
+    typeof event.payload?.activeType === "string"
+  ));
+  if (skippedIndex < 0) return "telemetry-event-timeout:state_sleep";
+  const skipped = relevantEvents[skippedIndex];
+  const pointerAction = relevantEvents.slice(0, skippedIndex).find((event) => (
+    event.type === "pet_interaction_action_started" &&
+    /^click_(?:head|body)$/u.test(event.payload?.reason ?? "") &&
+    event.payload?.type === skipped.payload.activeType
+  ));
+  return pointerAction
+    ? `pointer-interference:state_sleep:${skipped.payload.activeType}`
+    : "telemetry-event-timeout:state_sleep";
 }
 
 export function validateExplicitDraftMotion(candidate, modelParameterIds) {
@@ -258,16 +342,73 @@ export function readExplicitDraftFromUserData(sourceUserDataRoot) {
   };
 }
 
-function assertRegularNonReparsePath(path, expectedType) {
+export function readModelCandidateFromRoot(sourceRoot) {
+  const root = resolve(sourceRoot);
+  const candidatePath = join(root, ...MODEL_CANDIDATE_RELATIVE_PATH);
+  const displayInfoPath = join(root, ...MODEL_DISPLAY_INFO_RELATIVE_PATH);
+  for (const path of [root, join(root, "model")]) {
+    assertRegularNonReparsePath(path, "directory", "model-candidate");
+  }
+  for (const path of [candidatePath, displayInfoPath]) {
+    assertRegularNonReparsePath(path, "file", "model-candidate");
+    assertRealPathWithinRoot(root, path, "model-candidate");
+  }
+
+  let sourceBytes;
+  let candidate;
+  let displayInfo;
+  try {
+    sourceBytes = readFileSync(candidatePath);
+  } catch {
+    throw new Error("model-candidate-file-read-failed");
+  }
+  try {
+    candidate = JSON.parse(sourceBytes.toString("utf8"));
+    displayInfo = JSON.parse(readFileSync(displayInfoPath, "utf8"));
+  } catch {
+    throw new Error("model-candidate-invalid-json");
+  }
+  const validation = validateExplicitDraftMotion(candidate, displayInfo.Parameters.map(({ Id }) => Id));
+  if (validation.status !== "validated") throw new Error(validation.blockers[0] ?? "model-candidate-validation-blocked");
+  const sha256 = createHash("sha256").update(sourceBytes).digest("hex");
+  if (sha256 !== P2_63B2_MODEL_CANDIDATE_SHA256) throw new Error("model-candidate-sha256-mismatch");
+  return {
+    sourcePath: candidatePath,
+    sourceBytes,
+    motion: validation.motion,
+    summary: {
+      origin: "model-candidate",
+      basename: basename(candidatePath),
+      sha256
+    }
+  };
+}
+
+function assertRegularNonReparsePath(path, expectedType, errorPrefix = "draft") {
   let stats;
   try {
     stats = lstatSync(path);
   } catch {
-    throw new Error(expectedType === "file" ? "draft-file-missing" : "draft-parent-missing");
+    throw new Error(expectedType === "file" ? `${errorPrefix}-file-missing` : `${errorPrefix}-parent-missing`);
   }
-  if (stats.isSymbolicLink()) throw new Error("draft-reparse-path-rejected");
+  if (stats.isSymbolicLink()) throw new Error(`${errorPrefix}-reparse-path-rejected`);
   if (expectedType === "file" ? !stats.isFile() : !stats.isDirectory()) {
-    throw new Error(expectedType === "file" ? "draft-not-regular-file" : "draft-parent-not-directory");
+    throw new Error(expectedType === "file" ? `${errorPrefix}-not-regular-file` : `${errorPrefix}-parent-not-directory`);
+  }
+}
+
+function assertRealPathWithinRoot(root, path, errorPrefix) {
+  let realRoot;
+  let realPath;
+  try {
+    realRoot = realpathSync.native(root);
+    realPath = realpathSync.native(path);
+  } catch {
+    throw new Error(`${errorPrefix}-path-resolution-failed`);
+  }
+  const realRelative = relative(realRoot, realPath);
+  if (realRelative.startsWith(`..${sep}`) || realRelative === ".." || isAbsolute(realRelative)) {
+    throw new Error(`${errorPrefix}-path-escape`);
   }
 }
 
@@ -346,7 +487,7 @@ export function shouldKeepP263BArtifacts(env = process.env) {
   return env.P2_63B_KEEP_ARTIFACTS === "1";
 }
 
-export function injectIsolatedMotionPreset(source, timing) {
+export function injectIsolatedMotionPreset(source, timing, timeoutControl = false) {
   const marker = "export const PET_MOTION_PRESETS: readonly ModelMotionPreset[] = Object.freeze([]);";
   const replacement = `export const PET_MOTION_PRESETS: readonly ModelMotionPreset[] = Object.freeze([
   {
@@ -355,7 +496,7 @@ export function injectIsolatedMotionPreset(source, timing) {
     durationHintSeconds: ${timing.durationSeconds},
     fadeInSeconds: 0.15,
     fadeOutSeconds: 0.2,
-    loop: false,
+    loop: ${timeoutControl},
     priority: 3,
     allowedStates: ["sleep"]
   }
@@ -373,10 +514,10 @@ export function injectIsolatedStateSleepPath(source, timing, runId = "p2-63a-tes
     ? { ...action, durationMs: ${timing.durationMs}, motionPresetId: "${YAWN_PRESET_ID}" as const }
     : action;
   if (trigger.reason === "state_sleep") {
-    const target = globalThis as typeof globalThis & { __P2_63A_YAWN_PROBE__?: Array<Record<string, unknown>> };
-    const events = target.__P2_63A_YAWN_PROBE__ ?? [];
+    const target = globalThis as typeof globalThis & { __P2_63B2_YAWN_PROBE__?: Array<Record<string, unknown>> };
+    const events = target.__P2_63B2_YAWN_PROBE__ ?? [];
     events.push({ stage: "state_sleep_trigger", atMs: Math.round(performance.now()), runId: ${JSON.stringify(runId)} });
-    target.__P2_63A_YAWN_PROBE__ = events;
+    target.__P2_63B2_YAWN_PROBE__ = events;
   }
   interactionActionPlayer.playAction(
     isolatedAction,
@@ -385,104 +526,205 @@ export function injectIsolatedStateSleepPath(source, timing, runId = "p2-63a-tes
   return replaceExactlyOnce(source, actionMarker, actionReplacement, "isolated state_sleep action path");
 }
 
-export function injectIsolatedCubismProbe(source, runId = "p2-63a-test-run") {
-  const helperMarker = "export async function createCubismMotionController(): Promise<CubismMotionController> {";
-  const helper = `function reportP263AProbe(stage: string, detail: Record<string, unknown> = {}): void {
-  const target = globalThis as typeof globalThis & { __P2_63A_YAWN_PROBE__?: Array<Record<string, unknown>> };
-  const events = target.__P2_63A_YAWN_PROBE__ ?? [];
+function probeReporterSource(runId) {
+  return `function reportP263B2Probe(stage: string, detail: Record<string, unknown> = {}): void {
+  const target = globalThis as typeof globalThis & { __P2_63B2_YAWN_PROBE__?: Array<Record<string, unknown>> };
+  const events = target.__P2_63B2_YAWN_PROBE__ ?? [];
   events.push({ stage, atMs: Math.round(performance.now()), runId: ${JSON.stringify(runId)}, ...detail });
-  target.__P2_63A_YAWN_PROBE__ = events;
+  target.__P2_63B2_YAWN_PROBE__ = events;
+}`;
 }
 
-${helperMarker}`;
-  let output = replaceExactlyOnce(source, helperMarker, helper, "probe helper");
-
+export function injectNativeLifecycleProbe(source, runId = "p2-63b2-test-run") {
+  let output = replaceExactlyOnce(
+    source,
+    "export async function createCubismMotionController(",
+    `${probeReporterSource(runId)}\n\nexport async function createCubismMotionController(`,
+    "native lifecycle reporter"
+  );
   output = replaceExactlyOnce(
     output,
-    `    const load = (async () => {
-      const buffer = await fetchArrayBuffer(resolveModelAssetUrl(preset.path));
-      const motion = CubismMotion.create(buffer, buffer.byteLength);
-
-      if (!motion) {
-        return null;
-      }`,
-    `    const load = (async () => {
-      reportP263AProbe("load_attempt", { motionPresetId, loop: preset.loop });
-      const buffer = await fetchArrayBuffer(resolveModelAssetUrl(preset.path));
-      reportP263AProbe("load_succeeded", { motionPresetId, byteLength: buffer.byteLength });
-      reportP263AProbe("parse_attempt", { motionPresetId });
-      let motion: CubismMotion | null = null;
-
+    `      const buffer = await fetchMotionBuffer(resolveModelAssetUrl(preset.path));
+      const controlledParameterIds = parseControlledParameterIds(buffer);`,
+    `      reportP263B2Probe("load_attempt", { motionPresetId, loop: preset.loop });
+      const buffer = await fetchMotionBuffer(resolveModelAssetUrl(preset.path));
+      reportP263B2Probe("load_succeeded", { motionPresetId, byteLength: buffer.byteLength });
+      reportP263B2Probe("parse_attempt", { motionPresetId });
+      let controlledParameterIds: ReadonlySet<string>;
       try {
-        motion = CubismMotion.create(buffer, buffer.byteLength, undefined, undefined, true);
+        controlledParameterIds = parseControlledParameterIds(buffer);
       } catch (error) {
-        reportP263AProbe("parser_blocked", {
-          motionPresetId,
-          errorName: error instanceof Error ? error.name : "unknown"
-        });
+        reportP263B2Probe("parser_blocked", { motionPresetId, errorName: error instanceof Error ? error.name : "unknown" });
         throw error;
       }
-
-      if (!motion) {
-        reportP263AProbe("parser_blocked", { motionPresetId, errorName: "null-motion" });
-        return null;
-      }
-      motion.setEffectIds([], []);
-      reportP263AProbe("parse_succeeded", { motionPresetId, consistencyCheck: true });`,
-    "Cubism load/parse probe"
+      reportP263B2Probe("parse_succeeded", { motionPresetId, controlledParameterCount: controlledParameterIds.size });`,
+    "controlled parameter parse observation"
   );
-
   output = replaceExactlyOnce(
     output,
-    "  const motionLoads = new Map<PetMotionPresetId, MotionLoad>();",
-    "  const motionLoads = new Map<PetMotionPresetId, MotionLoad>();\n  let activeProbeMotionPresetId: PetMotionPresetId | null = null;",
-    "active probe state"
+    "      const handle = manager.startMotionPriority(loadedMotion.motion, false, preset.priority);",
+    `      reportP263B2Probe("start_attempt", { motionPresetId, priority: preset.priority });
+      const handle = manager.startMotionPriority(loadedMotion.motion, false, preset.priority);`,
+    "native start attempt observation"
   );
-
   output = replaceExactlyOnce(
     output,
-    `      const handle = manager.startMotionPriority(motion, false, preset.priority);
-
-      if (handle === -1) {`,
-    `      reportP263AProbe("start_attempt", { motionPresetId, priority: preset.priority });
-      const handle = manager.startMotionPriority(motion, false, preset.priority);
-
-      if (handle === -1) {
-        reportP263AProbe("start_blocked", { motionPresetId });`,
-    "Cubism start attempt probe"
-  );
-
-  output = replaceExactlyOnce(
-    output,
-    `      return {
-        status: "started",
-        motionPresetId,`,
-    `      activeProbeMotionPresetId = motionPresetId;
-      reportP263AProbe("start_succeeded", { motionPresetId });
-      return {
-        status: "started",
-        motionPresetId,`,
-    "Cubism start success probe"
-  );
-
-  output = replaceExactlyOnce(
-    output,
-    `    stop(): void {
-      manager.stopAllMotions();
-    },`,
-    `    stop(): void {
-      reportP263AProbe("watchdog_stop", {
-        motionPresetId: "${YAWN_PRESET_ID}",
-        hadActiveNativeMotion: activeProbeMotionPresetId === "${YAWN_PRESET_ID}",
-        nativeCompleted: false
+    `      const record = createPlaybackRecord(handle, motionPresetId, loadedMotion.controlledParameterIds);
+      activeMotions.set(handle, record);`,
+    `      const record = createPlaybackRecord(handle, motionPresetId, loadedMotion.controlledParameterIds);
+      activeMotions.set(handle, record);
+      reportP263B2Probe("queued", { motionPresetId });
+      record.playback.onStateChange((state) => {
+        if (state === "started") reportP263B2Probe("native_started", { motionPresetId });
       });
-      activeProbeMotionPresetId = null;
+      record.playback.onTerminal((result) => {
+        reportP263B2Probe("terminal_status", { motionPresetId, status: result.status });
+      });`,
+    "queued and terminal observation"
+  );
+  output = replaceExactlyOnce(
+    output,
+    `        if (!manager.isFinishedByHandle(handle)) {
+          continue;
+        }
+
+        if (activeMotion.playback.state === "started") {`,
+    `        if (!manager.isFinishedByHandle(handle)) {
+          continue;
+        }
+
+        reportP263B2Probe("handle_finished_after_update", {
+          motionPresetId: activeMotion.motionPresetId,
+          lifecycleState: activeMotion.playback.state
+        });
+        if (activeMotion.playback.state === "started") {`,
+    "finished handle observation"
+  );
+  output = replaceExactlyOnce(
+    output,
+    `type PlaybackRecord = {
+  handle: MotionHandle;`,
+    `type PlaybackRecord = {
+  handle: MotionHandle;
+  motionPresetId: PetMotionPresetId;`,
+    "playback record preset identity type"
+  );
+  output = replaceExactlyOnce(
+    output,
+    `    handle,
+    controlledParameterIds,`,
+    `    handle,
+    motionPresetId,
+    controlledParameterIds,`,
+    "playback record preset identity"
+  );
+  output = replaceExactlyOnce(
+    output,
+    `    stop(reason): void {
+      ++requestGeneration;
+      stopActiveMotions(reason);
+      activeMotions.clear();
       manager.stopAllMotions();
     },`,
-    "watchdog stop probe"
+    `    stop(reason): void {
+      ++requestGeneration;
+      const stoppingMotionPresetIds = [...activeMotions.values()]
+        .map((activeMotion) => activeMotion.motionPresetId);
+      stopActiveMotions(reason);
+      activeMotions.clear();
+      for (const motionPresetId of stoppingMotionPresetIds) {
+        reportP263B2Probe("stop_all_motions", { motionPresetId });
+      }
+      manager.stopAllMotions();
+    },`,
+    "actual stop-all observation"
   );
-
   return output;
+}
+
+export function injectPlayerLifecycleProbe(source, runId = "p2-63b2-test-run") {
+  let output = replaceExactlyOnce(
+    source,
+    "export function createInteractionActionPlayer({",
+    `${probeReporterSource(runId)}\n\nexport function createInteractionActionPlayer({`,
+    "player lifecycle reporter"
+  );
+  output = replaceExactlyOnce(
+    output,
+    `    const { action, reason } = activeAction;
+    clearActiveActionScheduling(activeAction);
+    activeInteractionAction = null;
+    restoreTemporaryPartOpacities();`,
+    `    const { action, reason } = activeAction;
+    clearActiveActionScheduling(activeAction);
+    activeInteractionAction = null;
+    reportP263B2Probe("restore_started", { actionType: action.type, motionPresetId: action.motionPresetId ?? null });
+    restoreTemporaryPartOpacities();`,
+    "restore start observation"
+  );
+  output = replaceExactlyOnce(
+    output,
+    `    reportTelemetry("pet_interaction_action_finished", {`,
+    `    reportP263B2Probe("restore_completed", { actionType: action.type, motionPresetId: action.motionPresetId ?? null });
+    reportTelemetry("pet_interaction_action_finished", {`,
+    "restore completion observation"
+  );
+  output = replaceExactlyOnce(
+    output,
+    `        activeAction.timeoutId = scheduleTimeout(() => {
+          if (activeInteractionAction !== activeAction) {
+            return;
+          }
+
+          stopMotion("timed_out");`,
+    `        reportP263B2Probe("player_watchdog_armed", { durationMs: result.durationMs, motionPresetId: result.motionPresetId });
+        activeAction.timeoutId = scheduleTimeout(() => {
+          if (activeInteractionAction !== activeAction) {
+            return;
+          }
+
+          reportP263B2Probe("player_watchdog_fired", { durationMs: result.durationMs, motionPresetId: result.motionPresetId });
+          stopMotion("timed_out");`,
+    "player watchdog observation"
+  );
+  return output;
+}
+
+export function injectFramePipelineProbe(source, runId = "p2-63b2-test-run") {
+  let output = replaceExactlyOnce(
+    source,
+    "export function updateCubismFrame(",
+    `${probeReporterSource(runId)}\n\nconst P2_63B2_ANGLE_Y_IDS: ReadonlySet<string> = new Set(["ParamAngleY"]);\n\nexport function updateCubismFrame(`,
+    "frame pipeline reporter"
+  );
+  output = replaceExactlyOnce(
+    output,
+    `  const ownedParameterIds = layers.applyMotion?.(deltaSeconds) ?? EMPTY_PARAMETER_IDS;
+  const ownedParameterIndices = findOwnedParameterIndices(model, ownedParameterIds);`,
+    `  const ownedParameterIds = layers.applyMotion?.(deltaSeconds) ?? EMPTY_PARAMETER_IDS;
+  const angleYIndex = findOwnedParameterIndices(model, P2_63B2_ANGLE_Y_IDS)[0] ?? -1;
+  const sourceAngleY = angleYIndex >= 0 ? model.getParameterValueByIndex(angleYIndex) : null;
+  const ownedParameterIndices = findOwnedParameterIndices(model, ownedParameterIds);`,
+    "motion source parameter sample"
+  );
+  output = replaceExactlyOnce(
+    output,
+    `  applyProtectedLayer(model, ownedParameterIndices, deltaSeconds, layers.applyBreath);
+  model.update();`,
+    `  applyProtectedLayer(model, ownedParameterIndices, deltaSeconds, layers.applyBreath);
+  reportP263B2Probe("frame_parameter_sample", {
+    owned: ownedParameterIds.has("ParamAngleY"),
+    sourceAngleY,
+    runtimeAngleY: angleYIndex >= 0 ? model.getParameterValueByIndex(angleYIndex) : null
+  });
+  model.update();`,
+    "protected runtime parameter sample"
+  );
+  return output;
+}
+
+export function injectIsolatedCubismProbe(source, runId = "p2-63a-test-run") {
+  return injectNativeLifecycleProbe(source, runId);
 }
 
 export function summarizeProbeOutcome({ fixtureMotion, canonicalization, timing, preTriggerProbeEvents, stateEvent, probeEvents, frameSamples, restoredFrame, runId }) {
@@ -686,7 +928,7 @@ export function isAcceptedProbeSummary(acceptance) {
   return acceptance.status === "passed" && Object.values(acceptance.gates).every(Boolean);
 }
 
-export function createExplicitDraftInputBlockedSummary(error, explicitDraftMode = true) {
+export function createExplicitDraftInputBlockedSummary(error, sourceMode) {
   const sanitizedError = sanitizeError(error);
   return {
     safeSummaryOnly: true,
@@ -694,26 +936,388 @@ export function createExplicitDraftInputBlockedSummary(error, explicitDraftMode 
     status: "blocked",
     acceptance: sanitizedError.message || "explicit-draft-input-blocked",
     error: sanitizedError,
-    phase: "explicit-draft-input",
-    explicitDraftMode,
+    phase: `${sourceMode}-input`,
+    sourceMode,
+    explicitDraftMode: sourceMode === "user-data-draft",
     diagnosticOnly: true,
     manualVisualPass: false,
     realUi: { launchAttempted: false }
   };
 }
 
+function roundEvidence(value) {
+  return Number.isFinite(value) ? Math.round(value * 1_000) / 1_000 : null;
+}
+
+export function summarizeParameterEvidence(probeEvents, nativeStartedAtMs, durationMs) {
+  const samples = probeEvents.filter((event) => (
+    event.stage === "frame_parameter_sample" &&
+    event.owned === true &&
+    Number.isFinite(event.sourceAngleY) &&
+    Number.isFinite(event.runtimeAngleY) &&
+    Number.isFinite(event.atMs) &&
+    event.atMs >= nativeStartedAtMs &&
+    event.atMs <= nativeStartedAtMs + durationMs
+  ));
+  const summarize = (key) => {
+    const values = samples.map((sample) => sample[key]);
+    const min = values.length > 0 ? Math.min(...values) : null;
+    const max = values.length > 0 ? Math.max(...values) : null;
+    return { min: roundEvidence(min), max: roundEvidence(max), span: roundEvidence(max === null ? null : max - min) };
+  };
+  const source = summarize("sourceAngleY");
+  const runtime = summarize("runtimeAngleY");
+  const runtimeSourceSpanRatio = source.span > 0 ? runtime.span / source.span : null;
+  const checkpoints = [0, 2_500, 4_270, durationMs].map((offsetMs) => {
+    const sample = samples.reduce((closest, candidate) => (
+      !closest || Math.abs(candidate.atMs - nativeStartedAtMs - offsetMs) < Math.abs(closest.atMs - nativeStartedAtMs - offsetMs)
+        ? candidate
+        : closest
+    ), null);
+    return {
+      offsetMs,
+      sampleDistanceMs: Number.isFinite(sample?.atMs)
+        ? Math.round(Math.abs(sample.atMs - nativeStartedAtMs - offsetMs))
+        : null,
+      source: roundEvidence(sample?.sourceAngleY),
+      runtime: roundEvidence(sample?.runtimeAngleY)
+    };
+  });
+  const sampleCountGatePassed = samples.length >= P2_63B2_MIN_PARAMETER_SAMPLES;
+  const checkpointDistanceGatePassed = checkpoints.every((checkpoint) => (
+    checkpoint.sampleDistanceMs !== null && checkpoint.sampleDistanceMs <= P2_63B2_MAX_CHECKPOINT_DISTANCE_MS
+  ));
+  const polarityGatePassed = checkpoints[1].source > 0 && checkpoints[1].runtime > 0 &&
+    checkpoints[2].source < 0 && checkpoints[2].runtime < 0;
+  return {
+    sampleCount: samples.length,
+    source,
+    runtime,
+    runtimeSourceSpanRatio: roundEvidence(runtimeSourceSpanRatio),
+    checkpoints,
+    sampleCountGatePassed,
+    checkpointDistanceGatePassed,
+    polarityGatePassed,
+    checkpointGatePassed: sampleCountGatePassed && checkpointDistanceGatePassed && polarityGatePassed,
+    directionPreserved: Boolean(
+      checkpoints[1].source > checkpoints[0].source && checkpoints[1].runtime > checkpoints[0].runtime &&
+      checkpoints[2].source < checkpoints[1].source && checkpoints[2].runtime < checkpoints[1].runtime
+    ),
+    spanGatePassed: runtimeSourceSpanRatio !== null && runtimeSourceSpanRatio >= 0.8
+  };
+}
+
+export function summarizeLifecycleEvidence(probeEvents, timeoutControl = false) {
+  const countIn = (events, stage, status) => events.filter((event) => (
+    event.stage === stage && (status === undefined || event.status === status)
+  )).length;
+  const targetEvents = probeEvents.filter((event) => event.motionPresetId === YAWN_PRESET_ID);
+  const firstIndex = (stage, status) => targetEvents.findIndex((event) => (
+    event.stage === stage && (status === undefined || event.status === status)
+  ));
+  const makeCounts = (events) => ({
+    queued: countIn(events, "queued"),
+    nativeStarted: countIn(events, "native_started"),
+    handleFinishedAfterUpdate: countIn(events, "handle_finished_after_update"),
+    completed: countIn(events, "terminal_status", "completed"),
+    timedOut: countIn(events, "terminal_status", "timed_out"),
+    stopAllMotions: countIn(events, "stop_all_motions"),
+    watchdogArmed: countIn(events, "player_watchdog_armed"),
+    watchdogFired: countIn(events, "player_watchdog_fired"),
+    restoreStarted: countIn(events, "restore_started"),
+    restoreCompleted: countIn(events, "restore_completed")
+  });
+  const terminalStatus = timeoutControl ? "timed_out" : "completed";
+  const orderedStages = timeoutControl
+    ? [["queued"], ["native_started"], ["player_watchdog_armed"], ["player_watchdog_fired"], ["terminal_status", "timed_out"], ["stop_all_motions"], ["restore_started"], ["restore_completed"]]
+    : [["queued"], ["native_started"], ["player_watchdog_armed"], ["handle_finished_after_update"], ["terminal_status", "completed"], ["restore_started"], ["restore_completed"]];
+  const indices = orderedStages.map(([stage, status]) => firstIndex(stage, status));
+  const strictOrder = indices.every((index, position) => index >= 0 && (position === 0 || index > indices[position - 1]));
+  const counts = makeCounts(targetEvents);
+  const observedGlobalCounts = makeCounts(probeEvents);
+  const passed = timeoutControl
+    ? strictOrder && counts.queued === 1 && counts.nativeStarted === 1 && counts.watchdogArmed === 1 &&
+      counts.watchdogFired === 1 && counts.timedOut === 1 && counts.completed === 0 &&
+      counts.stopAllMotions === 1 && counts.restoreStarted === 1 && counts.restoreCompleted === 1
+    : strictOrder && counts.queued === 1 && counts.nativeStarted === 1 && counts.handleFinishedAfterUpdate === 1 &&
+      counts.completed === 1 && counts.timedOut === 0 && counts.stopAllMotions === 0 &&
+      counts.watchdogArmed === 1 && counts.watchdogFired === 0 && counts.restoreStarted === 1 && counts.restoreCompleted === 1;
+  return {
+    mode: timeoutControl ? "timeout-control" : "normal",
+    targetMotionPresetId: YAWN_PRESET_ID,
+    terminalStatus,
+    strictOrder,
+    counts,
+    observedGlobalCounts,
+    passed
+  };
+}
+
+export function summarizeContinuousEvidence(index, nativeStartedAtMs, restoreCompletedAtMs, durationMs) {
+  const offsets = index.map((frame) => (
+    Number.isFinite(frame.offsetMs) ? frame.offsetMs : frame.atMs - nativeStartedAtMs
+  )).filter(Number.isFinite).sort((left, right) => left - right);
+  const intervals = offsets.slice(1).map((offset, index) => offset - offsets[index]);
+  const coveredMs = offsets.length > 0 ? offsets[offsets.length - 1] - offsets[0] : 0;
+  const maxIntervalMs = intervals.length > 0 ? Math.max(...intervals) : null;
+  const sortedIntervals = [...intervals].sort((left, right) => left - right);
+  const p95IntervalMs = sortedIntervals.length > 0
+    ? sortedIntervals[Math.ceil(sortedIntervals.length * 0.95) - 1]
+    : null;
+  const effectiveFps = coveredMs > 0 ? (offsets.length - 1) * 1_000 / coveredMs : 0;
+  const restoreCoverageMs = Number.isFinite(restoreCompletedAtMs) && offsets.length > 0
+    ? nativeStartedAtMs + offsets[offsets.length - 1] - restoreCompletedAtMs
+    : 0;
+  let validPngFrames = 0;
+  let visiblePngFrames = 0;
+  let changedPairs = 0;
+  let currentStaticRunFrames = index.length > 0 ? 1 : 0;
+  let maxStaticRunFrames = currentStaticRunFrames;
+  let dimensionsConsistent = true;
+  let previous = null;
+  const frameHashes = new Set();
+  for (const frame of index) {
+    const evidence = summarizePngFrameEvidence(frame);
+    if (evidence.pngValid) validPngFrames += 1;
+    if (evidence.nonTransparentPixels > 1_000) visiblePngFrames += 1;
+    if (evidence.pngSha256) frameHashes.add(evidence.pngSha256);
+    if (previous) {
+      const sameDimensions = previous.width === evidence.width && previous.height === evidence.height;
+      dimensionsConsistent &&= sameDimensions;
+      const changedPixelRatio = sameDimensions ? calculateChangedPixelRatio(previous, evidence) : 0;
+      if (changedPixelRatio >= P2_63B2_MIN_CHANGED_PIXEL_RATIO) {
+        changedPairs += 1;
+        currentStaticRunFrames = 1;
+      } else {
+        currentStaticRunFrames += 1;
+        maxStaticRunFrames = Math.max(maxStaticRunFrames, currentStaticRunFrames);
+      }
+    }
+    previous = evidence;
+  }
+  const adjacentPairCount = Math.max(0, index.length - 1);
+  const changedPairCoverage = adjacentPairCount > 0 ? changedPairs / adjacentPairCount : 0;
+  const distinctFrameHashes = frameHashes.size;
+  const timingGates = {
+    effectiveFps: effectiveFps >= P2_63B2_MIN_EFFECTIVE_FPS && effectiveFps <= P2_63B2_MAX_EFFECTIVE_FPS,
+    p95Interval: p95IntervalMs !== null && p95IntervalMs <= P2_63B2_MAX_P95_INTERVAL_MS,
+    absoluteMaxGap: maxIntervalMs !== null && maxIntervalMs <= P2_63B2_MAX_ABSOLUTE_GAP_MS
+  };
+  const timingFailureReasons = [
+    ...(!timingGates.effectiveFps ? ["effective-fps-out-of-range"] : []),
+    ...(!timingGates.p95Interval ? ["p95-interval-exceeded"] : []),
+    ...(!timingGates.absoluteMaxGap ? ["absolute-max-gap-exceeded"] : [])
+  ];
+  return {
+    frameCount: offsets.length,
+    coveredMs: Math.round(coveredMs),
+    effectiveFps: roundEvidence(effectiveFps),
+    maxIntervalMs: maxIntervalMs === null ? null : Math.round(maxIntervalMs),
+    p95IntervalMs: p95IntervalMs === null ? null : Math.round(p95IntervalMs),
+    absoluteMaxGapMs: maxIntervalMs === null ? null : Math.round(maxIntervalMs),
+    timingGates,
+    timingFailureReasons,
+    restoreCoverageMs: Math.round(restoreCoverageMs),
+    validPngFrames,
+    visiblePngFrames,
+    distinctFrameHashes,
+    changedPairs,
+    adjacentPairCount,
+    changedPairCoverage: roundEvidence(changedPairCoverage),
+    maxStaticRunFrames,
+    dimensionsConsistent,
+    passed: timingFailureReasons.length === 0 &&
+      coveredMs >= durationMs + 300 && restoreCoverageMs >= 300 &&
+      validPngFrames === index.length && visiblePngFrames === index.length && dimensionsConsistent &&
+      distinctFrameHashes >= 2 && changedPairCoverage >= P2_63B2_MIN_CHANGED_PAIR_COVERAGE &&
+      maxStaticRunFrames <= P2_63B2_MAX_STATIC_RUN_FRAMES
+  };
+}
+
+function calculateChangedPixelRatio(previous, current) {
+  if (!previous.pixels || !current.pixels || previous.pixels.length !== current.pixels.length) return 0;
+  let changedPixels = 0;
+  for (let index = 0; index < previous.pixels.length; index += 4) {
+    if (
+      Math.abs(previous.pixels[index] - current.pixels[index]) > 8 ||
+      Math.abs(previous.pixels[index + 1] - current.pixels[index + 1]) > 8 ||
+      Math.abs(previous.pixels[index + 2] - current.pixels[index + 2]) > 8 ||
+      Math.abs(previous.pixels[index + 3] - current.pixels[index + 3]) > 8
+    ) {
+      changedPixels += 1;
+    }
+  }
+  return changedPixels / Math.max(previous.nonTransparentPixels, current.nonTransparentPixels, 1);
+}
+
+function summarizePngFrameEvidence(frame) {
+  if (typeof frame.data !== "string") {
+    return { pngValid: false, pngSha256: null, width: 0, height: 0, nonTransparentPixels: 0, pixels: null };
+  }
+  const bytes = Buffer.from(frame.data, "base64");
+  try {
+    const png = decodePng(bytes, {
+      maxWidth: P2_63B2_MAX_SCREENCAST_WIDTH,
+      maxHeight: P2_63B2_MAX_SCREENCAST_HEIGHT
+    });
+    return {
+      pngValid: true,
+      pngSha256: createHash("sha256").update(bytes).digest("hex"),
+      width: png.width,
+      height: png.height,
+      nonTransparentPixels: countVisiblePngPixels(png.pixels),
+      pixels: png.pixels
+    };
+  } catch {
+    return { pngValid: false, pngSha256: null, width: 0, height: 0, nonTransparentPixels: 0, pixels: null };
+  }
+}
+
+export function createScreencastFrameCollector({
+  acknowledge,
+  maxFrames = P2_63B2_MAX_SCREENCAST_FRAMES,
+  maxBytes = P2_63B2_MAX_SCREENCAST_BYTES
+}) {
+  const frames = [];
+  const ackPromises = [];
+  let retainedBytes = 0;
+  let observedFrames = 0;
+  let limitReached = false;
+
+  function onFrame(event) {
+    observedFrames += 1;
+    let ack;
+    try {
+      ack = Promise.resolve(acknowledge(event.sessionId));
+    } catch (error) {
+      ack = Promise.reject(error);
+    }
+    ackPromises.push(ack);
+    void ack.catch(() => undefined);
+
+    const timestamp = event.metadata?.timestamp;
+    if (typeof event.data !== "string" || !Number.isFinite(timestamp)) return;
+    const byteLength = Buffer.byteLength(event.data, "base64");
+    if (frames.length >= maxFrames || retainedBytes + byteLength > maxBytes) {
+      limitReached = true;
+      return;
+    }
+    frames.push({ data: event.data, timestamp, byteLength });
+    retainedBytes += byteLength;
+  }
+
+  return {
+    onFrame,
+    getFrames: () => frames.slice(),
+    getSummary: () => ({ observedFrames, retainedFrames: frames.length, retainedBytes, limitReached }),
+    async settleAcks() {
+      const results = await Promise.allSettled(ackPromises);
+      const rejected = results.filter((result) => result.status === "rejected");
+      if (rejected.length > 0) throw new Error(`screencast-frame-ack-failed:${rejected.length}`);
+    }
+  };
+}
+
+export async function startScreencastCapture(cdp) {
+  const collector = createScreencastFrameCollector({
+    acknowledge: (sessionId) => cdp.send("Page.screencastFrameAck", { sessionId })
+  });
+  const listener = (event) => collector.onFrame(event);
+  const unsubscribe = cdp.on("Page.screencastFrame", listener);
+  let stopped = false;
+  let terminalError = null;
+  try {
+    await cdp.send("Page.startScreencast", {
+      format: "png",
+      maxWidth: P2_63B2_MAX_SCREENCAST_WIDTH,
+      maxHeight: P2_63B2_MAX_SCREENCAST_HEIGHT,
+      everyNthFrame: 1
+    });
+  } catch (error) {
+    unsubscribe();
+    throw error;
+  }
+
+  return {
+    collector,
+    async stop() {
+      if (terminalError) throw terminalError;
+      if (stopped) return collector.getSummary();
+      await cdp.send("Page.stopScreencast");
+      stopped = true;
+      try {
+        unsubscribe();
+        await collector.settleAcks();
+      } catch (error) {
+        terminalError = error;
+        throw error;
+      }
+      return collector.getSummary();
+    }
+  };
+}
+
+export function selectScreencastFrames({
+  frames,
+  performanceTimeOrigin,
+  nativeStartedAtMs,
+  restoreCompletedAtMs,
+  intervalMs = P2_63B2_CAPTURE_INTERVAL_MS,
+  maxFrames = P2_63B2_MAX_CAPTURE_FRAMES
+}) {
+  const windowStartMs = performanceTimeOrigin + nativeStartedAtMs;
+  const windowEndMs = performanceTimeOrigin + restoreCompletedAtMs + P2_63B2_RESTORE_TAIL_MS;
+  const selected = [];
+  let lastSlot = -1;
+  for (const frame of frames) {
+    const timestampMs = frame.timestamp * 1_000;
+    if (timestampMs < windowStartMs || timestampMs > windowEndMs + intervalMs) continue;
+    const slot = Math.max(0, Math.floor((timestampMs - windowStartMs) / intervalMs));
+    if (slot === lastSlot) continue;
+    selected.push({ ...frame, timestampMs, offsetMs: timestampMs - windowStartMs, slot });
+    lastSlot = slot;
+    if (selected.length === maxFrames) break;
+  }
+  return selected;
+}
+
+export function writeSelectedScreencastFrames(runDir, frames) {
+  const index = frames.map((frame, frameNumber) => {
+    const filename = `continuous-${String(frameNumber).padStart(4, "0")}.png`;
+    writeFileSync(join(runDir, filename), Buffer.from(frame.data, "base64"));
+    const { pixels: _pixels, ...pngEvidence } = summarizePngFrameEvidence(frame);
+    return {
+      filename,
+      offsetMs: roundEvidence(frame.offsetMs),
+      metadataTimestamp: frame.timestamp,
+      imageBytes: frame.byteLength,
+      slot: frame.slot,
+      ...pngEvidence
+    };
+  });
+  writeFileSync(join(runDir, "continuous-frame-index.json"), `${JSON.stringify(index, null, 2)}\n`, "utf8");
+  return index;
+}
+
 async function main() {
   const startedAt = Date.now();
   let runnerArgs;
-  let explicitDraft = null;
+  let sourceMode;
+  let source = null;
   try {
     runnerArgs = parseRunnerArgs(process.argv.slice(2));
+    sourceMode = sourceModeForRunnerArgs(runnerArgs);
     if (runnerArgs.mode === "explicit-draft") {
-      explicitDraft = readExplicitDraftFromUserData(runnerArgs.sourceUserDataRoot);
+      source = readExplicitDraftFromUserData(runnerArgs.sourceUserDataRoot);
+    } else if (runnerArgs.mode === "model-candidate") {
+      source = readModelCandidateFromRoot(ROOT);
     }
   } catch (error) {
     console.log(JSON.stringify(
-      createExplicitDraftInputBlockedSummary(error, process.argv.includes("--source-user-data")),
+      createExplicitDraftInputBlockedSummary(
+        error,
+        sourceMode ?? (process.argv.includes("--source-model-candidate") ? "model-candidate" : "user-data-draft")
+      ),
       null,
       2
     ));
@@ -762,12 +1366,23 @@ async function main() {
   const keepArtifacts = shouldKeepP263BArtifacts();
   const runId = context.stamp;
   let summary = null;
-  let outcome = null;
-  let runtimeDiagnostics = {};
   let canonicalization = null;
   let timing = null;
-  let screenshotPaths = [];
+  let continuousIndex = [];
+  let continuousEvidence = null;
+  let anchorPaths = [];
+  let lifecycle = null;
+  let parameterEvidence = null;
+  let stateSelection = null;
+  let runtimeDiagnostics = {};
+  let screencastCapture = null;
+  let pet = null;
+  let pointerInputIsolated = false;
+  const runController = new AbortController();
   const cleanup = {
+    screencastStopped: true,
+    screencastUnsubscribed: true,
+    screencastAcksSettled: true,
     electronStopped: false,
     tmpRemoved: false,
     artifactsRetained: false,
@@ -777,28 +1392,37 @@ async function main() {
   };
 
   try {
-    const prepared = prepareIsolatedApp(fixtureRoot, runId, explicitDraft);
+    await withHardTimeout(async () => {
+    const prepared = prepareIsolatedApp(fixtureRoot, runId, source, runnerArgs.timeoutControl);
     canonicalization = prepared.canonicalization;
     timing = prepared.timing;
     await buildIsolatedRenderer(fixtureRoot, context);
+    runController.signal.throwIfAborted();
     startIsolatedElectron(context, fixtureRoot);
     await connectToElectron(context, 40_000);
-    const pet = await waitForWindow(context, "renderer/pet/index.html", 30_000);
+    runController.signal.throwIfAborted();
+    pet = await waitForWindow(context, "renderer/pet/index.html", 30_000);
     await waitFor(pet, "Boolean(window.petApi && document.querySelector('#pet-canvas'))", { timeoutMs: 20_000 });
     await waitFor(pet, "document.querySelector('#pet-canvas')?.width > 0", { timeoutMs: 20_000 });
     await sleep(3_000);
+    runController.signal.throwIfAborted();
 
     await evaluate(pet, "window.petApi?.openChat()");
     const chat = await waitForWindow(context, "renderer/chat/index.html", 20_000);
     await waitFor(chat, "Boolean(document.querySelector('#chat-page'))", { timeoutMs: 15_000 });
     await setPresenceMode(chat, "default");
     await sleep(2_000);
+    runController.signal.throwIfAborted();
     const preTriggerProbeEvents = await readProbeEvents(pet);
     assertNoPreTriggerYawnLoad(preTriggerProbeEvents);
-    screenshotPaths.push(await captureScreenshot(pet, context, "baseline-before-trigger"));
-    await armTimedFrameSampler(pet, runId, timing.sampleOffsetsMs);
-    const screenshotPromise = captureTimedScreenshots(pet, context, runId, timing.sampleOffsetsMs);
     const telemetryStartIndex = readTelemetryEvents(context).length - 1;
+    const performanceTimeOrigin = await evaluate(pet, "performance.timeOrigin");
+    await setPetPointerInputIsolation(pet, true);
+    pointerInputIsolated = true;
+    screencastCapture = await startScreencastCapture(pet.cdp);
+    cleanup.screencastStopped = false;
+    cleanup.screencastUnsubscribed = false;
+    cleanup.screencastAcksSettled = false;
     await setPresenceMode(chat, "sleep");
 
     const stateEvent = await waitForTelemetry(context, (event) => (
@@ -809,27 +1433,69 @@ async function main() {
       event.payload?.type === "doze" &&
       event.payload?.durationMs === timing.durationMs &&
       event.payload?.selectedActionType === "doze"
-    ), 8_000);
-
-    const [frameSamples, capturedScreenshots] = await Promise.all([readTimedFrameSamples(pet), screenshotPromise]);
-    screenshotPaths.push(...capturedScreenshots);
-    await waitForProbeStage(pet, "watchdog_stop", timing.watchdogMaxMs + 1_000);
+    ), 8_000, runController.signal);
+    if (!stateEvent) {
+      throw new Error(diagnoseStateSleepFailure(readTelemetryEvents(context), telemetryStartIndex));
+    }
+    const nativeStarted = await waitForTargetProbeStage(pet, "native_started", 10_000, runController.signal);
+    if (!nativeStarted) throw new Error("probe-stage-timeout:native_started");
+    runController.signal.throwIfAborted();
+    const anchorCapture = captureTimedScreenshots(
+      pet,
+      context,
+      nativeStarted.atMs,
+      timing.sampleOffsetsMs,
+      runController.signal
+    );
+    const restoreCompleted = await waitForTargetProbeStage(
+      pet,
+      "restore_completed",
+      timing.durationMs + 2_500,
+      runController.signal
+    );
+    if (!restoreCompleted) throw new Error("probe-stage-timeout:restore_completed");
+    anchorPaths = await anchorCapture;
+    await waitForEvent(() => {
+      const lastFrame = screencastCapture.collector.getFrames().at(-1);
+      const targetTimestamp = (performanceTimeOrigin + restoreCompleted.atMs + P2_63B2_RESTORE_TAIL_MS) / 1_000;
+      return lastFrame?.timestamp >= targetTimestamp ? lastFrame : null;
+    }, { timeoutMs: 1_500, intervalMs: 20, signal: runController.signal });
+    const screencastSummary = await screencastCapture.stop();
+    cleanup.screencastStopped = true;
+    cleanup.screencastUnsubscribed = true;
+    cleanup.screencastAcksSettled = true;
+    const selectedFrames = selectScreencastFrames({
+      frames: screencastCapture.collector.getFrames(),
+      performanceTimeOrigin,
+      nativeStartedAtMs: nativeStarted.atMs,
+      restoreCompletedAtMs: restoreCompleted.atMs
+    });
+    continuousEvidence = summarizeContinuousEvidence(
+      selectedFrames,
+      nativeStarted.atMs,
+      restoreCompleted.atMs,
+      timing.durationMs
+    );
+    continuousIndex = keepArtifacts
+      ? writeSelectedScreencastFrames(context.runDir, selectedFrames)
+      : selectedFrames.map((frame) => {
+        const { pixels: _pixels, ...pngEvidence } = summarizePngFrameEvidence(frame);
+        return { offsetMs: frame.offsetMs, ...pngEvidence };
+      });
     const probeEvents = await readProbeEvents(pet);
+    lifecycle = summarizeLifecycleEvidence(probeEvents, runnerArgs.timeoutControl);
+    parameterEvidence = summarizeParameterEvidence(probeEvents, nativeStarted.atMs, timing.durationMs);
+    stateSelection = {
+      reason: stateEvent?.payload?.reason ?? null,
+      stateId: stateEvent?.payload?.stateId ?? null,
+      actionType: stateEvent?.payload?.type ?? null,
+      remainedSleepUntilRestore: stateEvent?.payload?.stateId === "sleep" && Boolean(restoreCompleted),
+      preTriggerNoYawnLoad: true
+    };
+    await setPetPointerInputIsolation(pet, false);
+    pointerInputIsolated = false;
     await setPresenceMode(chat, "default");
     await sleep(300);
-    const restoredFrame = await captureCurrentFrame(pet, "stop-plus-300ms", 300);
-    screenshotPaths.push(await captureScreenshot(pet, context, "restored"));
-    outcome = summarizeProbeOutcome({
-      fixtureMotion: JSON.parse(readFileSync(join(fixtureRoot, "model-fixture", "yawn.motion3.json"), "utf8")),
-      canonicalization,
-      timing,
-      preTriggerProbeEvents,
-      stateEvent,
-      probeEvents,
-      frameSamples,
-      restoredFrame,
-      runId
-    });
     runtimeDiagnostics = readRuntimeDiagnostics(context);
     summary = {
       ok: false,
@@ -837,18 +1503,29 @@ async function main() {
       acceptance: "pending-cleanup",
       isolatedFixture: true,
       diagnosticOnly: true,
-      explicitDraftMode: explicitDraft !== null,
-      sourceDraft: explicitDraft?.summary ?? null,
-      manualVisualPass: false,
+      sourceMode,
+      explicitDraftMode: sourceMode === "user-data-draft",
+      mode: runnerArgs.timeoutControl ? "timeout-control" : "normal",
+      sourceDraft: source?.summary ?? null,
       canonicalization,
       timing,
+      fixture: { loop: prepared.fixtureLoop },
       productionCatalogModified: false,
-      screenshotPersistence: keepArtifacts ? "retained-by-explicit-env" : "temporary-cleaned-by-default",
+      stateSelection,
+      lifecycle,
+      parameterEvidence,
+      continuousEvidence,
+      capture: {
+        ...screencastSummary,
+        selectedFrames: continuousIndex.length,
+        anchorCount: anchorPaths.length,
+        restoreObserved: true
+      },
+      runtimeDiagnostics,
+      postRestoreModeSwitch: "default",
       durationMs: Date.now() - startedAt,
-      outcome,
-      probeEvents,
-      runtimeDiagnostics
     };
+    }, P2_63B2_RUN_TIMEOUT_MS, runController);
   } catch (error) {
     runtimeDiagnostics = readRuntimeDiagnostics(context);
     summary = {
@@ -857,18 +1534,30 @@ async function main() {
       acceptance: "probe-failed",
       isolatedFixture: true,
       diagnosticOnly: true,
-      explicitDraftMode: explicitDraft !== null,
-      sourceDraft: explicitDraft?.summary ?? null,
-      manualVisualPass: false,
+      sourceMode,
+      explicitDraftMode: sourceMode === "user-data-draft",
+      mode: runnerArgs?.timeoutControl ? "timeout-control" : "normal",
+      sourceDraft: source?.summary ?? null,
       canonicalization,
       timing,
       productionCatalogModified: false,
-      screenshotPersistence: keepArtifacts ? "retained-by-explicit-env" : "temporary-cleaned-by-default",
       durationMs: Date.now() - startedAt,
       failure: sanitizeError(error),
       runtimeDiagnostics
     };
   } finally {
+    await runCleanupStep(cleanup, "pointer-input-isolation", async () => {
+      if (!pet || !pointerInputIsolated) return;
+      await setPetPointerInputIsolation(pet, false);
+      pointerInputIsolated = false;
+    });
+    await runCleanupStep(cleanup, "screencast-stop", async () => {
+      if (!screencastCapture) return;
+      await screencastCapture.stop();
+      cleanup.screencastStopped = true;
+      cleanup.screencastUnsubscribed = true;
+      cleanup.screencastAcksSettled = true;
+    });
     await runCleanupStep(cleanup, "electron-stop", async () => {
       cleanup.electronStopped = await stopElectronAndVerify(context);
       if (!cleanup.electronStopped) throw new Error("Electron process or CDP endpoint remained alive");
@@ -894,22 +1583,21 @@ async function main() {
   }
 
   summary.cleanup = cleanup;
-  summary.visualCheckpoints = {
-    manualInspectionRequired: true,
-    automaticVisualPass: false,
-    captured: screenshotPaths.length === 5,
-    basenames: screenshotPaths.map((path) => basename(path))
-  };
-  if (outcome) {
-    const acceptance = classifyProbeOutcome(outcome, runtimeDiagnostics, cleanup);
-    summary.status = acceptance.status;
-    summary.acceptance = acceptance.code;
-    summary.blockerEvidence = acceptance.blockerEvidence;
-    summary.gates = acceptance.gates;
-    summary.ok = isAcceptedProbeSummary(acceptance);
-  }
+  const cleanupPassed = cleanup.screencastStopped && cleanup.screencastUnsubscribed && cleanup.screencastAcksSettled &&
+    cleanup.electronStopped && (cleanup.tmpRemoved || cleanup.artifactsRetained) &&
+    cleanup.protectedFilesRestored && cleanup.screenshotResidue.length === 0 && cleanup.errors.length === 0;
+  const continuousPassed = summary.continuousEvidence?.passed === true && summary.capture?.limitReached === false;
+  const rendererError = /Uncaught (?:TypeError|Error):/u.test(Object.values(runtimeDiagnostics).join("\n"));
+  const passed = Boolean(lifecycle?.passed && parameterEvidence?.spanGatePassed &&
+    parameterEvidence?.directionPreserved && parameterEvidence?.checkpointGatePassed &&
+    stateSelection?.remainedSleepUntilRestore && cleanupPassed && continuousPassed && !rendererError);
+  summary.status = passed ? "passed" : summary.status === "failed" ? "failed" : "blocked";
+  summary.acceptance = passed ? "real-ui-evidence-contract-passed" : summary.acceptance === "probe-failed"
+    ? "probe-failed"
+    : "required-gate-failed";
+  summary.ok = passed;
   summary.artifacts = keepArtifacts
-    ? createPublicArtifactSummary(context, fixtureRoot, screenshotPaths)
+    ? createPublicArtifactSummary(context, fixtureRoot, continuousIndex, anchorPaths)
     : null;
   if (keepArtifacts) {
     writeFileSync(context.resultPath, `${JSON.stringify(summary, null, 2)}\n`, "utf8");
@@ -920,21 +1608,19 @@ async function main() {
   }
 }
 
-export function prepareIsolatedApp(fixtureRoot, runId, explicitDraft = null) {
-  const refreshedDraft = explicitDraft ? readExplicitDraftFromUserData(explicitDraft.sourceUserDataRoot) : null;
-  if (refreshedDraft && refreshedDraft.summary.sha256 !== explicitDraft.summary.sha256) {
-    throw new Error("draft-source-changed-after-validation");
-  }
-  const sourceYawnPath = refreshedDraft?.sourcePath ?? join(ROOT, "model", "yawn.motion3.json");
-  const sourceBytes = refreshedDraft?.sourceBytes ?? readFileSync(sourceYawnPath);
+export function prepareIsolatedApp(fixtureRoot, runId, source = null, timeoutControl = false) {
+  const sourceYawnPath = source?.sourcePath ?? join(ROOT, "model", "yawn.motion3.json");
+  const sourceBytes = source?.sourceBytes ?? readFileSync(sourceYawnPath);
   const sourceHashBefore = createHash("sha256").update(sourceBytes).digest("hex");
   const displayInfo = JSON.parse(readFileSync(join(ROOT, "model", "魔女.cdi3.json"), "utf8"));
   const modelParameterIds = displayInfo.Parameters.map(({ Id }) => Id);
-  const canonicalResult = refreshedDraft
-    ? createValidatedDraftFixture(refreshedDraft.motion, modelParameterIds)
+  const canonicalResult = source
+    ? createValidatedDraftFixture(source.motion, modelParameterIds)
     : createIsolatedMotionFixture(JSON.parse(sourceBytes.toString("utf8")), modelParameterIds);
   if (canonicalResult.status !== "canonicalized") throw new Error("yawn-source-gate-blocked");
   const timing = deriveYawnProbeTiming(canonicalResult.motion.Meta.Duration);
+  const fixtureMotion = structuredClone(canonicalResult.motion);
+  fixtureMotion.Meta.Loop = timeoutControl;
 
   mkdirSync(fixtureRoot, { recursive: true });
   for (const entry of ["dist", "public", "resources", "src"]) {
@@ -946,22 +1632,20 @@ export function prepareIsolatedApp(fixtureRoot, runId, explicitDraft = null) {
   symlinkSync(join(ROOT, "node_modules"), join(fixtureRoot, "node_modules"), "junction");
   createModelFixture(join(ROOT, "model"), join(fixtureRoot, "model-fixture"));
 
-  const sourceHashAfter = refreshedDraft
-    ? readExplicitDraftFromUserData(explicitDraft.sourceUserDataRoot).summary.sha256
-    : createHash("sha256").update(readFileSync(sourceYawnPath)).digest("hex");
+  const sourceHashAfter = createHash("sha256").update(readFileSync(sourceYawnPath)).digest("hex");
   if (sourceHashBefore !== sourceHashAfter) {
     throw new Error("source yawn hash changed during canonicalization");
   }
   const canonicalization = {
     ...canonicalResult.summary,
-    explicitDraftMode: explicitDraft !== null,
+    explicitDraftMode: source !== null,
     sourceHashBefore,
     sourceHashAfter,
     sourceHashUnchanged: true,
     diagnosticOnly: true
   };
   const yawnPath = join(fixtureRoot, "model-fixture", "yawn.motion3.json");
-  writeFileSync(yawnPath, `${JSON.stringify(canonicalResult.motion)}\n`, "utf8");
+  writeFileSync(yawnPath, `${JSON.stringify(fixtureMotion)}\n`, "utf8");
 
   const manifestPath = join(fixtureRoot, "resources", "models", "witch", "model-manifest.json");
   const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
@@ -972,16 +1656,18 @@ export function prepareIsolatedApp(fixtureRoot, runId, explicitDraft = null) {
     durationHintSeconds: timing.durationSeconds,
     fadeInSeconds: 0.15,
     fadeOutSeconds: 0.2,
-    loop: false,
+    loop: timeoutControl,
     priority: 3,
     allowedStates: ["sleep"]
   }];
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
 
-  patchFile(join(fixtureRoot, "src", "shared", "pet-motion-presets.ts"), (source) => injectIsolatedMotionPreset(source, timing));
+  patchFile(join(fixtureRoot, "src", "shared", "pet-motion-presets.ts"), (source) => injectIsolatedMotionPreset(source, timing, timeoutControl));
   patchFile(join(fixtureRoot, "src", "renderer", "pet", "main.ts"), (source) => injectIsolatedStateSleepPath(source, timing, runId));
-  patchFile(join(fixtureRoot, "src", "renderer", "pet", "live2d", "cubism-motion.ts"), (source) => injectIsolatedCubismProbe(source, runId));
-  return { canonicalization, timing };
+  patchFile(join(fixtureRoot, "src", "renderer", "pet", "live2d", "cubism-motion.ts"), (source) => injectNativeLifecycleProbe(source, runId));
+  patchFile(join(fixtureRoot, "src", "renderer", "pet", "interaction-action-player.ts"), (source) => injectPlayerLifecycleProbe(source, runId));
+  patchFile(join(fixtureRoot, "src", "renderer", "pet", "live2d", "cubism-frame-pipeline.ts"), (source) => injectFramePipelineProbe(source, runId));
+  return { canonicalization, timing, fixtureLoop: timeoutControl };
 }
 
 export function removeCurrentRunArtifacts(context) {
@@ -995,11 +1681,15 @@ export function removeCurrentRunArtifacts(context) {
   return !existsSync(runDir);
 }
 
-export function createPublicArtifactSummary(context, fixtureRoot, screenshotPaths) {
+export function createPublicArtifactSummary(context, fixtureRoot, continuousIndex, anchorPaths = []) {
   return {
     runDirectory: relative(ROOT, context.runDir).split(sep).join("/"),
     fixturePath: relative(context.runDir, join(fixtureRoot, "model-fixture", "yawn.motion3.json")).split(sep).join("/"),
-    screenshotBasenames: screenshotPaths.map((path) => basename(path))
+    continuousFrameCount: continuousIndex.length,
+    continuousFormat: "png",
+    timeIndex: "continuous-frame-index.json",
+    anchorFrameCount: anchorPaths.length,
+    anchorFormat: "png"
   };
 }
 
@@ -1182,39 +1872,257 @@ async function armTimedFrameSampler(pet, runId, sampleOffsetsMs) {
   `);
 }
 
-async function captureTimedScreenshots(pet, context, runId, sampleOffsetsMs) {
-  const trigger = await evaluate(pet, `
-    (async () => {
-      const deadline = performance.now() + 10000;
-      while (performance.now() < deadline) {
-        const event = (globalThis.__P2_63A_YAWN_PROBE__ ?? [])
-          .find((item) => item.runId === ${JSON.stringify(runId)} && item.stage === "start_succeeded");
-        if (event) return event;
-        await new Promise((resolveSleep) => setTimeout(resolveSleep, 10));
-      }
-      throw new Error("timed-screenshot-start-timeout");
-    })()
-  `);
+async function captureTimedScreenshots(pet, context, nativeStartedAtMs, sampleOffsetsMs, signal) {
   const paths = [];
   const labels = ["start", "mid", "end"];
   for (const [index, offsetMs] of sampleOffsetsMs.entries()) {
+    signal?.throwIfAborted();
     await evaluate(pet, `(async () => {
-      await new Promise((resolveSleep) => setTimeout(resolveSleep, Math.max(0, ${trigger.atMs + offsetMs} - performance.now())));
+      await new Promise((resolveSleep) => setTimeout(resolveSleep, Math.max(0, ${nativeStartedAtMs + offsetMs} - performance.now())));
       await new Promise((resolveFrame) => requestAnimationFrame(() => resolveFrame()));
     })()`);
-    paths.push(await captureScreenshot(pet, context, `${labels[index]}-${offsetMs}ms`));
+    paths.push((await captureScreenshot(pet, context, `${labels[index]}-${offsetMs}ms`, signal)).path);
   }
   return paths;
 }
 
-async function captureScreenshot(pet, context, label) {
-  const screenshot = await pet.cdp.send("Page.captureScreenshot", {
-    format: "png",
-    captureBeyondViewport: false
+async function captureScreenshot(pet, context, label, signal) {
+  const frame = await captureVisiblePageFrame({
+    signal,
+    waitForVisibleFrame: () => waitForVisibleRendererFrame(pet),
+    capturePageScreenshot: async () => {
+      const result = await pet.cdp.send("Page.captureScreenshot", {
+        format: "png",
+        captureBeyondViewport: false
+      });
+      return Buffer.from(result.data, "base64");
+    }
   });
   const path = join(context.runDir, `p2-63b-yawn-${label}.png`);
-  writeFileSync(path, Buffer.from(screenshot.data, "base64"));
-  return path;
+  writeFileSync(path, frame.data);
+  return {
+    path,
+    imageBytes: frame.byteLength,
+    visiblePixels: frame.pngNonTransparentPixels,
+    rendererVisiblePixels: frame.rendererNonTransparentPixels
+  };
+}
+
+export function assertCapturedFrameVisible({ pngNonTransparentPixels, rendererNonTransparentPixels }) {
+  if (
+    !Number.isSafeInteger(pngNonTransparentPixels) || pngNonTransparentPixels <= 1_000 ||
+    !Number.isSafeInteger(rendererNonTransparentPixels) || rendererNonTransparentPixels <= 1_000
+  ) {
+    throw new Error("captured-frame-model-not-visible");
+  }
+}
+
+export async function captureVisiblePageFrame({
+  waitForVisibleFrame,
+  capturePageScreenshot,
+  summarizeScreenshot = summarizeCapturedPng,
+  now = Date.now,
+  sleepFor = sleep,
+  signal
+}) {
+  signal?.throwIfAborted();
+  const renderer = await waitForVisibleFrame();
+  const deadline = now() + 250;
+  let screenshotAttempts = 0;
+  let firstPngNonTransparentPixels = null;
+  let image = Buffer.alloc(0);
+  let png = { width: 0, height: 0, nonTransparentPixels: 0 };
+
+  do {
+    signal?.throwIfAborted();
+    image = await capturePageScreenshot();
+    screenshotAttempts += 1;
+    png = summarizeScreenshot(image);
+    firstPngNonTransparentPixels ??= png.nonTransparentPixels;
+    try {
+      assertCapturedFrameVisible({
+        pngNonTransparentPixels: png.nonTransparentPixels,
+        rendererNonTransparentPixels: renderer.nonTransparentPixels
+      });
+      return {
+        data: image,
+        byteLength: image.length,
+        width: png.width,
+        height: png.height,
+        pngNonTransparentPixels: png.nonTransparentPixels,
+        rendererNonTransparentPixels: renderer.nonTransparentPixels,
+        rendererProbeAttempts: renderer.attempts,
+        screenshotAttempts
+      };
+    } catch (error) {
+      if (now() >= deadline) break;
+    }
+    await sleepFor(Math.min(P2_63B2_CAPTURE_INTERVAL_MS, deadline - now()));
+  } while (now() <= deadline);
+
+  const captureSummary = {
+    firstRendererNonTransparentPixels: renderer.firstNonTransparentPixels,
+    rendererNonTransparentPixels: renderer.nonTransparentPixels,
+    firstPngNonTransparentPixels,
+    pngNonTransparentPixels: png.nonTransparentPixels,
+    rendererProbeAttempts: renderer.attempts,
+    screenshotAttempts
+  };
+  const error = new Error(`captured-frame-model-not-visible:${JSON.stringify(captureSummary)}`);
+  error.captureSummary = captureSummary;
+  throw error;
+}
+
+async function waitForVisibleRendererFrame(pet) {
+  return evaluate(pet, `
+    (async () => {
+      const canvas = document.querySelector("#pet-canvas");
+      const gl = canvas?.getContext("webgl2");
+      if (!canvas || !gl) throw new Error("missing-webgl2-pet-canvas");
+      const deadline = performance.now() + 250;
+      let attempts = 0;
+      let firstNonTransparentPixels = null;
+      let nonTransparentPixels = 0;
+      do {
+        await new Promise((resolveFrame) => requestAnimationFrame(() => resolveFrame()));
+        attempts += 1;
+        const pixels = new Uint8Array(canvas.width * canvas.height * 4);
+        gl.readPixels(0, 0, canvas.width, canvas.height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+        nonTransparentPixels = 0;
+        for (let index = 3; index < pixels.length; index += 4) {
+          if ((pixels[index] ?? 0) > 8) nonTransparentPixels += 1;
+        }
+        firstNonTransparentPixels ??= nonTransparentPixels;
+        if (nonTransparentPixels > 1_000) break;
+      } while (performance.now() < deadline);
+      return {
+        firstNonTransparentPixels,
+        nonTransparentPixels,
+        attempts,
+        contextLost: gl.isContextLost()
+      };
+    })()
+  `);
+}
+
+export function summarizeCapturedPng(buffer) {
+  const png = decodePng(buffer);
+  return { width: png.width, height: png.height, nonTransparentPixels: countVisiblePngPixels(png.pixels) };
+}
+
+function countVisiblePngPixels(pixels) {
+  let nonTransparentPixels = 0;
+  for (let index = 0; index < pixels.length; index += 4) {
+    const hasColor = (pixels[index] ?? 0) > 8 ||
+      (pixels[index + 1] ?? 0) > 8 ||
+      (pixels[index + 2] ?? 0) > 8;
+    if ((pixels[index + 3] ?? 0) > 8 && hasColor) nonTransparentPixels += 1;
+  }
+  return nonTransparentPixels;
+}
+
+function decodePng(buffer, { maxWidth = 630, maxHeight = 900 } = {}) {
+  if (!buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) {
+    throw new Error("invalid-png-signature");
+  }
+  let offset = 8;
+  let width = 0;
+  let height = 0;
+  let bitDepth = 0;
+  let colorType = 0;
+  let sawHeader = false;
+  let sawEnd = false;
+  const idatChunks = [];
+  while (offset < buffer.length) {
+    if (offset + 12 > buffer.length) throw new Error("invalid-png-chunk-boundary");
+    const length = buffer.readUInt32BE(offset);
+    const type = buffer.toString("ascii", offset + 4, offset + 8);
+    const dataStart = offset + 8;
+    const dataEnd = dataStart + length;
+    if (dataEnd + 4 > buffer.length) throw new Error("invalid-png-chunk-boundary");
+    const expectedCrc = buffer.readUInt32BE(dataEnd);
+    const actualCrc = pngCrc32(buffer.subarray(offset + 4, dataEnd));
+    if (actualCrc !== expectedCrc) throw new Error(`invalid-png-chunk-crc:${type}`);
+    const data = buffer.subarray(dataStart, dataEnd);
+    offset = dataEnd + 4;
+    if (type === "IHDR") {
+      if (sawHeader || length !== 13) throw new Error("invalid-png-header");
+      sawHeader = true;
+      width = data.readUInt32BE(0);
+      height = data.readUInt32BE(4);
+      bitDepth = data[8] ?? 0;
+      colorType = data[9] ?? 0;
+    } else if (type === "IDAT") {
+      idatChunks.push(data);
+    } else if (type === "IEND") {
+      if (length !== 0 || offset !== buffer.length) throw new Error("invalid-png-end");
+      sawEnd = true;
+      break;
+    }
+  }
+  if (!sawHeader || !sawEnd || idatChunks.length === 0) throw new Error("incomplete-png");
+  if (width <= 0 || height <= 0 || bitDepth !== 8) throw new Error("unsupported-png-shape");
+  if (width > maxWidth || height > maxHeight) throw new Error("png-dimensions-exceed-limit");
+  const bytesPerPixel = { 0: 1, 2: 3, 4: 2, 6: 4 }[colorType];
+  if (!bytesPerPixel) throw new Error("unsupported-png-color-type");
+  const stride = width * bytesPerPixel;
+  const expectedInflatedBytes = height * (stride + 1);
+  const maxInflatedBytes = maxHeight * (maxWidth * 4 + 1);
+  if (!Number.isSafeInteger(expectedInflatedBytes) || expectedInflatedBytes > maxInflatedBytes) {
+    throw new Error("png-inflated-size-exceeds-limit");
+  }
+  const compressed = Buffer.concat(idatChunks);
+  const inflated = inflateSync(compressed, { maxOutputLength: maxInflatedBytes });
+  if (inflated.length !== expectedInflatedBytes) throw new Error("invalid-png-scanline-length");
+  const pixels = Buffer.alloc(width * height * 4);
+  let sourceOffset = 0;
+  let previous = Buffer.alloc(stride);
+  for (let y = 0; y < height; y += 1) {
+    const filter = inflated[sourceOffset] ?? 0;
+    sourceOffset += 1;
+    const row = Buffer.alloc(stride);
+    for (let x = 0; x < stride; x += 1) {
+      const raw = inflated[sourceOffset + x] ?? 0;
+      const left = x >= bytesPerPixel ? row[x - bytesPerPixel] ?? 0 : 0;
+      const up = previous[x] ?? 0;
+      const upLeft = x >= bytesPerPixel ? previous[x - bytesPerPixel] ?? 0 : 0;
+      row[x] = (raw + pngFilterPrediction(filter, left, up, upLeft)) & 0xff;
+    }
+    sourceOffset += stride;
+    for (let x = 0; x < width; x += 1) {
+      const input = x * bytesPerPixel;
+      const output = (y * width + x) * 4;
+      const gray = row[input] ?? 0;
+      pixels[output] = colorType <= 4 && colorType !== 2 ? gray : row[input] ?? 0;
+      pixels[output + 1] = colorType <= 4 && colorType !== 2 ? gray : row[input + 1] ?? 0;
+      pixels[output + 2] = colorType <= 4 && colorType !== 2 ? gray : row[input + 2] ?? 0;
+      pixels[output + 3] = colorType === 6 ? row[input + 3] ?? 255 : colorType === 4 ? row[input + 1] ?? 255 : 255;
+    }
+    previous = row;
+  }
+  return { width, height, pixels };
+}
+
+function pngCrc32(buffer) {
+  let crc = 0xffffffff;
+  for (const byte of buffer) {
+    crc = PNG_CRC32_TABLE[(crc ^ byte) & 0xff] ^ (crc >>> 8);
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function pngFilterPrediction(filter, left, up, upLeft) {
+  if (filter === 0) return 0;
+  if (filter === 1) return left;
+  if (filter === 2) return up;
+  if (filter === 3) return Math.floor((left + up) / 2);
+  if (filter !== 4) throw new Error("unsupported-png-filter");
+  const prediction = left + up - upLeft;
+  const leftDistance = Math.abs(prediction - left);
+  const upDistance = Math.abs(prediction - up);
+  const upLeftDistance = Math.abs(prediction - upLeft);
+  if (leftDistance <= upDistance && leftDistance <= upLeftDistance) return left;
+  return upDistance <= upLeftDistance ? up : upLeft;
 }
 
 async function captureCurrentFrame(pet, label, afterStopMs) {
@@ -1261,19 +2169,50 @@ async function readTimedFrameSamples(pet) {
 }
 
 async function readProbeEvents(pet) {
-  return evaluate(pet, "globalThis.__P2_63A_YAWN_PROBE__ ?? []");
+  return evaluate(pet, "globalThis.__P2_63B2_YAWN_PROBE__ ?? []");
 }
 
-async function waitForProbeStage(pet, stage, timeoutMs) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    const events = await readProbeEvents(pet);
-    if (events.some((event) => event.stage === stage)) {
-      return true;
-    }
-    await sleep(100);
+async function waitForTargetProbeStage(pet, stage, timeoutMs, signal) {
+  return waitForEvent(
+    async () => (await readProbeEvents(pet)).find((candidate) => (
+      candidate.stage === stage && candidate.motionPresetId === YAWN_PRESET_ID
+    )) ?? null,
+    { timeoutMs, intervalMs: 100, signal }
+  );
+}
+
+export async function waitForEvent(readEvent, {
+  timeoutMs,
+  intervalMs = 100,
+  signal,
+  sleepFor = sleep,
+  now = Date.now
+}) {
+  const deadline = now() + timeoutMs;
+  while (now() < deadline) {
+    signal?.throwIfAborted();
+    const event = await readEvent();
+    if (event) return event;
+    await sleepFor(Math.min(intervalMs, Math.max(0, deadline - now())));
   }
-  return false;
+  signal?.throwIfAborted();
+  return null;
+}
+
+export async function withHardTimeout(operation, timeoutMs, controller = new AbortController()) {
+  let timeoutId;
+  const timeout = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => {
+      const error = new Error("runner-hard-timeout");
+      reject(error);
+      controller.abort(error);
+    }, timeoutMs);
+  });
+  try {
+    return await Promise.race([Promise.resolve().then(operation), timeout]);
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 async function stopElectronAndVerify(context) {
@@ -1326,14 +2265,11 @@ function readTelemetryEvents(context) {
   return events.map((event, index) => ({ ...event, __index: index }));
 }
 
-async function waitForTelemetry(context, predicate, timeoutMs) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    const event = readTelemetryEvents(context).find(predicate);
-    if (event) return event;
-    await sleep(120);
-  }
-  return null;
+async function waitForTelemetry(context, predicate, timeoutMs, signal) {
+  return waitForEvent(
+    () => readTelemetryEvents(context).find(predicate) ?? null,
+    { timeoutMs, intervalMs: 120, signal }
+  );
 }
 
 function patchFile(path, transform) {

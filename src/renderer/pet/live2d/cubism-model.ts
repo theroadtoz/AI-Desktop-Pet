@@ -17,6 +17,8 @@ import { CubismPoseTargetController, type CubismPoseTarget } from "./cubism-pose
 import { WITCH_MODEL3_URL, type Live2DUpdateSample, type LoadedLive2DModel, type Model3Json } from "./types";
 import { CubismFramework } from "./vendor/framework/live2dcubismframework";
 
+const EMPTY_NATIVE_MOTION_PARAMETER_IDS: ReadonlySet<string> = new Set();
+
 async function fetchArrayBuffer(url: string): Promise<ArrayBuffer> {
   const response = await fetch(url);
 
@@ -103,13 +105,13 @@ export async function loadWitchLive2DModel(
       };
 
       updateCubismFrame(model, deltaSeconds, {
-        applyMotion: () => {
-          motionController?.update(model, deltaSeconds);
-        },
+        applyMotion: () => (
+          motionController?.update(model, deltaSeconds) ?? EMPTY_NATIVE_MOTION_PARAMETER_IDS
+        ),
+        applyLook: () => lookController?.update(model, deltaSeconds),
+        applyPose: () => poseTargetController?.update(model, deltaSeconds),
+        applyDrag: () => dragPhysicsController?.advance(deltaSeconds),
         applyPhysicsInputs: () => {
-          lookController?.update(model, deltaSeconds);
-          poseTargetController?.update(model, deltaSeconds);
-          dragPhysicsController?.advance(deltaSeconds);
           dragPhysicsController?.apply(model);
         },
         evaluatePhysics: () => this._physics?.evaluate(model, deltaSeconds),
@@ -249,8 +251,8 @@ export async function loadWitchLive2DModel(
         skipReason: "no_semantic_motion_presets"
       });
     },
-    stopMotion(): void {
-      motionController?.stop();
+    stopMotion(reason): void {
+      motionController?.stop(reason);
     },
     applyTemporaryPartOpacities,
     restoreTemporaryPartOpacities,

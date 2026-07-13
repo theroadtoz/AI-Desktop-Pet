@@ -58,6 +58,13 @@ import {
 import { resolvePetExpressionStateLinkage } from "../src/shared/pet-expression-state-linkage.ts";
 import type { EmotionPresentation } from "../src/shared/emotion-presentation.ts";
 import type { PetAccessoryPresetId } from "../src/shared/pet-accessory.ts";
+import type {
+  CubismMotionLifecycleState,
+  CubismMotionPlayback,
+  CubismMotionPlaybackResult,
+  CubismMotionStopReason,
+  CubismMotionTerminalResult
+} from "../src/renderer/pet/live2d/cubism-motion.ts";
 
 type FakePlayerTimer = {
   callback: () => void;
@@ -65,7 +72,9 @@ type FakePlayerTimer = {
   cleared: boolean;
 };
 
-function createFakeInteractionActionPlayer() {
+function createFakeInteractionActionPlayer(options: {
+  playMotionPreset?: (motionPresetId: string) => Promise<CubismMotionPlaybackResult>;
+} = {}) {
   let nowMs = 1_000;
   let persistent: { presentation: EmotionPresentation; accessoryPresetId: PetAccessoryPresetId } = {
     presentation: { emotion: "neutral", intensity: "low", mode: "neutral" },
@@ -111,9 +120,14 @@ function createFakeInteractionActionPlayer() {
     },
     playMotionPreset: (motionPresetId) => {
       calls.push(`playMotionPreset:${motionPresetId}`);
+      return options.playMotionPreset?.(motionPresetId) ?? Promise.resolve({
+        status: "skipped",
+        skipReason: "motion_start_cancelled",
+        motionPresetId
+      });
     },
-    stopMotion: () => {
-      calls.push("stopMotion");
+    stopMotion: (reason: CubismMotionStopReason) => {
+      calls.push(`stopMotion:${reason}`);
     },
     applyTemporaryPartOpacities: (partIds) => {
       calls.push(`temporaryParts:${partIds.join(",")}`);
@@ -146,6 +160,47 @@ function createFakeInteractionActionPlayer() {
     },
     setPersistentAccessory(accessoryPresetId: PetAccessoryPresetId): void {
       persistent = { ...persistent, accessoryPresetId };
+    },
+    setPersistentPresentation(presentation: EmotionPresentation): void {
+      persistent = { ...persistent, presentation };
+    }
+  };
+}
+
+function createFakeMotionPlayback(motionPresetId = "future-wave") {
+  let state: CubismMotionLifecycleState = "queued";
+  let resolveTerminal: (result: CubismMotionTerminalResult) => void = () => undefined;
+  const stateListeners = new Set<(nextState: CubismMotionLifecycleState) => void>();
+  const terminal = new Promise<CubismMotionTerminalResult>((resolve) => {
+    resolveTerminal = resolve;
+  });
+  const playback: CubismMotionPlayback = {
+    get state() {
+      return state;
+    },
+    terminal,
+    onStateChange(listener) {
+      stateListeners.add(listener);
+      listener(state);
+      return () => stateListeners.delete(listener);
+    },
+    onTerminal(listener) {
+      void terminal.then(listener);
+      return () => undefined;
+    }
+  };
+
+  return {
+    playback,
+    transition(nextState: CubismMotionLifecycleState): void {
+      state = nextState;
+      for (const listener of stateListeners) {
+        listener(nextState);
+      }
+    },
+    settle(status: CubismMotionTerminalResult["status"]): void {
+      state = status;
+      resolveTerminal({ status, motionPresetId });
     }
   };
 }
@@ -1151,8 +1206,16 @@ test("interaction action player applies manifest pose targets and restores them 
   ]);
 });
 
-test("interaction action player routes motion preset ids without raw motion paths", () => {
-  const harness = createFakeInteractionActionPlayer();
+test("interaction action player waits for native completion without stopping motion", async () => {
+  const motion = createFakeMotionPlayback();
+  const harness = createFakeInteractionActionPlayer({
+    playMotionPreset: async () => ({
+      status: "started",
+      motionPresetId: "future-wave",
+      durationMs: 5_100,
+      playback: motion.playback
+    })
+  });
   const motionAction = {
     ...getPetInteractionAction("thinking"),
     motionPresetId: "future-wave"
@@ -1167,18 +1230,119 @@ test("interaction action player routes motion preset ids without raw motion path
     "temporaryParts:",
     "applyPresentation:confused:none"
   ]);
+  await Promise.resolve();
+  assert.equal(harness.timers.length, 0);
 
-  harness.setNow(1_000 + motionAction.durationMs);
-  harness.timers[0]?.callback();
+  motion.transition("started");
+  assert.equal(harness.timers.length, 1);
+  assert.equal(harness.timers[0]?.delayMs, 5_600);
+
+  harness.setPersistentAccessory("glasses");
+  harness.setPersistentPresentation({ emotion: "happy", intensity: "high", mode: "emphasis" });
+  motion.settle("completed");
+  await Promise.resolve();
 
   assert.deepEqual(harness.calls.slice(6), [
     "restoreParts",
-    "stopMotion",
     "clearExpression",
     "resetLookTarget",
     "resumeLook",
-    "applyPresentation:neutral:none"
+    "applyPresentation:happy:glasses"
   ]);
+  assert.equal(harness.timers[0]?.cleared, true);
+  assert.equal(harness.calls.some((call) => call.startsWith("stopMotion:")), false);
+});
+
+test("interaction action player restores interrupted, timed_out, and failed native actions exactly once", async (t) => {
+  for (const status of ["interrupted", "timed_out", "failed"] as const) {
+    await t.test(status, async () => {
+      const motion = createFakeMotionPlayback();
+      const harness = createFakeInteractionActionPlayer({
+        playMotionPreset: async () => ({
+          status: "started",
+          motionPresetId: "future-wave",
+          durationMs: 5_100,
+          playback: motion.playback
+        })
+      });
+      const motionAction = {
+        ...getPetInteractionAction("thinking"),
+        motionPresetId: "future-wave" as const
+      };
+
+      harness.player.playAction(motionAction, "click_body");
+      await Promise.resolve();
+      motion.transition("started");
+      motion.settle(status);
+      await Promise.resolve();
+      motion.settle(status);
+      await Promise.resolve();
+
+      assert.equal(harness.calls.filter((call) => call === "restoreParts").length, 1);
+      assert.equal(harness.calls.filter((call) => call === "applyPresentation:neutral:none").length, 1);
+      assert.equal(harness.telemetry.filter((event) => event.type === "pet_interaction_action_finished").length, 1);
+      assert.equal(harness.calls.some((call) => call.startsWith("stopMotion:")), false);
+    });
+  }
+});
+
+test("interaction action player watchdog starts after native started, stops, and ignores late terminal", async () => {
+  const motion = createFakeMotionPlayback();
+  const harness = createFakeInteractionActionPlayer({
+    playMotionPreset: async () => ({
+      status: "started",
+      motionPresetId: "future-wave",
+      durationMs: 5_100,
+      playback: motion.playback
+    })
+  });
+  const motionAction = {
+    ...getPetInteractionAction("thinking"),
+    motionPresetId: "future-wave" as const
+  };
+
+  harness.player.playAction(motionAction, "click_body");
+  await Promise.resolve();
+  assert.equal(harness.timers.length, 0);
+  motion.transition("started");
+  harness.timers[0]?.callback();
+
+  assert.equal(harness.calls.filter((call) => call === "stopMotion:timed_out").length, 1);
+  assert.equal(harness.calls.filter((call) => call === "restoreParts").length, 1);
+  motion.settle("interrupted");
+  await Promise.resolve();
+  assert.equal(harness.calls.filter((call) => call === "restoreParts").length, 1);
+  assert.equal(harness.telemetry.filter((event) => event.type === "pet_interaction_action_finished").length, 1);
+});
+
+test("interaction action player ignores a late native playback Promise after dispose", async () => {
+  let resolveResult: (result: CubismMotionPlaybackResult) => void = () => undefined;
+  const pendingResult = new Promise<CubismMotionPlaybackResult>((resolve) => {
+    resolveResult = resolve;
+  });
+  const motion = createFakeMotionPlayback();
+  const harness = createFakeInteractionActionPlayer({ playMotionPreset: () => pendingResult });
+  const motionAction = {
+    ...getPetInteractionAction("thinking"),
+    motionPresetId: "future-wave" as const
+  };
+
+  harness.player.playAction(motionAction, "click_body");
+  harness.player.dispose();
+  assert.equal(harness.calls.filter((call) => call === "stopMotion:interrupted").length, 1);
+  resolveResult({
+    status: "started",
+    motionPresetId: "future-wave",
+    durationMs: 5_100,
+    playback: motion.playback
+  });
+  await Promise.resolve();
+  motion.transition("started");
+  motion.settle("completed");
+  await Promise.resolve();
+
+  assert.equal(harness.calls.filter((call) => call === "restoreParts").length, 0);
+  assert.equal(harness.telemetry.filter((event) => event.type === "pet_interaction_action_finished").length, 0);
 });
 
 test("interaction action player prevents stacking and reports active action skips", () => {
@@ -1365,6 +1529,29 @@ test("pet pointermove no longer drives the Live2D look target", async () => {
   const pointerMoveHandler = source.slice(pointerMoveStart, pointerDownStart);
 
   assert.equal(pointerMoveHandler.includes("setLookTarget"), false);
+});
+
+test("pet renderer motion adapter always returns a playback result and forwards stop reasons", async () => {
+  const source = await readFile(new URL("../src/renderer/pet/main.ts", import.meta.url), "utf8");
+
+  assert.match(source, /return live2DModel\?\.playMotionPreset\(motionPresetId\) \?\? Promise\.resolve\(\{/);
+  assert.match(source, /live2DModel\?\.stopMotion\(reason\)/);
+  assert.doesNotMatch(source, /void live2DModel\?\.playMotionPreset/);
+});
+
+test("WebGL context loss disposes the active interaction before releasing its model", async () => {
+  const source = await readFile(new URL("../src/renderer/pet/main.ts", import.meta.url), "utf8");
+  const handler = source.slice(
+    source.indexOf("function handleWebGLContextLost(): void"),
+    source.indexOf("async function handleWebGLContextRestored(): Promise<void>")
+  );
+
+  const disposeIndex = handler.indexOf("interactionActionPlayer.dispose()");
+  const releaseModelIndex = handler.indexOf("live2DModel = null");
+
+  assert.notEqual(disposeIndex, -1);
+  assert.notEqual(releaseModelIndex, -1);
+  assert.ok(disposeIndex < releaseModelIndex);
 });
 
 test("pet pointer clicks route head and body actions without changing drag or double-click guards", async () => {
