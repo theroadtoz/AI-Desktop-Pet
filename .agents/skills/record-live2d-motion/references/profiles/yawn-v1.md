@@ -1,0 +1,36 @@
+# Yawn Profile V1
+
+| 字段 | 固定值 |
+| --- | --- |
+| `id` / `revision` / `status` | `yawn` / `v1` / `ready` |
+| `templateKind` | `gesture.one-shot` |
+| `fps` / `draftLoop` | `30` / `false` |
+| `capture_duration` | `5.1s` |
+| `padding` / `motion_duration` | start `0.3s` + end `0.3s` / `5.7s` |
+| `cycle_duration` | 不适用 |
+| `outputPrefix` | `motion-drafts/vts-drafts/yawn` |
+
+## Allowlist And Ownership
+
+只允许以下 9 项：
+
+```text
+ParamAngleX
+ParamAngleY
+ParamAngleZ
+ParamEyeLOpen
+ParamEyeROpen
+ParamBrowLY
+ParamBrowLForm
+ParamMouthOpenY
+ParamMouthForm
+```
+
+排除 breath、voice、眼球跟踪、physics 输出、配件、手臂和未列参数。口型参数仅用于本 one-shot，不得推导为 speaking sustain 的所有权。
+
+## Profile Gates
+
+- 仅在当前模型身份、能力快照与上述 9 项完整匹配时 arm；缺失或未知参数即阻塞。
+- 保持 `Loop=false`，并检查开头和结尾 `0.3s` 静止区与中性恢复。
+- 人工视觉至少检查哈欠语义、嘴眼头节奏、脸/头发/帽子/手杖/衣袖/配件、出屏、残留姿态和 `UseBlinking=false` 下的眼部表现。
+- parser 与人工通过后仍需 Cubism Animator 精修；未获具体 intake 批准不得进入模型目录或 catalog。

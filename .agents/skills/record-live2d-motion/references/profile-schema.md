@@ -1,0 +1,37 @@
+# Profile Schema
+
+Schema version: `live2d-recorder-profile/v1`.
+
+每个 profile 由 Live2dREC main/core 持有并以受信安全摘要提供。renderer 只能提交 `profileId` 与允许时长；不得提交参数、FPS、padding、Loop、路径、状态或 blocker 覆盖值。
+
+## 必填字段
+
+| 字段 | 规则 |
+| --- | --- |
+| `id` | 稳定 profile ID。 |
+| `revision` / `digest` | main/core 对 canonical profile 的版本和摘要；arm 时冻结。 |
+| `status` | 仅 `ready` 或 `planned-blocked`。 |
+| `templateKind` | `gesture.one-shot`、`state.enter`、`state.loop` 或 `state.exit`。 |
+| `duration` | 默认值、允许范围和步进；capture、motion、cycle 三种语义必须明确。 |
+| `fps` / `padding` | 受 profile 控制，不能由 renderer 覆盖。 |
+| `draftLoop` / `productionLoopCandidate` | draft 必须独立声明；loop candidate 不等于生产 Loop。 |
+| `outputPrefix` | 受管相对前缀；不得为绝对路径、上跳路径或用户注入路径。 |
+| `allowlist` | 精确参数 ID 集合。未知、缺失或不匹配即阻塞。 |
+| `ownership` | 参数排除项、运行时通道所有权和冲突说明。 |
+| `gates` | endpoint、模型、parser、seam、视觉、Cubism 与 intake 门禁。 |
+| `blockers` | `planned-blocked` 的可审计原因；不得用猜测 allowlist 填充。 |
+
+## 模板语义
+
+- `gesture.one-shot`：一次性可恢复动作；draft `Loop=false`。
+- `state.enter`：进入持续状态的一次性过渡；draft `Loop=false`。
+- `state.loop`：持续状态的周期候选；录制 draft 仍为 `Loop=false`。
+- `state.exit`：离开持续状态的一次性过渡；draft `Loop=false`。
+
+loop draft 的首尾数值闭合只证明位置可闭合，不证明速度连续。只有 Cubism Animator 精修、至少三周期人工视觉复核、真实运行 pause/resume 复核和明确 production intake 全部通过后，最终资源才可设为 `Loop=true`。
+
+## 状态选择
+
+- 仅 `ready` profile 可进入 compatibility-check、arm 或 record。
+- `planned-blocked` profile 可被 catalog 安全列出，但不得连接、倒数、录制或写 Motion3。
+- 不认识的 profile 或 allowlist 一律按 `planned-blocked` 处理；不要推测参数。
