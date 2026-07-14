@@ -4,18 +4,17 @@
 
 ## Skill Package
 
-- 两个副本必须同为 release `record-live2d-motion-2026-07-14.2`、profile schema `live2d-recorder-profile/v1` 和 take contract schema `live2d-take-contract/v1`。
+- 两个副本必须同为 release `record-live2d-motion-2026-07-14.3`、profile schema `live2d-recorder-profile/v1` 和 take contract schema `live2d-take-contract/v1`。
 - 比对 `SKILL.md`、`agents/openai.yaml`、本目录四个通用 references 和三个 profile references 的 canonical content digest。
-- 按以下固定顺序，以 UTF-8 无 BOM、LF 行尾读取每个文件：`SKILL.md`、`agents/openai.yaml`、`references/profile-schema.md`、`references/take-contract.md`、`references/compatibility.md`、`references/motion-catalog.md`、`references/profiles/yawn-v1.md`、`references/profiles/idle-soft-loop-v1.md`、`references/profiles/greet-small-v1.md`。将 `SKILL.md` 的 `Package-content-digest` 值替换为 64 个 `0`，再串联每项的相对路径、LF、内容、LF，并计算 SHA-256 小写十六进制。结果必须等于 SKILL 中声明的 digest。
+- 按以下固定顺序，以 UTF-8 无 BOM、LF 行尾读取每个文件：`SKILL.md`、`agents/openai.yaml`、`references/profile-schema.md`、`references/take-contract.md`、`references/compatibility.md`、`references/motion-catalog.md`、`references/profiles/yawn-v1.md`、`references/profiles/idle-soft-loop-v1.md`、`references/profiles/greet-small-v2.md`。将 `SKILL.md` 的 `Package-content-digest` 值替换为 64 个 `0`，再串联每项的相对路径、LF、内容、LF，并计算 SHA-256 小写十六进制。结果必须等于 SKILL 中声明的 digest。
 
 ### Quick Validation
 
-当前机器使用已存在的 `C:\Users\1\.codex\skills\.system\skill-creator\scripts\quick_validate.py`，分别验证 source 和 global 副本：
+Windows 默认代码页可能无法读取本 Skill 的中文 UTF-8 内容。使用 `-X utf8` 分别验证 source 和 global 副本，每条命令均可独立运行：
 
 ```powershell
-$env:PYTHONUTF8 = "1"
-python "C:\Users\1\.codex\skills\.system\skill-creator\scripts\quick_validate.py" "E:\Work-26\AI_Desktop_Pet\.agents\skills\record-live2d-motion"
-python "C:\Users\1\.codex\skills\.system\skill-creator\scripts\quick_validate.py" "C:\Users\1\.codex\skills\record-live2d-motion"
+python -X utf8 "C:\Users\1\.codex\skills\.system\skill-creator\scripts\quick_validate.py" "E:\Work-26\AI_Desktop_Pet\.agents\skills\record-live2d-motion"
+python -X utf8 "C:\Users\1\.codex\skills\.system\skill-creator\scripts\quick_validate.py" "C:\Users\1\.codex\skills\record-live2d-motion"
 ```
 
 ## Live2dREC Contract
