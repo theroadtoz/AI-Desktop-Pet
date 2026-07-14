@@ -15,7 +15,7 @@ import {
 } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { inflateSync } from "node:zlib";
+import { deflateSync, inflateSync } from "node:zlib";
 import ts from "typescript";
 import { canonicalizeMotion3, parseMotion3Segments } from "./support/motion3-canonicalizer.mts";
 import {
@@ -164,7 +164,7 @@ export function diagnoseStateSleepFailure(events, telemetryStartIndex) {
     : "telemetry-event-timeout:state_sleep";
 }
 
-export function validateExplicitDraftMotion(candidate, modelParameterIds) {
+export function validateExplicitDraftMotion(candidate, modelParameterIds, constraints = {}) {
   const blockers = new Set();
   const isRecord = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
   const finite = (value) => typeof value === "number" && Number.isFinite(value);
@@ -172,7 +172,13 @@ export function validateExplicitDraftMotion(candidate, modelParameterIds) {
   const optionalNonNegative = (value) => value === undefined || finite(value) && value >= 0;
   const hasOnly = (value, fields) => Object.keys(value).every((key) => fields.has(key));
   const modelIds = Array.isArray(modelParameterIds) ? new Set(modelParameterIds) : null;
-  const allowlist = new Set(YAWN_SEMANTIC_ALLOWLIST);
+  const semanticAllowlist = Array.isArray(constraints.semanticAllowlist)
+    ? constraints.semanticAllowlist
+    : YAWN_SEMANTIC_ALLOWLIST;
+  const variationParameterIds = Array.isArray(constraints.variationParameterIds)
+    ? new Set(constraints.variationParameterIds)
+    : MOTION_VARIATION_PARAMETER_IDS;
+  const allowlist = new Set(semanticAllowlist);
 
   if (!isRecord(candidate)) {
     return { status: "blocked", blockers: ["invalid-candidate"] };
@@ -188,6 +194,10 @@ export function validateExplicitDraftMotion(candidate, modelParameterIds) {
     if (!hasOnly(meta, META_FIELDS)) blockers.add("unsupported-meta-field");
     if (!finite(meta.Duration) || meta.Duration <= 0) blockers.add("invalid-duration");
     if (!finite(meta.Fps) || meta.Fps <= 0) blockers.add("invalid-fps");
+    if (constraints.durationSeconds !== undefined && meta.Duration !== constraints.durationSeconds) {
+      blockers.add("unexpected-duration");
+    }
+    if (constraints.fps !== undefined && meta.Fps !== constraints.fps) blockers.add("unexpected-fps");
     if (meta.Loop !== false) blockers.add("invalid-loop");
     if (
       typeof meta.AreBeziersRestricted !== "boolean" ||
@@ -236,7 +246,7 @@ export function validateExplicitDraftMotion(candidate, modelParameterIds) {
       if (!parsed.validTime) blockers.add("invalid-segment-time");
       if (
         parsed.validEncoding && parsed.validTime &&
-        typeof curve.Id === "string" && MOTION_VARIATION_PARAMETER_IDS.has(curve.Id)
+        typeof curve.Id === "string" && variationParameterIds.has(curve.Id)
       ) {
         const values = extractValidatedMotion3PointValues(curve.Segments);
         if (values.length > 1 && Math.max(...values) - Math.min(...values) > MOTION_VARIATION_THRESHOLD) {
@@ -253,6 +263,15 @@ export function validateExplicitDraftMotion(candidate, modelParameterIds) {
     meta.TotalSegmentCount === segmentCount && meta.TotalPointCount === pointCount
   );
   if (!consistencyCheck) blockers.add("meta-count-mismatch");
+  if (meta && constraints.curveCount !== undefined && meta.CurveCount !== constraints.curveCount) {
+    blockers.add("unexpected-curve-count");
+  }
+  if (meta && constraints.segmentCount !== undefined && meta.TotalSegmentCount !== constraints.segmentCount) {
+    blockers.add("unexpected-segment-count");
+  }
+  if (meta && constraints.pointCount !== undefined && meta.TotalPointCount !== constraints.pointCount) {
+    blockers.add("unexpected-point-count");
+  }
   if (blockers.size > 0) return { status: "blocked", blockers: [...blockers].sort() };
   return {
     status: "validated",
@@ -1449,10 +1468,12 @@ export function selectScreencastFrames({
   nativeStartedAtMs,
   restoreCompletedAtMs,
   intervalMs = P2_63B2_CAPTURE_INTERVAL_MS,
-  maxFrames = P2_63B2_MAX_CAPTURE_FRAMES
+  maxFrames = P2_63B2_MAX_CAPTURE_FRAMES,
+  baselineMs = 0,
+  restoreTailMs = P2_63B2_RESTORE_TAIL_MS
 }) {
-  const windowStartMs = performanceTimeOrigin + nativeStartedAtMs;
-  const windowEndMs = performanceTimeOrigin + restoreCompletedAtMs + P2_63B2_RESTORE_TAIL_MS;
+  const windowStartMs = performanceTimeOrigin + nativeStartedAtMs - baselineMs;
+  const windowEndMs = performanceTimeOrigin + restoreCompletedAtMs + restoreTailMs;
   const selected = [];
   let lastSlot = -1;
   for (const frame of frames) {
@@ -1460,7 +1481,7 @@ export function selectScreencastFrames({
     if (timestampMs < windowStartMs || timestampMs > windowEndMs + intervalMs) continue;
     const slot = Math.max(0, Math.floor((timestampMs - windowStartMs) / intervalMs));
     if (slot === lastSlot) continue;
-    selected.push({ ...frame, timestampMs, offsetMs: timestampMs - windowStartMs, slot });
+    selected.push({ ...frame, timestampMs, offsetMs: timestampMs - (performanceTimeOrigin + nativeStartedAtMs), slot });
     lastSlot = slot;
     if (selected.length === maxFrames) break;
   }
@@ -1935,7 +1956,7 @@ function createModelFixture(sourceRoot, targetRoot) {
   mkdirSync(targetRoot, { recursive: true });
 }
 
-function buildIsolatedRenderer(fixtureRoot, context) {
+export function buildIsolatedRenderer(fixtureRoot, context) {
   const viteCmd = join(ROOT, "node_modules", ".bin", "vite.cmd");
   const child = spawn(viteCmd, ["build", "--config", join(fixtureRoot, "vite.config.ts")], {
     cwd: fixtureRoot,
@@ -1947,7 +1968,7 @@ function buildIsolatedRenderer(fixtureRoot, context) {
   return waitForChild(child, context, "isolated-renderer-build");
 }
 
-function startIsolatedElectron(context, fixtureRoot) {
+export function startIsolatedElectron(context, fixtureRoot) {
   const electronExe = join(ROOT, "node_modules", "electron", "dist", "electron.exe");
   const child = spawn(electronExe, [fixtureRoot, `--remote-debugging-port=${context.port}`], {
     cwd: fixtureRoot,
@@ -2215,7 +2236,7 @@ function countVisiblePngPixels(pixels) {
   return nonTransparentPixels;
 }
 
-function decodePng(buffer, { maxWidth = 630, maxHeight = 900 } = {}) {
+export function decodePng(buffer, { maxWidth = 630, maxHeight = 900 } = {}) {
   if (!buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) {
     throw new Error("invalid-png-signature");
   }
@@ -2295,6 +2316,42 @@ function decodePng(buffer, { maxWidth = 630, maxHeight = 900 } = {}) {
     previous = row;
   }
   return { width, height, pixels };
+}
+
+export function encodeRgbaPng(width, height, pixels) {
+  if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height) || width <= 0 || height <= 0) {
+    throw new Error("invalid-png-output-dimensions");
+  }
+  if (!(pixels instanceof Uint8Array) || pixels.byteLength !== width * height * 4) {
+    throw new Error("invalid-png-output-pixels");
+  }
+  const scanlines = Buffer.alloc(height * (width * 4 + 1));
+  for (let y = 0; y < height; y += 1) {
+    const targetOffset = y * (width * 4 + 1);
+    scanlines[targetOffset] = 0;
+    Buffer.from(pixels.buffer, pixels.byteOffset + y * width * 4, width * 4)
+      .copy(scanlines, targetOffset + 1);
+  }
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(width, 0);
+  header.writeUInt32BE(height, 4);
+  header[8] = 8;
+  header[9] = 6;
+  const chunk = (type, data) => {
+    const typeBytes = Buffer.from(type, "ascii");
+    const output = Buffer.alloc(data.length + 12);
+    output.writeUInt32BE(data.length, 0);
+    typeBytes.copy(output, 4);
+    data.copy(output, 8);
+    output.writeUInt32BE(pngCrc32(Buffer.concat([typeBytes, data])), output.length - 4);
+    return output;
+  };
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk("IHDR", header),
+    chunk("IDAT", deflateSync(scanlines)),
+    chunk("IEND", Buffer.alloc(0))
+  ]);
 }
 
 function pngCrc32(buffer) {
@@ -2409,7 +2466,7 @@ export async function withHardTimeout(operation, timeoutMs, controller = new Abo
   }
 }
 
-async function stopElectronAndVerify(context) {
+export async function stopElectronAndVerify(context) {
   const child = context.child;
   const exitPromise = child && child.exitCode === null
     ? new Promise((resolveExit) => child.once("exit", () => resolveExit(true)))
