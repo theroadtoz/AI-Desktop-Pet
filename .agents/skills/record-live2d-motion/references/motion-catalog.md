@@ -1,6 +1,6 @@
 # Motion Catalog
 
-除 `yawn` 与 `idle-soft-loop` 外，所有项均为 `planned-blocked`。catalog 只说明规划与 fallback；未知 allowlist 一律阻塞，不能因此连接、倒数、录制或写 Motion3。
+除 `yawn`、`idle-soft-loop` 与 `greet-small` 外，所有项均为 `planned-blocked`。catalog 只说明规划与 fallback；未知 allowlist 一律阻塞，不能因此连接、倒数、录制或写 Motion3。
 
 | 顺序 | 动作族 | Canonical 资产或 profile | 模板 | 时长语义 | 别名或 fallback | 是否需要新 Motion | 状态与门禁 |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -9,7 +9,7 @@
 | 2 | sleep | `sleep-enter` | `state.enter` | 建议 1.5-3.0s | 无 | 是 | `planned-blocked`；参数所有权、运行时和视觉门禁未批准。 |
 | 3 | sleep | `sleep-loop-soft` | `state.loop` | 建议 4.0-8.0s cycle | 无 | 是 | `planned-blocked`；专属 allowlist、三周期与 pause/resume 未批准。 |
 | 4 | sleep | `wake-up` | `state.exit` | 建议 2.0-4.0s | 无 | 是 | `planned-blocked`；参数所有权、运行时和视觉门禁未批准。 |
-| 5 | greeting | `greet-small` | `gesture.one-shot` | 建议 1.2-2.5s | 无 | 是 | `planned-blocked`；allowlist、可中断性和 cooldown 未批准。 |
+| 5 | greeting | `greet-small` | `gesture.one-shot` | 2.0s capture + 0.2s + 0.2s padding | 无 | 是，仅生成 draft | `ready`；读 greet-small profile，要求摄像头面捕、完整 allowlist 与当前 take 确认。 |
 | 6 | reaction | `happy-small` | `gesture.one-shot` | 建议 1.0-2.5s | `headPat`、appearance、game cheer 的安全映射候选 | 是 | `planned-blocked`；专属 allowlist 与视觉门禁未批准。 |
 | 7 | reaction | `surprised-small` | `gesture.one-shot` | 建议 0.8-1.8s | 同上 | 是 | `planned-blocked`；专属 allowlist 与视觉门禁未批准。 |
 | 8 | reaction | `flustered-small` | `gesture.one-shot` | 建议 1.0-2.5s | 同上 | 是 | `planned-blocked`；专属 allowlist 与视觉门禁未批准。 |
