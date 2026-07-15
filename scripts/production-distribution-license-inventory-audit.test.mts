@@ -7,9 +7,10 @@ import { auditProductionDistributionLicenseInventory } from "./p2-20u-production
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
-test("default repo production distribution license inventory stays blocked and safe", () => {
+test("default repo metadata with scaffold-only local LLM stays blocked and safe", () => {
   const result = auditProductionDistributionLicenseInventory({
-    repoRoot
+    repoRoot,
+    localLlmScaffold: scaffoldOnlyLocalLlmScaffold()
   });
   const output = JSON.stringify(result);
   const blockers = result.blockers.join(",");
@@ -286,6 +287,21 @@ function readyLocalLlmScaffold() {
     runtimePresent: true,
     modelPresent: true,
     productionPackPresent: true
+  };
+}
+
+function scaffoldOnlyLocalLlmScaffold() {
+  return {
+    scaffoldPresent: true,
+    manifestExamplePresent: true,
+    manifestJsonPresent: false,
+    noticesTemplatePresent: true,
+    noticesTemplatePlaceholder: true,
+    thirdPartyNoticesPresent: false,
+    thirdPartyNoticesPlaceholder: false,
+    runtimePresent: false,
+    modelPresent: false,
+    productionPackPresent: false
   };
 }
 

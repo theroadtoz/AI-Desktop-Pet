@@ -2,6 +2,7 @@
 manifest.json
 runtime/
 models/
+licenses/*
 archives/
 installers/
 generated/

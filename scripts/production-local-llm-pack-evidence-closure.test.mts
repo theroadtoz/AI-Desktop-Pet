@@ -27,15 +27,10 @@ test("default closure audit stays blocked and safe", async () => {
   assert.equal(result.productionReadyClaim, false);
   assert.equal(result.candidateEvidence.model.status, "ready");
   assert.equal(result.candidateEvidence.runtime.status, "ready");
-  assert.equal(result.repoPackState.status, "scaffold_only");
   assert.equal(result.repoPackState.gitignore, "present");
   assert.equal(result.repoPackState.manifestExample, "present");
   assert.equal(result.repoPackState.noticesTemplate, "present");
-  assert.equal(result.repoPackState.productionManifest, "missing");
-  assert.equal(result.repoPackState.productionNotices, "missing");
-  assert.equal(result.repoPackState.runtimeExecutable, "missing");
-  assert.equal(result.repoPackState.runtimeDlls, "missing");
-  assert.equal(result.repoPackState.modelFile, "missing");
+  assertRepoPackState(result.repoPackState);
   assert.equal(result.commandEvidence.status, "ready");
   assert.equal(result.commandEvidence.commands.validateLocalLlm.status, "available");
   assert.equal(result.commandEvidence.commands.dryRunProductionLocalLlmPack.status, "available");
@@ -117,7 +112,7 @@ test("CLI defaults to safe JSON and exits zero", () => {
   assert.equal(result.status, "blocked");
   assert.equal(result.productionReadyClaim, false);
   assert.equal(result.exitPolicy, "always_zero");
-  assert.equal(result.repoPackState.status, "scaffold_only");
+  assert.match(result.repoPackState.status, /^(scaffold_only|production_files_present_not_approved)$/);
   assert.doesNotMatch(cli.stdout, new RegExp(escapeRegExp(repoRoot)));
   assert.doesNotMatch(cli.stdout, /[A-Za-z]:\\/);
   assert.doesNotMatch(cli.stdout, /\btoken\b/i);
@@ -126,6 +121,11 @@ test("CLI defaults to safe JSON and exits zero", () => {
 test("write mode creates only P2-20Z draft markdown and evidence JSON", async () => {
   rmSync(outputRoot, { recursive: true, force: true });
 
+  const repoFinalNoticesPath = join(repoRoot, "resources", "local-llm", "licenses", "THIRD_PARTY_NOTICES.md");
+  const repoFinalNoticesBefore = existsSync(repoFinalNoticesPath)
+    ? readFileSync(repoFinalNoticesPath, "utf8")
+    : null;
+
   const result = await auditProductionLocalLlmPackEvidenceClosure({
     repoRoot,
     write: true
@@ -133,7 +133,6 @@ test("write mode creates only P2-20Z draft markdown and evidence JSON", async ()
   const draftPath = join(outputRoot, "production-local-llm-pack-evidence-closure-draft.md");
   const evidencePath = join(outputRoot, "production-local-llm-pack-evidence-closure.json");
   const finalNoticesPath = join(outputRoot, "THIRD_PARTY_NOTICES.md");
-  const repoFinalNoticesPath = join(repoRoot, "resources", "local-llm", "licenses", "THIRD_PARTY_NOTICES.md");
   const draftText = readFileSync(draftPath, "utf8");
   const evidence = JSON.parse(readFileSync(evidencePath, "utf8"));
 
@@ -142,7 +141,10 @@ test("write mode creates only P2-20Z draft markdown and evidence JSON", async ()
   assert.equal(existsSync(draftPath), true);
   assert.equal(existsSync(evidencePath), true);
   assert.equal(existsSync(finalNoticesPath), false);
-  assert.equal(existsSync(repoFinalNoticesPath), false);
+  assert.equal(existsSync(repoFinalNoticesPath), repoFinalNoticesBefore !== null);
+  if (repoFinalNoticesBefore !== null) {
+    assert.equal(readFileSync(repoFinalNoticesPath, "utf8"), repoFinalNoticesBefore);
+  }
   assert.deepEqual(
     result.writtenArtifacts.map((entry: any) => entry.basename).sort(),
     [
@@ -249,6 +251,26 @@ function unsafeAudit(phase: string, audit: string) {
     assistantMessage: "ASSISTANT_MESSAGE_TEXT",
     factCardBody: "FACT_CARD_TEXT"
   };
+}
+
+function assertRepoPackState(repoPackState: any) {
+  if (repoPackState.status === "scaffold_only") {
+    assert.equal(repoPackState.productionManifest, "missing");
+    assert.equal(repoPackState.productionNotices, "missing");
+    assert.equal(repoPackState.runtimeExecutable, "missing");
+    assert.equal(repoPackState.runtimeDlls, "missing");
+    assert.equal(repoPackState.modelFile, "missing");
+    assert.equal(repoPackState.productionPack, "missing");
+    return;
+  }
+
+  assert.equal(repoPackState.status, "production_files_present_not_approved");
+  assert.equal(repoPackState.productionManifest, "present_not_approved");
+  assert.equal(repoPackState.productionNotices, "present_not_approved");
+  assert.equal(repoPackState.runtimeExecutable, "present_not_approved");
+  assert.equal(repoPackState.runtimeDlls, "present_not_approved");
+  assert.equal(repoPackState.modelFile, "present_not_approved");
+  assert.equal(repoPackState.productionPack, "present_not_approved");
 }
 
 function escapeRegExp(value: string) {
