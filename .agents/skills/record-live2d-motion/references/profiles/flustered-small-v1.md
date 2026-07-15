@@ -1,0 +1,46 @@
+# Flustered Small Profile V1
+
+| 字段 | 固定值 |
+| --- | --- |
+| `id` / `revision` / `status` | `flustered-small` / `v1` / `ready` |
+| `label` / `templateKind` | `轻量窘迫` / `gesture.one-shot` |
+| `fps` / `draftLoop` | `30` / `false` |
+| `capture_duration` | 录制器 UI 固定 `1.8s` |
+| `padding` / `motion_duration` | start `0.2s` + end `0.2s` / `2.2s` |
+| `cycle_duration` | 不适用 |
+| `draft.intent` / `productionLoopCandidate` | `one-shot-draft` / `false` |
+| `outputPrefix` | `flustered-small` |
+| `parameterOwnership` | `approved-flustered-small-draft-only` |
+| `gates.endpoint` / `gates.seam` | `closed-neutral` / `not-required` |
+| `semanticAliases` | `[]` |
+
+## Allowlist And Ownership
+
+只允许以下 5 项，CurrentModel 参数表缺少任一项即阻塞，不得静默删减或扩大：
+
+```text
+ParamAngleX
+ParamAngleZ
+ParamEyeLOpen
+ParamEyeROpen
+ParamBrowLForm
+```
+
+Motion 播放期间独占上述五项。明确排除 `ParamBreath`、所有 `ParamBodyAngle*`、眼球注视参数、`ParamAngleY`、所有 smile、嘴部和 lip-sync 参数、physics destination、ArtMesh 曲线、配件和任何未列参数。不得使用参数注入驱动模型。
+
+## Structural Requirements
+
+- 主体采集窗口为 `1.8s`；导出 Motion3 时间整体加上 `0.2s` leading padding。
+- `ParamBrowLForm` 必须具有有限、时间有序的 semantic variation。`ParamAngleX`、`ParamAngleZ`、`ParamEyeLOpen` 和 `ParamEyeROpen` 是辅助曲线，只有在序列化精度内恒定时可省略；任一微小但非零的已序列化变化都必须保留，并经真实 Motion3 write/read 回读验证，若导出必须结构有效。
+- 每条实际导出的 allowlist 曲线都必须以相同中性基线闭合首尾；closed endpoint 阈值内的端点必须在生成时规范化为该中性基线，parser readback 以同一阈值和规范化口径复验；不得用通用、审美幅度、节奏或情绪效果阈值判定变化是否合格。
+
+## Profile Gates
+
+- 每个独立 take 在 arm 前必须重新由用户确认 camera face tracking 已启用，并重新确认 CurrentModel 身份和完整 5 项参数签名与当前 take contract 一致；旧 take、旧确认和切换前 profile 的 preflight 不可复用。
+- VTube Studio 只读采样上述 allowlist；不得播放、注入或触发任何 VTS motion、expression 或 hotkey。
+- UI 录制时长必须为 `1.8s`，固定保留前后各 `0.2s` padding；预期 Motion3 `Meta.Duration=2.2s`、`FPS=30`、`Loop=false`。
+- 连接或 preflight 失败时，先消费当前 take 的人工前置条件确认，再等待或触发 candidate adapter 清理。
+- 每段只在当前 take 的独立 digest 和 profile/take ID 派生的受管相对 output 中暂存一个 candidate；独立 parser readback 必须重验 required variation IDs、mode 和按生成同一阈值规范化的 closed endpoints，不能只比较序列化 JSON 与内存对象；通过后原子发布为 draft，才算输出成功。发布后，以及发布前/readback 失败或取消时，均必须重试本 take 临时 candidate 的 unlink 并追踪 `cleanupPending`；临时 unlink 持续失败时，必须将含 `take_id`、owner、受控临时路径、重试状态和禁止删除 final 标记的结构化 cleanup handle 移交 managed drain。发布成功时合法 final 仍为成功 draft，发布前/readback 失败时保留原始录制失败，且 managed drain 不得删除或改报任何合法 final；完成、失败或取消后停止，等待用户选择下一段，不得自动连录、覆盖或删除其他 take 输出。
+- agent/自动 human-review 只检查技术播放、allowlist 曲线的有限且时间有序变化、参数/通道所有权冲突，以及自然完成或中断后的衔接与恢复。结构损坏、隐私越界、allowlist/所有权冲突或衔接恢复失败可阻塞。
+- 窘迫幅度、节奏、自然度、美观和情绪效果由用户最终审核；agent 不得以审美理由要求重录。
+- 结果始终是 one-shot draft。parser、用户最终审核、Cubism Animator 精修和具体 production intake 批准均未完成前，不得写入模型目录、manifest 或 production catalog。
