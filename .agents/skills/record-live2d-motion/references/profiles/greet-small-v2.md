@@ -48,8 +48,9 @@ ParamMouthForm
 
 ## Profile Gates
 
-- arm 前确认摄像头面捕已启用，并确认当前模型身份、能力快照和完整 10 项 allowlist 与 take contract 一致。
+- 可复用当前有效的会话级 `camera-face-tracking` 许可，不要求为此 take 再答 `准备好了`。arm 前仍自动确认当前模型身份、能力快照、完整 10 项参数签名与 allowlist、时长、FPS、Loop 和 outputPrefix 与 take contract 一致。
 - UI 录制时长必须为 `3.0s`，固定保留前后各 `0.2s` padding；预期 Motion3 `Meta.Duration=3.4s`、`Loop=false`。
 - VTube Studio 只读采样；不要按动画热键，不要触发 `HotkeyTriggerRequest`，不要播放或重采样 `Scene1.motion3.json`。
 - 旧 profile ID `greet-small` revision `v1` 及三份 `2.4s` 历史 draft 都是未采用候选，不得复用、精修、intake 或自动 fallback。用户视觉否决优先于 agent 多数意见和既有自动/结构证据。
+- 每个 take 只运行一次内建自动技术 readback；通过时标记 `draft / technical-pass / user-visual-review-pending`。用户可批量决定视觉接受或逐段重录；不得自动连录或重复代码/Skill/profile/agent 审美审核。
 - 结果始终是 one-shot draft。parser、人工视觉、Cubism Animator 精修和具体 production intake 批准均未完成前，不得写入模型目录、manifest 或 production catalog。

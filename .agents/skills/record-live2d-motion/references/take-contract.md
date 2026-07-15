@@ -23,12 +23,19 @@ Schema version: `live2d-take-contract/v1`.
 | `ownership` | 本 take 可创建、可停止、可删除的资源 ledger。 |
 | `created_at` / `expires_at` | armed 时间和失效时间。 |
 
-## 确认与失效
+## 会话级 Camera-Face-Tracking 许可
 
-1. 只在界面显示当前 `take_id` 和短摘要后接受用户完全一致的 `准备好了`。
-2. 确认上限为 10 分钟或 recorder 工具 TTL，以更短者为准。
-3. profile revision/digest、template、connection、token 可用性、模型身份、能力快照、allowlist、任一时长、outputPrefix 或 ownership 变化时，立即让 armed contract 和确认失效。
-4. 失效后必须重新 arm、重新显示新 take ID，并重新等待当前 take 的 `准备好了`；旧确认、连接成功和鉴权成功均不可复用。连接或 preflight 失败时，必须先消费当前 take 的人工前置条件确认，再等待或触发 candidate adapter 清理。
+1. `camera-face-tracking` 是当前 Live2dREC main service 运行内唯一可复用的人工前置条件；它不属于 active recording session object，不能持久化、不能复用到应用重启后，也不授予 renderer 覆盖 profile 参数、output path、runtime state 或 intake target 的权限。
+2. 用户只需在该会话中确认一次；有效时可手动发起 `yawn`、`idle-soft-loop`、`greet-small/v2`、`sleep-enter/v1`、`happy-small/v1`、`surprised-small/v1` 或 `flustered-small/v1` 的独立 take。它不批准具体视觉 take，不会自动开始、连续或批量录制。
+3. 应用重启或被销毁、用户取消/取消勾选、connection configuration 变化、认证或连接失败、profile prerequisite definition 变化，或 preflight/recording 发现 CurrentModel 身份或参数签名变化时，必须立即撤销会话许可。
+4. take 完成、readback/write 失败、take TTL 到期、重新 prepare 或切换 ready profile 不撤销会话许可；它们只使当前 take 失效。下一段仍须完成自动 preflight。
+
+## Take Contract 失效
+
+1. 每个 take 自动 arm，且不再等待逐 take 的 `准备好了`。
+2. armed take 上限为 10 分钟或 recorder 工具 TTL，以更短者为准。
+3. profile revision/digest、template、connection、token 可用性、模型身份、能力快照、allowlist、任一时长、outputPrefix 或 ownership 变化时，立即让该 armed contract 失效。
+4. take 失效后必须重新 arm、重新显示新 take ID 并重跑自动 preflight；旧 take、连接成功和鉴权成功均不能替代该 preflight。认证/连接失败与模型身份/参数签名漂移还必须按上节撤销会话许可；其他 readback/write 或重新 prepare 失败只清理当前 take candidate。
 
 ## Ownership Ledger
 

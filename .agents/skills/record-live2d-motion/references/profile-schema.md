@@ -21,6 +21,12 @@ Schema version: `live2d-recorder-profile/v1`.
 | `gates` | endpoint、模型、parser、seam、视觉、Cubism 与 intake 门禁。 |
 | `blockers` | `planned-blocked` 的可审计原因；不得用猜测 allowlist 填充。 |
 
+## Session Readiness
+
+- `camera-face-tracking` 许可仅是当前 Live2dREC main service 运行内的非持久化人工门禁，不是 profile 字段、active recording session object 或 renderer 权限。
+- 当前有效许可可用于所有 `ready` profile：`yawn`、`idle-soft-loop`、`greet-small/v2`、`sleep-enter/v1`、`happy-small/v1`、`surprised-small/v1`、`flustered-small/v1`。每个 take 仍必须独立自动检查 CurrentModel、参数签名、allowlist、时长、FPS、Loop 和 outputPrefix。
+- profile prerequisite definition 改变，或 preflight/recording 发现模型身份或参数签名改变时，必须撤销会话许可。take 完成、readback/write 失败、TTL 到期、重新 prepare 或 ready profile 切换不撤销它，只撤销当前 take。
+
 ## 模板语义
 
 - `gesture.one-shot`：一次性可恢复动作；draft `Loop=false`。
