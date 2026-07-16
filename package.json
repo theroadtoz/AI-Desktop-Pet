@@ -70,6 +70,8 @@
     "accept:p2-63c-2-yawn-runtime-state-conflict-real-ui": "npm run build && node --no-warnings scripts/p2-63c-2-yawn-runtime-state-conflict-real-ui.mjs",
     "accept:p2-63c-9-sleep-enter-draft-preview": "npm run build && node --no-warnings scripts/p2-63c-9-sleep-enter-draft-preview.mjs",
     "test:p2-63c-9-sleep-enter-draft-preview": "node --test --experimental-strip-types scripts/p2-63c-9-sleep-enter-draft-preview.test.mts",
+    "preview:p2-63c-12-reaction-draft": "node --no-warnings scripts/p2-63c-12-reaction-draft-visual-preview.mjs",
+    "test:p2-63c-12-reaction-draft-preview": "node --test --experimental-strip-types scripts/p2-63c-12-reaction-draft-visual-preview.test.mts",
     "accept:p2-30b-real-local-daily-companion-rhythm": "npm run build && node scripts/p2-30b-real-local-daily-companion-rhythm-real-ui.mjs",
     "accept:p2-29a-privacy-safe-mcp-web-search": "node scripts/p2-29a-privacy-safe-mcp-web-search-real-ui.mjs",
     "accept:p2-29b-real-mcp-server-compatibility-search-citation-ui": "npm run build && node scripts/p2-29b-real-mcp-server-compatibility-search-citation-ui.mjs",
