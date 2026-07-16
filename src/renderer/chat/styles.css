@@ -533,6 +533,53 @@ body {
   accent-color: #654321;
 }
 
+.pet-accessory-groups {
+  display: grid;
+  gap: 12px;
+}
+
+.pet-accessory-group {
+  min-width: 0;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid #e7dccb;
+  border-radius: 8px;
+}
+
+.pet-accessory-group legend {
+  padding: 0 4px;
+  color: #4b3928;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.pet-accessory-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+
+.pet-accessory-choice {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  color: #4b3928;
+  font-size: 13px;
+}
+
+.pet-accessory-choice input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: #654321;
+}
+
+.pet-accessory-choice input:focus-visible {
+  outline: 2px solid #8c6b4d;
+  outline-offset: 2px;
+}
+
 .field-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

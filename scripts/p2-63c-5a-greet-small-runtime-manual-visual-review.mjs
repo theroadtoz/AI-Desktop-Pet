@@ -277,8 +277,11 @@ function probeReporterSource(runId) {
 }
 
 export function injectGreetMotionPreset(source) {
-  const marker = "export const PET_MOTION_PRESETS: readonly ModelMotionPreset[] = Object.freeze([";
-  const replacement = `${marker}
+  const marker = "export const PET_MOTION_PRESETS: readonly ModelMotionPreset[] = APPROVED_MOTION_PRESETS;";
+  const replacement = `const approvedReviewPresetCount = APPROVED_MOTION_PRESETS.filter((preset) => preset.id === "${REVIEW_PRESET_ID}").length;
+if (approvedReviewPresetCount !== 0) throw new Error("expected fixture-only review preset id");
+
+export const PET_MOTION_PRESETS: readonly ModelMotionPreset[] = Object.freeze([
   {
     id: "${REVIEW_PRESET_ID}",
     path: "motions/greet-small-review.motion3.json",
@@ -295,8 +298,10 @@ export function injectGreetMotionPreset(source) {
     allowedDialogueModes: ["default"],
     visualRisk: "needs-visual-check",
     assetLicenseStatus: "user-provided"
-  },`;
-  return replaceExactlyOnce(source, marker, replacement, "motion preset catalog");
+  },
+  ...APPROVED_MOTION_PRESETS
+]);`;
+  return replaceExactlyOnce(source, marker, replacement, "pet motion preset export");
 }
 
 export function injectGreetReviewAction(source) {

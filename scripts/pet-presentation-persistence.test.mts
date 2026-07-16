@@ -2,24 +2,21 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createPetPresentationPersistence } from "../src/main/services/config/pet-presentation-persistence.ts";
 
-test("wheel persistence saves only the final idle scale", async () => {
-  const saved: number[] = [];
-  const savedAccessories: string[] = [];
+test("wheel persistence saves only the final schema-v2 preferences", async () => {
+  const saved: Array<{ petScale: number; accessoryIds: readonly string[] }> = [];
   const persistence = createPetPresentationPersistence({
     savePreferences(preferences) {
-      saved.push(preferences.petScale);
-      savedAccessories.push(preferences.accessoryPresetId);
+      saved.push({ petScale: preferences.petScale, accessoryIds: preferences.accessoryIds });
       return preferences;
     }
   }, 20);
 
-  persistence.schedule({ petScale: 1.05, accessoryPresetId: "glasses" });
-  persistence.schedule({ petScale: 1.1, accessoryPresetId: "glasses" });
-  persistence.schedule({ petScale: 1.15, accessoryPresetId: "glasses" });
+  persistence.schedule({ schemaVersion: 2, petScale: 1.05, accessoryIds: ["glasses"] });
+  persistence.schedule({ schemaVersion: 2, petScale: 1.1, accessoryIds: ["glasses"] });
+  persistence.schedule({ schemaVersion: 2, petScale: 1.15, accessoryIds: ["glasses", "hat"] });
   await new Promise((resolve) => setTimeout(resolve, 35));
 
-  assert.deepEqual(saved, [1.15]);
-  assert.deepEqual(savedAccessories, ["glasses"]);
+  assert.deepEqual(saved, [{ petScale: 1.15, accessoryIds: ["glasses", "hat"] }]);
 });
 
 test("explicit save replaces pending wheel persistence and flush saves pending data once", () => {
@@ -31,10 +28,10 @@ test("explicit save replaces pending wheel persistence and flush saves pending d
     }
   }, 1000);
 
-  persistence.schedule({ petScale: 1.05, accessoryPresetId: "none" });
-  persistence.saveNow({ petScale: 1.1, accessoryPresetId: "glasses" });
+  persistence.schedule({ schemaVersion: 2, petScale: 1.05, accessoryIds: [] });
+  persistence.saveNow({ schemaVersion: 2, petScale: 1.1, accessoryIds: ["glasses"] });
   assert.equal(persistence.flush(), null);
-  persistence.schedule({ petScale: 1.15, accessoryPresetId: "none" });
-  assert.deepEqual(persistence.flush(), { petScale: 1.15, accessoryPresetId: "none" });
+  persistence.schedule({ schemaVersion: 2, petScale: 1.15, accessoryIds: ["ghost"] });
+  assert.deepEqual(persistence.flush(), { schemaVersion: 2, petScale: 1.15, accessoryIds: ["ghost"] });
   assert.deepEqual(saved, [1.1, 1.15]);
 });

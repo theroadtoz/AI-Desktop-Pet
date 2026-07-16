@@ -15,8 +15,17 @@ test("action capability audit covers every catalog action", () => {
   );
 });
 
-test("action capability audit preserves legacy source candidates while reporting the registered yawn preset", () => {
+test("action capability audit reports the approved motion catalog without crossing the idle or legacy source boundary", () => {
   const audit = auditWitchActionCapabilities();
+  const nativeMotionsByAction = new Map(
+    audit.targetActions.map((entry) => [
+      entry.action,
+      entry.nativeMotions.map((motion) => ({
+        id: motion.id,
+        path: motion.path
+      }))
+    ])
+  );
 
   assert.deepEqual(audit.model3DeclaredMotionGroups, []);
   assert.deepEqual(audit.physicalMotionFiles.filter((path) => path !== ISOLATED_YAWN_CANDIDATE_PATH), [
@@ -27,10 +36,20 @@ test("action capability audit preserves legacy source candidates while reporting
     audit.physicalMotionFiles.filter((path) => path === ISOLATED_YAWN_CANDIDATE_PATH).length <= 1,
     true
   );
+  assert.equal(audit.idleMotion.path, "model/Scene1.motion3.json");
   assert.equal(audit.idleMotion.loop, true);
-  assert.equal(audit.semanticMotionPresetCount, 1);
+  assert.equal(audit.semanticMotionPresetCount, 4);
   assert.equal(audit.motionSafeSkip, null);
-  assert.equal(audit.targetActions.every((entry) => entry.supportLevel !== "native-motion"), true);
+  assert.deepEqual(
+    [...nativeMotionsByAction.entries()].filter(([, motions]) => motions.length > 0),
+    [
+      ["appearance", [{ id: "surprised-small", path: "resources/models/witch/motions/surprised-small.motion3.json" }]],
+      ["headPat", [{ id: "happy-small", path: "resources/models/witch/motions/happy-small.motion3.json" }]],
+      ["doze", [{ id: "yawn-once", path: "resources/models/witch/motions/yawn-once.motion3.json" }]],
+      ["flusteredGlance", [{ id: "flustered-small", path: "resources/models/witch/motions/flustered-small.motion3.json" }]]
+    ]
+  );
+  assert.equal(audit.targetActions.filter((entry) => entry.supportLevel === "native-motion").length, 4);
   assert.equal(
     audit.targetActions.some((entry) => entry.nativeMotions.some((motion) => motion.path === "model/yawn.motion3.json")),
     false
@@ -39,6 +58,10 @@ test("action capability audit preserves legacy source candidates while reporting
     audit.targetActions.some((entry) =>
       entry.nativeMotions.some((motion) => motion.path === ISOLATED_YAWN_CANDIDATE_PATH)
     ),
+    false
+  );
+  assert.equal(
+    audit.targetActions.some((entry) => entry.nativeMotions.some((motion) => motion.path === "model/Scene1.motion3.json")),
     false
   );
 });

@@ -3,13 +3,13 @@ import {
   checkLayout,
   cleanupRealUiRun,
   click,
+  closeSettingsPage,
   connectToElectron,
   createRealUiRunContext,
   evaluate,
   findScreenshotResidue,
   getPageByUrlPart,
   log as logRun,
-  closeSettingsPage,
   openAdvancedSettings,
   openAppearanceSettings,
   readPrivacyCheckText,
@@ -39,11 +39,22 @@ const forbiddenTexts = [
   ".env.local",
   "原始鼠标轨迹"
 ];
+const ACCESSORY_CLASS_COUNT_PATTERN = /已选\s*(\d+)\s*类/u;
+const MODEL_DETAIL_LEAK_PATTERN = /\b(?:Param[A-Za-z0-9_]*|Part[A-Za-z0-9_]*|PartOpacity)\b/u;
 const HEAD_PAT_ACTION_TYPE = "headPat";
 const HEAD_PAT_SAFE_ECHO_MESSAGE = getPetInteractionActionSafeEchoMessage(HEAD_PAT_ACTION_TYPE);
 
 function log(message) {
   logRun(context, message);
+}
+
+function countSelectedAccessoryClasses(text) {
+  const match = text.match(ACCESSORY_CLASS_COUNT_PATTERN);
+  return match ? Number(match[1]) : null;
+}
+
+function hasModelDetailLeak(text) {
+  return MODEL_DETAIL_LEAK_PATTERN.test(text);
 }
 
 async function openChat() {
@@ -59,12 +70,108 @@ async function openChat() {
 async function saveWelcomeProfile(page) {
   await saveWelcomeProfileWithHarness(page, {
     displayName: "P2-11E 验收用户",
-    preferredName: "馆长"
+    preferredName: "领长"
   });
 }
 
 async function setMode(cdp, modeId) {
   await setDialogueMode(cdp, modeId);
+}
+
+async function readAccessoryEntryState(page) {
+  return await evaluate(page, `
+    (() => {
+      const groups = [...document.querySelectorAll("#pet-accessory-groups .pet-accessory-group")].map((fieldset) => {
+        const legend = fieldset.querySelector("legend")?.textContent?.trim() ?? "";
+        const radios = [...fieldset.querySelectorAll('input[type="radio"]')].map((input) => {
+          const label = input.closest("label")?.querySelector("span")?.textContent?.trim() ?? "";
+          return {
+            name: input.name,
+            value: input.value,
+            checked: input.checked,
+            label
+          };
+        });
+        return {
+          legend,
+          optionCount: radios.length,
+          hasNoneOption: radios.some((radio) => radio.value === "none"),
+          checkedValue: radios.find((radio) => radio.checked)?.value ?? null,
+          checkedLabel: radios.find((radio) => radio.checked)?.label ?? null,
+          firstSelectable: radios.find((radio) => radio.value !== "none") ?? null
+        };
+      });
+
+      const selectedAccessory = groups
+        .map((group) => group.firstSelectable && ({
+          legend: group.legend,
+          name: group.firstSelectable.name,
+          value: group.firstSelectable.value,
+          label: group.firstSelectable.label
+        }))
+        .find(Boolean) ?? null;
+
+      const visibleText = [
+        document.querySelector("#settings-appearance-page")?.textContent ?? "",
+        document.querySelector("#pet-accessory-status")?.textContent ?? "",
+        document.querySelector("#companion-control-shelf")?.textContent ?? ""
+      ].join("\\n");
+
+      return {
+        pageVisible: document.querySelector("#settings-appearance-page")?.hidden === false,
+        groupCount: groups.length,
+        groups,
+        selectedAccessory,
+        visibleText
+      };
+    })()
+  `);
+}
+
+async function selectAccessory(page, selectedAccessory) {
+  return await evaluate(page, `
+    (() => {
+      const target = [...document.querySelectorAll('#pet-accessory-groups input[type="radio"]')].find((input) => (
+        input.name === ${JSON.stringify(selectedAccessory.name)} &&
+        input.value === ${JSON.stringify(selectedAccessory.value)}
+      ));
+
+      if (!target) {
+        return null;
+      }
+
+      target.click();
+      target.dispatchEvent(new Event("change", { bubbles: true }));
+      return {
+        name: target.name,
+        value: target.value
+      };
+    })()
+  `);
+}
+
+async function readSelectedAccessorySummary(page) {
+  return await evaluate(page, `
+    (() => {
+      const shelfText = document.querySelector("#shelf-accessory-button")?.textContent ?? "";
+      const statusText = document.querySelector("#pet-accessory-status")?.textContent ?? "";
+      const checkedNonNone = [...document.querySelectorAll('#pet-accessory-groups input[type="radio"]:checked')]
+        .map((input) => ({ name: input.name, value: input.value }))
+        .filter((input) => input.value !== "none");
+      const visibleText = [
+        document.querySelector("#settings-appearance-page")?.textContent ?? "",
+        statusText,
+        shelfText
+      ].join("\\n");
+
+      return {
+        shelfText,
+        statusText,
+        checkedNonNone,
+        visibleText
+      };
+    })()
+  `);
 }
 
 async function runFirstSession(checks) {
@@ -80,32 +187,63 @@ async function runFirstSession(checks) {
         document.querySelector('#chat-page')?.hidden === false &&
         document.querySelector('#chat-input')?.disabled === false
     `);
+
     await saveWelcomeProfile(chat);
     await openAppearanceSettings(chat);
     checks.shelfVisibleAfterProfile = await evaluate(chat, `
-      (() => {
-        return Boolean(
-          document.querySelector("#companion-control-shelf") &&
-          document.querySelector("#shelf-accessory-button") &&
-          document.querySelector("#shelf-scale-button") &&
-          document.querySelector("#shelf-lock-button") &&
-          document.querySelector("#shelf-action-echo")
-        );
-      })()
+      Boolean(
+        document.querySelector("#companion-control-shelf") &&
+        document.querySelector("#shelf-accessory-button") &&
+        document.querySelector("#shelf-scale-button") &&
+        document.querySelector("#shelf-lock-button") &&
+        document.querySelector("#shelf-action-echo")
+      )
     `);
 
     await setMode(chat, "reading");
     checks.modeSyncsShelfAndRibbon = await evaluate(chat, `
-      (() => document.querySelector("#partner-status")?.textContent.includes("读书模式") &&
-        document.querySelector("#dialogue-mode-controls .mode-button.is-active")?.dataset.modeId === "reading")()
+      document.querySelector("#partner-status")?.textContent.includes("读书模式") &&
+        document.querySelector("#dialogue-mode-controls .mode-button.is-active")?.dataset.modeId === "reading"
     `);
 
     await openAppearanceSettings(chat);
     await click(chat, "#shelf-accessory-button");
-    await waitFor(chat, "document.querySelector('#shelf-accessory-button')?.textContent.includes('眼镜')");
-    checks.accessoryToggleSyncsShelf = await evaluate(chat, `
-      document.querySelector("#shelf-accessory-button")?.textContent.includes("眼镜")
+    const accessoryEntryState = await readAccessoryEntryState(chat);
+    checks.accessoryEntryReachableAndGrouped = (
+      accessoryEntryState.pageVisible &&
+      accessoryEntryState.groupCount >= 2 &&
+      accessoryEntryState.groups.every((group) => group.optionCount >= 2 && group.hasNoneOption) &&
+      Boolean(accessoryEntryState.selectedAccessory)
+    );
+    checks.accessoryUiDoesNotLeakModelDetails = !hasModelDetailLeak(accessoryEntryState.visibleText);
+
+    if (!accessoryEntryState.selectedAccessory) {
+      throw new Error(`P2-11E accessory entry unavailable: ${JSON.stringify(accessoryEntryState)}`);
+    }
+
+    const selectedAccessory = accessoryEntryState.selectedAccessory;
+    const selectionResult = await selectAccessory(chat, selectedAccessory);
+    if (!selectionResult) {
+      throw new Error(`P2-11E accessory selection failed: ${JSON.stringify(selectedAccessory)}`);
+    }
+
+    await click(chat, "#save-pet-accessory-button");
+    await waitFor(chat, `
+      (() => {
+        const text = document.querySelector("#shelf-accessory-button")?.textContent ?? "";
+        const match = text.match(/已选\\s*(\\d+)\\s*类/u);
+        return Number(match?.[1] ?? 0) === 1;
+      })()
     `);
+    const selectedAccessorySummary = await readSelectedAccessorySummary(chat);
+    checks.accessoryToggleSyncsShelf = (
+      countSelectedAccessoryClasses(selectedAccessorySummary.shelfText) === 1 &&
+      selectedAccessorySummary.statusText.includes(selectedAccessory.label) &&
+      selectedAccessorySummary.checkedNonNone.length === 1 &&
+      selectedAccessorySummary.checkedNonNone[0]?.name === selectedAccessory.name &&
+      selectedAccessorySummary.checkedNonNone[0]?.value === selectedAccessory.value &&
+      !hasModelDetailLeak(selectedAccessorySummary.visibleText)
+    );
 
     await click(chat, "#shelf-scale-button");
     await evaluate(chat, `
@@ -124,9 +262,9 @@ async function runFirstSession(checks) {
     await click(chat, "#settings-close-button");
 
     await click(chat, "#shelf-lock-button");
-    await waitFor(chat, "document.querySelector('#shelf-lock-button')?.textContent.includes('已锁定')");
+    await waitFor(chat, "document.querySelector('#shelf-lock-button')?.dataset.state === 'ready'");
     checks.lockToggleSyncsShelf = await evaluate(chat, `
-      document.querySelector("#shelf-lock-button")?.textContent.includes("已锁定")
+      document.querySelector("#shelf-lock-button")?.dataset.state === "ready"
     `);
 
     await openAdvancedSettings(chat);
@@ -154,6 +292,7 @@ async function runFirstSession(checks) {
           !text.includes("durationMs");
       })()
     `);
+
     await evaluate(pet, `
       (() => {
         window.petApi?.reportTelemetry("pet_interaction_action_started", {
@@ -174,6 +313,7 @@ async function runFirstSession(checks) {
           !text.includes("durationMs");
       })()
     `);
+
     await waitFor(chat, "document.querySelector('#shelf-action-echo')?.dataset.state === 'fading'", 7_000);
     checks.actionEchoFadesNaturally = await evaluate(chat, `
       (() => {
@@ -182,6 +322,7 @@ async function runFirstSession(checks) {
           echo.textContent.includes("在旁边陪着");
       })()
     `);
+
     await waitFor(chat, "document.querySelector('#shelf-action-echo')?.dataset.state === 'idle'", 6_000);
     checks.actionEchoReturnsToIdle = await evaluate(chat, `
       document.querySelector("#shelf-action-echo")?.textContent === "小动作：她安静待着"
@@ -207,25 +348,33 @@ async function runFirstSession(checks) {
     const narrowLayout = await checkLayout(chat, 360, 720);
     checks.desktopLayout = desktopLayout.ok;
     checks.narrowLayout = narrowLayout.ok;
-    return { desktopLayout, narrowLayout };
+
+    return { desktopLayout, narrowLayout, selectedAccessory };
   } finally {
     await stopElectron(context);
   }
 }
 
-async function runRestartSession(checks) {
+async function runRestartSession(checks, expectedAccessory) {
   startElectron(context);
 
   try {
     const handles = await openChat();
     const chat = handles.chat;
     await waitFor(chat, "document.querySelector('#user-welcome-panel')?.hidden === true");
-    checks.accessoryRestoresAfterRestart = await evaluate(chat, `
-      document.querySelector("#shelf-accessory-button")?.textContent.includes("眼镜")
-    `);
+    await click(chat, "#shelf-accessory-button");
+    const restartAccessorySummary = await readSelectedAccessorySummary(chat);
+    checks.accessoryRestoresAfterRestart = (
+      countSelectedAccessoryClasses(restartAccessorySummary.shelfText) === 1 &&
+      restartAccessorySummary.checkedNonNone.length === 1 &&
+      restartAccessorySummary.checkedNonNone[0]?.name === expectedAccessory.name &&
+      restartAccessorySummary.checkedNonNone[0]?.value === expectedAccessory.value &&
+      !hasModelDetailLeak(restartAccessorySummary.visibleText)
+    );
     checks.scaleRestoresAfterRestart = await evaluate(chat, `
       document.querySelector("#shelf-scale-button")?.textContent.includes("110%")
     `);
+
     return await evaluate(chat, `
       (() => ({
         partnerStatus: document.querySelector("#partner-status")?.textContent ?? "",
@@ -246,9 +395,10 @@ async function main() {
   const checks = {};
   const layout = await runFirstSession(checks);
   await sleep(800);
-  const finalUi = await runRestartSession(checks);
+  const finalUi = await runRestartSession(checks, layout.selectedAccessory);
   const textOutput = readPrivacyCheckText(context);
-  checks.privacyOutput = forbiddenTexts.every((text) => !textOutput.includes(text));
+  checks.privacyOutput = forbiddenTexts.every((text) => !textOutput.includes(text)) && !hasModelDetailLeak(textOutput);
+  checks.finalUiDoesNotLeakModelDetails = !hasModelDetailLeak(JSON.stringify(finalUi));
   checks.noScreenshotResidueBeforeCleanup = findScreenshotResidue(context).filter((path) => !path.includes(runParentDir)).length === 0;
 
   const result = {

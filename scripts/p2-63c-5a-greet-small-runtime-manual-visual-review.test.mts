@@ -226,7 +226,9 @@ test("Motion3 gate accepts exactly 10 approved curves and rejects timing or owne
 
 test("fixture transforms register a neutral greet-only trigger and observable natural lifecycle", () => {
   const preset = injectGreetMotionPreset(readFile("src/shared/pet-motion-presets.ts"));
+  assert.match(preset, /const approvedReviewPresetCount = APPROVED_MOTION_PRESETS\.filter\(\(preset\) => preset\.id === "greet-small-review"\)\.length;/u);
   assert.match(preset, /id: "greet-small-review"[\s\S]*semanticKind: "greeting"[\s\S]*allowedStates: \["idle"\]/u);
+  assert.match(preset, /\.\.\.APPROVED_MOTION_PRESETS/u);
   assert.doesNotMatch(preset.slice(0, preset.indexOf("},") + 2), /sleep|doze|yawn/u);
 
   const action = injectGreetReviewAction(readFile("src/renderer/pet/interaction-actions.ts"));
@@ -246,7 +248,7 @@ test("fixture transforms register a neutral greet-only trigger and observable na
   );
   assert.equal(
     (native.match(/reportGreetSmallReview\("stop_all_motions"[\s\S]*?manager\.stopAllMotions\(\);/gu) ?? []).length,
-    3
+    (nativeSource.match(/manager\.stopAllMotions\(\);/gu) ?? []).length
   );
   const ownership = injectGreetOwnershipProbe(readFile("src/renderer/pet/live2d/cubism-frame-pipeline.ts"), "run-1");
   assert.match(ownership, /layers\.applyLook[\s\S]*layers\.applyBreath[\s\S]*ownership_applied/u);

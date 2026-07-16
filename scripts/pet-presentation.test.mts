@@ -13,7 +13,8 @@ import {
   PET_WAIST_BOTTOM_OVERHANG_PX,
   parsePetScaleAdjustmentIntent,
   parsePetPresentationPreferences,
-  parseStoredPetPresentationPreferences
+  parseStoredPetPresentationPreferences,
+  toPetPresentationPreferencesView
 } from "../src/shared/pet-presentation.ts";
 
 function assertApproximatelyEqual(actual: number, expected: number, tolerance = 1): void {
@@ -193,9 +194,16 @@ test("calculateInitialPetBounds keeps the half-body placement across scales and 
 
 test("parsePetPresentationPreferences rejects missing and invalid scales", () => {
   assert.deepEqual(parsePetPresentationPreferences({ petScale: 1.1 }), {
+    schemaVersion: 2,
     petScale: 1.1,
-    accessoryPresetId: "none"
+    accessoryIds: []
   });
+  assert.deepEqual(parsePetPresentationPreferences({ petScale: 1.1, accessoryIds: ["hat", "ghost"] }), {
+    schemaVersion: 2,
+    petScale: 1.1,
+    accessoryIds: ["ghost", "hat"]
+  });
+  assert.equal(parsePetPresentationPreferences({ petScale: 1.1, accessoryIds: ["staff", "microphone"] }), null);
   assert.equal(parsePetPresentationPreferences({}), null);
   assert.equal(parsePetPresentationPreferences({ petScale: 1.02 }), null);
   assert.equal(parsePetPresentationPreferences({ petScale: Number.NaN }), null);
@@ -209,7 +217,40 @@ test("stored pet presentation data falls back safely on invalid content", () => 
     DEFAULT_PET_PRESENTATION_PREFERENCES
   );
   assert.deepEqual(parseStoredPetPresentationPreferences(JSON.stringify({ petScale: 1.25 })), {
+    schemaVersion: 2,
     petScale: 1.25,
-    accessoryPresetId: "none"
+    accessoryIds: []
   });
+});
+
+test("stored presentation migrates legacy presets and tolerantly filters schema-v2 accessory data", () => {
+  assert.deepEqual(
+    parseStoredPetPresentationPreferences(JSON.stringify({ petScale: 1.1, accessoryPresetId: "none" })),
+    { schemaVersion: 2, petScale: 1.1, accessoryIds: [] }
+  );
+  assert.deepEqual(
+    parseStoredPetPresentationPreferences(JSON.stringify({ petScale: 1.1, accessoryPresetId: "glasses" })),
+    { schemaVersion: 2, petScale: 1.1, accessoryIds: ["glasses"] }
+  );
+  assert.deepEqual(
+    parseStoredPetPresentationPreferences(JSON.stringify({
+      schemaVersion: 2,
+      petScale: 1.1,
+      accessoryIds: ["staff", "ghost", "unknown", "microphone", "ghost", "hat"]
+    })),
+    { schemaVersion: 2, petScale: 1.1, accessoryIds: ["ghost", "hat", "staff"] }
+  );
+});
+
+test("canonical preferences serialize without the deprecated single-value field", () => {
+  assert.equal(JSON.stringify(DEFAULT_PET_PRESENTATION_PREFERENCES).includes("accessoryPresetId"), false);
+  assert.deepEqual(
+    toPetPresentationPreferencesView({ schemaVersion: 2, petScale: 1, accessoryIds: ["ghost", "glasses"] }),
+    {
+      schemaVersion: 2,
+      petScale: 1,
+      accessoryIds: ["ghost", "glasses"],
+      accessoryPresetId: "glasses"
+    }
+  );
 });

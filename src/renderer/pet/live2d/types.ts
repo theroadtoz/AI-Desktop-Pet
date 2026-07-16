@@ -4,6 +4,8 @@ import type { PresenceModeId } from "../../../shared/presence-mode";
 import type { CubismPoseTarget } from "./cubism-pose-target";
 import type { CubismMotionPlaybackResult, CubismMotionStopReason } from "./cubism-motion";
 import type { PetMotionPresetId } from "../../../shared/pet-motion-presets.ts";
+import type { PetAccessoryResolution } from "../../../shared/pet-accessory";
+import type { CubismTemporaryAccessoryId } from "./cubism-accessory-controller";
 
 export type Model3Json = {
   FileReferences?: {
@@ -20,6 +22,9 @@ export type LoadedLive2DModel = {
   setExpression(name: string): Promise<void>;
   clearExpression(): void;
   getAvailableExpressions(): string[];
+  setAccessorySelection(selection: PetAccessoryResolution): void;
+  setTemporaryAccessory(accessoryId: CubismTemporaryAccessoryId): void;
+  restoreTemporaryAccessory(): void;
   playMotionPreset(motionPresetId: PetMotionPresetId): Promise<CubismMotionPlaybackResult>;
   stopMotion(reason: CubismMotionStopReason): void;
   applyTemporaryPartOpacities(partIds: readonly string[], opacity: number): void;

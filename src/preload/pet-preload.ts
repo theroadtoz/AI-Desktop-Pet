@@ -23,7 +23,17 @@ const petRoleStates = [
 ] as const;
 const emotionTags = ["neutral", "happy", "sad", "surprised", "confused", "angry"] as const;
 const emotionIntensities = ["low", "medium", "high"] as const;
-const petAccessoryPresetIds = ["none", "glasses"] as const;
+const petAccessoryCatalog = [
+  { id: "ghost", group: "companion" },
+  { id: "bow", group: "attire" },
+  { id: "glasses", group: "facewear" },
+  { id: "hat", group: "headwear" },
+  { id: "staff", group: "held-prop" },
+  { id: "game-controller", group: "held-prop" },
+  { id: "microphone", group: "held-prop" }
+] as const;
+const petAccessoryGroups = ["companion", "attire", "facewear", "headwear", "held-prop"] as const;
+const petAccessorySources = ["user", "mode", "action"] as const;
 const dialogueModeIds = ["default", "work", "game", "reading"] as const;
 const presenceModeIds = ["default", "focus", "quiet", "sleep"] as const;
 const proactiveSpeechBubbleLineIds = [
@@ -109,8 +119,46 @@ function isEmotionPresentation(value: unknown): boolean {
   return isEmotion && isIntensity && expression.mode === expectedMode;
 }
 
-function isPetAccessoryPresetId(value: unknown): boolean {
-  return typeof value === "string" && petAccessoryPresetIds.includes(value as (typeof petAccessoryPresetIds)[number]);
+function parsePetAccessorySelection(value: unknown): string[] | null {
+  if (!Array.isArray(value) || value.length > petAccessoryGroups.length) {
+    return null;
+  }
+
+  const ids = new Set<string>();
+  const groups = new Set<string>();
+  for (const candidate of value) {
+    const item = petAccessoryCatalog.find((entry) => entry.id === candidate);
+    if (!item || ids.has(item.id) || groups.has(item.group)) {
+      return null;
+    }
+    ids.add(item.id);
+    groups.add(item.group);
+  }
+
+  const canonical = petAccessoryCatalog.flatMap((item) => ids.has(item.id) ? [item.id] : []);
+  return canonical.every((id, index) => id === value[index]) ? canonical : null;
+}
+
+function isPetAccessoryResolution(value: unknown): boolean {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+
+  const resolution = value as {
+    accessoryIds?: unknown;
+    sourceByGroup?: Record<string, unknown>;
+  };
+  const accessoryIds = parsePetAccessorySelection(resolution.accessoryIds);
+  return Boolean(
+    accessoryIds &&
+    resolution.sourceByGroup &&
+    Object.keys(resolution.sourceByGroup).length === petAccessoryGroups.length &&
+    petAccessoryGroups.every((group) =>
+      petAccessorySources.includes(
+        resolution.sourceByGroup?.[group] as (typeof petAccessorySources)[number]
+      )
+    )
+  );
 }
 
 function parseDialogueModeId(value: unknown): DialogueModeId | null {
@@ -140,7 +188,7 @@ function isPetPresentationIntent(value: unknown): value is PetPresentationIntent
     (intent.gaze === "ambient" || intent.gaze === "attentive") &&
     (intent.workStatus === "idle" || intent.workStatus === "thinking") &&
     isEmotionPresentation(intent.expression) &&
-    isPetAccessoryPresetId(intent.accessoryPresetId) &&
+    isPetAccessoryResolution(intent.accessorySelection) &&
     typeof intent.allowMicroExpression === "boolean" &&
     typeof intent.allowEmphasisExpression === "boolean" &&
     (intent.recovery === "normal" || intent.recovery === "safe-neutral") &&

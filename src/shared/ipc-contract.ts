@@ -7,8 +7,11 @@ import type { ProviderHealthCheckRequest, ProviderHealthResult } from "./provide
 import type { DialogueModeId, DialogueModeView } from "./dialogue-style";
 import type { PresenceModeId, PresenceModeView } from "./presence-mode";
 import type { ProviderConfig, ProviderStatus } from "./provider-config";
-import type { PetPresentationPreferences, PetScaleAdjustmentIntent } from "./pet-presentation";
-import type { PetAccessoryPresetId } from "./pet-accessory";
+import type {
+  PetPresentationPreferencesView,
+  PetScaleAdjustmentIntent
+} from "./pet-presentation";
+import type { PetAccessoryId, PetAccessoryPresetId } from "./pet-accessory";
 import type { PetPresentationIntent } from "./pet-role-state";
 import type { PetTelemetryEvent } from "./pet-telemetry-contract";
 import type { ShortcutActionId, ShortcutPreferenceView, ShortcutUpdateResult } from "./shortcut-preferences";
@@ -298,9 +301,11 @@ export type UserProfileApi = {
 };
 
 export type PetPresentationApi = {
-  getPreferences(): Promise<PetPresentationPreferences>;
-  setPetScale(petScale: number): Promise<PetPresentationPreferences>;
-  setAccessoryPreset(presetId: PetAccessoryPresetId): Promise<PetPresentationPreferences>;
+  getPreferences(): Promise<PetPresentationPreferencesView>;
+  setPetScale(petScale: number): Promise<PetPresentationPreferencesView>;
+  setAccessorySelection(ids: readonly PetAccessoryId[]): Promise<PetPresentationPreferencesView>;
+  /** @deprecated Use setAccessorySelection. */
+  setAccessoryPreset(presetId: PetAccessoryPresetId): Promise<PetPresentationPreferencesView>;
   getPetLockState(): Promise<PetLockState>;
   setPetLocked(isLocked: boolean): Promise<PetLockState>;
   onPetLockChanged(handler: (state: PetLockState) => void): () => void;

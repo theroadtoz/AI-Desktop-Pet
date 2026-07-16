@@ -59,7 +59,14 @@ import {
   getPetInteractionActionSafeEchoMessage,
   getPetWindowMotionFeedbackSafeEchoMessage
 } from "../shared/interaction-action-catalog";
-import { isPetAccessoryPresetId } from "../shared/pet-accessory";
+import {
+  getAccessoryIdsForLegacyPreset,
+  getPetAccessoryModeLayer,
+  isPetAccessoryPresetId,
+  parsePetAccessorySelection,
+  resolvePetAccessorySelection,
+  type PetAccessoryId
+} from "../shared/pet-accessory";
 import {
   createPetPresentationIntent,
   INITIAL_PET_ROLE_SNAPSHOT,
@@ -1384,11 +1391,33 @@ function publishPetPresentation(intent: PetPresentationIntent): void {
   petWindow.webContents.send("pet:apply-presentation", intent);
 }
 
-function withCurrentAccessoryPreset(intent: PetPresentationIntent): PetPresentationIntent {
+function withCurrentAccessorySelection(intent: PetPresentationIntent): PetPresentationIntent {
+  const accessorySelection = resolvePetAccessorySelection({
+    userAccessoryIds: currentPetPresentationPreferences.accessoryIds,
+    modeLayer: getPetAccessoryModeLayer(currentDialogueModeId)
+  });
+
   return {
     ...intent,
-    accessoryPresetId: currentPetPresentationPreferences.accessoryPresetId
+    accessorySelection
   };
+}
+
+function savePetAccessorySelection(accessoryIds: readonly PetAccessoryId[]): PetPresentationPreferences {
+  if (!petPresentationStore) {
+    throw new Error("Pet presentation store unavailable");
+  }
+
+  currentPetPresentationPreferences = {
+    ...currentPetPresentationPreferences,
+    accessoryIds: [...accessoryIds]
+  };
+  const preferences = petPresentationPersistence?.saveNow(currentPetPresentationPreferences)
+    ?? petPresentationStore.savePreferences(currentPetPresentationPreferences);
+  currentPetPresentationPreferences = preferences;
+  currentPetPresentationIntent = withCurrentAccessorySelection(currentPetPresentationIntent);
+  publishPetPresentation(currentPetPresentationIntent);
+  return preferences;
 }
 
 function transitionPetRole(event: PetRoleEvent): boolean {
@@ -1399,7 +1428,7 @@ function transitionPetRole(event: PetRoleEvent): boolean {
   }
 
   petRoleSnapshot = transition.snapshot;
-  currentPetPresentationIntent = withCurrentAccessoryPreset(transition.intent);
+  currentPetPresentationIntent = withCurrentAccessorySelection(transition.intent);
   publishPetPresentation(currentPetPresentationIntent);
   logTelemetry("pet_role_transition", {
     state: petRoleSnapshot.state,
@@ -2028,7 +2057,7 @@ app.whenReady().then(async () => {
   providerConfigStore = createProviderConfigStore({ logTelemetry });
   petPresentationStore = createPetPresentationStore();
   currentPetPresentationPreferences = petPresentationStore.getPreferences();
-  currentPetPresentationIntent = withCurrentAccessoryPreset(currentPetPresentationIntent);
+  currentPetPresentationIntent = withCurrentAccessorySelection(currentPetPresentationIntent);
   petPresentationPersistence = createPetPresentationPersistence(petPresentationStore);
   historyStore = createHistoryStore();
   memoryStore = createMemoryStore();
@@ -2037,6 +2066,7 @@ app.whenReady().then(async () => {
   });
   dialogueModeStore = createDialogueModeStore();
   currentDialogueModeId = dialogueModeStore.getMode();
+  currentPetPresentationIntent = withCurrentAccessorySelection(currentPetPresentationIntent);
   presenceModeStore = createPresenceModeStore();
   currentPresenceModeId = presenceModeStore.getMode();
   proactiveCompanionSettingsStore = createProactiveCompanionSettingsStore();
@@ -3352,6 +3382,8 @@ app.whenReady().then(async () => {
     currentDialogueModeId = dialogueModeStore.saveMode(modeId);
 
     if (previousModeId !== currentDialogueModeId) {
+      currentPetPresentationIntent = withCurrentAccessorySelection(currentPetPresentationIntent);
+      publishPetPresentation(currentPetPresentationIntent);
       logTelemetry("dialogue_mode_changed", {
         previousModeId,
         nextModeId: currentDialogueModeId,
@@ -3553,21 +3585,21 @@ app.whenReady().then(async () => {
     return preferences;
   });
 
+  ipcMain.handle("pet-presentation:set-accessory-selection", (event, value: unknown) => {
+    const accessoryIds = parsePetAccessorySelection(value);
+    if (!isChatSender(event) || !accessoryIds || !petPresentationStore) {
+      throw new Error("Invalid pet accessory selection request");
+    }
+
+    return savePetAccessorySelection(accessoryIds);
+  });
+
   ipcMain.handle("pet-presentation:set-accessory", (event, presetId: unknown) => {
     if (!isChatSender(event) || !isPetAccessoryPresetId(presetId) || !petPresentationStore) {
       throw new Error("Invalid pet accessory preset request");
     }
 
-    currentPetPresentationPreferences = {
-      ...currentPetPresentationPreferences,
-      accessoryPresetId: presetId
-    };
-    const preferences = petPresentationPersistence?.saveNow(currentPetPresentationPreferences)
-      ?? petPresentationStore.savePreferences(currentPetPresentationPreferences);
-    currentPetPresentationIntent = withCurrentAccessoryPreset(currentPetPresentationIntent);
-    publishPetPresentation(currentPetPresentationIntent);
-
-    return preferences;
+    return savePetAccessorySelection(getAccessoryIdsForLegacyPreset(presetId));
   });
 
   ipcMain.handle("pet-lock:get", (event) => {

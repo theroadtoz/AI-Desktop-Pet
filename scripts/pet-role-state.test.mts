@@ -87,13 +87,23 @@ test("cancel and error clear working state and enforce neutral recovery", () => 
 });
 
 test("presentation IPC is a closed, self-consistent contract", () => {
+  const accessorySelection = {
+    accessoryIds: ["glasses"],
+    sourceByGroup: {
+      companion: "user",
+      attire: "user",
+      facewear: "mode",
+      headwear: "user",
+      "held-prop": "user"
+    }
+  } as const;
   assert.equal(isPetPresentationIntent({
     state: "thinking",
     requestVersion: 1,
     gaze: "attentive",
     workStatus: "thinking",
     expression: { emotion: "neutral", intensity: "low", mode: "neutral" },
-    accessoryPresetId: "glasses",
+    accessorySelection,
     allowMicroExpression: false,
     allowEmphasisExpression: false,
     recovery: "normal"
@@ -104,7 +114,7 @@ test("presentation IPC is a closed, self-consistent contract", () => {
     gaze: "attentive",
     workStatus: "idle",
     expression: { emotion: "happy", intensity: "high", mode: "emphasis" },
-    accessoryPresetId: "glasses",
+    accessorySelection,
     allowMicroExpression: false,
     allowEmphasisExpression: false,
     recovery: "safe-neutral"
@@ -115,7 +125,10 @@ test("presentation IPC is a closed, self-consistent contract", () => {
     gaze: "attentive",
     workStatus: "thinking",
     expression: { emotion: "neutral", intensity: "low", mode: "neutral" },
-    accessoryPresetId: "Part53",
+    accessorySelection: {
+      ...accessorySelection,
+      sourceByGroup: { ...accessorySelection.sourceByGroup, Param66: "mode" }
+    },
     allowMicroExpression: false,
     allowEmphasisExpression: false,
     recovery: "normal"

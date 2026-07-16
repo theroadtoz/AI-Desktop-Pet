@@ -30,7 +30,8 @@ import type { DialogueModeId, DialogueModeView } from "../shared/dialogue-style"
 import type { PresenceModeId, PresenceModeView } from "../shared/presence-mode";
 import type { ProviderConfig, ProviderStatus } from "../shared/provider-config";
 import type { ProviderHealthCheckRequest, ProviderHealthResult, ProviderHealthStatus } from "../shared/provider-health";
-import type { PetPresentationPreferences } from "../shared/pet-presentation";
+import type { PetAccessoryId } from "../shared/pet-accessory";
+import type { PetPresentationPreferencesView } from "../shared/pet-presentation";
 import type { ShortcutActionId, ShortcutPreferenceView, ShortcutUpdateResult } from "../shared/shortcut-preferences";
 import type { UserProfile, UserProfileInput } from "../shared/user-profile";
 import type {
@@ -46,6 +47,16 @@ import type {
 } from "../shared/proactive-companion-settings";
 
 const petAccessoryPresetIds = ["none", "glasses"] as const;
+const petAccessoryCatalog = [
+  { id: "ghost", group: "companion" },
+  { id: "bow", group: "attire" },
+  { id: "glasses", group: "facewear" },
+  { id: "hat", group: "headwear" },
+  { id: "staff", group: "held-prop" },
+  { id: "game-controller", group: "held-prop" },
+  { id: "microphone", group: "held-prop" }
+] as const;
+const maxPetAccessorySelection = 5;
 const shortcutActionIds = ["togglePetLock", "adjustPetScaleWithWheel"] as const;
 const dialogueModeIds = ["default", "work", "game", "reading"] as const;
 const presenceModeIds = ["default", "focus", "quiet", "sleep"] as const;
@@ -209,6 +220,25 @@ function isPetAccessoryPresetId(value: unknown): value is (typeof petAccessoryPr
   return typeof value === "string" && petAccessoryPresetIds.includes(value as (typeof petAccessoryPresetIds)[number]);
 }
 
+function parsePetAccessorySelection(value: unknown): PetAccessoryId[] | null {
+  if (!Array.isArray(value) || value.length > maxPetAccessorySelection) {
+    return null;
+  }
+
+  const ids = new Set<PetAccessoryId>();
+  const groups = new Set<string>();
+  for (const candidate of value) {
+    const item = petAccessoryCatalog.find((entry) => entry.id === candidate);
+    if (!item || ids.has(item.id) || groups.has(item.group)) {
+      return null;
+    }
+    ids.add(item.id);
+    groups.add(item.group);
+  }
+
+  return petAccessoryCatalog.flatMap((item) => ids.has(item.id) ? [item.id] : []);
+}
+
 function parseDialogueModeId(value: unknown): DialogueModeId | null {
   return typeof value === "string" && dialogueModeIds.includes(value as DialogueModeId)
     ? value as DialogueModeId
@@ -325,16 +355,35 @@ function parseUserProfile(value: unknown): UserProfile | null {
   };
 }
 
-function parsePetPresentationPreferences(value: unknown): PetPresentationPreferences | null {
-  const preferences = value as Partial<PetPresentationPreferences> | null;
+function parsePetPresentationPreferences(value: unknown): PetPresentationPreferencesView | null {
+  const preferences = value as {
+    schemaVersion?: unknown;
+    petScale?: unknown;
+    accessoryIds?: unknown;
+    accessoryPresetId?: unknown;
+  } | null;
   const petScale = preferences && typeof preferences === "object"
     ? normalizePetScale(preferences.petScale)
     : null;
-  const accessoryPresetId = preferences && typeof preferences === "object" && isPetAccessoryPresetId(preferences.accessoryPresetId)
-    ? preferences.accessoryPresetId
-    : "none";
+  if (petScale === null) {
+    return null;
+  }
 
-  return petScale === null ? null : { petScale, accessoryPresetId };
+  const accessoryIds = Object.prototype.hasOwnProperty.call(preferences, "accessoryIds")
+    ? parsePetAccessorySelection(preferences?.accessoryIds)
+    : isPetAccessoryPresetId(preferences?.accessoryPresetId) && preferences.accessoryPresetId === "glasses"
+      ? ["glasses"] as PetAccessoryId[]
+      : [];
+  if (!accessoryIds) {
+    return null;
+  }
+
+  return {
+    schemaVersion: 2,
+    petScale,
+    accessoryIds,
+    accessoryPresetId: accessoryIds.includes("glasses") ? "glasses" : "none"
+  };
 }
 
 function parsePetLockState(value: unknown): PetLockState | null {
@@ -1926,8 +1975,22 @@ const petPresentationApi: PetPresentationApi = {
     }
 
     const preferences: unknown = await ipcRenderer.invoke("pet-presentation:set-scale", petScale);
-    const parsedPreferences: PetPresentationPreferences | null = parsePetPresentationPreferences(preferences);
+    const parsedPreferences = parsePetPresentationPreferences(preferences);
 
+    if (!parsedPreferences) {
+      throw new Error("Invalid pet presentation preferences response");
+    }
+
+    return parsedPreferences;
+  },
+  async setAccessorySelection(ids) {
+    const accessoryIds = parsePetAccessorySelection(ids);
+    if (!accessoryIds) {
+      throw new Error("Invalid pet accessory selection");
+    }
+
+    const preferences: unknown = await ipcRenderer.invoke("pet-presentation:set-accessory-selection", accessoryIds);
+    const parsedPreferences = parsePetPresentationPreferences(preferences);
     if (!parsedPreferences) {
       throw new Error("Invalid pet presentation preferences response");
     }
@@ -1940,7 +2003,7 @@ const petPresentationApi: PetPresentationApi = {
     }
 
     const preferences: unknown = await ipcRenderer.invoke("pet-presentation:set-accessory", presetId);
-    const parsedPreferences: PetPresentationPreferences | null = parsePetPresentationPreferences(preferences);
+    const parsedPreferences = parsePetPresentationPreferences(preferences);
 
     if (!parsedPreferences) {
       throw new Error("Invalid pet presentation preferences response");

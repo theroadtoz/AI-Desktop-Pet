@@ -100,8 +100,8 @@ test("layered action decisions declare presence and dialogue boundaries as safe 
   assert.deepEqual(getPetLayeredActionDecision("proactive-bubble-visible").allowedDialogueModes, ["default", "work", "game", "reading"]);
 });
 
-test("layered action decisions retain their fallback metadata beside the registered native motion", () => {
-  assert.deepEqual(PET_MOTION_PRESET_IDS, ["yawn-once"]);
+test("layered action decisions retain their fallback metadata beside the approved motion catalog", () => {
+  assert.deepEqual(PET_MOTION_PRESET_IDS, ["yawn-once", "happy-small", "surprised-small", "flustered-small"]);
 
   for (const decision of listPetLayeredActionDecisions()) {
     assert.deepEqual(decision.motionPresetFallback, {

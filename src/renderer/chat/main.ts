@@ -23,7 +23,13 @@ import {
   DEFAULT_PET_PRESENTATION_PREFERENCES,
   normalizePetScale
 } from "../../shared/pet-presentation";
-import { isPetAccessoryPresetId, type PetAccessoryPresetId } from "../../shared/pet-accessory";
+import {
+  PET_ACCESSORY_CATALOG,
+  PET_ACCESSORY_GROUPS,
+  parsePetAccessorySelection,
+  type PetAccessoryGroup,
+  type PetAccessoryId
+} from "../../shared/pet-accessory";
 import type { ShortcutActionId, ShortcutPreferenceView } from "../../shared/shortcut-preferences";
 import type { UserProfile } from "../../shared/user-profile";
 import {
@@ -149,7 +155,7 @@ const confirmDeleteApiKeyButton = document.querySelector<HTMLButtonElement>("#co
 const settingsFeedback = document.querySelector<HTMLElement>("#settings-feedback");
 const petScaleInput = document.querySelector<HTMLInputElement>("#pet-scale");
 const petScaleValue = document.querySelector<HTMLOutputElement>("#pet-scale-value");
-const petAccessorySelect = document.querySelector<HTMLSelectElement>("#pet-accessory");
+const petAccessoryGroups = document.querySelector<HTMLElement>("#pet-accessory-groups");
 const petAccessoryStatus = document.querySelector<HTMLElement>("#pet-accessory-status");
 const savePetScaleButton = document.querySelector<HTMLButtonElement>("#save-pet-scale-button");
 const savePetAccessoryButton = document.querySelector<HTMLButtonElement>("#save-pet-accessory-button");
@@ -241,7 +247,7 @@ if (
   !llamaCppRuntimeStartButton || !llamaCppRuntimeStopButton || !llamaCppRuntimeRefreshButton ||
   !providerResetLocalButton || !providerHealthCheckButton || !providerHealthStatus || !apiKeyInput || !apiKeyStatus || !connectionSafeSection || !deleteApiKeyButton ||
   !deleteKeyConfirmation || !cancelDeleteApiKeyButton || !confirmDeleteApiKeyButton || !settingsFeedback ||
-  !petScaleInput || !petScaleValue || !petAccessorySelect || !petAccessoryStatus || !savePetScaleButton ||
+  !petScaleInput || !petScaleValue || !petAccessoryGroups || !petAccessoryStatus || !savePetScaleButton ||
   !savePetAccessoryButton || !petLockStatus || !togglePetLockButton || !userProfileSummary ||
   !settingsUserDisplayName || !settingsUserPreferredName || !saveUserProfileButton || !clearUserProfileButton ||
   !settingsDialogueModeSummary || !settingsPresenceModeSummary || !proactiveCompanionStatus || !proactiveCadenceControls ||
@@ -329,7 +335,7 @@ const confirmDeleteApiKeyAction = confirmDeleteApiKeyButton;
 const settingsFeedbackBox = settingsFeedback;
 const petScaleField = petScaleInput;
 const petScaleValueBox = petScaleValue;
-const petAccessoryField = petAccessorySelect;
+const petAccessoryGroupsBox = petAccessoryGroups;
 const petAccessoryStatusBox = petAccessoryStatus;
 const savePetScaleAction = savePetScaleButton;
 const savePetAccessoryAction = savePetAccessoryButton;
@@ -493,7 +499,7 @@ let activeMemoryFilter: MemoryFilter = "all";
 let memoryDraftSourceMessage: ChatMessage | null = null;
 let isPetLocked = false;
 let currentPetScale = DEFAULT_PET_PRESENTATION_PREFERENCES.petScale;
-let currentPetAccessoryPresetId: PetAccessoryPresetId = DEFAULT_PET_PRESENTATION_PREFERENCES.accessoryPresetId;
+let currentPetAccessoryIds: PetAccessoryId[] = [...DEFAULT_PET_PRESENTATION_PREFERENCES.accessoryIds];
 let shortcutViews: ShortcutPreferenceView[] = [];
 let dialogueModes: DialogueModeView[] = [];
 let currentDialogueModeId: DialogueModeId = "default";
@@ -1119,7 +1125,7 @@ function setChatLifecycleEcho(message: string): void {
 
 function renderCompanionControlShelf(): void {
   const shelf = formatCompanionShelf({
-    accessoryLabel: getPetAccessoryLabel(currentPetAccessoryPresetId),
+    accessoryLabel: `已选 ${currentPetAccessoryIds.length} 类`,
     petScale: currentPetScale,
     isPetLocked,
     activityEcho: currentActivityEcho,
@@ -2298,15 +2304,69 @@ function setPetScaleValue(petScale: number): void {
   renderCompanionControlShelf();
 }
 
-function getPetAccessoryLabel(presetId: PetAccessoryPresetId): string {
-  return presetId === "glasses" ? "眼镜" : "无配件";
+const PET_ACCESSORY_GROUP_LABELS: Record<PetAccessoryGroup, string> = {
+  companion: "伙伴",
+  attire: "服饰",
+  facewear: "面部",
+  headwear: "头部",
+  "held-prop": "手持"
+};
+
+function formatPetAccessorySelection(ids: readonly PetAccessoryId[]): string {
+  const labels = ids.map((id) => PET_ACCESSORY_CATALOG.find((item) => item.id === id)?.label).filter(Boolean);
+  return labels.length > 0 ? labels.join(" · ") : "无配件";
 }
 
-function setPetAccessoryValue(presetId: PetAccessoryPresetId): void {
-  currentPetAccessoryPresetId = presetId;
-  petAccessoryField.value = presetId;
-  petAccessoryStatusBox.textContent = `角色配件：${getPetAccessoryLabel(presetId)}`;
-  petAccessoryStatusBox.dataset.state = presetId === "glasses" ? "ready" : "fallback";
+function renderPetAccessoryGroups(): void {
+  const selectedIds = new Set(currentPetAccessoryIds);
+  const groups = PET_ACCESSORY_GROUPS.map((group) => {
+    const fieldset = document.createElement("fieldset");
+    fieldset.className = "pet-accessory-group";
+
+    const legend = document.createElement("legend");
+    legend.textContent = PET_ACCESSORY_GROUP_LABELS[group];
+    fieldset.append(legend);
+
+    const options = document.createElement("div");
+    options.className = "pet-accessory-options";
+    const groupName = `pet-accessory-${group}`;
+    const items = PET_ACCESSORY_CATALOG.filter((item) => item.group === group && item.availability === "available");
+
+    for (const item of [null, ...items]) {
+      const choice = document.createElement("label");
+      choice.className = "pet-accessory-choice";
+
+      const radio = document.createElement("input");
+      radio.type = "radio";
+      radio.name = groupName;
+      radio.value = item?.id ?? "none";
+      radio.checked = item ? selectedIds.has(item.id) : !items.some((availableItem) => selectedIds.has(availableItem.id));
+
+      const label = document.createElement("span");
+      label.textContent = item?.label ?? "无";
+      choice.append(radio, label);
+      options.append(choice);
+    }
+
+    fieldset.append(options);
+    return fieldset;
+  });
+
+  petAccessoryGroupsBox.replaceChildren(...groups);
+}
+
+function getPetAccessorySelectionFromFields(): PetAccessoryId[] | null {
+  const selectedIds = [...petAccessoryGroupsBox.querySelectorAll<HTMLInputElement>("input[type=radio]:checked")]
+    .map((field) => field.value)
+    .filter((value) => value !== "none");
+  return parsePetAccessorySelection(selectedIds);
+}
+
+function setPetAccessorySelection(ids: readonly PetAccessoryId[]): void {
+  currentPetAccessoryIds = [...ids];
+  renderPetAccessoryGroups();
+  petAccessoryStatusBox.textContent = `已保存配件：${formatPetAccessorySelection(ids)}`;
+  petAccessoryStatusBox.dataset.state = ids.length > 0 ? "ready" : "fallback";
   renderCompanionControlShelf();
 }
 
@@ -2318,7 +2378,7 @@ async function refreshPetPresentationPreferences(): Promise<void> {
   }
 
   setPetScaleValue(preferences.petScale);
-  setPetAccessoryValue(preferences.accessoryPresetId);
+  setPetAccessorySelection(preferences.accessoryIds);
 }
 
 function setPetLockState(nextIsLocked: boolean): void {
@@ -3014,17 +3074,8 @@ settingsAction.addEventListener("click", () => {
 });
 
 shelfAccessoryAction.addEventListener("click", () => {
-  if (chatTurnState.isReplying || !window.petPresentationApi) {
-    return;
-  }
-
-  const nextPresetId: PetAccessoryPresetId = currentPetAccessoryPresetId === "glasses" ? "none" : "glasses";
-
-  void window.petPresentationApi.setAccessoryPreset(nextPresetId).then((preferences) => {
-    setPetAccessoryValue(preferences.accessoryPresetId);
-    setChatSessionNote(`角色配件已切换为${getPetAccessoryLabel(preferences.accessoryPresetId)}。`, "ready");
-  }).catch(() => {
-    setChatSessionNote("无法切换角色配件，请稍后重试。", "error");
+  void openSettings("appearance").then(() => {
+    petAccessoryGroupsBox.querySelector<HTMLInputElement>("input[type=radio]:checked")?.focus();
   });
 });
 
@@ -3495,18 +3546,18 @@ savePetAccessoryAction.addEventListener("click", () => {
     return;
   }
 
-  const presetId = petAccessoryField.value;
+  const accessoryIds = getPetAccessorySelectionFromFields();
 
-  if (!isPetAccessoryPresetId(presetId)) {
-    setSettingsFeedback("角色配件选项无效。", "fallback");
+  if (!accessoryIds) {
+    setSettingsFeedback("角色配件选择无效。", "fallback");
     return;
   }
 
   clearSettingsFeedback();
 
-  void window.petPresentationApi.setAccessoryPreset(presetId).then((preferences) => {
-    setPetAccessoryValue(preferences.accessoryPresetId);
-    setSettingsFeedback("角色配件已保存。", "ready");
+  void window.petPresentationApi.setAccessorySelection(accessoryIds).then((preferences) => {
+    setPetAccessorySelection(preferences.accessoryIds);
+    setSettingsFeedback(`角色配件已保存：${formatPetAccessorySelection(preferences.accessoryIds)}。`, "ready");
   }).catch(() => {
     setSettingsFeedback("无法保存角色配件，请稍后重试。", "fallback");
   });
@@ -3618,7 +3669,7 @@ void refreshProviderStatus();
 void refreshWebSearchSettings();
 void refreshMemory();
 setPetScaleValue(DEFAULT_PET_PRESENTATION_PREFERENCES.petScale);
-setPetAccessoryValue(DEFAULT_PET_PRESENTATION_PREFERENCES.accessoryPresetId);
+setPetAccessorySelection(DEFAULT_PET_PRESENTATION_PREFERENCES.accessoryIds);
 setPetLockState(false);
 void refreshPetPresentationPreferences().catch(() => {
   setChatSessionNote("无法读取伙伴外观摘要；请稍后打开设置重试。", "fallback");

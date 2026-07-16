@@ -186,18 +186,17 @@
               <input id="pet-scale" name="petScale" type="range" min="0.70" max="1.35" step="0.05" value="1.00" />
             </label>
             <output id="pet-scale-value" class="status-box" aria-live="polite">1.00 倍</output>
-            <label class="field-label">
-              角色配件
-              <select id="pet-accessory" name="petAccessory">
-                <option value="none">无配件</option>
-                <option value="glasses">眼镜</option>
-              </select>
-            </label>
-            <p id="pet-accessory-status" class="status-box" aria-live="polite">角色配件：无配件</p>
+            <section class="content-stack" aria-labelledby="pet-accessory-title">
+              <h4 id="pet-accessory-title" class="settings-section-title">角色配件</h4>
+              <div id="pet-accessory-groups" class="pet-accessory-groups" aria-describedby="pet-accessory-status"></div>
+              <p id="pet-accessory-status" class="status-box" data-state="fallback" aria-live="polite">已保存配件：无配件</p>
+              <div class="settings-actions">
+                <button id="save-pet-accessory-button" class="button-light" type="button">保存角色配件</button>
+              </div>
+            </section>
             <p id="pet-lock-status" class="status-box" aria-live="polite">桌宠锁定：未锁定</p>
             <div class="settings-actions">
               <button id="save-pet-scale-button" class="button-light" type="button">保存桌宠大小</button>
-              <button id="save-pet-accessory-button" class="button-light" type="button">保存角色配件</button>
               <button id="toggle-pet-lock-button" class="button-light" type="button">锁定桌宠</button>
             </div>
             <section id="companion-control-shelf" class="companion-control-shelf" aria-label="伙伴控制架">

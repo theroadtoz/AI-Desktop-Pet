@@ -57,7 +57,11 @@ import {
 } from "../src/shared/pet-action-state-machine.ts";
 import { resolvePetExpressionStateLinkage } from "../src/shared/pet-expression-state-linkage.ts";
 import type { EmotionPresentation } from "../src/shared/emotion-presentation.ts";
-import type { PetAccessoryPresetId } from "../src/shared/pet-accessory.ts";
+import {
+  resolvePetAccessorySelection,
+  type PetAccessoryId,
+  type PetAccessoryResolution
+} from "../src/shared/pet-accessory.ts";
 import type {
   CubismMotionLifecycleState,
   CubismMotionPlayback,
@@ -76,9 +80,9 @@ function createFakeInteractionActionPlayer(options: {
   playMotionPreset?: (motionPresetId: string) => Promise<CubismMotionPlaybackResult>;
 } = {}) {
   let nowMs = 1_000;
-  let persistent: { presentation: EmotionPresentation; accessoryPresetId: PetAccessoryPresetId } = {
+  let persistent: { presentation: EmotionPresentation; accessorySelection: PetAccessoryResolution } = {
     presentation: { emotion: "neutral", intensity: "low", mode: "neutral" },
-    accessoryPresetId: "none"
+    accessorySelection: resolvePetAccessorySelection({ userAccessoryIds: [] })
   };
   const timers: FakePlayerTimer[] = [];
   const calls: string[] = [];
@@ -135,14 +139,20 @@ function createFakeInteractionActionPlayer(options: {
     restoreTemporaryPartOpacities: () => {
       calls.push("restoreParts");
     },
+    setTemporaryAccessory: (accessoryId) => {
+      calls.push(`temporaryAccessory:${accessoryId}`);
+    },
+    restoreTemporaryAccessory: () => {
+      calls.push("restoreAccessory");
+    },
     setExpression: (expressionName) => {
       calls.push(`setExpression:${expressionName}`);
     },
     clearExpression: () => {
       calls.push("clearExpression");
     },
-    applyPresentation: (presentation, accessoryPresetId) => {
-      calls.push(`applyPresentation:${presentation.emotion}:${accessoryPresetId}`);
+    applyPresentation: (presentation, accessorySelection) => {
+      calls.push(`applyPresentation:${presentation.emotion}:${accessorySelection.accessoryIds.join(",") || "none"}`);
     },
     getPersistentPresentation: () => persistent,
     reportTelemetry: (type, payload) => {
@@ -158,8 +168,11 @@ function createFakeInteractionActionPlayer(options: {
     setNow(value: number): void {
       nowMs = value;
     },
-    setPersistentAccessory(accessoryPresetId: PetAccessoryPresetId): void {
-      persistent = { ...persistent, accessoryPresetId };
+    setPersistentAccessories(accessoryIds: readonly PetAccessoryId[]): void {
+      persistent = {
+        ...persistent,
+        accessorySelection: resolvePetAccessorySelection({ userAccessoryIds: accessoryIds })
+      };
     },
     setPersistentPresentation(presentation: EmotionPresentation): void {
       persistent = { ...persistent, presentation };
@@ -720,13 +733,11 @@ test("pet interaction action manifest includes audited expression and accessory 
     shySmile: "happy",
     playGame: "gestureGame",
     gameReady: "gestureGame",
-    gameCheerLite: "gestureGame",
-    reading: "glasses",
-    readingIdle: "glasses",
-    readingThink: "glasses"
+    gameCheerLite: "gestureGame"
   } as const;
 
   assert.equal(byType.get("greeting")?.expressionName, undefined);
+  assert.equal(byType.get("greeting")?.temporaryAccessoryId, undefined);
   assert.equal(byType.get("listen")?.expressionName, undefined);
   assert.deepEqual(byType.get("listen")?.lookTarget, { x: 0, y: 0.18 });
   assert.equal(byType.get("curiousTilt")?.expressionName, undefined);
@@ -742,6 +753,7 @@ test("pet interaction action manifest includes audited expression and accessory 
   assert.equal(byType.get("lookAway")?.expressionName, undefined);
   assert.deepEqual(byType.get("lookAway")?.lookTarget, { x: -0.45, y: 0.02 });
   assert.equal(byType.get("thinking")?.expressionName, undefined);
+  assert.equal(byType.get("thinking")?.temporaryAccessoryId, undefined);
   assert.equal(byType.get("replyThinking")?.expressionName, undefined);
   assert.deepEqual(byType.get("replyThinking")?.lookTarget, { x: 0.18, y: 0.08 });
   assert.equal(byType.get("focus")?.expressionName, undefined);
@@ -749,6 +761,7 @@ test("pet interaction action manifest includes audited expression and accessory 
   assert.equal(byType.get("workFocus")?.expressionName, undefined);
   assert.deepEqual(byType.get("workFocus")?.lookTarget, { x: 0.05, y: 0.1 });
   assert.equal(byType.get("appearance")?.motionPresetId, "surprised-small");
+  assert.equal(byType.get("appearance")?.temporaryAccessoryId, "staff");
   assert.equal(byType.get("headPat")?.motionPresetId, "happy-small");
   assert.equal(byType.get("doze")?.motionPresetId, "yawn-once");
   assert.deepEqual(
@@ -767,19 +780,19 @@ test("pet interaction action manifest includes audited expression and accessory 
   assert.equal(byType.get("replySustain")?.presentation.intensity, "low");
   assert.deepEqual(byType.get("replySustain")?.lookTarget, { x: 0.08, y: 0.04 });
   assert.deepEqual(byType.get("replySustain")?.poseTarget, { bodyAngleX: 1.5, bodyAngleZ: -1 });
-  assert.equal(byType.get("reading")?.expressionName, "glasses");
-  assert.deepEqual(byType.get("reading")?.accessoryPartIds, ["Part53"]);
-  assert.equal(byType.get("readingIdle")?.expressionName, "glasses");
-  assert.deepEqual(byType.get("readingIdle")?.accessoryPartIds, ["Part53"]);
+  assert.equal(byType.get("reading")?.expressionName, undefined);
+  assert.equal(byType.get("reading")?.temporaryAccessoryId, "glasses");
+  assert.equal(byType.get("readingIdle")?.expressionName, undefined);
+  assert.equal(byType.get("readingIdle")?.temporaryAccessoryId, "glasses");
   assert.equal(byType.get("playGame")?.expressionName, "gestureGame");
-  assert.deepEqual(byType.get("playGame")?.accessoryPartIds, ["Part17", "Part21"]);
+  assert.equal(byType.get("playGame")?.temporaryAccessoryId, "game-controller");
   assert.equal(byType.get("gameReady")?.expressionName, "gestureGame");
-  assert.deepEqual(byType.get("gameReady")?.accessoryPartIds, ["Part17", "Part21"]);
+  assert.equal(byType.get("gameReady")?.temporaryAccessoryId, "game-controller");
   assert.equal(byType.get("gameCheerLite")?.expressionName, "gestureGame");
-  assert.deepEqual(byType.get("gameCheerLite")?.accessoryPartIds, ["Part17", "Part21"]);
+  assert.equal(byType.get("gameCheerLite")?.temporaryAccessoryId, "game-controller");
   assert.deepEqual(byType.get("gameCheerLite")?.poseTarget, { bodyAngleX: 3, bodyAngleZ: -1.5 });
-  assert.equal(byType.get("readingThink")?.expressionName, "glasses");
-  assert.deepEqual(byType.get("readingThink")?.accessoryPartIds, ["Part53"]);
+  assert.equal(byType.get("readingThink")?.expressionName, undefined);
+  assert.equal(byType.get("readingThink")?.temporaryAccessoryId, "glasses");
   assert.deepEqual(byType.get("readingThink")?.lookTarget, { x: -0.08, y: -0.16 });
   assert.equal(byType.get("sleepySettle")?.expressionName, undefined);
   assert.equal(byType.get("sleepySettle")?.motionPresetId, undefined);
@@ -1137,8 +1150,9 @@ test("interaction action player owns start, finish, restore, and finished teleme
     `boost:${reading.durationMs + 250}`,
     "pauseLook",
     "resetLookTarget",
-    "temporaryParts:Part53",
-    "setExpression:glasses"
+    "temporaryParts:",
+    "temporaryAccessory:glasses",
+    "applyPresentation:neutral:none"
   ]);
   assert.equal(harness.timers.length, 1);
   assert.equal(harness.timers[0]?.delayMs, reading.durationMs);
@@ -1154,13 +1168,14 @@ test("interaction action player owns start, finish, restore, and finished teleme
     }
   });
 
-  harness.setPersistentAccessory("glasses");
+  harness.setPersistentAccessories(["glasses"]);
   harness.setNow(1_000 + reading.durationMs);
   harness.timers[0]?.callback();
 
   assert.equal(harness.player.isActive(), false);
-  assert.deepEqual(harness.calls.slice(5), [
+  assert.deepEqual(harness.calls.slice(6), [
     "restoreParts",
+    "restoreAccessory",
     "clearExpression",
     "resetLookTarget",
     "resumeLook",
@@ -1170,8 +1185,7 @@ test("interaction action player owns start, finish, restore, and finished teleme
     type: "pet_interaction_action_finished",
     payload: {
       type: "reading",
-      reason: "click_body",
-      restoredAccessoryPresetId: "glasses"
+      reason: "click_body"
     }
   });
 });
@@ -1268,7 +1282,7 @@ test("interaction action player waits for native completion without stopping mot
   harness.timers[0]?.callback();
   assert.equal(harness.calls.some((call) => call.startsWith("stopMotion:")), false);
 
-  harness.setPersistentAccessory("glasses");
+  harness.setPersistentAccessories(["glasses"]);
   harness.setPersistentPresentation({ emotion: "happy", intensity: "high", mode: "emphasis" });
   motion.settle("completed");
   await Promise.resolve();
@@ -1289,8 +1303,7 @@ test("interaction action player waits for native completion without stopping mot
       type: "thinking",
       reason: "click_body",
       motionPresetId: "future-wave",
-      terminalStatus: "completed",
-      restoredAccessoryPresetId: "glasses"
+      terminalStatus: "completed"
     }
   });
 });
@@ -1326,8 +1339,7 @@ test("interaction action player times out native motion that remains queued", as
       type: "thinking",
       reason: "state_sleep",
       motionPresetId: "future-wave",
-      terminalStatus: "timed_out",
-      restoredAccessoryPresetId: "none"
+      terminalStatus: "timed_out"
     }
   });
 
@@ -1496,8 +1508,7 @@ test("interaction action player interrupts an active motion action before allowi
       type: "thinking",
       reason: "state_sleep",
       motionPresetId: "future-wave",
-      terminalStatus: "interrupted",
-      restoredAccessoryPresetId: "none"
+      terminalStatus: "interrupted"
     }
   });
 
@@ -1708,7 +1719,8 @@ test("interaction action player ignores a late native playback Promise after dis
   motion.settle("completed");
   await Promise.resolve();
 
-  assert.equal(harness.calls.filter((call) => call === "restoreParts").length, 0);
+  assert.equal(harness.calls.filter((call) => call === "restoreParts").length, 1);
+  assert.equal(harness.calls.filter((call) => call === "applyPresentation:neutral:none").length, 1);
   assert.equal(harness.telemetry.filter((event) => event.type === "pet_interaction_action_finished").length, 0);
 });
 
@@ -1812,7 +1824,7 @@ test("interaction action player only emits renderer telemetry contract fields", 
     candidateActionTypes: ["greeting", "thinking", "reading"]
   });
   harness.player.playAction(getPetInteractionAction("headPat"), "click_head");
-  harness.setPersistentAccessory("glasses");
+  harness.setPersistentAccessories(["glasses"]);
   harness.setNow(1_000 + reading.durationMs);
   harness.timers[0]?.callback();
   harness.setNow(1_000 + PET_WINDOW_SHAKE_LIGHT_FEEDBACK_COOLDOWN_MS - 1);

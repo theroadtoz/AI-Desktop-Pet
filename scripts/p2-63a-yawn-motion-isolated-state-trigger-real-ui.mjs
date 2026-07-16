@@ -508,35 +508,25 @@ export function shouldKeepP263BArtifacts(env = process.env) {
 }
 
 export function injectIsolatedMotionPreset(source, timing, timeoutControl = false) {
-  const marker = "export const PET_MOTION_PRESETS: readonly ModelMotionPreset[] = Object.freeze([";
-  const replacement = `export const PET_MOTION_PRESETS: readonly ModelMotionPreset[] = Object.freeze([
-  {
-    id: "${YAWN_PRESET_ID}",
-    path: "motions/yawn-once.motion3.json",
-    semanticKind: "sleep",
-    fadeInSeconds: 0.15,
-    fadeOutSeconds: 0.2,
-    durationHintSeconds: ${timing.durationSeconds},
-    loop: ${timeoutControl},
-    priority: 3,
-    cooldownMs: 2_000,
-    restorePolicy: "restore-current-state",
-    allowedStates: ["sleep"],
-    allowedPresenceModes: ["sleep"],
-    allowedDialogueModes: ["default"],
-    visualRisk: "needs-visual-check",
-    assetLicenseStatus: "user-provided"
-  }
-]);`;
+  const marker = "export const PET_MOTION_PRESETS: readonly ModelMotionPreset[] = APPROVED_MOTION_PRESETS;";
+  const replacement = `const isolatedYawnPresetCount = APPROVED_MOTION_PRESETS.filter((preset) => preset.id === "${YAWN_PRESET_ID}").length;
+if (isolatedYawnPresetCount !== 1) throw new Error("expected exactly one approved yawn preset");
 
-  const start = source.indexOf(marker);
-  const end = source.indexOf("\n]);", start);
-
-  if (start < 0 || end < 0 || source.indexOf(marker, start + marker.length) >= 0) {
-    throw new Error("expected exactly one motion preset catalog marker");
-  }
-
-  return `${source.slice(0, start)}${replacement}${source.slice(end + "\n]);".length)}`;
+export const PET_MOTION_PRESETS: readonly ModelMotionPreset[] = Object.freeze(
+  APPROVED_MOTION_PRESETS.map((preset) => (
+    preset.id === "${YAWN_PRESET_ID}"
+      ? {
+          ...preset,
+          id: "${YAWN_PRESET_ID}",
+          path: "motions/yawn-once.motion3.json",
+          semanticKind: "sleep",
+          durationHintSeconds: ${timing.durationSeconds},
+          loop: ${timeoutControl}
+        }
+      : preset
+  ))
+);`;
+  return replaceExactlyOnce(source, marker, replacement, "pet motion preset export");
 }
 
 export function injectIsolatedStateSleepPath(source, timing, runId = "p2-63a-test-run") {

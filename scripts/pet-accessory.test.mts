@@ -2,85 +2,118 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
-  DEFAULT_PET_ACCESSORY_PRESET_ID,
-  getPetAccessoryPreset,
-  isPetAccessoryPresetId,
-  PET_ACCESSORY_PRESETS
+  getAccessoryIdsForLegacyPreset,
+  getLegacyAccessoryPresetId,
+  getPetAccessoryModeLayer,
+  MAX_PET_ACCESSORY_SELECTION,
+  normalizeStoredPetAccessorySelection,
+  parsePetAccessorySelection,
+  PET_ACCESSORY_CATALOG,
+  PET_ACCESSORY_GROUPS,
+  resolvePetAccessorySelection
 } from "../src/shared/pet-accessory.ts";
-import {
-  DEFAULT_PET_PRESENTATION_PREFERENCES,
-  parsePetPresentationPreferences,
-  parseStoredPetPresentationPreferences
-} from "../src/shared/pet-presentation.ts";
 
-test("pet accessory preset ids are a closed whitelist", () => {
-  assert.equal(DEFAULT_PET_ACCESSORY_PRESET_ID, "none");
-  assert.deepEqual(PET_ACCESSORY_PRESETS.map((preset) => preset.id), ["none", "glasses"]);
-  assert.equal(isPetAccessoryPresetId("none"), true);
-  assert.equal(isPetAccessoryPresetId("glasses"), true);
-  assert.equal(isPetAccessoryPresetId("gestureGame"), false);
-  assert.equal(isPetAccessoryPresetId("Part53"), false);
-  assert.equal(isPetAccessoryPresetId("dark"), false);
+test("public accessory catalog is closed and contains no renderer implementation details", async () => {
+  assert.deepEqual(PET_ACCESSORY_CATALOG, [
+    { id: "ghost", label: "小幽灵", group: "companion", availability: "available" },
+    { id: "bow", label: "蝴蝶结", group: "attire", availability: "available" },
+    { id: "glasses", label: "眼镜", group: "facewear", availability: "available" },
+    { id: "hat", label: "帽子", group: "headwear", availability: "available" },
+    { id: "staff", label: "法杖", group: "held-prop", availability: "available" },
+    { id: "game-controller", label: "手柄", group: "held-prop", availability: "available" },
+    { id: "microphone", label: "麦克风", group: "held-prop", availability: "available" }
+  ]);
+  assert.deepEqual(PET_ACCESSORY_GROUPS, ["companion", "attire", "facewear", "headwear", "held-prop"]);
+
+  const source = await readFile(new URL("../src/shared/pet-accessory.ts", import.meta.url), "utf8");
+  assert.doesNotMatch(source, /expressionName|partIds|Param\d+|Part\d+|motion3|model3|[\\/]model[\\/]/i);
+  assert.doesNotMatch(PET_ACCESSORY_CATALOG.map((item) => item.id).join(","), /dark|happy|sad|angry|excited/);
 });
 
-test("glasses preset exposes only the audited expression and part", () => {
-  assert.deepEqual(getPetAccessoryPreset("none"), {
-    id: "none",
-    label: "无配件",
-    expressionName: null,
-    partIds: []
-  });
-  assert.deepEqual(getPetAccessoryPreset("glasses"), {
-    id: "glasses",
-    label: "眼镜",
-    expressionName: "glasses",
-    partIds: ["Part53"]
-  });
+test("strict accessory selection accepts canonical cross-group combinations", () => {
+  assert.equal(MAX_PET_ACCESSORY_SELECTION, 5);
+  assert.deepEqual(parsePetAccessorySelection([]), []);
+  assert.deepEqual(
+    parsePetAccessorySelection(["hat", "ghost", "glasses", "bow", "microphone"]),
+    ["ghost", "bow", "glasses", "hat", "microphone"]
+  );
 });
 
-test("pet presentation preferences persist accessory ids and migrate old scale-only data", () => {
-  assert.deepEqual(parsePetPresentationPreferences({ petScale: 1.1, accessoryPresetId: "glasses" }), {
-    petScale: 1.1,
-    accessoryPresetId: "glasses"
-  });
-  assert.deepEqual(parsePetPresentationPreferences({ petScale: 1.1 }), {
-    petScale: 1.1,
-    accessoryPresetId: "none"
-  });
-  assert.deepEqual(parsePetPresentationPreferences({ petScale: 1.1, accessoryPresetId: "Part53" }), {
-    petScale: 1.1,
-    accessoryPresetId: "none"
-  });
+test("strict accessory selection rejects unknown, duplicate, overlong, and held-prop conflicts", () => {
+  assert.equal(parsePetAccessorySelection(["Part53"]), null);
+  assert.equal(parsePetAccessorySelection(["dark"]), null);
+  assert.equal(parsePetAccessorySelection(["glasses", "glasses"]), null);
+  assert.equal(parsePetAccessorySelection(["staff", "game-controller"]), null);
+  assert.equal(parsePetAccessorySelection(["staff", "microphone"]), null);
+  assert.equal(parsePetAccessorySelection(["game-controller", "microphone"]), null);
+  assert.equal(parsePetAccessorySelection(new Array(MAX_PET_ACCESSORY_SELECTION + 1).fill("ghost")), null);
+  assert.equal(parsePetAccessorySelection("glasses"), null);
 });
 
-test("stored pet presentation data falls back safely with accessory fields", () => {
-  assert.deepEqual(parseStoredPetPresentationPreferences("not json"), DEFAULT_PET_PRESENTATION_PREFERENCES);
-  assert.deepEqual(parseStoredPetPresentationPreferences(JSON.stringify({ petScale: 1.2, accessoryPresetId: "glasses" })), {
-    petScale: 1.2,
-    accessoryPresetId: "glasses"
-  });
-  assert.deepEqual(parseStoredPetPresentationPreferences(JSON.stringify({ petScale: 1.2, accessoryPresetId: "gestureGame" })), {
-    petScale: 1.2,
-    accessoryPresetId: "none"
-  });
+test("stored selection tolerantly filters unknown, duplicate, and conflicting ids", () => {
+  assert.deepEqual(
+    normalizeStoredPetAccessorySelection([
+      "microphone",
+      "ghost",
+      "Part53",
+      "microphone",
+      "staff",
+      "hat",
+      "glasses"
+    ]),
+    ["ghost", "glasses", "hat", "microphone"]
+  );
+  assert.deepEqual(normalizeStoredPetAccessorySelection(null), []);
 });
 
-test("chat preload exposes accessory preset IPC without arbitrary part or expression channels", async () => {
+test("legacy none and glasses presets adapt to canonical selections", () => {
+  assert.deepEqual(getAccessoryIdsForLegacyPreset("none"), []);
+  assert.deepEqual(getAccessoryIdsForLegacyPreset("glasses"), ["glasses"]);
+  assert.equal(getLegacyAccessoryPresetId([]), "none");
+  assert.equal(getLegacyAccessoryPresetId(["ghost", "glasses"]), "glasses");
+  assert.equal(getLegacyAccessoryPresetId(["ghost", "hat"]), "none");
+});
+
+test("work mode overrides facewear without changing other user groups", () => {
+  const userAccessoryIds = ["ghost", "hat", "staff"] as const;
+  const resolution = resolvePetAccessorySelection({
+    userAccessoryIds,
+    modeLayer: getPetAccessoryModeLayer("work")
+  });
+
+  assert.deepEqual(userAccessoryIds, ["ghost", "hat", "staff"]);
+  assert.deepEqual(resolution.accessoryIds, ["ghost", "glasses", "hat", "staff"]);
+  assert.equal(resolution.sourceByGroup.facewear, "mode");
+  assert.equal(resolution.sourceByGroup.companion, "user");
+  assert.equal(resolution.sourceByGroup["held-prop"], "user");
+});
+
+test("action layer has highest group-level priority and can explicitly clear a group", () => {
+  const resolution = resolvePetAccessorySelection({
+    userAccessoryIds: ["ghost", "glasses", "staff"],
+    modeLayer: getPetAccessoryModeLayer("work"),
+    actionLayer: {
+      source: "action",
+      overriddenGroups: ["facewear", "held-prop"],
+      accessoryIds: ["game-controller"]
+    }
+  });
+
+  assert.deepEqual(resolution.accessoryIds, ["ghost", "game-controller"]);
+  assert.equal(resolution.sourceByGroup.facewear, "action");
+  assert.equal(resolution.sourceByGroup["held-prop"], "action");
+});
+
+test("chat preload exposes strict selection IPC and no renderer command surface", async () => {
   const preload = await readFile(new URL("../src/preload/chat-preload.ts", import.meta.url), "utf8");
+  const main = await readFile(new URL("../src/main/app.ts", import.meta.url), "utf8");
 
+  assert.match(preload, /setAccessorySelection/);
+  assert.match(preload, /pet-presentation:set-accessory-selection/);
   assert.match(preload, /setAccessoryPreset/);
-  assert.match(preload, /pet-presentation:set-accessory/);
-  assert.doesNotMatch(preload, /setPartOpacity|setExpressionAsset|Part53|gestureGame|dark/);
-});
-
-test("pet renderer restores the latest persistent accessory after temporary actions", async () => {
-  const source = await readFile(new URL("../src/renderer/pet/main.ts", import.meta.url), "utf8");
-  const playerSource = await readFile(new URL("../src/renderer/pet/interaction-action-player.ts", import.meta.url), "utf8");
-
-  assert.match(source, /lastAccessoryPresetId/);
-  assert.match(source, /getPersistentPresentation:\s*\(\) => \(\{\s*presentation: lastPresentation,\s*accessoryPresetId: lastAccessoryPresetId\s*\}\)/);
-  assert.match(source, /interactionActionPlayer\.isActive\(\)/);
-  assert.match(playerSource, /const persistent = getPersistentPresentation\(\)/);
-  assert.match(playerSource, /applyPresentation\(persistent\.presentation, persistent\.accessoryPresetId\)/);
-  assert.match(playerSource, /restoredAccessoryPresetId: persistent\.accessoryPresetId/);
+  assert.doesNotMatch(preload, /setPartOpacity|setExpressionAsset|Param\d+|Part\d+|motion3|model3/);
+  assert.match(main, /ipcMain\.handle\("pet-presentation:set-accessory-selection"/);
+  assert.match(main, /const accessoryIds = parsePetAccessorySelection\(value\)/);
+  assert.match(main, /!isChatSender\(event\) \|\| !accessoryIds/);
+  assert.match(main, /savePetAccessorySelection\(getAccessoryIdsForLegacyPreset\(presetId\)\)/);
 });

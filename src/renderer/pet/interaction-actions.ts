@@ -5,6 +5,7 @@ import {
   type PetExpressionPresetId
 } from "../../shared/interaction-action-catalog.ts";
 import type { PetMotionPresetId } from "../../shared/pet-motion-presets.ts";
+import type { CubismTemporaryAccessoryId } from "./live2d/cubism-accessory-controller";
 import type { PresenceModeId } from "../../shared/presence-mode";
 
 export const PET_INTERACTION_ACTION_TYPES = [
@@ -57,6 +58,7 @@ export type PetInteractionAction = {
   expressionName?: string;
   motionPresetId?: PetMotionPresetId;
   accessoryPartIds?: readonly string[];
+  temporaryAccessoryId?: CubismTemporaryAccessoryId;
   lookTarget?: PetInteractionLookTarget;
   poseTarget?: PetInteractionPoseTarget;
 };
@@ -132,7 +134,7 @@ export const PET_INTERACTION_ACTIONS: readonly PetInteractionAction[] = [
     presentation: { emotion: "surprised", intensity: "high", mode: "emphasis" },
     motionPresetId: "surprised-small",
     ...useExpressionPreset("excited"),
-    accessoryPartIds: ["Part84"]
+    temporaryAccessoryId: "staff"
   },
   {
     type: "headPat",
@@ -212,7 +214,7 @@ export const PET_INTERACTION_ACTIONS: readonly PetInteractionAction[] = [
     durationMs: 1_700,
     presentation: { emotion: "surprised", intensity: "medium", mode: "micro" },
     ...useExpressionPreset("gestureGame"),
-    accessoryPartIds: ["Part17", "Part21"]
+    temporaryAccessoryId: "game-controller"
   },
   {
     type: "gameReady",
@@ -220,7 +222,7 @@ export const PET_INTERACTION_ACTIONS: readonly PetInteractionAction[] = [
     durationMs: 1_500,
     presentation: { emotion: "happy", intensity: "medium", mode: "micro" },
     ...useExpressionPreset("gestureGame"),
-    accessoryPartIds: ["Part17", "Part21"],
+    temporaryAccessoryId: "game-controller",
     lookTarget: { x: 0.12, y: 0.05 }
   },
   {
@@ -229,7 +231,7 @@ export const PET_INTERACTION_ACTIONS: readonly PetInteractionAction[] = [
     durationMs: 1_300,
     presentation: { emotion: "happy", intensity: "medium", mode: "micro" },
     ...useExpressionPreset("gestureGame"),
-    accessoryPartIds: ["Part17", "Part21"],
+    temporaryAccessoryId: "game-controller",
     lookTarget: { x: 0.18, y: 0.1 },
     poseTarget: { bodyAngleX: 3, bodyAngleZ: -1.5 }
   },
@@ -238,16 +240,14 @@ export const PET_INTERACTION_ACTIONS: readonly PetInteractionAction[] = [
     weight: 0.8,
     durationMs: 1_900,
     presentation: { emotion: "neutral", intensity: "low", mode: "neutral" },
-    ...useExpressionPreset("glasses"),
-    accessoryPartIds: ["Part53"]
+    temporaryAccessoryId: "glasses"
   },
   {
     type: "readingIdle",
     weight: 1,
     durationMs: 1_600,
     presentation: { emotion: "neutral", intensity: "low", mode: "neutral" },
-    ...useExpressionPreset("glasses"),
-    accessoryPartIds: ["Part53"],
+    temporaryAccessoryId: "glasses",
     lookTarget: { x: 0, y: -0.12 }
   },
   {
@@ -255,8 +255,7 @@ export const PET_INTERACTION_ACTIONS: readonly PetInteractionAction[] = [
     weight: 0.9,
     durationMs: 1_500,
     presentation: { emotion: "neutral", intensity: "low", mode: "neutral" },
-    ...useExpressionPreset("glasses"),
-    accessoryPartIds: ["Part53"],
+    temporaryAccessoryId: "glasses",
     lookTarget: { x: -0.08, y: -0.16 },
     poseTarget: { bodyAngleX: -1.5, bodyAngleZ: 0.8 }
   },

@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, relative, resolve } from "node:path";
-import { PET_INTERACTION_ACTION_TYPES, type PetInteractionActionType } from "../src/renderer/pet/interaction-actions.ts";
-import { auditWitchMotionAssets } from "./live2d-motion-asset-audit.mts";
+import { PET_INTERACTION_ACTIONS, PET_INTERACTION_ACTION_TYPES, type PetInteractionActionType } from "../src/renderer/pet/interaction-actions.ts";
+import { auditWitchMotionAssets, type MotionAssetAuditResult } from "./live2d-motion-asset-audit.mts";
 
 const REPOSITORY_ROOT = resolve(import.meta.dirname, "..");
 const MANIFEST_PATH = "resources/models/witch/model-manifest.json";
@@ -134,6 +134,24 @@ function expressionReference(name: string, manifest: Manifest, modelDirectory: s
   };
 }
 
+function motionPresetReference(
+  motionPresets: MotionAssetAuditResult["semanticMotionPresets"],
+  presetId: string
+): NamedReference {
+  const preset = motionPresets.find((entry) => entry.id === presetId);
+
+  if (!preset) {
+    throw new Error(`动作能力审计缺少已注册 motion preset：${presetId}`);
+  }
+
+  return {
+    name: preset.id,
+    id: preset.id,
+    path: preset.path,
+    evidence: `manifest.motionPresets.${preset.id} (${preset.semanticKind})`
+  };
+}
+
 function namedMatches(entries: Map<string, string>, pattern: RegExp, evidence: string): NamedReference[] {
   return [...entries.entries()]
     .filter(([, name]) => pattern.test(name))
@@ -198,25 +216,34 @@ export function auditWitchActionCapabilities(repositoryRoot = REPOSITORY_ROOT): 
   const hatParts = namedMatches(parts, /帽子/, "CDI3.Parts");
   const faceParameters = namedMatches(parameters, /眼|眉|嘴|口/, "CDI3.Parameters");
   const bodyParameters = namedMatches(parameters, /角度|身体|手|发|头/, "CDI3.Parameters");
+  const actionMotionPresetIds = new Map(
+    PET_INTERACTION_ACTIONS.flatMap((action) => action.motionPresetId
+      ? [[action.type, action.motionPresetId] as const]
+      : [])
+  );
+  const nativeMotionForAction = (action: PetInteractionActionType): NamedReference[] => {
+    const presetId = actionMotionPresetIds.get(action);
+    return presetId ? [motionPresetReference(motionAudit.semanticMotionPresets, presetId)] : [];
+  };
 
   const targetActions = [
-    actionEntry("appearance", "expression-parameter-composition", {
-      nativeMotions: [idleMotionReference],
+    actionEntry("appearance", "native-motion", {
+      nativeMotions: nativeMotionForAction("appearance"),
       expressions: [expressionReference("excited", manifest, modelDirectory, repositoryRoot)],
       parameters: bodyParameters.slice(0, 8),
       parts: [...staffParts, ...hatParts].slice(0, 6),
       hitAreas: bodyHitArea,
-      implementationRecommendation: "V1 使用缩放/透明度缓入 + excited 表情；不要把 idle 循环当出场动作直接播放。",
-      risk: "缺少独立出场 motion，真实出场感需要后续补 motion 或参数序列。"
+      implementationRecommendation: "使用已注册的 surprised-small motion 作为原生出场反应，并叠加 excited 表情与 staff 配件增强；Scene1 idle 仍只保留给待机边界。",
+      risk: "当前使用的是 reaction 语义的原生 motion 作为出场候选，真实出场感仍需后续视觉验收确认。"
     }),
-    actionEntry("headPat", "expression-parameter-composition", {
-      nativeMotions: [],
+    actionEntry("headPat", "native-motion", {
+      nativeMotions: nativeMotionForAction("headPat"),
       expressions: [expressionReference("happy", manifest, modelDirectory, repositoryRoot)],
       parameters: faceParameters.slice(0, 8),
       parts: [],
       hitAreas: headHitArea,
-      implementationRecommendation: "头部命中后播放 happy 表情，并叠加小幅头部/身体参数反应。",
-      risk: "缺少原生摸头反应 motion；命中区为项目侧矩形，需要真实 UI 复核。"
+      implementationRecommendation: "头部命中后优先使用已注册的 happy-small motion，并叠加 happy 表情与小幅头部/身体参数反应。",
+      risk: "命中区仍是项目侧矩形；happy-small 的视觉强度需要真实 UI 复核。"
     }),
     actionEntry("greeting", "accessory-enhanced", {
       nativeMotions: [],
@@ -371,14 +398,14 @@ export function auditWitchActionCapabilities(repositoryRoot = REPOSITORY_ROOT): 
       implementationRecommendation: "复用 focus 的 neutral 低幅表现，并加入短时视线稳定目标，作为工作模式偏好的专注变体。",
       risk: "与 focus 共享资产能力，视觉差异需要保持克制并靠权重区分。"
     }),
-    actionEntry("doze", "expression-parameter-composition", {
-      nativeMotions: [],
+    actionEntry("doze", "native-motion", {
+      nativeMotions: nativeMotionForAction("doze"),
       expressions: [],
       parameters: faceParameters.slice(0, 8),
       parts: [],
       hitAreas: bodyHitArea,
-      implementationRecommendation: "使用低打扰 neutral + 视线下移表现小憩，不使用未验证闭眼 motion。",
-      risk: "当前无睡眠 motion 或闭眼专用资产，只能作为低幅参数降级。"
+      implementationRecommendation: "优先使用已注册的 yawn-once sleep motion，并配合低打扰 neutral + 视线下移完成小憩收束。",
+      risk: "闭眼/睡眠相关仍只有这一条受控 motion；Scene1 idle 与遗留 yawn 源文件不得越界复用。"
     }),
     actionEntry("sleepySettle", "expression-parameter-composition", {
       nativeMotions: [],
@@ -398,14 +425,14 @@ export function auditWitchActionCapabilities(repositoryRoot = REPOSITORY_ROOT): 
       implementationRecommendation: "使用短时 look target 横向偏移表现看回屏幕内侧；首版只进入白名单动作池。",
       risk: "尚未绑定窗口靠边检测，不能宣称已实现边缘触发。"
     }),
-    actionEntry("flusteredGlance", "expression-parameter-composition", {
-      nativeMotions: [],
+    actionEntry("flusteredGlance", "native-motion", {
+      nativeMotions: nativeMotionForAction("flusteredGlance"),
       expressions: [expressionReference("happy", manifest, modelDirectory, repositoryRoot)],
       parameters: [...faceParameters, ...bodyParameters].slice(0, 8),
       parts: [],
       hitAreas: bodyHitArea,
-      implementationRecommendation: "使用固定 rapid_touch_combo 触发低强度 surprised/happy 微表现，叠加短时侧下方视线和轻微躲闪姿态；不开放任意动作参数。",
-      risk: "没有原生害羞或躲闪 motion，只能作为参数组合降级；连续触摸触发必须继续受 active action 和 cooldown 保护。"
+      implementationRecommendation: "使用固定 rapid_touch_combo 触发已注册的 flustered-small motion，并叠加短时侧下方视线和轻微躲闪姿态；不开放任意动作参数。",
+      risk: "连续触摸触发仍必须受 active action 和 cooldown 保护；flustered-small 的视觉语义需维持在低强度害羞范围。"
     }),
     actionEntry("replySustain", "expression-parameter-composition", {
       nativeMotions: [],

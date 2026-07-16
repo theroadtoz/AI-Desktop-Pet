@@ -1,11 +1,12 @@
-import type { PetAccessoryPresetId } from "./pet-accessory";
-
-const DEFAULT_PET_ACCESSORY_PRESET_ID: PetAccessoryPresetId = "none";
-const PET_ACCESSORY_PRESET_IDS = ["none", "glasses"] as const;
-
-function isPetAccessoryPresetId(value: unknown): value is PetAccessoryPresetId {
-  return typeof value === "string" && PET_ACCESSORY_PRESET_IDS.includes(value as PetAccessoryPresetId);
-}
+import {
+  getAccessoryIdsForLegacyPreset,
+  getLegacyAccessoryPresetId,
+  isPetAccessoryPresetId,
+  normalizeStoredPetAccessorySelection,
+  parsePetAccessorySelection,
+  type PetAccessoryId,
+  type PetAccessoryPresetId
+} from "./pet-accessory.ts";
 
 export const PET_WINDOW_BASE_WIDTH = 420;
 export const PET_WINDOW_BASE_HEIGHT = 600;
@@ -18,8 +19,13 @@ export const PET_INITIAL_RIGHT_MARGIN_PX = 50;
 export const PET_WAIST_BOTTOM_OVERHANG_PX = 96;
 
 export type PetPresentationPreferences = {
+  schemaVersion: 2;
   petScale: number;
-  accessoryPresetId: PetAccessoryPresetId;
+  accessoryIds: PetAccessoryId[];
+};
+
+export type PetPresentationPreferencesView = PetPresentationPreferences & {
+  readonly accessoryPresetId: PetAccessoryPresetId;
 };
 
 export type PetScaleAdjustmentIntent = {
@@ -41,10 +47,17 @@ export type PetVisibleRegion = {
   waistY: number;
 };
 
-export const DEFAULT_PET_PRESENTATION_PREFERENCES: PetPresentationPreferences = {
+const DEFAULT_PET_PRESENTATION_PREFERENCES_VALUE: PetPresentationPreferences = {
+  schemaVersion: 2,
   petScale: 1,
-  accessoryPresetId: DEFAULT_PET_ACCESSORY_PRESET_ID
+  accessoryIds: []
 };
+
+export const DEFAULT_PET_PRESENTATION_PREFERENCES = Object.defineProperty(
+  DEFAULT_PET_PRESENTATION_PREFERENCES_VALUE,
+  "accessoryPresetId",
+  { value: "none", enumerable: false }
+) as PetPresentationPreferencesView;
 
 export function normalizePetScale(value: unknown): number | null {
   if (typeof value !== "number" || !Number.isFinite(value)) {
@@ -100,23 +113,57 @@ export function canApplyPetScaleAdjustment(options: {
 }
 
 export function parsePetPresentationPreferences(value: unknown): PetPresentationPreferences | null {
-  const preferences = value as Partial<PetPresentationPreferences> | null;
+  const preferences = value as (Partial<PetPresentationPreferences> & { accessoryPresetId?: unknown }) | null;
   const petScale = preferences && typeof preferences === "object"
     ? normalizePetScale(preferences.petScale)
     : null;
-  const accessoryPresetId = preferences && typeof preferences === "object" && isPetAccessoryPresetId(preferences.accessoryPresetId)
-    ? preferences.accessoryPresetId
-    : DEFAULT_PET_ACCESSORY_PRESET_ID;
+  if (petScale === null) {
+    return null;
+  }
 
-  return petScale === null ? null : { petScale, accessoryPresetId };
+  if (Object.prototype.hasOwnProperty.call(preferences, "accessoryIds")) {
+    const accessoryIds = parsePetAccessorySelection(preferences?.accessoryIds);
+    return accessoryIds ? { schemaVersion: 2, petScale, accessoryIds } : null;
+  }
+
+  const accessoryIds = isPetAccessoryPresetId(preferences?.accessoryPresetId)
+    ? getAccessoryIdsForLegacyPreset(preferences.accessoryPresetId)
+    : [];
+
+  return { schemaVersion: 2, petScale, accessoryIds };
 }
 
 export function parseStoredPetPresentationPreferences(content: string): PetPresentationPreferences {
   try {
-    return parsePetPresentationPreferences(JSON.parse(content)) ?? DEFAULT_PET_PRESENTATION_PREFERENCES;
+    const value = JSON.parse(content) as {
+      petScale?: unknown;
+      accessoryIds?: unknown;
+      accessoryPresetId?: unknown;
+    } | null;
+    const petScale = value && typeof value === "object" ? normalizePetScale(value.petScale) : null;
+    if (petScale === null) {
+      return DEFAULT_PET_PRESENTATION_PREFERENCES;
+    }
+
+    const accessoryIds = Object.prototype.hasOwnProperty.call(value, "accessoryIds")
+      ? normalizeStoredPetAccessorySelection(value?.accessoryIds)
+      : isPetAccessoryPresetId(value?.accessoryPresetId)
+        ? getAccessoryIdsForLegacyPreset(value.accessoryPresetId)
+        : [];
+
+    return { schemaVersion: 2, petScale, accessoryIds };
   } catch {
     return DEFAULT_PET_PRESENTATION_PREFERENCES;
   }
+}
+
+export function toPetPresentationPreferencesView(
+  preferences: PetPresentationPreferences
+): PetPresentationPreferencesView {
+  return {
+    ...preferences,
+    accessoryPresetId: getLegacyAccessoryPresetId(preferences.accessoryIds)
+  };
 }
 
 export function calculateScaledPetBounds(

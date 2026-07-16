@@ -518,9 +518,11 @@ test("isolated transforms bind yawn only on the state_sleep path for the real du
   const mainSource = readFileSync("src/renderer/pet/main.ts", "utf8");
   const interactionSource = readFileSync("src/renderer/pet/interaction-actions.ts", "utf8");
   const cubismSource = readFileSync("src/renderer/pet/live2d/cubism-motion.ts", "utf8");
+  const patchedPreset = injectIsolatedMotionPreset(presetSource, TIMING);
 
-  assert.match(injectIsolatedMotionPreset(presetSource, TIMING), /id: "yawn-once"[\s\S]*durationHintSeconds: 4\.986[\s\S]*loop: false/u);
-  assert.match(injectIsolatedMotionPreset(presetSource, TIMING), /path: "motions\/yawn-once\.motion3\.json"[\s\S]*semanticKind: "sleep"/u);
+  assert.match(patchedPreset, /const isolatedYawnPresetCount = APPROVED_MOTION_PRESETS\.filter\(\(preset\) => preset\.id === "yawn-once"\)\.length;/u);
+  assert.match(patchedPreset, /APPROVED_MOTION_PRESETS\.map\(\(preset\) => \([\s\S]*preset\.id === "yawn-once"[\s\S]*id: "yawn-once"[\s\S]*path: "motions\/yawn-once\.motion3\.json"[\s\S]*semanticKind: "sleep"[\s\S]*durationHintSeconds: 4\.986[\s\S]*loop: false/u);
+  assert.match(patchedPreset, /: preset/u);
   const patchedMain = injectIsolatedStateSleepPath(mainSource, TIMING, RUN_ID);
   assert.match(patchedMain, /trigger\.reason === "state_sleep"[\s\S]*durationMs: 4986[\s\S]*motionPresetId: "yawn-once"/u);
   assert.equal((interactionSource.match(/motionPresetId: "yawn-once"/gu) ?? []).length, 1);
@@ -548,8 +550,9 @@ test("isolated transforms bind yawn only on the state_sleep path for the real du
   assert.doesNotMatch(probed, /CubismMotion\.create\(buffer, buffer\.byteLength, undefined, undefined, true\)/u);
 
   const timeoutPreset = injectIsolatedMotionPreset(presetSource, TIMING, true);
+  assert.match(timeoutPreset, /APPROVED_MOTION_PRESETS\.map/u);
   assert.match(timeoutPreset, /loop: true/u);
-  assert.match(injectIsolatedMotionPreset(presetSource, TIMING), /loop: false/u);
+  assert.match(patchedPreset, /loop: false/u);
 });
 
 test("player and frame transforms structurally observe bounded start and independent runtime watchdogs", () => {

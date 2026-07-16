@@ -36,7 +36,10 @@ import {
   getPetActionStateForReason
 } from "../../shared/pet-action-state-machine";
 import { resolvePetExpressionStateLinkage } from "../../shared/pet-expression-state-linkage";
-import { getPetAccessoryPreset, type PetAccessoryPresetId } from "../../shared/pet-accessory";
+import {
+  resolvePetAccessorySelection,
+  type PetAccessoryResolution
+} from "../../shared/pet-accessory";
 import {
   clampProactiveSpeechBubbleDuration,
   getProactiveSpeechBubbleLine,
@@ -256,8 +259,8 @@ let live2DModel: LoadedLive2DModel | null = null;
 let isUsingLive2D = false;
 let pendingPresentation: EmotionPresentation | null = null;
 let lastPresentation: EmotionPresentation = { emotion: "neutral", intensity: "low", mode: "neutral" };
-let pendingAccessoryPresetId: PetAccessoryPresetId | null = null;
-let lastAccessoryPresetId: PetAccessoryPresetId = "none";
+let pendingAccessorySelection: PetAccessoryResolution | null = null;
+let lastAccessorySelection = resolvePetAccessorySelection({ userAccessoryIds: [] });
 let isStartingPetRenderer = false;
 let isRecoveringContext = false;
 let currentRenderStartMs = 0;
@@ -302,31 +305,34 @@ function showProactiveSpeechBubble(payload: ProactiveSpeechBubblePayload): void 
 
 async function applyBasePresentationToLoadedModel(
   presentation: EmotionPresentation,
-  accessoryPresetId: PetAccessoryPresetId
+  accessorySelection: PetAccessoryResolution
 ): Promise<void> {
-  if (!live2DModel) {
+  const model = live2DModel;
+  if (!model) {
     return;
   }
 
-  await live2DModel.setEmotionPresentation(presentation);
-
-  const accessoryPreset = getPetAccessoryPreset(accessoryPresetId);
-  if (accessoryPreset.expressionName) {
-    await live2DModel.setExpression(accessoryPreset.expressionName);
+  model.setAccessorySelection(accessorySelection);
+  await model.setEmotionPresentation(presentation);
+  if (live2DModel === model) {
+    model.setAccessorySelection(lastAccessorySelection);
   }
 }
 
-function applyBasePresentationToModel(presentation: EmotionPresentation, accessoryPresetId: PetAccessoryPresetId): void {
+function applyBasePresentationToModel(
+  presentation: EmotionPresentation,
+  accessorySelection: PetAccessoryResolution
+): void {
   if (!live2DModel) {
     pendingPresentation = presentation;
-    pendingAccessoryPresetId = accessoryPresetId;
+    pendingAccessorySelection = accessorySelection;
     return;
   }
 
   pendingPresentation = null;
-  pendingAccessoryPresetId = null;
+  pendingAccessorySelection = null;
 
-  void applyBasePresentationToLoadedModel(presentation, accessoryPresetId);
+  void applyBasePresentationToLoadedModel(presentation, accessorySelection);
 }
 
 const interactionActionPlayer = createInteractionActionPlayer({
@@ -374,6 +380,12 @@ const interactionActionPlayer = createInteractionActionPlayer({
   restoreTemporaryPartOpacities: () => {
     live2DModel?.restoreTemporaryPartOpacities();
   },
+  setTemporaryAccessory: (accessoryId) => {
+    live2DModel?.setTemporaryAccessory(accessoryId);
+  },
+  restoreTemporaryAccessory: () => {
+    live2DModel?.restoreTemporaryAccessory();
+  },
   setExpression: (expressionName) => {
     void live2DModel?.setExpression(expressionName);
   },
@@ -383,17 +395,20 @@ const interactionActionPlayer = createInteractionActionPlayer({
   applyPresentation: applyBasePresentationToModel,
   getPersistentPresentation: () => ({
     presentation: lastPresentation,
-    accessoryPresetId: lastAccessoryPresetId
+    accessorySelection: lastAccessorySelection
   }),
   reportTelemetry: (type, payload) => {
     window.petApi?.reportTelemetry(type, payload);
   }
 });
 
-function applyBasePresentation(presentation: EmotionPresentation, accessoryPresetId: PetAccessoryPresetId): void {
+function applyBasePresentation(
+  presentation: EmotionPresentation,
+  accessorySelection: PetAccessoryResolution
+): void {
   lastPresentation = presentation;
-  lastAccessoryPresetId = accessoryPresetId;
-  applyBasePresentationToModel(presentation, accessoryPresetId);
+  lastAccessorySelection = accessorySelection;
+  applyBasePresentationToModel(presentation, accessorySelection);
 }
 
 function applyPresentationIntent(intent: PetPresentationIntent): void {
@@ -418,14 +433,19 @@ function applyPresentationIntent(intent: PetPresentationIntent): void {
     allowEmphasisExpression: intent.allowEmphasisExpression,
     recovery: intent.recovery
   });
-  lastAccessoryPresetId = intent.accessoryPresetId;
+  lastAccessorySelection = intent.accessorySelection;
+  if (live2DModel) {
+    live2DModel.setAccessorySelection(lastAccessorySelection);
+  } else {
+    pendingAccessorySelection = lastAccessorySelection;
+  }
 
   if (expressionAllowed) {
     lastPresentation = intent.expression;
   }
 
   if (!interactionActionPlayer.isActive()) {
-    applyBasePresentationToModel(lastPresentation, lastAccessoryPresetId);
+    applyBasePresentationToModel(lastPresentation, lastAccessorySelection);
   }
 
   live2DRenderer?.boostInteraction();
@@ -536,13 +556,10 @@ async function startPetRenderer(): Promise<void> {
     live2DModel.setLookTarget(0, 0);
     const firstLive2DFrameSample = waitForNextLive2DFrameSample();
     live2DRenderer.start();
-    if (pendingPresentation) {
-      applyBasePresentationToModel(pendingPresentation, pendingAccessoryPresetId ?? lastAccessoryPresetId);
-    } else if (lastPresentation.mode !== "neutral") {
-      applyBasePresentationToModel(lastPresentation, lastAccessoryPresetId);
-    } else if (lastAccessoryPresetId !== "none") {
-      applyBasePresentationToModel(lastPresentation, lastAccessoryPresetId);
-    }
+    applyBasePresentationToModel(
+      pendingPresentation ?? lastPresentation,
+      pendingAccessorySelection ?? lastAccessorySelection
+    );
     reportRenderHealth("live2d");
     const sample = await firstLive2DFrameSample;
     if (!hasPlayedStartupAppearance && sample && sample.nonTransparentPixels > 0) {
@@ -589,7 +606,7 @@ function handleWebGLContextLost(): void {
   live2DModel = null;
   isUsingLive2D = false;
   pendingPresentation = lastPresentation;
-  pendingAccessoryPresetId = lastAccessoryPresetId;
+  pendingAccessorySelection = lastAccessorySelection;
   invalidatePlaceholderResources();
   endDrag();
   reportRenderHealth(renderer, "WebGL context lost");
@@ -1125,6 +1142,6 @@ window.addEventListener("keydown", (event) => {
   applyBasePresentation(selectEmotionPresentation({
     emotion,
     intensity: emotion === "neutral" ? "low" : "high"
-  }), lastAccessoryPresetId);
+  }), lastAccessorySelection);
   live2DRenderer?.boostInteraction();
 });

@@ -4,7 +4,7 @@ import {
   getPetExpressionPresetExpressionName,
   type PetExpressionPresetId
 } from "../../shared/interaction-action-catalog.ts";
-import type { PetAccessoryPresetId } from "../../shared/pet-accessory";
+import type { PetAccessoryResolution } from "../../shared/pet-accessory";
 import type { PetActionStateId } from "../../shared/pet-action-state-machine";
 import type { PetActionTriggerReason } from "../../shared/pet-action-trigger";
 import type { PresenceModeId } from "../../shared/presence-mode";
@@ -44,7 +44,7 @@ export type InteractionActionStrategy = {
 
 type PersistentPresentation = {
   presentation: EmotionPresentation;
-  accessoryPresetId: PetAccessoryPresetId;
+  accessorySelection: PetAccessoryResolution;
 };
 
 type InteractionActionTelemetryType =
@@ -104,9 +104,11 @@ export type InteractionActionPlayerOptions = {
   stopMotion(reason: CubismMotionStopReason): void;
   applyTemporaryPartOpacities(partIds: readonly string[]): void;
   restoreTemporaryPartOpacities(): void;
+  setTemporaryAccessory(accessoryId: NonNullable<PetInteractionAction["temporaryAccessoryId"]>): void;
+  restoreTemporaryAccessory(): void;
   setExpression(expressionName: string): void;
   clearExpression(): void;
-  applyPresentation(presentation: EmotionPresentation, accessoryPresetId: PetAccessoryPresetId): void;
+  applyPresentation(presentation: EmotionPresentation, accessorySelection: PetAccessoryResolution): void;
   getPersistentPresentation(): PersistentPresentation;
   reportTelemetry(type: InteractionActionTelemetryType, payload: Record<string, unknown>): void;
 };
@@ -130,6 +132,8 @@ export function createInteractionActionPlayer({
   stopMotion,
   applyTemporaryPartOpacities,
   restoreTemporaryPartOpacities,
+  setTemporaryAccessory,
+  restoreTemporaryAccessory,
   setExpression,
   clearExpression,
   applyPresentation,
@@ -180,15 +184,7 @@ export function createInteractionActionPlayer({
     clearActiveActionScheduling(activeAction);
     activeInteractionAction = null;
     restoreTemporaryPartOpacities();
-    clearExpression();
-    resetLookTarget();
-    if (action.poseTarget) {
-      resetPoseTarget();
-    }
-    resumeLook();
-
-    const persistent = getPersistentPresentation();
-    applyPresentation(persistent.presentation, persistent.accessoryPresetId);
+    restoreActionPresentation(action, false);
 
     const finishedAtMs = now();
     lastInteractionActionFinishedAtMs = finishedAtMs;
@@ -203,10 +199,30 @@ export function createInteractionActionPlayer({
       type: action.type,
       reason,
       ...(action.motionPresetId ? { motionPresetId: action.motionPresetId } : {}),
-      ...(terminalStatus ? { terminalStatus } : {}),
-      restoredAccessoryPresetId: persistent.accessoryPresetId
+      ...(terminalStatus ? { terminalStatus } : {})
     });
     return true;
+  }
+
+  function restoreActionPresentation(
+    action: PetInteractionAction,
+    shouldRestoreTemporaryParts = true
+  ): void {
+    if (shouldRestoreTemporaryParts) {
+      restoreTemporaryPartOpacities();
+    }
+    if (action.temporaryAccessoryId) {
+      restoreTemporaryAccessory();
+    }
+    clearExpression();
+    resetLookTarget();
+    if (action.poseTarget) {
+      resetPoseTarget();
+    }
+    resumeLook();
+
+    const persistent = getPersistentPresentation();
+    applyPresentation(persistent.presentation, persistent.accessorySelection);
   }
 
   function reportActionStarted(activeAction: ActiveInteractionAction): void {
@@ -364,13 +380,16 @@ export function createInteractionActionPlayer({
       }
     }
     applyTemporaryPartOpacities(action.accessoryPartIds ?? []);
+    if (action.temporaryAccessoryId) {
+      setTemporaryAccessory(action.temporaryAccessoryId);
+    }
 
     if (action.expressionName) {
       setExpression(action.expressionName);
     } else if (strategy?.expressionPresetId) {
       setExpression(getPetExpressionPresetExpressionName(strategy.expressionPresetId));
     } else {
-      applyPresentation(action.presentation, getPersistentPresentation().accessoryPresetId);
+      applyPresentation(action.presentation, getPersistentPresentation().accessorySelection);
     }
 
     if (action.motionPresetId) {
@@ -459,6 +478,7 @@ export function createInteractionActionPlayer({
       if (activeAction.action.motionPresetId) {
         stopMotion("interrupted");
       }
+      restoreActionPresentation(activeAction.action);
     }
   };
 }

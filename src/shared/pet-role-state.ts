@@ -1,12 +1,9 @@
-import type { EmotionPresentation } from "./emotion-presentation";
-import type { PetAccessoryPresetId } from "./pet-accessory";
-
-const DEFAULT_PET_ACCESSORY_PRESET_ID: PetAccessoryPresetId = "none";
-const PET_ACCESSORY_PRESET_IDS = ["none", "glasses"] as const;
-
-function isPetAccessoryPresetId(value: unknown): value is PetAccessoryPresetId {
-  return typeof value === "string" && PET_ACCESSORY_PRESET_IDS.includes(value as PetAccessoryPresetId);
-}
+import type { EmotionPresentation } from "./emotion-presentation.ts";
+import {
+  isPetAccessoryResolution,
+  resolvePetAccessorySelection,
+  type PetAccessoryResolution
+} from "./pet-accessory.ts";
 
 export const petRoleStates = [
   "idle",
@@ -25,7 +22,7 @@ export type PetPresentationIntent = Readonly<{
   gaze: "ambient" | "attentive";
   workStatus: "idle" | "thinking";
   expression: EmotionPresentation;
-  accessoryPresetId: PetAccessoryPresetId;
+  accessorySelection: PetAccessoryResolution;
   allowMicroExpression: boolean;
   allowEmphasisExpression: boolean;
   recovery: "normal" | "safe-neutral";
@@ -63,6 +60,8 @@ const NEUTRAL_EXPRESSION: EmotionPresentation = {
   mode: "neutral"
 };
 
+const DEFAULT_ACCESSORY_SELECTION = resolvePetAccessorySelection({ userAccessoryIds: [] });
+
 export const INITIAL_PET_ROLE_SNAPSHOT: PetRoleSnapshot = {
   state: "idle",
   chatOpen: false,
@@ -96,7 +95,7 @@ function isEmotionPresentation(value: unknown): value is EmotionPresentation {
 export function createPetPresentationIntent(
   snapshot: PetRoleSnapshot,
   expression: EmotionPresentation = NEUTRAL_EXPRESSION,
-  accessoryPresetId: PetAccessoryPresetId = DEFAULT_PET_ACCESSORY_PRESET_ID
+  accessorySelection: PetAccessoryResolution = DEFAULT_ACCESSORY_SELECTION
 ): PetPresentationIntent {
   const recovery = snapshot.state === "error" ? "safe-neutral" : "normal";
   const neutralExpression = recovery === "safe-neutral" ? NEUTRAL_EXPRESSION : expression;
@@ -108,7 +107,7 @@ export function createPetPresentationIntent(
     gaze: snapshot.state === "idle" ? "ambient" : "attentive",
     workStatus: snapshot.state === "thinking" ? "thinking" : "idle",
     expression: neutralExpression,
-    accessoryPresetId,
+    accessorySelection,
     allowMicroExpression: snapshot.state === "idle" || snapshot.state === "replying" || hasReplyExpression,
     allowEmphasisExpression: snapshot.state === "idle" || snapshot.state === "replying" || hasReplyExpression,
     recovery
@@ -137,7 +136,7 @@ export function isPetPresentationIntent(value: unknown): value is PetPresentatio
     (intent.gaze === "ambient" || intent.gaze === "attentive") &&
     (intent.workStatus === "idle" || intent.workStatus === "thinking") &&
     isEmotionPresentation(intent.expression) &&
-    isPetAccessoryPresetId(intent.accessoryPresetId) &&
+    isPetAccessoryResolution(intent.accessorySelection) &&
     typeof intent.allowMicroExpression === "boolean" &&
     typeof intent.allowEmphasisExpression === "boolean" &&
     (intent.recovery === "normal" || intent.recovery === "safe-neutral") &&

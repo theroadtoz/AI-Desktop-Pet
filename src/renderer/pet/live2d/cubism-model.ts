@@ -1,5 +1,9 @@
 import { CUBISM_SHADER_BASE_URL } from "./cubism-assets";
 import { createCubismBreathController, type CubismBreathController } from "./cubism-breath";
+import {
+  createCubismAccessoryController,
+  type CubismAccessoryController
+} from "./cubism-accessory-controller";
 import { createCubismExpressionController } from "./cubism-expression";
 import {
   createCubismMicroExpressionController,
@@ -93,6 +97,7 @@ export async function loadWitchLive2DModel(
   let microExpressionController: CubismMicroExpressionController | null = null;
   let motionController: CubismMotionController | null = null;
   let dragPhysicsController: DragPhysicsController | null = null;
+  let accessoryController: CubismAccessoryController | null = null;
   let temporaryPartOpacitySnapshot: Map<number, number> | null = null;
 
   class PetCubismUserModel extends CubismUserModel {
@@ -105,9 +110,12 @@ export async function loadWitchLive2DModel(
       };
 
       updateCubismFrame(model, deltaSeconds, {
-        applyMotion: () => (
-          motionController?.update(model, deltaSeconds) ?? EMPTY_NATIVE_MOTION_PARAMETER_IDS
-        ),
+        applyMotion: () => {
+          const motionParameterIds = motionController?.update(model, deltaSeconds)
+            ?? EMPTY_NATIVE_MOTION_PARAMETER_IDS;
+          return accessoryController?.retainNonAccessoryMotionParameterIds(motionParameterIds)
+            ?? motionParameterIds;
+        },
         applyLook: () => lookController?.update(model, deltaSeconds),
         applyPose: () => poseTargetController?.update(model, deltaSeconds),
         applyDrag: () => dragPhysicsController?.advance(deltaSeconds),
@@ -117,7 +125,10 @@ export async function loadWitchLive2DModel(
         evaluatePhysics: () => this._physics?.evaluate(model, deltaSeconds),
         applyExpression: () => expressionController.update(model, deltaSeconds),
         applyMicroExpression: () => microExpressionController?.update(model, deltaSeconds),
-        applyBreath: () => breathController?.update(model, deltaSeconds)
+        applyBreath: () => {
+          breathController?.update(model, deltaSeconds);
+          accessoryController?.update(model);
+        }
       });
 
       return sample;
@@ -147,6 +158,7 @@ export async function loadWitchLive2DModel(
   }
 
   lookController = new CubismLookController(userModel.getModel());
+  accessoryController = createCubismAccessoryController(userModel.getModel());
   poseTargetController = new CubismPoseTargetController(userModel.getModel());
   breathController = await createCubismBreathController(userModel.getModel());
   microExpressionController = createCubismMicroExpressionController(userModel.getModel());
@@ -245,6 +257,15 @@ export async function loadWitchLive2DModel(
     getAvailableExpressions(): string[] {
       return expressionController.getAvailableExpressions();
     },
+    setAccessorySelection(selection): void {
+      accessoryController?.setResolvedSelection(selection);
+    },
+    setTemporaryAccessory(accessoryId): void {
+      accessoryController?.setTemporaryAccessory(accessoryId);
+    },
+    restoreTemporaryAccessory(): void {
+      accessoryController?.restoreResolvedSelection();
+    },
     playMotionPreset(motionPresetId) {
       return motionController?.playMotionPreset(motionPresetId) ?? Promise.resolve({
         status: "skipped",
@@ -283,6 +304,7 @@ export async function loadWitchLive2DModel(
       expressionController.release();
       motionController?.release();
       motionController = null;
+      accessoryController = null;
       microExpressionController?.release();
       microExpressionController = null;
       breathController?.release();
