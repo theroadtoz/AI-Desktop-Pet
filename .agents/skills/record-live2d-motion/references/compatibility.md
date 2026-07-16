@@ -2,35 +2,33 @@
 
 真实录制前必须逐项通过；任一未知、不一致或证据过期都阻塞，不自动修复、降级或猜测。
 
-## Skill Package
+## Contract Authority
 
-- 两个副本必须同为 release `record-live2d-motion-2026-07-15.10`、profile schema `live2d-recorder-profile/v1` 和 take contract schema `live2d-take-contract/v1`。
-- 比对 `SKILL.md`、`agents/openai.yaml`、本目录四个通用 references 和七个 profile references 的 canonical content digest。`happy-small-v1.md`、`surprised-small-v1.md` 与 `flustered-small-v1.md` 仅作为已发布 v1 profile 的只读历史审计 reference 保留，不属于 canonical list、active-contract canonical digest，也不得由 resolve/record 解析或录制。
-- 按以下固定顺序，以 UTF-8 无 BOM、LF 行尾读取每个文件：`SKILL.md`、`agents/openai.yaml`、`references/profile-schema.md`、`references/take-contract.md`、`references/compatibility.md`、`references/motion-catalog.md`、`references/profiles/yawn-v1.md`、`references/profiles/idle-soft-loop-v1.md`、`references/profiles/greet-small-v2.md`、`references/profiles/sleep-enter-v1.md`、`references/profiles/happy-small-v2.md`、`references/profiles/surprised-small-v2.md`、`references/profiles/flustered-small-v2.md`。将 `SKILL.md` 的 `Package-content-digest` 值替换为 64 个 `0`，再串联每项的相对路径、LF、内容、LF，并计算 SHA-256 小写十六进制。结果必须等于 SKILL 中声明的 digest。
+- 本 Skill 不维护 release identity、package digest 或双副本 parity 要求。
+- 每次录制均以 `E:\Work-26\Live2dREC` 的受信 catalog 与当前 UI resolved profile 为唯一契约来源。只有其中相互一致的 profile ID、revision、status、duration、padding、FPS、Loop、allowlist、outputPrefix 和 profile digest 可以进入 arm。
+- `references/motion-catalog.md` 和 `references/profiles/` 仅用于历史或技术说明，不属于 active contract，不能由 resolve、preflight、arm 或 record 使用，也不得覆盖当前 summary。
 
 ### Quick Validation
 
-Windows 默认代码页可能无法读取本 Skill 的中文 UTF-8 内容。使用 `-X utf8` 分别验证 source 和 global 副本，每条命令均可独立运行：
+Windows 默认代码页可能无法读取本 Skill 的中文 UTF-8 内容。运行以下结构校验；它只验证本地 Skill 的格式，不能证明 Live2dREC profile 已通过运行时门禁：
 
 ```powershell
 python -X utf8 "C:\Users\1\.codex\skills\.system\skill-creator\scripts\quick_validate.py" "E:\Work-26\AI_Desktop_Pet\.agents\skills\record-live2d-motion"
-python -X utf8 "C:\Users\1\.codex\skills\.system\skill-creator\scripts\quick_validate.py" "C:\Users\1\.codex\skills\record-live2d-motion"
 ```
 
 ## Session Approval Contract
 
-- 只可复用当前 Live2dREC main service 运行内的 `camera-face-tracking` 人工许可；它覆盖 `yawn`、`idle-soft-loop`、`greet-small/v2`、`sleep-enter/v1`、`happy-small/v2`、`surprised-small/v2` 和 `flustered-small/v2`，但不覆盖任何具体 take 的视觉结论，也不允许自动连录。
-- 每个手动选择的 ready profile 仍必须自动比对 CurrentModel、完整参数签名、allowlist、duration、FPS、Loop 和 outputPrefix，并生成独立 take contract、digest、candidate 与 output。renderer 不得覆盖这些受信字段。
+- 只可复用当前 Live2dREC main service 运行内的 `camera-face-tracking` 人工许可；它仅覆盖当前 catalog 标为 `ready` 的手动独立 take，不覆盖任何具体 take 的视觉结论，也不允许自动连录。
+- 每个手动选择的 ready profile 仍必须自动比对 CurrentModel、完整参数签名、当前 summary 的 allowlist、duration、padding、FPS、Loop 和 outputPrefix，并生成独立 take contract、digest、candidate 与 output。renderer 不得覆盖这些受信字段。
 - 只在应用重启/销毁、用户取消、connection configuration 变化、认证/连接失败、profile prerequisite definition 变化，或 preflight/recording 发现模型身份或参数签名变化时撤销会话许可。take 结束、readback/write 失败、TTL 到期、重新 prepare 或切换 ready profile 只撤销当前 take。
-- 每个 take 仅保留一次内建自动技术 readback：managed output、parser/readback、active allowlist、有限有序曲线、required semantic variation、endpoint rules 和 cleanup。通过时标记 `draft / technical-pass / user-visual-review-pending`；用户可批量决定视觉接受或逐段重录，agent 不重复代码/Skill/profile 审核或审美投票。
+- 每个 take 仅保留一次内建自动技术 readback：managed output、parser/readback、active allowlist、有限有序曲线、当前 summary 要求的 semantic variation、endpoint/seam 规则和 cleanup。通过时标记 `draft / technical-pass / user-visual-review-pending`；用户可批量决定视觉结论，agent 不重复代码/Skill/profile 审核或审美投票。
 
 ## Live2dREC Contract
 
-- 接受 main/core 的受信 profile summary、revision/digest、允许时长、受管相对 outputPrefix 和 immutable take contract。
-- 拒绝 unknown、`planned-blocked`、对象注入、过期 revision/digest、非法时长、参数/路径/Loop/FPS/padding 覆盖和 profile 选择不一致。
+- 接受 main/core 的受信 current profile summary、revision/digest、允许时长、padding、FPS、Loop、受管相对 outputPrefix 和 immutable take contract。
+- 拒绝 unknown、非 `ready`、对象注入、过期 revision/digest、非法时长、参数/路径/Loop/FPS/padding 覆盖和 profile 选择不一致。
 - 变化必须撤销 armed take；在 VTS 连接、授权、倒数和写文件前失败。
-- 对 `happy-small/v2`、`surprised-small/v2` 与 `flustered-small/v2`，每条实际导出的 allowlist 曲线必须有限、时间有序并以同一中性基线闭合首尾。closed endpoint 阈值内的端点必须在生成时规范化为该中性基线，parser readback 必须以同一阈值和规范化口径复验。`happy-small` 只要求 `ParamEyeLSmile`、`ParamEyeRSmile`、`ParamMouthForm` 的任一项有 semantic variation；`surprised-small` 只要求 `ParamBrowLY`，`flustered-small` 只要求 `ParamBrowLForm`。辅助头眼曲线只有在序列化精度内恒定时可省略；任一微小但非零的已序列化变化都必须保留，并经真实 Motion3 write/read 回读验证；若导出则必须结构有效；不得使用通用或审美幅度阈值。
-- parser readback 必须独立重验 active profile 的 required variation IDs、mode 与按生成同一阈值规范化的 closed endpoints，不能仅比较序列化 JSON 与内存对象。
+- 每条实际导出的 allowlist 曲线必须有限、时间有序，并按当前 summary 要求满足 closed endpoint 或 seam 规则。closed endpoint 阈值、规范化口径、required semantic variation 与辅助曲线是否可省略都由当前 summary 决定；parser readback 必须独立复验，不能仅比较序列化 JSON 与内存对象。
 - 连接或 preflight 失败时，必须先消费当前 take 的人工前置条件确认，再等待或触发 candidate adapter 清理。
 - 输出必须先成为本 take ownership ledger 中的 staging candidate，经独立 parser readback 成功后原子发布。只有原子发布成功才可报告成功 draft；发布后，以及发布前/readback 失败或取消时，均必须重试本 take 临时 candidate 的 unlink，并单独追踪 `cleanupPending`。临时 unlink 持续失败时，必须生成含 `take_id`、owner、受控临时路径、重试状态和禁止删除 final 标记的结构化 cleanup handle，移交 managed drain；发布成功时合法 final 仍为成功 draft，发布前/readback 失败时保留原始录制失败，且 managed drain 不得删除或改报任何合法 final。
 
@@ -39,10 +37,10 @@ python -X utf8 "C:\Users\1\.codex\skills\.system\skill-creator\scripts\quick_val
 - 真实 VTS 连接只允许 `ws://127.0.0.1:<当前配置端口>`；protocol 必须严格为 `ws`，host 必须严格为 `127.0.0.1`，否则在连接前阻塞。
 - 从 Live2dREC 当前 connection 配置读取 port，实测并比对 VTS 实际 port；不要写死端口或尝试多个端口。
 - 依次验证 `APIStateRequest`、鉴权、`CurrentModelRequest`、`Live2DParameterListRequest`；不要把 `ParameterValueRequest` 当作参数表读取 API。
-- CurrentModel 身份、参数签名和 allowlist 存在性必须与 take contract 一致；token 只能由 `main + safeStorage` 使用。
+- CurrentModel 身份、参数签名和 allowlist 存在性必须与冻结的 take contract 一致；token 只能由 `main + safeStorage` 使用。
 
 ## Motion3 And Cubism
 
-- parser readback 必须证明 Motion3 `Version: 3`、`Meta`、正且匹配的 Duration、有限单调曲线、参数 allowlist、计数一致和 profile 的 draft Loop 值。
+- parser readback 必须证明 Motion3 `Version: 3`、`Meta`、正且匹配当前 take contract 的 Duration、有限单调曲线、参数 allowlist、计数一致和冻结的 draft Loop 值。
 - loop draft 的 `Loop=false`、seam 数值闭合、速度连续、三周期视觉复核和最终 `Loop=true` 是不同门禁，不能互相替代。
 - Cubism Animator 精修与重新导出是 production intake 前置条件；parser 通过或 VTS 连接成功都不等于视觉通过。

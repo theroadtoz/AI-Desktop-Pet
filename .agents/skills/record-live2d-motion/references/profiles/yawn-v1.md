@@ -1,5 +1,7 @@
 # Yawn Profile V1
 
+> **历史/技术说明，非执行契约。** 本文件不得用于 resolve、preflight、arm 或 record，也不得覆盖 `E:\Work-26\Live2dREC` 当前受信 catalog 与 UI resolved profile summary；每次 take 的 revision、duration、padding、FPS、Loop 和 allowlist 仅以该 summary 为准。
+
 | 字段 | 固定值 |
 | --- | --- |
 | `id` / `revision` / `status` | `yawn` / `v1` / `ready` |

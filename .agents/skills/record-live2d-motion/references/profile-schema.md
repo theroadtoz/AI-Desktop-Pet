@@ -24,7 +24,7 @@ Schema version: `live2d-recorder-profile/v1`.
 ## Session Readiness
 
 - `camera-face-tracking` 许可仅是当前 Live2dREC main service 运行内的非持久化人工门禁，不是 profile 字段、active recording session object 或 renderer 权限。
-- 当前有效许可可用于所有 `ready` profile：`yawn`、`idle-soft-loop`、`greet-small/v2`、`sleep-enter/v1`、`happy-small/v2`、`surprised-small/v2`、`flustered-small/v2`。每个 take 仍必须独立自动检查 CurrentModel、参数签名、allowlist、时长、FPS、Loop 和 outputPrefix。
+- 当前有效许可仅可用于 Live2dREC 当前受信 catalog 标为 `ready` 的 profile。每个 take 仍必须独立自动检查 CurrentModel、参数签名、当前 summary 的 allowlist、时长、padding、FPS、Loop 和 outputPrefix；本 Skill 的历史 references 不可参与该判断。
 - profile prerequisite definition 改变，或 preflight/recording 发现模型身份或参数签名改变时，必须撤销会话许可。take 完成、readback/write 失败、TTL 到期、重新 prepare 或 ready profile 切换不撤销它，只撤销当前 take。
 
 ## 模板语义
