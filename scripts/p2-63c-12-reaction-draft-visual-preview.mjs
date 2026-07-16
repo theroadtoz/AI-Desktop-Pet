@@ -42,6 +42,11 @@ export const REACTION_DRAFT_PROFILES = Object.freeze([
   "flustered-small"
 ]);
 
+export const MANAGED_VISUAL_PREVIEW_PROFILES = Object.freeze([
+  ...REACTION_DRAFT_PROFILES,
+  "arrival-settle"
+]);
+
 function isWithin(parent, candidate) {
   const child = relative(resolve(parent), resolve(candidate));
   return child === "" || (!child.startsWith(`..${sep}`) && child !== ".." && !isAbsolute(child));
@@ -150,7 +155,7 @@ export function parseRunnerArgs(argv) {
     }
     throw new Error("invalid-cli-arguments");
   }
-  if (!REACTION_DRAFT_PROFILES.includes(profile)) throw new Error("reaction-profile-not-allowed");
+  if (!MANAGED_VISUAL_PREVIEW_PROFILES.includes(profile)) throw new Error("reaction-profile-not-allowed");
   if (!candidateDraft) throw new Error("candidate-draft-required");
   if (typeof candidateDraft !== "string" || !isAbsolute(candidateDraft)) throw new Error("candidate-draft-must-be-absolute");
   return { profile, candidateDraft: resolve(candidateDraft) };
@@ -226,7 +231,7 @@ export function readReactionDraft(
   draftRoot = REACTION_DRAFT_ROOT,
   workspaceRoot = ROOT
 ) {
-  if (!REACTION_DRAFT_PROFILES.includes(profile)) throw new Error("reaction-profile-not-allowed");
+  if (!MANAGED_VISUAL_PREVIEW_PROFILES.includes(profile)) throw new Error("reaction-profile-not-allowed");
   if (!isAbsolute(candidateDraft)) throw new Error("candidate-draft-must-be-absolute");
   const root = resolve(draftRoot);
   const candidatePath = resolve(candidateDraft);
@@ -289,8 +294,8 @@ function previewConfig(candidate) {
 }
 
 export function injectReactionMotionPreset(source, config) {
-  const marker = "export const PET_MOTION_PRESETS: readonly ModelMotionPreset[] = Object.freeze([";
-  return replaceExactlyOnce(source, marker, `${marker}
+  const marker = "export const PET_MOTION_PRESETS: readonly ModelMotionPreset[] = APPROVED_MOTION_PRESETS;";
+  return replaceExactlyOnce(source, marker, `export const PET_MOTION_PRESETS: readonly ModelMotionPreset[] = Object.freeze([
   {
     id: "${config.id}",
     path: "${config.motionPath}",
@@ -307,7 +312,9 @@ export function injectReactionMotionPreset(source, config) {
     allowedDialogueModes: ["default"],
     visualRisk: "needs-visual-check",
     assetLicenseStatus: "user-provided"
-  },`, "reaction preview motion preset");
+  },
+  ...APPROVED_MOTION_PRESETS
+]);`, "reaction preview motion preset");
 }
 
 export function injectReactionPreviewAction(source, config) {

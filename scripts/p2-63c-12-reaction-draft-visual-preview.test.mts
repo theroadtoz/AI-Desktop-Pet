@@ -23,11 +23,13 @@ import {
   injectReactionPreviewTrigger,
   parseRunnerArgs,
   prepareIsolatedReactionPreview,
+  MANAGED_VISUAL_PREVIEW_PROFILES,
   REACTION_DRAFT_PROFILES,
   readReactionDraft
 } from "./p2-63c-12-reaction-draft-visual-preview.mjs";
 
 const PROFILE = "happy-small";
+const ARRIVAL_SETTLE_PROFILE = "arrival-settle";
 
 function makeCandidatePath(root: string, profile = PROFILE, suffix = "20260716-101010-123") {
   return join(root, `${profile}-${suffix}.motion3.json`);
@@ -84,7 +86,7 @@ function makeSyntheticWorkspace(root: string) {
   writeTreeFile(
     root,
     "src/shared/pet-motion-presets.ts",
-    "export const PET_MOTION_PRESETS: readonly ModelMotionPreset[] = Object.freeze([\n]);\n"
+    "import { APPROVED_MOTION_PRESETS } from \"./approved-motion-presets.ts\";\nexport const PET_MOTION_PRESETS: readonly ModelMotionPreset[] = APPROVED_MOTION_PRESETS;\n"
   );
   writeTreeFile(
     root,
@@ -134,13 +136,19 @@ function makeDirectoryLink(target: string, linkPath: string) {
   symlinkSync(target, linkPath, process.platform === "win32" ? "junction" : "dir");
 }
 
-test("CLI accepts exactly one supported profile and one absolute candidate", () => {
+test("CLI accepts one managed visual-preview profile and one absolute candidate", () => {
   const candidate = resolve(tmpdir(), "happy-small-20260716-101010-123.motion3.json");
+  const arrivalCandidate = resolve(tmpdir(), "arrival-settle-20260716-094704-585.motion3.json");
   assert.deepEqual(parseRunnerArgs(["--profile", PROFILE, "--candidate-draft", candidate]), {
     profile: PROFILE,
     candidateDraft: candidate
   });
-  assert.equal(REACTION_DRAFT_PROFILES.length, 3);
+  assert.deepEqual(REACTION_DRAFT_PROFILES, ["happy-small", "surprised-small", "flustered-small"]);
+  assert.deepEqual(MANAGED_VISUAL_PREVIEW_PROFILES, [...REACTION_DRAFT_PROFILES, ARRIVAL_SETTLE_PROFILE]);
+  assert.deepEqual(parseRunnerArgs(["--profile", ARRIVAL_SETTLE_PROFILE, "--candidate-draft", arrivalCandidate]), {
+    profile: ARRIVAL_SETTLE_PROFILE,
+    candidateDraft: arrivalCandidate
+  });
   assert.throws(() => parseRunnerArgs(["--candidate-draft", candidate]), /reaction-profile-not-allowed/u);
   assert.throws(() => parseRunnerArgs(["--profile", PROFILE, "--candidate-draft", "relative.motion3.json"]), /must-be-absolute/u);
   assert.throws(() => parseRunnerArgs(["--profile", "sleep-enter", "--candidate-draft", candidate]), /profile-not-allowed/u);
@@ -230,7 +238,7 @@ test("candidate reader permits only managed regular profile-prefixed JSON drafts
   }
 });
 
-test("fixture assembles current source and declared display assets without dist or local-llm", () => {
+test("arrival-settle assembles the same isolated fixture without dist or local-llm", () => {
   const root = mkdtempSync(join(tmpdir(), "p2-63c-12-fixture-"));
   try {
     const workspace = join(root, "workspace");
@@ -238,15 +246,16 @@ test("fixture assembles current source and declared display assets without dist 
     const fixtureRoot = join(root, "isolated-app");
     mkdirSync(drafts, { recursive: true });
     makeSyntheticWorkspace(workspace);
-    const candidatePath = makeCandidatePath(drafts);
+    const candidatePath = makeCandidatePath(drafts, ARRIVAL_SETTLE_PROFILE);
     writeCandidate(candidatePath);
-    const candidate = readReactionDraft({ profile: PROFILE, candidateDraft: candidatePath }, drafts, workspace);
+    const candidate = readReactionDraft({ profile: ARRIVAL_SETTLE_PROFILE, candidateDraft: candidatePath }, drafts, workspace);
 
     const fixture = prepareIsolatedReactionPreview(fixtureRoot, candidate, workspace);
     assert.equal(existsSync(join(fixtureRoot, "dist")), false);
     assert.equal(existsSync(join(fixtureRoot, "resources", "local-llm")), false);
     assert.equal(existsSync(join(fixtureRoot, "resources", "models", "witch", "model-manifest.json")), true);
     assert.equal(existsSync(join(fixtureRoot, fixture.fixtureMotionPath)), true);
+    assert.deepEqual(readFileSync(join(fixtureRoot, fixture.fixtureMotionPath)), readFileSync(candidatePath));
     assert.equal(existsSync(join(fixtureRoot, "resources", "icons", "app-icon-256.png")), true);
     assert.equal(existsSync(join(fixtureRoot, "public", "cubism", "live2dcubismcore.min.js")), true);
     assert.equal(existsSync(join(fixtureRoot, "model-fixture", "textures", "texture.png")), true);
