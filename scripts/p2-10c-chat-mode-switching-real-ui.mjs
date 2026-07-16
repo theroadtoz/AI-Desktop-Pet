@@ -20,8 +20,7 @@ const forbiddenTelemetryTexts = [
   "provider request body",
   "表达风格：低打扰桌面伙伴"
 ];
-
-mkdirSync(runDir, { recursive: true });
+const actionDiagnostics = {};
 
 function log(message) {
   const line = `${new Date().toISOString()} ${message}`;
@@ -338,7 +337,101 @@ function readTelemetryEvents() {
     }
   }
 
-  return events;
+  return events.map((event, index) => ({ ...event, __index: index }));
+}
+
+function lastTelemetryIndex() {
+  return readTelemetryEvents().length - 1;
+}
+
+export function findTelemetryEventAfter(events, afterIndex, predicate) {
+  return events.find((event) => event.__index > afterIndex && predicate(event)) ?? null;
+}
+
+export function findActionFinishedAfter(events, startedEvent) {
+  if (!startedEvent) {
+    return null;
+  }
+
+  return findTelemetryEventAfter(events, startedEvent.__index, (event) => (
+    event.type === "pet_interaction_action_finished" &&
+    event.payload?.type === startedEvent.payload?.type &&
+    event.payload?.reason === startedEvent.payload?.reason
+  ));
+}
+
+export function findHeadActionOutcomeAfter(events, afterIndex) {
+  return findTelemetryEventAfter(events, afterIndex, (event) => (
+    (event.type === "pet_interaction_action_started" || event.type === "pet_interaction_action_skipped") &&
+    event.payload?.reason === "click_head" &&
+    event.payload?.type === "headPat"
+  ));
+}
+
+export function summarizeHeadActionOutcome(event) {
+  if (!event) {
+    return { eventType: "not_observed" };
+  }
+
+  if (event.type === "pet_interaction_action_skipped") {
+    return {
+      eventType: "skipped",
+      skipReason: event.payload?.skipReason ?? null,
+      activeType: event.payload?.activeType ?? null
+    };
+  }
+
+  return { eventType: "started" };
+}
+
+function hasCompletedMatchingAction(bodyAction) {
+  const started = bodyAction?.started;
+  const finished = bodyAction?.finished;
+  const startedType = started?.payload?.type;
+  const startedReason = started?.payload?.reason;
+
+  return (
+    started?.type === "pet_interaction_action_started" &&
+    finished?.type === "pet_interaction_action_finished" &&
+    finished.__index > started.__index &&
+    typeof startedType === "string" &&
+    typeof startedReason === "string" &&
+    finished.payload?.type === startedType &&
+    finished.payload?.reason === startedReason
+  );
+}
+
+export async function runHeadCheckAfterBodyAction({
+  runBodyAction,
+  sleep: sleepForCooldown,
+  captureBaseline,
+  clickHead,
+  waitForHeadOutcome
+}) {
+  const bodyAction = await runBodyAction();
+  if (!hasCompletedMatchingAction(bodyAction)) {
+    return {
+      bodyAction,
+      bodyActionCompleted: false,
+      headAction: null,
+      diagnostic: {
+        eventType: "not_attempted",
+        reason: "body_action_incomplete"
+      }
+    };
+  }
+
+  await sleepForCooldown(550);
+  const headAfterIndex = captureBaseline();
+  await clickHead();
+  const headAction = await waitForHeadOutcome(headAfterIndex);
+
+  return {
+    bodyAction,
+    bodyActionCompleted: true,
+    headAction,
+    diagnostic: summarizeHeadActionOutcome(headAction)
+  };
 }
 
 function isModeActionStarted(event, { modeId, actionTypes, reasons = ["click_body"] }) {
@@ -382,11 +475,39 @@ async function clickPet(cdp, randomValue, hitArea = "body") {
   await sleep(260);
 }
 
-async function waitForTelemetryEvent(predicate, timeoutMs = 6_000) {
+async function waitForTelemetryEvent(predicate, timeoutMs = 6_000, afterIndex = -1) {
   const deadline = Date.now() + timeoutMs;
 
   while (Date.now() < deadline) {
-    const event = readTelemetryEvents().find(predicate);
+    const event = findTelemetryEventAfter(readTelemetryEvents(), afterIndex, predicate);
+    if (event) {
+      return event;
+    }
+    await sleep(200);
+  }
+
+  return null;
+}
+
+async function waitForHeadActionOutcome(afterIndex, timeoutMs = 6_000) {
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() < deadline) {
+    const event = findHeadActionOutcomeAfter(readTelemetryEvents(), afterIndex);
+    if (event) {
+      return event;
+    }
+    await sleep(200);
+  }
+
+  return null;
+}
+
+async function waitForActionFinished(startedEvent, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() < deadline) {
+    const event = findActionFinishedAfter(readTelemetryEvents(), startedEvent);
     if (event) {
       return event;
     }
@@ -400,14 +521,24 @@ async function clickPetUntilTelemetry(cdp, randomValue, predicate, options = {})
   const attempts = options.attempts ?? 3;
   const hitArea = options.hitArea ?? "body";
   const timeoutMs = options.timeoutMs ?? 2_500;
+  const finishTimeoutMs = options.finishTimeoutMs ?? 8_000;
   const pauseMs = options.pauseMs ?? 700;
+  const cooldownMs = options.cooldownMs ?? 550;
 
   for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const afterIndex = lastTelemetryIndex();
     await clickPet(cdp, randomValue, hitArea);
-    const event = await waitForTelemetryEvent(predicate, timeoutMs);
+    const started = await waitForTelemetryEvent(predicate, timeoutMs, afterIndex);
 
-    if (event) {
-      return event;
+    if (started) {
+      const finished = await waitForActionFinished(started, finishTimeoutMs);
+      if (!finished) {
+        return null;
+      }
+      if (cooldownMs > 0) {
+        await sleep(cooldownMs);
+      }
+      return { started, finished };
     }
 
     await sleep(pauseMs);
@@ -440,6 +571,7 @@ function findScreenshotResidue(directory) {
 }
 
 async function main() {
+  mkdirSync(runDir, { recursive: true });
   log(`runDir=${runDir}`);
   log(`appDataDir=${appDataDir}`);
 
@@ -473,7 +605,6 @@ async function main() {
       )
     ), { attempts: 4 });
     checks.workModePetActionCanTriggerFocus = Boolean(workAction);
-    await sleep(2_100);
     const workReply = await sendMessage(chat, `${userSentinel} 工作模式回复`);
     checks.workReplyDiffers = workReply.at(-1)?.startsWith("先抓下一步。") || workReply.at(-1)?.startsWith("我们直接拆任务。");
 
@@ -487,7 +618,6 @@ async function main() {
       })
     ), { attempts: 3 });
     checks.gameModePetActionPrefersPlayGame = Boolean(gameAction);
-    await sleep(2_100);
     const gameReply = await sendMessage(chat, "游戏模式回复");
     checks.gameReplyDiffers = gameReply.at(-1)?.startsWith("好，来点轻快的。") || gameReply.at(-1)?.startsWith("可以，先轻松一下。");
 
@@ -501,7 +631,6 @@ async function main() {
       })
     ), { attempts: 3 });
     checks.readingModePetActionPrefersReading = Boolean(readingAction);
-    await sleep(2_300);
     const readingReply = await sendMessage(chat, "读书模式回复");
     checks.readingReplyDiffers = readingReply.at(-1)?.startsWith("慢慢看。") || readingReply.at(-1)?.startsWith("我们安静地理一遍。");
 
@@ -545,24 +674,25 @@ async function main() {
 
     await setMode(chat, "default");
     checks.defaultModeVisibleAfterSwitch = await evaluate(chat, "document.querySelector('#partner-status')?.textContent.includes('默认陪伴')");
-    const defaultAction = await clickPetUntilTelemetry(handles.pet.cdp, 0.05, (event) => (
-      event.type === "pet_interaction_action_started" &&
-      event.payload?.reason === "click_body" &&
-      event.payload?.modeId === "default" &&
-      Array.isArray(event.payload?.candidateActionTypes) &&
-      PET_BODY_POOL_ACTION_TYPES.every((type) => event.payload.candidateActionTypes.includes(type)) &&
-      !event.payload.candidateActionTypes.includes("appearance") &&
-      !event.payload.candidateActionTypes.includes("headPat")
-    ), { attempts: 4 });
-    checks.defaultModePetActionPoolSummary = Boolean(defaultAction);
-    await sleep(2_400);
-    await clickPet(handles.pet.cdp, 0.2, "head");
-    const headAction = await waitForTelemetryEvent((event) => (
-      event.type === "pet_interaction_action_started" &&
-      event.payload?.reason === "click_head" &&
-      event.payload?.type === "headPat"
-    ));
-    checks.headClickStillTriggersHeadPat = Boolean(headAction);
+    const defaultHeadCheck = await runHeadCheckAfterBodyAction({
+      runBodyAction: () => clickPetUntilTelemetry(handles.pet.cdp, 0.05, (event) => (
+        event.type === "pet_interaction_action_started" &&
+        event.payload?.reason === "click_body" &&
+        event.payload?.modeId === "default" &&
+        Array.isArray(event.payload?.candidateActionTypes) &&
+        PET_BODY_POOL_ACTION_TYPES.every((type) => event.payload.candidateActionTypes.includes(type)) &&
+        !event.payload.candidateActionTypes.includes("appearance") &&
+        !event.payload.candidateActionTypes.includes("headPat")
+      ), { attempts: 4, cooldownMs: 0 }),
+      sleep,
+      captureBaseline: lastTelemetryIndex,
+      clickHead: () => clickPet(handles.pet.cdp, 0.2, "head"),
+      waitForHeadOutcome: (afterIndex) => waitForHeadActionOutcome(afterIndex, 6_000)
+    });
+    const { bodyAction: defaultAction, headAction } = defaultHeadCheck;
+    checks.defaultModePetActionPoolSummary = defaultHeadCheck.bodyActionCompleted;
+    actionDiagnostics.headClick = defaultHeadCheck.diagnostic;
+    checks.headClickStillTriggersHeadPat = headAction?.type === "pet_interaction_action_started";
     await setMode(chat, "reading");
 
     await stopElectron(child, handles);
@@ -595,6 +725,7 @@ async function main() {
       provider: "fake",
       port,
       checks,
+      actionDiagnostics,
       finalUi: finalSnapshot,
       telemetry: {
         logDirectory: telemetry.logDirectory,
@@ -617,20 +748,24 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  const result = {
-    ok: false,
-    runDir,
-    appDataDir,
-    error: error instanceof Error ? error.stack ?? error.message : String(error),
-    telemetry: readTelemetrySummary(),
-    screenshotResidue: findScreenshotResidue(root)
-  };
-  writeFileSync(resultPath, `${JSON.stringify(result, null, 2)}\n`);
-  console.error(result.error);
-  process.exitCode = 1;
-}).finally(() => {
-  if (process.env.P2_10C_KEEP_TMP !== "1") {
-    rmSync(runDir, { recursive: true, force: true });
-  }
-});
+const scriptPath = resolve(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"));
+if (process.argv[1] && resolve(process.argv[1]) === scriptPath) {
+  main().catch((error) => {
+    const result = {
+      ok: false,
+      runDir,
+      appDataDir,
+      error: error instanceof Error ? error.stack ?? error.message : String(error),
+      actionDiagnostics,
+      telemetry: readTelemetrySummary(),
+      screenshotResidue: findScreenshotResidue(root)
+    };
+    writeFileSync(resultPath, `${JSON.stringify(result, null, 2)}\n`);
+    console.error(result.error);
+    process.exitCode = 1;
+  }).finally(() => {
+    if (process.env.P2_10C_KEEP_TMP !== "1") {
+      rmSync(runDir, { recursive: true, force: true });
+    }
+  });
+}
