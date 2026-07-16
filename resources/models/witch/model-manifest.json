@@ -31,6 +31,90 @@
       ],
       "visualRisk": "needs-visual-check",
       "assetLicenseStatus": "user-provided"
+    },
+    {
+      "id": "happy-small",
+      "path": "motions/happy-small.motion3.json",
+      "semanticKind": "reaction",
+      "loop": false,
+      "fadeInSeconds": 0.15,
+      "fadeOutSeconds": 0.2,
+      "durationHintSeconds": 3,
+      "priority": 30,
+      "cooldownMs": 2500,
+      "restorePolicy": "restore-expression-pose-accessory",
+      "allowedStates": [
+        "idle"
+      ],
+      "allowedPresenceModes": [
+        "default",
+        "focus",
+        "quiet"
+      ],
+      "allowedDialogueModes": [
+        "default",
+        "work",
+        "game",
+        "reading"
+      ],
+      "visualRisk": "needs-visual-check",
+      "assetLicenseStatus": "user-provided"
+    },
+    {
+      "id": "surprised-small",
+      "path": "motions/surprised-small.motion3.json",
+      "semanticKind": "reaction",
+      "loop": false,
+      "fadeInSeconds": 0.15,
+      "fadeOutSeconds": 0.2,
+      "durationHintSeconds": 2.6,
+      "priority": 30,
+      "cooldownMs": 2500,
+      "restorePolicy": "restore-expression-pose-accessory",
+      "allowedStates": [
+        "idle"
+      ],
+      "allowedPresenceModes": [
+        "default",
+        "focus",
+        "quiet"
+      ],
+      "allowedDialogueModes": [
+        "default",
+        "work",
+        "game",
+        "reading"
+      ],
+      "visualRisk": "needs-visual-check",
+      "assetLicenseStatus": "user-provided"
+    },
+    {
+      "id": "flustered-small",
+      "path": "motions/flustered-small.motion3.json",
+      "semanticKind": "reaction",
+      "loop": false,
+      "fadeInSeconds": 0.15,
+      "fadeOutSeconds": 0.2,
+      "durationHintSeconds": 3.2,
+      "priority": 30,
+      "cooldownMs": 2500,
+      "restorePolicy": "restore-expression-pose-accessory",
+      "allowedStates": [
+        "idle"
+      ],
+      "allowedPresenceModes": [
+        "default",
+        "focus",
+        "quiet"
+      ],
+      "allowedDialogueModes": [
+        "default",
+        "work",
+        "game",
+        "reading"
+      ],
+      "visualRisk": "needs-visual-check",
+      "assetLicenseStatus": "user-provided"
     }
   ],
   "textures": [

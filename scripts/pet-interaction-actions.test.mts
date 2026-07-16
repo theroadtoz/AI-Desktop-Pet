@@ -748,6 +748,8 @@ test("pet interaction action manifest includes audited expression and accessory 
   assert.equal(byType.get("focus")?.accessoryPartIds, undefined);
   assert.equal(byType.get("workFocus")?.expressionName, undefined);
   assert.deepEqual(byType.get("workFocus")?.lookTarget, { x: 0.05, y: 0.1 });
+  assert.equal(byType.get("appearance")?.motionPresetId, "surprised-small");
+  assert.equal(byType.get("headPat")?.motionPresetId, "happy-small");
   assert.equal(byType.get("doze")?.motionPresetId, "yawn-once");
   assert.deepEqual(
     PET_INTERACTION_ACTIONS
@@ -759,6 +761,7 @@ test("pet interaction action manifest includes audited expression and accessory 
   assert.deepEqual(byType.get("edgeGlance")?.lookTarget, { x: 0.38, y: 0.02 });
   assert.deepEqual(byType.get("edgeGlance")?.poseTarget, { bodyAngleX: 4, bodyAngleZ: -2 });
   assert.equal(byType.get("flusteredGlance")?.presentation.emotion, "surprised");
+  assert.equal(byType.get("flusteredGlance")?.motionPresetId, "flustered-small");
   assert.deepEqual(byType.get("flusteredGlance")?.lookTarget, { x: -0.36, y: -0.12 });
   assert.deepEqual(byType.get("flusteredGlance")?.poseTarget, { bodyAngleX: -5, bodyAngleZ: 3, angleZ: -4 });
   assert.equal(byType.get("replySustain")?.presentation.intensity, "low");
@@ -1619,7 +1622,7 @@ test("interaction action player runtime watchdog starts after native started, st
   assert.equal(harness.telemetry.at(-1)?.payload.motionPresetId, "future-wave");
 });
 
-test("interaction action player reports native motion start failures as failed terminals", async (t) => {
+test("interaction action player falls back to declared action duration when native motion cannot start", async (t) => {
   const cases = [
     {
       name: "skipped",
@@ -1655,9 +1658,25 @@ test("interaction action player reports native motion start failures as failed t
       await Promise.resolve();
       await Promise.resolve();
 
-      assert.equal(harness.calls.filter((call) => call === "restoreParts").length, 1);
+      assert.equal(harness.timers[0]?.cleared, true);
+      assert.equal(harness.timers[1]?.delayMs, motionAction.durationMs);
+      assert.equal(harness.calls.filter((call) => call === "restoreParts").length, 0);
       assert.equal(harness.calls.some((call) => call.startsWith("stopMotion:")), false);
-      assert.equal(harness.telemetry.at(-1)?.payload.terminalStatus, "failed");
+      assert.deepEqual(harness.telemetry.at(0), {
+        type: "pet_interaction_action_started",
+        payload: {
+          type: "thinking",
+          reason: "state_sleep",
+          durationMs: motionAction.durationMs,
+          motionPresetId: "future-wave"
+        }
+      });
+
+      harness.timers[1]?.callback();
+
+      assert.equal(harness.calls.filter((call) => call === "restoreParts").length, 1);
+      assert.equal(harness.telemetry.filter((event) => event.type === "pet_interaction_action_finished").length, 1);
+      assert.equal(Object.hasOwn(harness.telemetry.at(-1)?.payload ?? {}, "terminalStatus"), false);
       assert.equal(harness.telemetry.at(-1)?.payload.motionPresetId, "future-wave");
     });
   }
@@ -1702,12 +1721,13 @@ test("interaction action player prevents stacking and reports active action skip
 
   assert.deepEqual(harness.telemetry[1], {
     type: "pet_interaction_action_skipped",
-    payload: {
-      type: "headPat",
-      reason: "click_head",
-      skipReason: "active_action",
-      activeType: "thinking"
-    }
+      payload: {
+        type: "headPat",
+        reason: "click_head",
+        skipReason: "active_action",
+        activeType: "thinking",
+        motionPresetId: "happy-small"
+      }
   });
 });
 

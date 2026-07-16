@@ -1,0 +1,36 @@
+{
+  "registryVersion": 1,
+  "modelId": "witch",
+  "entries": [
+    {
+      "presetId": "happy-small",
+      "targetPath": "motions/happy-small.motion3.json",
+      "sourceBasename": "happy-small.motion3.json",
+      "sourceHashPrefix": "97d79427989b",
+      "intakeStatus": "user-authorized-vts-draft",
+      "userVisualReview": "passed",
+      "cubismRefined": false,
+      "runtimeEnabled": true
+    },
+    {
+      "presetId": "surprised-small",
+      "targetPath": "motions/surprised-small.motion3.json",
+      "sourceBasename": "surprised-small.motion3.json",
+      "sourceHashPrefix": "73d7821b635a",
+      "intakeStatus": "user-authorized-vts-draft",
+      "userVisualReview": "passed",
+      "cubismRefined": false,
+      "runtimeEnabled": true
+    },
+    {
+      "presetId": "flustered-small",
+      "targetPath": "motions/flustered-small.motion3.json",
+      "sourceBasename": "flustered-small.motion3.json",
+      "sourceHashPrefix": "dcf7f1b0e0dd",
+      "intakeStatus": "user-authorized-vts-draft",
+      "userVisualReview": "passed",
+      "cubismRefined": false,
+      "runtimeEnabled": true
+    }
+  ]
+}

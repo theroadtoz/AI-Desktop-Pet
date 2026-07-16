@@ -44,3 +44,9 @@ Schema version: `live2d-take-contract/v1`.
 ## Output Publication
 
 录制文件先是当前 take ledger 中的 staging candidate，不是成功 draft。独立 Motion3 parser readback 必须重验冻结 profile summary 要求的 variation IDs、mode、endpoint 或 seam 规则，并对微小辅助曲线完成真实 write/read 回读验证，而不只比较序列化 JSON 与内存对象。readback 通过后，才可将它原子发布到 profile/take ID 派生的受管相对 output；原子发布成功是唯一可报告输出成功的时点。发布后，以及发布前/readback 失败或取消时，均必须重试本 take 临时 candidate 的 unlink，并单独追踪 `cleanupPending`。临时 unlink 持续失败时，必须生成含 `take_id`、owner、受控临时路径、重试状态和禁止删除 final 标记的结构化 cleanup handle，移交 managed drain；发布成功时合法 final 仍为成功 draft，发布前/readback 失败时保留原始录制失败，且 managed drain 不得删除或改报任何合法 final。
+
+## User-Authorized VTS Draft Intake Summary
+
+只有用户明确点名当前 exact source 与 exact runtime target 时，take contract 才能附加此例外摘要：`intakeStatus=user-authorized-vts-draft`、`userVisualReview=passed`、`cubismRefined=false`、`runtimeEnabled=true`。摘要必须同时包含 P2-52 dry-run 结果、用户授权来源证据引用、source/target 的 safe relative path、Model CDI3 摘要、hash 以及 `sourceTargetEqual=true`；这些值必须在写入前重新核对，不能由草稿元数据自报。
+
+例外批次以 all-or-nothing 原子性写入 exact runtime target；失败时不得部分写入。原始 VTS 草稿及上述来源证据必须保留。写入后仅对 exact target 做一次针对性技术播放，且不得把结果称为 Cubism refined、quality certified 或等价质量结论；例外不改变普通路径的 Cubism Animator 精修/重新导出要求，也不成为后续 take 的默认路径。

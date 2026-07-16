@@ -220,6 +220,22 @@ export function createInteractionActionPlayer({
     });
   }
 
+  function fallBackToDeclaredActionDuration(activeAction: ActiveInteractionAction): void {
+    if (activeInteractionAction !== activeAction) {
+      return;
+    }
+
+    if (activeAction.timeoutId !== undefined) {
+      clearScheduledTimeout(activeAction.timeoutId);
+      delete activeAction.timeoutId;
+    }
+    delete activeAction.playbackPhase;
+    reportActionStarted(activeAction);
+    activeAction.timeoutId = scheduleTimeout(() => {
+      finishActiveAction(activeAction);
+    }, activeAction.action.durationMs);
+  }
+
   function waitForNativeMotion(
     activeAction: ActiveInteractionAction,
     pendingPlayback: Promise<CubismMotionPlaybackResult>
@@ -230,7 +246,7 @@ export function createInteractionActionPlayer({
       }
 
       if (result.status !== "started") {
-        finishActiveAction(activeAction, "failed");
+        fallBackToDeclaredActionDuration(activeAction);
         return;
       }
 
@@ -273,9 +289,9 @@ export function createInteractionActionPlayer({
             ? undefined
             : terminal.status
         ),
-        () => finishActiveAction(activeAction, "failed")
+        () => fallBackToDeclaredActionDuration(activeAction)
       );
-    }, () => finishActiveAction(activeAction, "failed"));
+    }, () => fallBackToDeclaredActionDuration(activeAction));
   }
 
   function playAction(
@@ -359,7 +375,7 @@ export function createInteractionActionPlayer({
 
     if (action.motionPresetId) {
       if (nativeMotionStartFailed || !pendingNativePlayback) {
-        finishActiveAction(activeAction, "failed");
+        fallBackToDeclaredActionDuration(activeAction);
       } else {
         waitForNativeMotion(activeAction, pendingNativePlayback);
       }

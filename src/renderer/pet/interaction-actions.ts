@@ -130,6 +130,7 @@ export const PET_INTERACTION_ACTIONS: readonly PetInteractionAction[] = [
     weight: 1,
     durationMs: 1_600,
     presentation: { emotion: "surprised", intensity: "high", mode: "emphasis" },
+    motionPresetId: "surprised-small",
     ...useExpressionPreset("excited"),
     accessoryPartIds: ["Part84"]
   },
@@ -138,6 +139,7 @@ export const PET_INTERACTION_ACTIONS: readonly PetInteractionAction[] = [
     weight: 2,
     durationMs: 1_500,
     presentation: { emotion: "happy", intensity: "high", mode: "emphasis" },
+    motionPresetId: "happy-small",
     ...useExpressionPreset("happy")
   },
   {
@@ -300,6 +302,7 @@ export const PET_INTERACTION_ACTIONS: readonly PetInteractionAction[] = [
     weight: 0.7,
     durationMs: 1_200,
     presentation: { emotion: "surprised", intensity: "low", mode: "micro" },
+    motionPresetId: "flustered-small",
     lookTarget: { x: -0.36, y: -0.12 },
     poseTarget: { bodyAngleX: -5, bodyAngleZ: 3, angleZ: -4 }
   },

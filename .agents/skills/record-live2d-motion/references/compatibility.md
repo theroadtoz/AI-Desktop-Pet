@@ -44,3 +44,18 @@ python -X utf8 "C:\Users\1\.codex\skills\.system\skill-creator\scripts\quick_val
 - parser readback 必须证明 Motion3 `Version: 3`、`Meta`、正且匹配当前 take contract 的 Duration、有限单调曲线、参数 allowlist、计数一致和冻结的 draft Loop 值。
 - loop draft 的 `Loop=false`、seam 数值闭合、速度连续、三周期视觉复核和最终 `Loop=true` 是不同门禁，不能互相替代。
 - Cubism Animator 精修与重新导出是 production intake 前置条件；parser 通过或 VTS 连接成功都不等于视觉通过。
+
+## P2-65 User-Authorized VTS Draft Exception
+
+默认仍是 `technical readback -> user visual review -> Cubism Animator refine/re-export -> explicit intake`。仅当用户在当前 intake 明确写出一个 exact source 和一个 exact runtime target，才可使用一次 `user-authorized-vts-draft` 例外；它不是 profile 默认值、未来默认路径、批量授权或 Cubism 质量认证。
+
+例外在 intake-approve 前必须完成并记录以下安全摘要；缺一项即阻塞：
+
+- P2-52 motion-resource dry-run 必须通过，且仍为 dry-run；不能以 dry-run 结果直接改写 product manifest 或 runtime catalog。
+- 用户授权来源证据必须明确指向本次 exact source、exact runtime target 和本次批次；不得使用口头概括、旧批准或隐含同意替代。
+- source 与 target 的 Motion3 路径必须是受管 safe relative path，拒绝绝对路径、上跳路径、符号链接逃逸和用户注入路径。
+- source 的 Motion3 parser readback、目标模型的 Model CDI3 身份和文件 hash 必须分别核对；source/target 记录的模型 CDI3 与 hash 必须相等，且 `sourceTargetEqual=true`。这里的相等只表示已核验的来源与运行目标确实相同，不表示动作已由 Cubism 精修。
+- 整个批次只能在所有条目门禁通过后原子写入；任何条目失败都不得部分 intake，并保留每个原始 VTS 草稿。
+- 写入后只允许对 exact runtime target 做针对性技术播放，核对模型身份、allowlist/ownership 和完成/恢复边界；不得播放、注入或触发其他动作、expression 或 hotkey。
+
+例外结果必须固定为 `intakeStatus=user-authorized-vts-draft`、`userVisualReview=passed`、`cubismRefined=false`、`runtimeEnabled=true`，并保留原始草稿、source/target 摘要、hash、Model CDI3 摘要和用户授权来源证据。该结果不得标记为 `Cubism refined`、`quality certified` 或等价措辞；普通路径的 Cubism 前置条件不因本例外而改变。
