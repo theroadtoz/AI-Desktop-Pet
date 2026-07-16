@@ -26,7 +26,7 @@ Schema version: `live2d-take-contract/v1`.
 ## 会话级 Camera-Face-Tracking 许可
 
 1. `camera-face-tracking` 是当前 Live2dREC main service 运行内唯一可复用的人工前置条件；它不属于 active recording session object，不能持久化、不能复用到应用重启后，也不授予 renderer 覆盖 profile 参数、output path、runtime state 或 intake target 的权限。
-2. 用户只需在该会话中确认一次；有效时可手动发起 `yawn`、`idle-soft-loop`、`greet-small/v2`、`sleep-enter/v1`、`happy-small/v1`、`surprised-small/v1` 或 `flustered-small/v1` 的独立 take。它不批准具体视觉 take，不会自动开始、连续或批量录制。
+2. 用户只需在该会话中确认一次；有效时可手动发起 `yawn`、`idle-soft-loop`、`greet-small/v2`、`sleep-enter/v1`、`happy-small/v2`、`surprised-small/v2` 或 `flustered-small/v2` 的独立 take。它不批准具体视觉 take，不会自动开始、连续或批量录制。
 3. 应用重启或被销毁、用户取消/取消勾选、connection configuration 变化、认证或连接失败、profile prerequisite definition 变化，或 preflight/recording 发现 CurrentModel 身份或参数签名变化时，必须立即撤销会话许可。
 4. take 完成、readback/write 失败、take TTL 到期、重新 prepare 或切换 ready profile 不撤销会话许可；它们只使当前 take 失效。下一段仍须完成自动 preflight。
 
