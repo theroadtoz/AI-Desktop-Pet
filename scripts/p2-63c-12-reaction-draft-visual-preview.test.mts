@@ -23,6 +23,8 @@ import {
   injectReactionPreviewTrigger,
   parseRunnerArgs,
   prepareIsolatedReactionPreview,
+  GREET_SMALL_V3_PARAMETER_ALLOWLIST,
+  GREET_SMALL_V3_PROFILE,
   MANAGED_VISUAL_PREVIEW_PROFILES,
   REACTION_DRAFT_PROFILES,
   readReactionDraft
@@ -60,6 +62,29 @@ function makeMotion(duration = 3.4, parameterId = "ParamAngleX") {
 
 function writeCandidate(path: string, motion = makeMotion()) {
   writeFileSync(path, JSON.stringify(motion), "utf8");
+}
+
+function makeGreetSmallV3Motion(duration = 3.4) {
+  return {
+    Version: 3,
+    Meta: {
+      Duration: duration,
+      Fps: 30,
+      Loop: false,
+      AreBeziersRestricted: false,
+      CurveCount: GREET_SMALL_V3_PARAMETER_ALLOWLIST.length,
+      TotalSegmentCount: GREET_SMALL_V3_PARAMETER_ALLOWLIST.length,
+      TotalPointCount: GREET_SMALL_V3_PARAMETER_ALLOWLIST.length * 2,
+      UserDataCount: 0,
+      TotalUserDataSize: 0
+    },
+    Curves: GREET_SMALL_V3_PARAMETER_ALLOWLIST.map((parameterId) => ({
+      Target: "Parameter",
+      Id: parameterId,
+      Segments: [0, -0.4, 0, duration, 0.8]
+    })),
+    UserData: []
+  };
 }
 
 function readSource(path: string) {
@@ -136,23 +161,99 @@ function makeDirectoryLink(target: string, linkPath: string) {
   symlinkSync(target, linkPath, process.platform === "win32" ? "junction" : "dir");
 }
 
-test("CLI accepts one managed visual-preview profile and one absolute candidate", () => {
+test("CLI accepts only managed visual-preview profiles and one absolute candidate", () => {
   const candidate = resolve(tmpdir(), "happy-small-20260716-101010-123.motion3.json");
   const arrivalCandidate = resolve(tmpdir(), "arrival-settle-20260716-094704-585.motion3.json");
+  const greetCandidate = resolve(tmpdir(), "greet-small-v3-20260717-014841-268.motion3.json");
   assert.deepEqual(parseRunnerArgs(["--profile", PROFILE, "--candidate-draft", candidate]), {
     profile: PROFILE,
     candidateDraft: candidate
   });
   assert.deepEqual(REACTION_DRAFT_PROFILES, ["happy-small", "surprised-small", "flustered-small"]);
-  assert.deepEqual(MANAGED_VISUAL_PREVIEW_PROFILES, [...REACTION_DRAFT_PROFILES, ARRIVAL_SETTLE_PROFILE]);
+  assert.deepEqual(MANAGED_VISUAL_PREVIEW_PROFILES, [
+    ...REACTION_DRAFT_PROFILES,
+    ARRIVAL_SETTLE_PROFILE,
+    GREET_SMALL_V3_PROFILE
+  ]);
   assert.deepEqual(parseRunnerArgs(["--profile", ARRIVAL_SETTLE_PROFILE, "--candidate-draft", arrivalCandidate]), {
     profile: ARRIVAL_SETTLE_PROFILE,
     candidateDraft: arrivalCandidate
+  });
+  assert.deepEqual(parseRunnerArgs(["--profile", GREET_SMALL_V3_PROFILE, "--candidate-draft", greetCandidate]), {
+    profile: GREET_SMALL_V3_PROFILE,
+    candidateDraft: greetCandidate
   });
   assert.throws(() => parseRunnerArgs(["--candidate-draft", candidate]), /reaction-profile-not-allowed/u);
   assert.throws(() => parseRunnerArgs(["--profile", PROFILE, "--candidate-draft", "relative.motion3.json"]), /must-be-absolute/u);
   assert.throws(() => parseRunnerArgs(["--profile", "sleep-enter", "--candidate-draft", candidate]), /profile-not-allowed/u);
   assert.throws(() => parseRunnerArgs(["--profile", PROFILE, "--candidate-draft", candidate, "--profile", PROFILE]), /invalid-profile/u);
+});
+
+test("greet-small-v3 requires its fixed Motion3 contract and safe summary", () => {
+  const root = mkdtempSync(join(tmpdir(), "p2-63c-12-greet-small-v3-"));
+  const workspace = join(root, "workspace");
+  try {
+    makeSyntheticWorkspace(workspace);
+    writeTreeFile(
+      workspace,
+      "model/witch.cdi3.json",
+      JSON.stringify({ Parameters: GREET_SMALL_V3_PARAMETER_ALLOWLIST.map((Id) => ({ Id })) })
+    );
+
+    const candidate = makeCandidatePath(root, GREET_SMALL_V3_PROFILE);
+    writeCandidate(candidate, makeGreetSmallV3Motion());
+    const accepted = readReactionDraft({ profile: GREET_SMALL_V3_PROFILE, candidateDraft: candidate }, root, workspace);
+    assert.deepEqual(accepted.summary, {
+      safeSummaryOnly: true,
+      profile: GREET_SMALL_V3_PROFILE,
+      basename: "greet-small-v3-20260716-101010-123.motion3.json",
+      durationSeconds: 3.4
+    });
+    assert.doesNotMatch(JSON.stringify(accepted.summary), /ParamAngleX|Segments/u);
+
+    const wrongPrefix = makeCandidatePath(root, PROFILE, "wrong-prefix");
+    writeCandidate(wrongPrefix, makeGreetSmallV3Motion());
+    assert.throws(
+      () => readReactionDraft({ profile: GREET_SMALL_V3_PROFILE, candidateDraft: wrongPrefix }, root, workspace),
+      /candidate-filename-profile-mismatch/u
+    );
+
+    const wrongDuration = makeCandidatePath(root, GREET_SMALL_V3_PROFILE, "wrong-duration");
+    writeCandidate(wrongDuration, makeGreetSmallV3Motion(3.3));
+    assert.throws(
+      () => readReactionDraft({ profile: GREET_SMALL_V3_PROFILE, candidateDraft: wrongDuration }, root, workspace),
+      /unexpected-duration/u
+    );
+
+    const wrongFps = makeCandidatePath(root, GREET_SMALL_V3_PROFILE, "wrong-fps");
+    const fpsMotion = makeGreetSmallV3Motion();
+    fpsMotion.Meta.Fps = 24;
+    writeCandidate(wrongFps, fpsMotion);
+    assert.throws(
+      () => readReactionDraft({ profile: GREET_SMALL_V3_PROFILE, candidateDraft: wrongFps }, root, workspace),
+      /unexpected-fps/u
+    );
+
+    const looping = makeCandidatePath(root, GREET_SMALL_V3_PROFILE, "looping");
+    const loopingMotion = makeGreetSmallV3Motion();
+    loopingMotion.Meta.Loop = true;
+    writeCandidate(looping, loopingMotion);
+    assert.throws(
+      () => readReactionDraft({ profile: GREET_SMALL_V3_PROFILE, candidateDraft: looping }, root, workspace),
+      /invalid-loop/u
+    );
+
+    const unexpectedParameter = makeCandidatePath(root, GREET_SMALL_V3_PROFILE, "unexpected-parameter");
+    const parameterMotion = makeGreetSmallV3Motion();
+    parameterMotion.Curves[0].Id = "ParamNotAllowlisted";
+    writeCandidate(unexpectedParameter, parameterMotion);
+    assert.throws(
+      () => readReactionDraft({ profile: GREET_SMALL_V3_PROFILE, candidateDraft: unexpectedParameter }, root, workspace),
+      /parameter-not-allowlisted/u
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("candidate reader applies Motion3 structural validation without an endpoint-closure gate", () => {

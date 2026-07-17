@@ -42,9 +42,26 @@ export const REACTION_DRAFT_PROFILES = Object.freeze([
   "flustered-small"
 ]);
 
+export const GREET_SMALL_V3_PROFILE = "greet-small-v3";
+export const GREET_SMALL_V3_PARAMETER_ALLOWLIST = Object.freeze([
+  "ParamAngleX",
+  "ParamAngleY",
+  "ParamAngleZ",
+  "ParamEyeLOpen",
+  "ParamEyeROpen",
+  "ParamEyeLSmile",
+  "ParamEyeRSmile",
+  "ParamBrowLY",
+  "ParamBrowLForm",
+  "ParamMouthForm"
+]);
+const GREET_SMALL_V3_DURATION_SECONDS = 3.4;
+const GREET_SMALL_V3_FPS = 30;
+
 export const MANAGED_VISUAL_PREVIEW_PROFILES = Object.freeze([
   ...REACTION_DRAFT_PROFILES,
-  "arrival-settle"
+  "arrival-settle",
+  GREET_SMALL_V3_PROFILE
 ]);
 
 function isWithin(parent, candidate) {
@@ -208,16 +225,21 @@ function readCurrentModelParameterIds(workspaceRoot) {
   return parameterIds;
 }
 
-function validateReactionDraftMotion(motion, workspaceRoot) {
+function validateReactionDraftMotion(motion, workspaceRoot, profile) {
   const candidateParameterIds = Array.isArray(motion?.Curves)
     ? motion.Curves.flatMap((curve) => typeof curve?.Id === "string" ? [curve.Id] : [])
     : [];
+  const isGreetSmallV3 = profile === GREET_SMALL_V3_PROFILE;
   const validation = validateExplicitDraftMotion(
     motion,
     readCurrentModelParameterIds(workspaceRoot),
     {
-      semanticAllowlist: candidateParameterIds,
-      variationParameterIds: []
+      semanticAllowlist: isGreetSmallV3 ? GREET_SMALL_V3_PARAMETER_ALLOWLIST : candidateParameterIds,
+      variationParameterIds: [],
+      ...(isGreetSmallV3 ? {
+        durationSeconds: GREET_SMALL_V3_DURATION_SECONDS,
+        fps: GREET_SMALL_V3_FPS
+      } : {})
     }
   );
   if (validation.status !== "validated") {
@@ -261,7 +283,7 @@ export function readReactionDraft(
   } catch {
     throw new Error("candidate-invalid-json");
   }
-  const validation = validateReactionDraftMotion(motion, workspaceRoot);
+  const validation = validateReactionDraftMotion(motion, workspaceRoot, profile);
   const durationSeconds = validation.structure.durationSeconds;
   if (durationSeconds > MAX_DURATION_SECONDS) {
     throw new Error("candidate-duration-invalid");
