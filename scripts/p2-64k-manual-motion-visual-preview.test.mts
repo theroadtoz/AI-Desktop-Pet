@@ -268,3 +268,14 @@ test("cleanup removes only its run directory and preserves sibling/user files", 
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("run context initializes pages for the real-ui wait and stop lifecycle", () => {
+  const root = mkdtempSync(join(tmpdir(), "p2-64k-pages-"));
+  try {
+    const context = createManualPreviewRunContext({ workspaceRoot: root });
+    assert.deepEqual(context.pages, []);
+    cleanupOwnManualPreviewArtifacts(context, root);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

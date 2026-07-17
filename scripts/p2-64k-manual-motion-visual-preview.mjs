@@ -397,7 +397,8 @@ export function createManualPreviewRunContext({ workspaceRoot = ROOT, port = 969
     runDir,
     appDataDir: join(runDir, "user-data"),
     port,
-    child: null
+    child: null,
+    pages: []
   };
 }
 
