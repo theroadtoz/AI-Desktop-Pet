@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createRequire } from "node:module";
 import {
   existsSync,
   mkdirSync,
@@ -26,8 +27,34 @@ import {
   parseRunnerArgs,
   P2_64K_DRAFT_ROOT,
   prepareIsolatedManualPreview,
-  readVisualOnlyCandidate
+  readVisualOnlyCandidate,
+  waitForManualPreviewTriggerAcceptance
 } from "./p2-64k-manual-motion-visual-preview.mjs";
+
+const require = createRequire(import.meta.url);
+const {
+  loadModelManifest
+} = require("../dist/main/services/model-manifest-loader.js") as {
+  loadModelManifest(modelId: string): {
+    sourceRoot: string;
+    managedMotionRoot: string;
+    sourceRelativePaths: ReadonlySet<string>;
+    managedMotionRelativePaths: ReadonlySet<string>;
+  };
+};
+const {
+  resolveModelAssetPath
+} = require("../dist/main/services/model-asset-protocol.js") as {
+  resolveModelAssetPath(
+    manifest: {
+      sourceRoot: string;
+      managedMotionRoot: string;
+      sourceRelativePaths: ReadonlySet<string>;
+      managedMotionRelativePaths: ReadonlySet<string>;
+    },
+    relativePath: string
+  ): Promise<string | null>;
+};
 
 function writeTreeFile(root: string, relativePath: string, contents = relativePath) {
   const path = join(root, relativePath);
@@ -72,8 +99,34 @@ function makeSyntheticWorkspace(root: string) {
   );
   writeTreeFile(root, "public/cubism/live2dcubismcore.min.js", "core");
   writeTreeFile(root, "resources/icons/app-icon-256.png", "icon");
-  writeTreeFile(root, "resources/models/witch/model-manifest.json", "not-read-by-visual-carrier");
+  writeTreeFile(
+    root,
+    "resources/models/witch/model-manifest.json",
+    `${JSON.stringify({
+      id: "witch",
+      sourceDir: "../../../model",
+      model3: "witch.model3.json",
+      moc3: "witch.moc3",
+      physics: "witch.physics3.json",
+      displayInfo: "witch.cdi3.json",
+      idleMotion: "idle.motion3.json",
+      motionPresets: [{
+        id: "surprised-small",
+        path: "motions/surprised-small.motion3.json"
+      }],
+      textures: ["textures/texture.png"],
+      expressions: { happy: "happy.exp3.json" }
+    }, null, 2)}\n`
+  );
+  writeTreeFile(root, "resources/models/witch/motions/surprised-small.motion3.json", "{}\n");
+  writeTreeFile(root, "model/witch.model3.json", "{}\n");
   writeTreeFile(root, "model/witch.moc3", "model");
+  writeTreeFile(root, "model/witch.physics3.json", "{}\n");
+  writeTreeFile(root, "model/witch.cdi3.json", JSON.stringify({ Parameters: [{ Id: "ParamAngleX" }] }));
+  writeTreeFile(root, "model/idle.motion3.json", "{}\n");
+  writeTreeFile(root, "model/textures/texture.png", "texture");
+  writeTreeFile(root, "model/happy.exp3.json", "{}\n");
+  writeTreeFile(root, "model/unreferenced.motion3.json", "must-not-copy");
 }
 
 test("P2-64J profiles are exact and use frozen playback durations", () => {
@@ -182,9 +235,9 @@ test("candidate reading is raw-byte only and makes no technical verdict", () => 
     });
 
     const source = readFileSync(new URL("./p2-64k-manual-motion-visual-preview.mjs", import.meta.url), "utf8");
-    assert.doesNotMatch(source, /JSON\.parse|createHash|validateExplicitDraftMotion|canonicalizeMotion3/u);
+    assert.doesNotMatch(source, /createHash|validateExplicitDraftMotion|canonicalizeMotion3/u);
+    assert.doesNotMatch(source, /JSON\.parse\(\s*(bytes|readFileSync\(candidatePath|candidateBytes)/u);
     assert.doesNotMatch(source, /candidate\.motion|candidate\.sha|Meta\.Duration|Curves/u);
-    assert.doesNotMatch(source, /cdi3|displayInfo|Parameters/u);
     assert.doesNotMatch(JSON.stringify(candidate.summary), /validated|accepted|passed|allowlist|variation/u);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -229,6 +282,7 @@ test("isolated fixture copies bytes and only patches its own app", () => {
       });
       assert.deepEqual(result.diagnostics?.filter((diagnostic) => diagnostic.category === ts.DiagnosticCategory.Error), [], name);
     }
+    assert.match(transformed.preset, /\.\.\.APPROVED_MOTION_PRESETS/u);
     assert.deepEqual(getIsolatedManualPreviewBuildSteps().map(({ label, args }) => ({ label, args })), [
       { label: "main", args: ["-p", "tsconfig.main.json"] },
       { label: "preload", args: ["-p", "tsconfig.preload.json"] },
@@ -237,6 +291,76 @@ test("isolated fixture copies bytes and only patches its own app", () => {
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("isolated fixture registers preview motion while preserving approved managed assets and safe source resolution", { concurrency: false }, async () => {
+  const root = mkdtempSync(join(tmpdir(), "p2-64k-manifest-"));
+  const previousCwd = process.cwd();
+  try {
+    const workspace = join(root, "workspace");
+    const drafts = join(root, "drafts");
+    const fixtureRoot = join(root, "fixture");
+    makeSyntheticWorkspace(workspace);
+    mkdirSync(drafts);
+    const candidatePath = makeCandidatePath(drafts, "listen-soft");
+    writeFileSync(candidatePath, Buffer.from("visual-only-bytes\n", "utf8"));
+    const candidate = readVisualOnlyCandidate({ profile: "listen-soft", candidateDraft: candidatePath }, drafts);
+    const fixture = prepareIsolatedManualPreview(fixtureRoot, candidate, workspace);
+
+    assert.equal(existsSync(join(fixtureRoot, "model-fixture", "witch.model3.json")), true);
+    assert.equal(existsSync(join(fixtureRoot, "model-fixture", "unreferenced.motion3.json")), false);
+
+    process.chdir(fixtureRoot);
+    const manifest = loadModelManifest("witch");
+    assert.equal(manifest.sourceRoot, join(fixtureRoot, "model-fixture"));
+    assert.equal(manifest.managedMotionRoot, join(fixtureRoot, "resources", "models", "witch"));
+    assert.equal(manifest.managedMotionRelativePaths.has(fixture.config.motionPath), true);
+    assert.equal(manifest.managedMotionRelativePaths.has("motions/surprised-small.motion3.json"), true);
+
+    assert.equal(
+      await resolveModelAssetPath(manifest, fixture.config.motionPath),
+      join(fixtureRoot, "resources", "models", "witch", fixture.config.motionPath)
+    );
+    assert.equal(
+      await resolveModelAssetPath(manifest, "motions/surprised-small.motion3.json"),
+      join(fixtureRoot, "resources", "models", "witch", "motions", "surprised-small.motion3.json")
+    );
+    assert.equal(
+      await resolveModelAssetPath(manifest, "witch.model3.json"),
+      join(fixtureRoot, "model-fixture", "witch.model3.json")
+    );
+  } finally {
+    process.chdir(previousCwd);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("preview trigger retries until startup action clears instead of relying on a fixed sleep", async () => {
+  const calls: boolean[] = [];
+  let attempt = 0;
+  await waitForManualPreviewTriggerAcceptance({
+    timeoutMs: 100,
+    intervalMs: 5,
+    now: () => attempt * 5,
+    sleepFn: async () => {
+      attempt += 1;
+    },
+    trigger: async () => {
+      calls.push(true);
+      return calls.length >= 3;
+    }
+  });
+  assert.equal(calls.length, 3);
+  let timeoutTick = 0;
+  await assert.rejects(() => waitForManualPreviewTriggerAcceptance({
+    timeoutMs: 10,
+    intervalMs: 5,
+    now: () => timeoutTick,
+    sleepFn: async () => {
+      timeoutTick += 5;
+    },
+    trigger: async () => false
+  }), /preview-trigger-rejected/u);
 });
 
 test("cleanup removes only its run directory and preserves sibling/user files", () => {

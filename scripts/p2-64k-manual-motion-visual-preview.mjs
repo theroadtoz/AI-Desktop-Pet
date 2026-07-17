@@ -266,7 +266,8 @@ export function injectManualPreviewPreset(source, config) {
     allowedDialogueModes: ["default"],
     visualRisk: "needs-visual-check",
     assetLicenseStatus: "user-provided"
-  }
+  },
+  ...APPROVED_MOTION_PRESETS
 ]);`, "manual preview motion preset");
 }
 
@@ -321,6 +322,53 @@ function patchFile(path, transform) {
   writeFileSync(path, transform(readFileSync(path, "utf8")), "utf8");
 }
 
+function collectDeclaredModelFixturePaths(manifest) {
+  const references = new Set();
+  const addReference = (value, label) => {
+    if (value === undefined || value === null) return;
+    if (typeof value !== "string" || value.length === 0) {
+      throw new Error(`model-manifest-${label}-invalid`);
+    }
+    references.add(value);
+  };
+
+  for (const label of ["model3", "moc3", "physics", "displayInfo", "idleMotion"]) {
+    addReference(manifest?.[label], label);
+  }
+  if (manifest?.textures !== undefined) {
+    if (!Array.isArray(manifest.textures)) throw new Error("model-manifest-textures-invalid");
+    for (const texture of manifest.textures) addReference(texture, "texture");
+  }
+  if (manifest?.expressions !== undefined) {
+    if (!manifest.expressions || typeof manifest.expressions !== "object" || Array.isArray(manifest.expressions)) {
+      throw new Error("model-manifest-expressions-invalid");
+    }
+    for (const expression of Object.values(manifest.expressions)) addReference(expression, "expression");
+  }
+  return [...references];
+}
+
+function copyDeclaredModelFixtureFiles(sourceRoot, targetRoot, manifest) {
+  mkdirSync(targetRoot, { recursive: true });
+  for (const reference of collectDeclaredModelFixturePaths(manifest)) {
+    const sourcePath = resolve(sourceRoot, reference);
+    if (!isWithin(sourceRoot, sourcePath)) throw new Error("model-fixture-path-outside-model-root");
+    const stats = lstatSync(sourcePath);
+    if (stats.isSymbolicLink()) throw new Error("model-fixture-reparse-path-rejected");
+    if (!stats.isFile()) throw new Error("model-fixture-reference-not-regular-file");
+    checkWindowsReparsePath(
+      sourcePath,
+      "model-fixture-reparse-path-rejected",
+      "model-fixture-reparse-attribute-check-failed"
+    );
+
+    const targetPath = resolve(targetRoot, relative(sourceRoot, sourcePath));
+    if (!isWithin(targetRoot, targetPath)) throw new Error("model-fixture-target-outside-root");
+    mkdirSync(dirname(targetPath), { recursive: true });
+    copyFileSync(sourcePath, targetPath);
+  }
+}
+
 function binCommand(name) {
   return join(ROOT, "node_modules", ".bin", `${name}${process.platform === "win32" ? ".cmd" : ""}`);
 }
@@ -372,12 +420,58 @@ export function prepareIsolatedManualPreview(fixtureRoot, candidate, workspaceRo
   const fixtureMotionPath = join(targetRoot, "resources", "models", "witch", config.motionPath);
   mkdirSync(dirname(fixtureMotionPath), { recursive: true });
   writeFileSync(fixtureMotionPath, candidate.bytes);
+  const manifestPath = join(targetRoot, "resources", "models", "witch", "model-manifest.json");
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+  const sourceManifestPath = join(sourceRoot, "resources", "models", "witch", "model-manifest.json");
+  const sourceManifest = JSON.parse(readFileSync(sourceManifestPath, "utf8"));
+  const sourceModelRoot = resolve(dirname(sourceManifestPath), sourceManifest.sourceDir);
+  if (!isWithin(sourceRoot, sourceModelRoot)) throw new Error("model-fixture-source-outside-workspace");
+  copyDeclaredModelFixtureFiles(sourceModelRoot, join(targetRoot, "model-fixture"), sourceManifest);
+  manifest.sourceDir = "../../../model-fixture";
+  manifest.motionPresets = [{
+    id: config.id,
+    path: config.motionPath,
+    semanticKind: "reaction",
+    loop: false,
+    fadeInSeconds: 0.15,
+    fadeOutSeconds: 0.2,
+    durationHintSeconds: config.durationSeconds,
+    priority: 50,
+    cooldownMs: 0,
+    restorePolicy: "restore-current-state",
+    allowedStates: ["idle"],
+    allowedPresenceModes: ["default"],
+    allowedDialogueModes: ["default"],
+    visualRisk: "needs-visual-check",
+    assetLicenseStatus: "user-provided"
+  }, ...(Array.isArray(manifest.motionPresets) ? manifest.motionPresets : [])];
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
   patchFile(join(targetRoot, "src", "shared", "pet-motion-presets.ts"), (source) => injectManualPreviewPreset(source, config));
   patchFile(join(targetRoot, "src", "renderer", "pet", "interaction-actions.ts"), (source) => injectManualPreviewAction(source, config));
   patchFile(join(targetRoot, "src", "renderer", "pet", "main.ts"), (source) => injectManualPreviewTrigger(source, config));
   patchFile(join(targetRoot, "src", "renderer", "pet", "interaction-action-player.ts"), injectManualPreviewReason);
 
   return { config, fixtureMotionPath: relative(targetRoot, fixtureMotionPath).split(sep).join("/") };
+}
+
+export async function waitForManualPreviewTriggerAcceptance({
+  trigger,
+  timeoutMs = 10_000,
+  intervalMs = 150,
+  now = () => Date.now(),
+  sleepFn = sleep
+}) {
+  const deadline = now() + timeoutMs;
+  while (now() <= deadline) {
+    if (await trigger()) {
+      return true;
+    }
+    if (now() >= deadline) {
+      break;
+    }
+    await sleepFn(intervalMs);
+  }
+  throw new Error("preview-trigger-rejected");
 }
 
 export function createManualPreviewRunContext({ workspaceRoot = ROOT, port = 9696 } = {}) {
@@ -486,9 +580,11 @@ async function main() {
     const pet = await waitForWindow(context, "renderer/pet/index.html", 30_000);
     await waitFor(pet, "Boolean(window.petApi && document.querySelector('#pet-canvas'))", { timeoutMs: 20_000 });
     await waitFor(pet, "document.querySelector('#pet-canvas')?.width > 0", { timeoutMs: 20_000 });
-    await sleep(750);
     await waitFor(pet, `typeof globalThis.${TRIGGER_GLOBAL} === "function"`, { timeoutMs: 10_000 });
-    if (await evaluate(pet, `globalThis.${TRIGGER_GLOBAL}()`) !== true) throw new Error("preview-trigger-rejected");
+    await waitForManualPreviewTriggerAcceptance({
+      timeoutMs: 12_000,
+      trigger: () => evaluate(pet, `globalThis.${TRIGGER_GLOBAL}()`)
+    });
     opened = true;
     await evaluate(pet, `
       globalThis.setInterval(() => { void globalThis.${TRIGGER_GLOBAL}?.(); }, ${fixture.config.durationMs + REPLAY_GAP_MS});
