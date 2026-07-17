@@ -58,10 +58,44 @@ export const GREET_SMALL_V3_PARAMETER_ALLOWLIST = Object.freeze([
 const GREET_SMALL_V3_DURATION_SECONDS = 3.4;
 const GREET_SMALL_V3_FPS = 30;
 
+export const ARRIVAL_SETTLE_PROFILE = "arrival-settle";
+export const ARRIVAL_SETTLE_PARAMETER_ALLOWLIST = Object.freeze([
+  "ParamAngleX",
+  "ParamAngleY",
+  "ParamAngleZ",
+  "ParamEyeLOpen",
+  "ParamEyeROpen"
+]);
+const ARRIVAL_SETTLE_REQUIRED_VARIATION_PARAMETER_IDS = Object.freeze(["ParamAngleX", "ParamAngleY"]);
+const ARRIVAL_SETTLE_DURATION_SECONDS = 6.4;
+const ARRIVAL_SETTLE_FPS = 30;
+
+export const WORK_FOCUS_PROFILE = "work-focus";
+export const WORK_FOCUS_PARAMETER_ALLOWLIST = Object.freeze([
+  "ParamAngleY",
+  "ParamAngleZ",
+  "ParamEyeLOpen",
+  "ParamEyeROpen",
+  "ParamBrowLY"
+]);
+const WORK_FOCUS_VARIATION_PARAMETER_IDS = Object.freeze([
+  "ParamAngleY",
+  "ParamBrowLY"
+]);
+const WORK_FOCUS_DURATION_SECONDS = 2.6;
+const WORK_FOCUS_FPS = 30;
+
+export const CITE_ACKNOWLEDGE_PROFILE = "cite-acknowledge";
+export const CITE_ACKNOWLEDGE_PARAMETER_ALLOWLIST = Object.freeze(["ParamAngleY"]);
+const CITE_ACKNOWLEDGE_DURATION_SECONDS = 2;
+const CITE_ACKNOWLEDGE_FPS = 30;
+
 export const MANAGED_VISUAL_PREVIEW_PROFILES = Object.freeze([
   ...REACTION_DRAFT_PROFILES,
-  "arrival-settle",
-  GREET_SMALL_V3_PROFILE
+  ARRIVAL_SETTLE_PROFILE,
+  GREET_SMALL_V3_PROFILE,
+  WORK_FOCUS_PROFILE,
+  CITE_ACKNOWLEDGE_PROFILE
 ]);
 
 function isWithin(parent, candidate) {
@@ -230,20 +264,71 @@ function validateReactionDraftMotion(motion, workspaceRoot, profile) {
     ? motion.Curves.flatMap((curve) => typeof curve?.Id === "string" ? [curve.Id] : [])
     : [];
   const isGreetSmallV3 = profile === GREET_SMALL_V3_PROFILE;
+  const isArrivalSettle = profile === ARRIVAL_SETTLE_PROFILE;
+  const isWorkFocus = profile === WORK_FOCUS_PROFILE;
+  const isCiteAcknowledge = profile === CITE_ACKNOWLEDGE_PROFILE;
+  const profileAllowlist = isArrivalSettle
+    ? ARRIVAL_SETTLE_PARAMETER_ALLOWLIST
+    : isWorkFocus
+      ? WORK_FOCUS_PARAMETER_ALLOWLIST
+    : isCiteAcknowledge
+      ? CITE_ACKNOWLEDGE_PARAMETER_ALLOWLIST
+      : null;
+  if (profileAllowlist && candidateParameterIds.some((id) => !profileAllowlist.includes(id))) {
+    throw new Error("candidate-motion3-structural-validation-failed:parameter-not-allowlisted");
+  }
   const validation = validateExplicitDraftMotion(
     motion,
     readCurrentModelParameterIds(workspaceRoot),
     {
-      semanticAllowlist: isGreetSmallV3 ? GREET_SMALL_V3_PARAMETER_ALLOWLIST : candidateParameterIds,
-      variationParameterIds: [],
-      ...(isGreetSmallV3 ? {
-        durationSeconds: GREET_SMALL_V3_DURATION_SECONDS,
-        fps: GREET_SMALL_V3_FPS
+      semanticAllowlist: isGreetSmallV3
+        ? GREET_SMALL_V3_PARAMETER_ALLOWLIST
+        : isArrivalSettle
+          ? ARRIVAL_SETTLE_PARAMETER_ALLOWLIST
+        : isWorkFocus
+          ? candidateParameterIds
+          : isCiteAcknowledge
+            ? CITE_ACKNOWLEDGE_PARAMETER_ALLOWLIST
+        : candidateParameterIds,
+      variationParameterIds: isArrivalSettle
+        ? ARRIVAL_SETTLE_REQUIRED_VARIATION_PARAMETER_IDS
+        : isWorkFocus
+          ? WORK_FOCUS_VARIATION_PARAMETER_IDS
+        : isCiteAcknowledge
+          ? CITE_ACKNOWLEDGE_PARAMETER_ALLOWLIST
+          : [],
+      ...((isGreetSmallV3 || isArrivalSettle || isWorkFocus || isCiteAcknowledge) ? {
+        durationSeconds: isGreetSmallV3
+          ? GREET_SMALL_V3_DURATION_SECONDS
+          : isArrivalSettle
+            ? ARRIVAL_SETTLE_DURATION_SECONDS
+          : isWorkFocus
+            ? WORK_FOCUS_DURATION_SECONDS
+            : CITE_ACKNOWLEDGE_DURATION_SECONDS,
+        fps: isGreetSmallV3
+          ? GREET_SMALL_V3_FPS
+          : isArrivalSettle
+            ? ARRIVAL_SETTLE_FPS
+            : isWorkFocus
+              ? WORK_FOCUS_FPS
+              : CITE_ACKNOWLEDGE_FPS
       } : {})
     }
   );
   if (validation.status !== "validated") {
     throw new Error(`candidate-motion3-structural-validation-failed:${validation.blockers.join(",")}`);
+  }
+  if (
+    isArrivalSettle &&
+    !ARRIVAL_SETTLE_REQUIRED_VARIATION_PARAMETER_IDS.every((id) => validation.structure.variedParameterIds.includes(id))
+  ) {
+    throw new Error("candidate-motion3-structural-validation-failed:arrival-settle-variation-required");
+  }
+  if (isWorkFocus && !validation.structure.semanticMotionVariation) {
+    throw new Error("candidate-motion3-structural-validation-failed:work-focus-variation-required");
+  }
+  if (isCiteAcknowledge && !validation.structure.semanticMotionVariation) {
+    throw new Error("candidate-motion3-structural-validation-failed:cite-acknowledge-variation-required");
   }
   return validation;
 }
