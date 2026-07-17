@@ -44,7 +44,7 @@ export const P2_64J_MOTION_PROFILES = Object.freeze([
   { id: "sleepy-settle", durationSeconds: 2.8 },
   { id: "joy-bright", durationSeconds: 3 },
   { id: "surprised-big", durationSeconds: 2.6 },
-  { id: "flustered-big", durationSeconds: 3.2 },
+  { id: "flustered-big", durationSeconds: 4.2 },
   { id: "serious-focus", durationSeconds: 2.8 },
   { id: "concern-soft", durationSeconds: 2.8 },
   { id: "playful-protest", durationSeconds: 2.4 }

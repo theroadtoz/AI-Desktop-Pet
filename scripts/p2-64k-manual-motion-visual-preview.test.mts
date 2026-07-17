@@ -140,7 +140,7 @@ test("P2-64J profiles are exact and use frozen playback durations", () => {
     { id: "sleepy-settle", durationSeconds: 2.8 },
     { id: "joy-bright", durationSeconds: 3 },
     { id: "surprised-big", durationSeconds: 2.6 },
-    { id: "flustered-big", durationSeconds: 3.2 },
+    { id: "flustered-big", durationSeconds: 4.2 },
     { id: "serious-focus", durationSeconds: 2.8 },
     { id: "concern-soft", durationSeconds: 2.8 },
     { id: "playful-protest", durationSeconds: 2.4 }
@@ -226,12 +226,12 @@ test("candidate reading is raw-byte only and makes no technical verdict", () => 
     writeFileSync(candidatePath, originalBytes);
     const candidate = readVisualOnlyCandidate({ profile: "flustered-big", candidateDraft: candidatePath }, root);
     assert.deepEqual(candidate.bytes, originalBytes);
-    assert.equal(candidate.durationSeconds, 3.2);
+    assert.equal(candidate.durationSeconds, 4.2);
     assert.deepEqual(candidate.summary, {
       visualOnly: true,
       profile: "flustered-big",
       basename: "flustered-big-20260717-072342-699.motion3.json",
-      playbackDurationSeconds: 3.2
+      playbackDurationSeconds: 4.2
     });
 
     const source = readFileSync(new URL("./p2-64k-manual-motion-visual-preview.mjs", import.meta.url), "utf8");
