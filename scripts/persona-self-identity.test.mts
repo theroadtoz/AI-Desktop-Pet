@@ -25,9 +25,29 @@ test("detects and redacts generic AI self identity drift", () => {
 
   assert.equal(hasGenericAiSelfIdentityDrift(drift), true);
   assert.match(redacted, /我是西塔，魔法学院高年级的现代魔导工程进修魔女/);
-  assert.match(redacted, /作为西塔/);
+  assert.match(redacted, /我会回答/);
+  assert.doesNotMatch(redacted, /作为西塔/);
   assert.match(redacted, /我的身份是桌面魔女同伴/);
   assert.doesNotMatch(redacted, /我是一个AI助手|作为语言模型|普通 AI 助手|本质上是聊天机器人/);
+});
+
+test("removes assistant-role preambles without replacing them with a Xita declaration", () => {
+  assert.equal(
+    redactPersonaSelfIdentityDrift("作为语言模型，我会尽量准确。"),
+    "我会尽量准确。"
+  );
+  assert.equal(
+    redactPersonaSelfIdentityDrift("作为AI助手，可以啊。"),
+    "可以啊。"
+  );
+  assert.equal(
+    redactPersonaSelfIdentityDrift("作为语言模型。"),
+    "我是西塔。"
+  );
+  assert.doesNotMatch(
+    redactPersonaSelfIdentityDrift("身为一名聊天机器人，我想听听。"),
+    /作为西塔|身为西塔/
+  );
 });
 
 test("keeps normal local model technical wording", () => {

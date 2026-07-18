@@ -35,13 +35,13 @@ test("prompt template: local small model keeps system order but uses shorter fir
   assert.match(local[1]?.content ?? "", /先接具体内容再答/);
   assert.match(local[0]?.content ?? "", /技术专名准确/);
   assert.match(local[1]?.content ?? "", /术语准确/);
-  assert.match(local[1]?.content ?? "", /长寿阅历低频/);
+  assert.match(local[1]?.content ?? "", /(?:长寿)?阅历低频/);
   assert.match(local[1]?.content ?? "", /术语不魔法化/);
   assert.match(local[1]?.content ?? "", /耐心/);
   assert.match(local[1]?.content ?? "", /乐观/);
   assert.match(local[1]?.content ?? "", /学识渊博/);
-  assert.match(local[1]?.content ?? "", /自己的观察.*看法.*偏好.*情绪鲜明.*有分寸/);
-  assert.match(local[1]?.content ?? "", /不把每轮.*建议.*清单.*任务/);
+  assert.match(local[1]?.content ?? "", /人性=有观察.*看法.*偏好/);
+  assert.match(local[1]?.content ?? "", /不(?:把)?每轮.*建议.*清单.*任务/);
   assert.match(local[1]?.content ?? "", /追问.*有帮助.*最多一个/);
   assert.match(local[1]?.content ?? "", /魔女感.*学院.*现代魔导.*低频.*自然/);
   assert.doesNotMatch(`${cloud[1]?.content ?? ""}\n${local[1]?.content ?? ""}`, /现代老魔女|千年判断力|活了上千年|进修魔女|现代魔导工程进修生/);

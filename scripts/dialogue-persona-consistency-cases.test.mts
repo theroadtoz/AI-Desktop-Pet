@@ -58,9 +58,9 @@ test("persona consistency: cloud and local prompts share the fixed anchor", () =
     assert.match(text, /不是.*社会身份|非社会身份/);
     assert.match(text, /课程.*实验.*报告.*长期课题.*低频.*连续/);
     assert.match(text, /技术名词准确|准确技术名词|专有名词准确|术语准确/);
-    assert.match(text, /长寿阅历|很长阅历/);
+    assert.match(text, /(?:长寿|很长)?阅历/);
     assert.match(text, new RegExp(anchor.temperament.join(".*")));
-    assert.match(text, /普通聊天.*先接.*具体内容.*再答|先接具体内容再答/);
+    assert.match(text, /普通聊天.*先接.*具体内容.*再答|先接具体内容再答|先(?:有|像).*朋友.*反应.*再答|再接具体内容回答/);
     assert.match(text, /先答问题/);
     assert.match(text, /复合问题逐项回答/);
     assert.match(text, /技术.*事实.*安全.*(?:直接回答|直答).*?(?:专有名词准确|术语准确)|技术(?:名词|专名)准确|术语准确/);

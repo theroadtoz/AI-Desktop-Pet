@@ -89,7 +89,8 @@ test("assistant reply redaction replaces generic AI self identity with Xita iden
   );
 
   assert.match(redacted, /我是西塔，魔法学院高年级的现代魔导工程进修魔女/);
-  assert.match(redacted, /作为西塔/);
+  assert.match(redacted, /我会尽量准确/);
+  assert.doesNotMatch(redacted, /作为西塔/);
   assert.match(redacted, /我的身份是桌面魔女同伴/);
   assert.doesNotMatch(redacted, /我是一个AI助手|作为语言模型|普通 AI 助手|本质上是聊天机器人/);
   assert.equal(hasGenericAiSelfIdentityDrift(redacted), false);
@@ -258,8 +259,10 @@ test("chat engine redacts streamed deltas and final provider result", async () =
   assert.doesNotMatch(result.text, /作为语言模型/);
   assert.match(streamed, /\[私有标记\]/);
   assert.match(result.text, /\[敏感密钥\]/);
-  assert.match(streamed, /作为西塔/);
-  assert.match(result.text, /作为西塔/);
+  assert.match(streamed, /我会继续回答/);
+  assert.match(result.text, /我会继续回答/);
+  assert.doesNotMatch(streamed, /作为西塔/);
+  assert.doesNotMatch(result.text, /作为西塔/);
 });
 
 test("chat engine rejects an aborted reply when the provider resolves late", async () => {

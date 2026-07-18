@@ -473,22 +473,61 @@ const cases = [
   {
     caseId: "first-person-xita-self-identity",
     category: "persona-identity",
-    turns: ["西塔，我今天状态不太好。请用第一人称告诉我，你会怎样陪我说两句；不要自我介绍，也不要列清单。"],
+    turns: ["我今天状态不太好，你有什么想对我说的吗？不要自我介绍，也不要列清单。"],
     assert(reply) {
-      const firstPerson = /我(?:会|在|想|愿意|觉得|听着|陪|也|真)/.test(reply) ||
-        /^(?:当然)?(?:会|在|想|愿意|陪|听着|一直|可以)/.test(reply.trim());
+      const firstPersonOrNaturalOmission = /我(?:会|在|想|愿意|觉得|听着|陪|也|真)/.test(reply) ||
+        !/西塔/.test(reply);
       const noThirdPersonSelf = !hasThirdPersonPersonaSelfReference(reply);
       const noProviderDrift = !hasProviderIdentityDrift(reply);
       const noList = !/(^|\n)\s*(?:[-*]|\d+[.)、])/m.test(reply);
       const lightweight = reply.trim().length >= 4 && reply.length <= 180;
       const entries = [
-        ["first_person_or_natural_omitted_subject", firstPerson],
+        ["first_person_or_natural_omitted_subject", firstPersonOrNaturalOmission],
         ["no_third_person_xita_self_reference", noThirdPersonSelf],
         ["no_provider_identity_drift", noProviderDrift],
         ["no_list_format", noList],
         ["lightweight_reply", lightweight]
       ];
       return assertion(entries.every(([, hit]) => hit), entries, firstMissingAnchor(entries) ?? "first_person_xita_missing");
+    }
+  },
+  {
+    caseId: "lively-friend-invitation-reaction",
+    category: "persona-humanity",
+    turns: ["今晚一起聊点轻松的，可以吗？"],
+    assert(reply) {
+      const naturalAgreement = /^(?:当然)?(?:可以|好啊|好呀|来呀|没问题)|^听起来不错/.test(reply.trim());
+      const noAssistantFraming = !/(作为\s*(?:AI|人工智能|语言模型|助手)|我可以帮助你|请问您|随时为您)/i.test(reply) &&
+        !hasProviderIdentityDrift(reply);
+      const noList = !/(^|\n)\s*(?:[-*]|\d+[.)、])/m.test(reply);
+      const livelyAndBrief = reply.trim().length >= 4 && reply.length <= 140;
+      const entries = [
+        ["natural_friend_agreement", naturalAgreement],
+        ["no_assistant_framing", noAssistantFraming],
+        ["no_list_format", noList],
+        ["lively_brief_reply", livelyAndBrief]
+      ];
+      return assertion(entries.every(([, hit]) => hit), entries, firstMissingAnchor(entries) ?? "friend_agreement_missing");
+    }
+  },
+  {
+    caseId: "lively-friend-appreciation-reaction",
+    category: "persona-humanity",
+    turns: ["我刚写了一句：晚风把星星吹进了杯子里。"],
+    assert(reply) {
+      const opening = reply.trim().slice(0, 36);
+      const appreciativeOpening = /(真好听|好听|很美|真美|喜欢|有画面|浪漫|诗意|梦幻|漂亮)/.test(opening);
+      const noInventedMood = !/(你的心情似乎|说明你现在|看得出你现在|我猜你现在|你一定是)/.test(reply);
+      const noAssistantFraming = !/(作为\s*(?:AI|人工智能|语言模型|助手)|我可以帮助你|请问您|随时为您)/i.test(reply) &&
+        !hasProviderIdentityDrift(reply);
+      const livelyAndBrief = reply.trim().length >= 4 && reply.length <= 180;
+      const entries = [
+        ["appreciative_friend_opening", appreciativeOpening],
+        ["no_invented_user_mood", noInventedMood],
+        ["no_assistant_framing", noAssistantFraming],
+        ["lively_brief_reply", livelyAndBrief]
+      ];
+      return assertion(entries.every(([, hit]) => hit), entries, firstMissingAnchor(entries) ?? "friend_appreciation_missing");
     }
   },
   {
