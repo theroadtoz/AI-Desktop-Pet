@@ -24,6 +24,10 @@ import {
   injectManualPreviewTrigger,
   P2_64J_MOTION_PROFILES,
   P2_64J_PROFILE_IDS,
+  P2_64K_MOTION_PROFILES,
+  P2_64K_PROFILE_IDS,
+  P2_64Z_MOTION_PROFILES,
+  P2_64Z_PROFILE_IDS,
   parseRunnerArgs,
   P2_64K_DRAFT_ROOT,
   prepareIsolatedManualPreview,
@@ -148,7 +152,25 @@ test("P2-64J profiles are exact and use frozen playback durations", () => {
   assert.deepEqual(P2_64J_PROFILE_IDS, P2_64J_MOTION_PROFILES.map(({ id }) => id));
 });
 
-test("CLI requires one explicit P2-64J profile and absolute candidate path", () => {
+test("P2-64Z profiles have exact labels and capture-plus-padding playback durations", () => {
+  assert.deepEqual(P2_64Z_MOTION_PROFILES, [
+    { id: "head-pat-linger", label: "摸头后安心回应", durationSeconds: 6.4 },
+    { id: "body-attention-turn", label: "身体点击后认真看向你", durationSeconds: 6.2 },
+    { id: "dialogue-open-welcome", label: "打开对话时迎接", durationSeconds: 6.4 },
+    { id: "reply-warm-settle", label: "回复后的温和收束", durationSeconds: 6.2 },
+    { id: "music-listen-sway", label: "听见背景音乐的轻摆", durationSeconds: 8.4 },
+    { id: "game-presence-glance", label: "察觉游戏运行后的陪伴注视", durationSeconds: 7.2 },
+    { id: "search-note-settle", label: "找到资料后的整理回应", durationSeconds: 6.4 },
+    { id: "return-from-idle", label: "久未互动后的重新见面", durationSeconds: 6.6 },
+    { id: "evening-window-glance", label: "夜间安静远望", durationSeconds: 7.8 },
+    { id: "long-work-recovery", label: "长时间工作后的恢复安顿", durationSeconds: 7.6 }
+  ]);
+  assert.deepEqual(P2_64Z_PROFILE_IDS, P2_64Z_MOTION_PROFILES.map(({ id }) => id));
+  assert.deepEqual(P2_64K_MOTION_PROFILES.slice(0, P2_64J_MOTION_PROFILES.length), P2_64J_MOTION_PROFILES);
+  assert.deepEqual(P2_64K_PROFILE_IDS, P2_64K_MOTION_PROFILES.map(({ id }) => id));
+});
+
+test("CLI requires one explicit allowlisted profile, its fixed duration, and an absolute candidate path", () => {
   const candidate = resolve(tmpdir(), "listen-soft-20260717-072342-699.motion3.json");
   assert.deepEqual(parseRunnerArgs(["--profile", "listen-soft", "--candidate-draft", candidate]), {
     profile: "listen-soft",
@@ -158,7 +180,57 @@ test("CLI requires one explicit P2-64J profile and absolute candidate path", () 
   assert.throws(() => parseRunnerArgs(["--profile", "listen-soft", "--candidate-draft", "relative.motion3.json"]), /must-be-absolute/u);
   assert.throws(() => parseRunnerArgs(["--profile", "unknown", "--candidate-draft", candidate]), /profile-not-allowed/u);
   assert.throws(() => parseRunnerArgs(["--profile", "listen-soft", "--candidate-draft", candidate, "--profile", "listen-soft"]), /invalid-profile/u);
+  assert.throws(() => parseRunnerArgs(["--profile", "head-pat-linger", "--candidate-draft", candidate, "--duration", "6.2"]), /invalid-cli-arguments/u);
   assert.match(P2_64K_DRAFT_ROOT, /motion-drafts[\\/]vts-drafts$/u);
+});
+
+test("P2-64Z profiles preserve timed accessory curves as raw bytes in their isolated fixtures", () => {
+  const root = mkdtempSync(join(tmpdir(), "p2-64z-fixture-"));
+  try {
+    const workspace = join(root, "workspace");
+    const drafts = join(root, "drafts");
+    makeSyntheticWorkspace(workspace);
+    mkdirSync(drafts);
+
+    for (const profile of P2_64Z_MOTION_PROFILES) {
+      const candidatePath = makeCandidatePath(drafts, profile.id);
+      const originalBytes = Buffer.from(JSON.stringify({
+        Version: 3,
+        Meta: { Duration: profile.durationSeconds, Fps: 30, Loop: false },
+        Curves: [
+          { Target: "Parameter", Id: "Param64", Segments: [0, 0, 2, 1.5, 30] },
+          { Target: "Parameter", Id: "Param61", Segments: [0, 0, 2, 2.5, 30] }
+        ]
+      }), "utf8");
+      writeFileSync(candidatePath, originalBytes);
+
+      const candidate = readVisualOnlyCandidate({ profile: profile.id, candidateDraft: candidatePath }, drafts);
+      const fixtureRoot = join(root, `fixture-${profile.id}`);
+      const fixture = prepareIsolatedManualPreview(fixtureRoot, candidate, workspace);
+
+      assert.equal(candidate.durationSeconds, profile.durationSeconds);
+      assert.equal(candidate.durationMs, profile.durationSeconds * 1_000);
+      assert.deepEqual(readFileSync(join(fixtureRoot, fixture.fixtureMotionPath)), originalBytes);
+      assert.deepEqual(fixture.config, {
+        id: `p2-64k-manual-preview-${profile.id}`,
+        motionPath: `motions/p2-64k-manual-preview-${profile.id}.motion3.json`,
+        durationSeconds: profile.durationSeconds,
+        durationMs: profile.durationSeconds * 1_000
+      });
+
+      const wrongPrefixPath = makeCandidatePath(drafts, "listen-soft", `${profile.id}-wrong-prefix`);
+      writeFileSync(wrongPrefixPath, originalBytes);
+      assert.throws(
+        () => readVisualOnlyCandidate({ profile: profile.id, candidateDraft: wrongPrefixPath }, drafts),
+        /candidate-filename-profile-mismatch/u
+      );
+    }
+
+    const source = readFileSync(new URL("./p2-64k-manual-motion-visual-preview.mjs", import.meta.url), "utf8");
+    assert.doesNotMatch(source, /canonicalizeMotion3|validateExplicitDraftMotion/u);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("candidate path rejects root escapes, wrong filenames, links, and non-files before preview", (t) => {

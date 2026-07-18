@@ -52,6 +52,26 @@ export const P2_64J_MOTION_PROFILES = Object.freeze([
 
 export const P2_64J_PROFILE_IDS = Object.freeze(P2_64J_MOTION_PROFILES.map(({ id }) => id));
 
+export const P2_64Z_MOTION_PROFILES = Object.freeze([
+  { id: "head-pat-linger", label: "摸头后安心回应", durationSeconds: 6.4 },
+  { id: "body-attention-turn", label: "身体点击后认真看向你", durationSeconds: 6.2 },
+  { id: "dialogue-open-welcome", label: "打开对话时迎接", durationSeconds: 6.4 },
+  { id: "reply-warm-settle", label: "回复后的温和收束", durationSeconds: 6.2 },
+  { id: "music-listen-sway", label: "听见背景音乐的轻摆", durationSeconds: 8.4 },
+  { id: "game-presence-glance", label: "察觉游戏运行后的陪伴注视", durationSeconds: 7.2 },
+  { id: "search-note-settle", label: "找到资料后的整理回应", durationSeconds: 6.4 },
+  { id: "return-from-idle", label: "久未互动后的重新见面", durationSeconds: 6.6 },
+  { id: "evening-window-glance", label: "夜间安静远望", durationSeconds: 7.8 },
+  { id: "long-work-recovery", label: "长时间工作后的恢复安顿", durationSeconds: 7.6 }
+]);
+
+export const P2_64Z_PROFILE_IDS = Object.freeze(P2_64Z_MOTION_PROFILES.map(({ id }) => id));
+export const P2_64K_MOTION_PROFILES = Object.freeze([
+  ...P2_64J_MOTION_PROFILES,
+  ...P2_64Z_MOTION_PROFILES
+]);
+export const P2_64K_PROFILE_IDS = Object.freeze(P2_64K_MOTION_PROFILES.map(({ id }) => id));
+
 function isWithin(parent, candidate) {
   const child = relative(resolve(parent), resolve(candidate));
   return child === "" || (!child.startsWith(`..${sep}`) && child !== ".." && !isAbsolute(child));
@@ -188,14 +208,14 @@ export function parseRunnerArgs(argv) {
     }
     throw new Error("invalid-cli-arguments");
   }
-  if (!P2_64J_PROFILE_IDS.includes(profile)) throw new Error("p2-64j-profile-not-allowed");
+  if (!P2_64K_PROFILE_IDS.includes(profile)) throw new Error("p2-64j-profile-not-allowed");
   if (typeof candidateDraft !== "string" || candidateDraft.length === 0) throw new Error("candidate-draft-required");
   if (!isAbsolute(candidateDraft)) throw new Error("candidate-draft-must-be-absolute");
   return { profile, candidateDraft: resolve(candidateDraft) };
 }
 
 export function readVisualOnlyCandidate({ profile, candidateDraft }, draftRoot = P2_64K_DRAFT_ROOT) {
-  const profileContract = P2_64J_MOTION_PROFILES.find((candidate) => candidate.id === profile);
+  const profileContract = P2_64K_MOTION_PROFILES.find((candidate) => candidate.id === profile);
   if (!profileContract) throw new Error("p2-64j-profile-not-allowed");
   if (typeof candidateDraft !== "string" || !isAbsolute(candidateDraft)) {
     throw new Error("candidate-draft-must-be-absolute");
