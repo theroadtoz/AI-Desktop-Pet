@@ -140,7 +140,7 @@ function createLocalTurnHintMessage(
   }
 
   if (hints.length === 0 && isOrdinaryCompanionStatement(latestUserMessage)) {
-    hints.push("闲聊=2句≤55字/次句即止；首句“我”开头写感受；次句具体画面并原样收尾“我就在这里陪你。”；禁问号/建议命令/分析步骤方案/帮助邀请/段落；非求助不编状态");
+    hints.push("闲聊=2句≤55字/次句即止；首句“我”开头写感受；次句具体画面自然收尾；禁问号/建议命令/分析步骤方案/帮助邀请/段落；非求助不编状态");
   }
 
   return hints.length > 0

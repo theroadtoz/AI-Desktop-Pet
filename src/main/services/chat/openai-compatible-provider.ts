@@ -183,28 +183,24 @@ function constrainOrdinaryCompanionReply(reply: string, latestUserMessage: strin
   if (!/[。！!]$/.test(constrained)) {
     constrained += "。";
   }
-  if (!/我就在这里陪你/.test(constrained)) {
-    constrained += "我就在这里陪你。";
-  }
-
   return constrained;
 }
 
 function createCompanionFallback(latestUserMessage: string): string {
   if (/茶|咖啡|热饮/.test(latestUserMessage)) {
-    return "我也喜欢热气慢慢散开的安静劲儿";
+    return "我也喜欢热气慢慢散开的安静劲儿，就这样陪你坐一会儿";
   }
   if (/云|窗外|发呆/.test(latestUserMessage)) {
-    return "我看着慢吞吞的云也会跟着安静下来";
+    return "我看着慢吞吞的云也会跟着安静下来，就这样陪你发会儿呆";
   }
   if (/TypeScript|报错|错误|bug/i.test(latestUserMessage)) {
-    return "我也会被这种偏偏挑时候冒出来的报错惹恼";
+    return "我也会被这种偏偏挑时候冒出来的报错惹恼，陪你一起嫌它两句";
   }
   if (/累|疲惫|趴|不想做/.test(latestUserMessage)) {
-    return "我有点心疼你";
+    return "我有点心疼你，就安静陪你趴一会儿";
   }
   if (/雨/.test(latestUserMessage)) {
-    return "我也讨厌这场没完没了的雨";
+    return "我也讨厌这场没完没了的雨，陪你听它滴答一会儿";
   }
 
   return "我听见了，也愿意陪你安静待一会儿";

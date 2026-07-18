@@ -611,9 +611,10 @@ test("local provider removes service questions after an ordinary companionship r
       }
     });
 
-    assert.equal(result.text, "我很喜欢茶香慢慢散开的安静劲儿。我就在这里陪你。");
+    assert.equal(result.text, "我很喜欢茶香慢慢散开的安静劲儿。");
     assert.equal(deltaText, result.text);
     assert.doesNotMatch(result.text, /[？?]|帮你|整理|话题/);
+    assert.doesNotMatch(result.text, /我就在这里陪你/);
   } finally {
     await close(server);
   }

@@ -201,7 +201,8 @@ test("prompt template: ordinary statements get a companionship-only local hint",
     assert.equal(hints.length, 1);
     assert.match(hints[0]?.content ?? "", /闲聊=.*2句≤55字.*次句即止/);
     assert.match(hints[0]?.content ?? "", /首句“我”开头.*感受/);
-    assert.match(hints[0]?.content ?? "", /我就在这里陪你/);
+    assert.match(hints[0]?.content ?? "", /次句具体画面自然收尾/);
+    assert.doesNotMatch(hints[0]?.content ?? "", /原样收尾|固定.*收尾/);
     assert.match(hints[0]?.content ?? "", /禁问号.*建议命令.*分析步骤方案.*帮助邀请.*段落/);
     assert.match(hints[0]?.content ?? "", /非求助.*不编状态/);
   }
