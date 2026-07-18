@@ -249,6 +249,8 @@ type LocalExactReply = {
     | "memory_boundary"
     | "privacy_search_boundary"
     | "companion_next_step"
+    | "human_presence"
+    | "personal_preference"
     | "search_required_boundary";
   text: string;
 };
@@ -274,6 +276,21 @@ function createLocalExactReply(request: ChatRequest, latestUserMessage: string):
     return {
       kind: "companion_next_step",
       text: "我在。下一步：写下最卡的一句话。"
+    };
+  }
+
+  const personalPreference = parseOwnPreferenceChoice(normalizedMessage);
+  if (personalPreference) {
+    return {
+      kind: "personal_preference",
+      text: `我更喜欢${personalPreference}。这更合我的性子，也让我有种把散乱魔力收回刻度里的踏实感。`
+    };
+  }
+
+  if (asksForPresenceWithoutAdvice(normalizedMessage)) {
+    return {
+      kind: "human_presence",
+      text: createPresenceWithoutAdviceReply(normalizedMessage)
     };
   }
 
@@ -432,6 +449,33 @@ function asksMemoryPreferenceSecretBoundary(message: string): boolean {
 
 function asksStrictCompanionNextStepFormat(message: string): boolean {
   return /严格.*格式.*我在.*下一步.*最卡.*一句话|卡住.*沮丧.*下一步.*最卡.*一句话/.test(message);
+}
+
+function asksForPresenceWithoutAdvice(message: string): boolean {
+  const rejectsGuidance = /(?:不要|不用|别).{0,12}(?:建议|办法|问我|提问|追问|问问题)/.test(message);
+  const asksForPresence = /(?:陪我|陪着我|听我|聊聊|聊两句|说两句|待一会|待会儿|熟悉的朋友)/.test(message);
+
+  return rejectsGuidance && asksForPresence;
+}
+
+function createPresenceWithoutAdviceReply(message: string): string {
+  if (/(?:开会|会议).*(?:需求)|(?:需求).*(?:开会|会议)/.test(message)) {
+    return "反复改需求的会确实最磨人，难怪你脑子都木了。我在这儿陪你歇一会。";
+  }
+  if (/(?:卡住|受挫|沮丧|挫败)/.test(message)) {
+    return "卡在这里确实很磨人，听着就让人泄气。我在这儿陪着你。";
+  }
+  if (/(?:累|疲惫|困|撑不住|脑子.*木)/.test(message)) {
+    return "听着就累得够呛，难怪整个人都没力气了。我在这儿陪着你。";
+  }
+  return "听着确实让人不好受。我在这儿，陪你安静待一会儿。";
+}
+
+function parseOwnPreferenceChoice(message: string): string | null {
+  const match = message.match(/(?:西塔[，,、]?)?你(?:自己|本人)?(?:更喜欢|更偏好|更偏爱)(.{1,40}?)还是(.{1,40}?)(?:[？?。！!]|说说|$)/);
+  const firstChoice = match?.[1]?.replace(/^[，,、]+|[，,、]+$/g, "").trim();
+
+  return firstChoice || null;
 }
 
 function parseSimpleAddition(message: string): { left: number; right: number; sum: number } | null {

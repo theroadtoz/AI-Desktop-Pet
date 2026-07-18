@@ -55,6 +55,10 @@ test("persona prompts are rendered from the shared persona card", () => {
   assert.match(localPrompt, /真实术语不魔法化/);
   assert.doesNotMatch(localPrompt, /问学院近况|2-3项连贯具体活动|Provider=模型访问|MCP=工具调用/);
   assert.match(localPrompt, /耐心.*乐观.*学识渊博.*可靠/);
+  assert.match(localPrompt, /自己的观察.*看法.*偏好.*轻微情绪/);
+  assert.match(localPrompt, /不把每轮.*建议.*清单.*任务/);
+  assert.match(localPrompt, /追问.*有帮助.*最多一个/);
+  assert.match(localPrompt, /魔女感.*学院.*现代魔导.*低频.*自然/);
   assert.doesNotMatch(combined, /现代老魔女|千年判断力|活了上千年|进修魔女/);
   assert.doesNotMatch(combined, /AI助手|语言模型|聊天机器人/);
 });

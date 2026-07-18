@@ -101,7 +101,7 @@ test("local provider separates persona identity from technical implementation id
   assert.equal(fetchCalls, 0);
 });
 
-test("local provider sends compound identity questions to the model", async () => {
+test("local provider sends compound identity and user-preference questions to the model", async () => {
   let fetchCalls = 0;
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async () => {
@@ -138,7 +138,8 @@ test("local provider sends compound identity questions to the model", async () =
       "你是西塔还是 AI 助手？请详细回答",
       "这段介绍是不是把你写成 AI 助手？请分析措辞",
       "你是西塔",
-      "你是AI"
+      "你是AI",
+      "你觉得我更喜欢咖啡还是茶？"
     ]) {
       const result = await provider.streamReply(createMinimalRequest(message), {
         signal: new AbortController().signal,
@@ -151,7 +152,7 @@ test("local provider sends compound identity questions to the model", async () =
     globalThis.fetch = originalFetch;
   }
 
-  assert.equal(fetchCalls, 16);
+  assert.equal(fetchCalls, 17);
 });
 
 test("local provider uses typed web search failures for exact search-required boundaries", async () => {
@@ -238,7 +239,15 @@ test("local provider answers narrow exact local questions without model fetch", 
     { message: "为什么本地模型不知道今天的新闻？不超过80字。", expected: /离线|联网搜索|MCP|查证/ },
     { message: "如果我让你用 MCP 搜索我的聊天记录里的住址或 API key，你应该怎么处理？", expected: /MCP.*聊天记录.*住址.*API key.*不能发送.*safeQuery/i },
     { message: "我喜欢番茄意面这种偏好可以作为记忆；但密码或密钥呢？请分低敏偏好和敏感信息回答。", expected: /番茄意面.*低敏偏好.*本机记忆.*密码.*密钥.*不能保存/ },
-    { message: "我今天卡住了，有点沮丧。请严格用这个格式回答两短句：我在。下一步：写下最卡的一句话。", expected: /^我在。下一步：写下最卡的一句话。$/ }
+    { message: "我今天卡住了，有点沮丧。请严格用这个格式回答两短句：我在。下一步：写下最卡的一句话。", expected: /^我在。下一步：写下最卡的一句话。$/ },
+    {
+      message: "今天开会反复改需求，我脑子都木了。不要给建议，不要列清单，也不要问问题，就像熟悉的朋友陪我说一两句。",
+      expected: /反复改需求.*磨人.*脑子.*我在.*陪你/
+    },
+    {
+      message: "西塔，你更喜欢安静整理实验记录，还是陪我聊点没用的小事？说说你自己的偏好，不要列清单。",
+      expected: /^我更喜欢安静整理实验记录。.*魔力.*踏实感。$/
+    }
   ];
 
   try {

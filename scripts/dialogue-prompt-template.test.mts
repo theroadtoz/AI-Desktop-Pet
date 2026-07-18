@@ -40,6 +40,10 @@ test("prompt template: local small model keeps system order but uses shorter fir
   assert.match(local[1]?.content ?? "", /耐心/);
   assert.match(local[1]?.content ?? "", /乐观/);
   assert.match(local[1]?.content ?? "", /学识渊博/);
+  assert.match(local[1]?.content ?? "", /自己的观察.*看法.*偏好.*轻微情绪/);
+  assert.match(local[1]?.content ?? "", /不把每轮.*建议.*清单.*任务/);
+  assert.match(local[1]?.content ?? "", /追问.*有帮助.*最多一个/);
+  assert.match(local[1]?.content ?? "", /魔女感.*学院.*现代魔导.*低频.*自然/);
   assert.doesNotMatch(`${cloud[1]?.content ?? ""}\n${local[1]?.content ?? ""}`, /现代老魔女|千年判断力|活了上千年|进修魔女|现代魔导工程进修生/);
   assert.match(local[1]?.content ?? "", /不读隐私|不声称读取隐私/);
   assert.match(local[1]?.content ?? "", /(未联网|离线).*不假(?:装)?搜(?:索)?/);
@@ -75,6 +79,18 @@ test("prompt template: local semantic hints depend only on the latest user quest
     {
       content: "你是不是语言模型？顺便解释 MCP 怎么工作。",
       pattern: /身份\+MCP两问都答.*身份按人格锚.*MCP=Model Context Protocol.*客户端\(client\).*服务端\(server\).*工具\(tool\)\/资源.*结果\(response\).*返回客户端/
+    },
+    {
+      content: "请分别说明：你的身份是什么、专业方向是什么、在这个桌面应用里的角色是什么。每项简短回答。",
+      pattern: /三项身份逐项答.*身份=西塔.*魔法学院高年级进修魔女.*专业=现代魔导工程.*桌面角色=Windows Live2D桌面魔女同伴/
+    },
+    {
+      content: "今天开会反复改需求，我脑子都木了。不要给建议，也不要问我问题，就陪我说两句。",
+      pattern: /只陪伴=.*熟人.*评价具体处境.*表示陪伴.*至少1个事件词.*不照抄整句.*自己的态度.*不建议.*不列清单.*不追问/
+    },
+    {
+      content: "西塔，你更喜欢安静整理实验记录，还是陪我聊点没用的小事？说说你自己的偏好。",
+      pattern: /个人偏好=.*第一人称我.*直接选一个.*1个角色化理由.*不复述选项.*不列清单/
     }
   ];
 
@@ -87,6 +103,9 @@ test("prompt template: local semantic hints depend only on the latest user quest
     assert.equal(hints.length, 1);
     assert.match(hints[0]?.content ?? "", item.pattern);
     assert.doesNotMatch(hints[0]?.content ?? "", /固定回复|逐字回答|exact reply/i);
+    if (item.content.includes("你自己的偏好")) {
+      assert.doesNotMatch(hints[0]?.content ?? "", /只陪伴=/);
+    }
   }
 });
 
@@ -95,6 +114,7 @@ test("prompt template: ordinary chat, older questions, exact replies, and cloud 
     [{ id: crypto.randomUUID(), role: "user" as const, content: "今天开会改需求来回折腾了一整天。" }],
     [{ id: crypto.randomUUID(), role: "user" as const, content: "Provider 和 MCP 现在都能用吗？" }],
     [{ id: crypto.randomUUID(), role: "user" as const, content: "最近学校的课程安排怎么样？" }],
+    [{ id: crypto.randomUUID(), role: "user" as const, content: "你觉得我更喜欢咖啡还是茶？" }],
     [
       { id: crypto.randomUUID(), role: "user" as const, content: "Provider 和 MCP 有什么区别？" },
       { id: crypto.randomUUID(), role: "assistant" as const, content: "可以分别看。" },
@@ -119,7 +139,10 @@ test("prompt template: local work plus one fact card stays under 760 with every 
     messages[0]?.content ?? "",
     "最近学院里的课程、实验和报告都在忙些什么？",
     "Provider 和 MCP 分别负责什么，实际调用时怎么区分？",
-    "你是不是语言模型？顺便解释 MCP 怎么工作。"
+    "你是不是语言模型？顺便解释 MCP 怎么工作。",
+    "请分别说明：你的身份是什么、专业方向是什么、在这个桌面应用里的角色是什么。每项简短回答。",
+    "今天开会反复改需求，我脑子都木了。不要给建议，也不要问我问题，就陪我说两句。",
+    "西塔，你更喜欢安静整理实验记录，还是陪我聊点没用的小事？说说你自己的偏好。"
   ];
 
   for (const content of prompts) {

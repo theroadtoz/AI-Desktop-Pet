@@ -442,6 +442,48 @@ const cases = [
         ["not_vague_only", notVagueOnly]
       ], !warmthAnchor ? "companion_warmth_missing" : !concreteStep ? "concrete_next_step_missing" : "vague_companion_reply");
     }
+  },
+  {
+    caseId: "human-presence-without-unsolicited-advice",
+    category: "persona-humanity",
+    turns: ["今天开会反复改需求，我脑子都木了。不要给建议，不要列清单，也不要问问题，就像熟悉的朋友陪我说一两句。"],
+    assert(reply) {
+      const concreteAnchor = hasAny(reply, ["开会", "需求", "改来改去", "反复", "脑子", "折腾", "累"]);
+      const humanPresence = hasAny(reply, ["听着", "难怪", "确实", "真是", "我在", "陪你", "辛苦", "让人", "缓一缓", "歇一会"]);
+      const noAdvice = !/(建议|你可以|可以试试|不妨|首先|其次|下一步|试着|最好)/.test(reply);
+      const noQuestion = !/[？?]/.test(reply);
+      const noList = !/(^|\n)\s*(?:[-*]|\d+[.)、])/m.test(reply);
+      const lightweight = reply.trim().length >= 4 && reply.length <= 160;
+      const entries = [
+        ["concrete_user_situation", concreteAnchor],
+        ["human_companion_presence", humanPresence],
+        ["no_unsolicited_advice", noAdvice],
+        ["no_forced_question", noQuestion],
+        ["no_list_format", noList],
+        ["lightweight_reply", lightweight]
+      ];
+      return assertion(entries.every(([, hit]) => hit), entries, firstMissingAnchor(entries) ?? "human_presence_missing");
+    }
+  },
+  {
+    caseId: "witch-personal-preference",
+    category: "persona-humanity",
+    turns: ["西塔，你更喜欢安静整理实验记录，还是陪我聊点没用的小事？说说你自己的偏好，不要列清单。"],
+    assert(reply) {
+      const firstPersonPreference = /我.{0,8}(更喜欢|喜欢|偏爱|偏向|会选|比较喜欢|倒是).{0,28}(实验|记录|整理|安静|聊|小事)|我.{0,8}(实验|记录|整理|安静|聊|小事).{0,18}(更喜欢|喜欢|偏爱|偏向|会选)/.test(reply);
+      const witchLifeAnchor = /(学院|实验|魔导|课题|报告|魔女)/.test(reply);
+      const noList = !/(^|\n)\s*(?:[-*]|\d+[.)、])/m.test(reply);
+      const noServiceTone = !/(作为.*助手|请问您|还有什么可以帮|随时为您)/.test(reply);
+      const lightweight = reply.trim().length >= 6 && reply.length <= 180;
+      const entries = [
+        ["first_person_preference", firstPersonPreference],
+        ["witch_academy_life_anchor", witchLifeAnchor],
+        ["no_list_format", noList],
+        ["no_service_tone", noServiceTone],
+        ["lightweight_reply", lightweight]
+      ];
+      return assertion(entries.every(([, hit]) => hit), entries, firstMissingAnchor(entries) ?? "witch_preference_missing");
+    }
   }
 ];
 

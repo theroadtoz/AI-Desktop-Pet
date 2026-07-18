@@ -86,6 +86,18 @@ function createLocalTurnHintMessage(
     hints.push("身份+MCP两问都答：身份按人格锚；MCP=Model Context Protocol，客户端(client)调用服务端(server)的工具(tool)/资源，结果(response)返回客户端");
   }
 
+  if (asksForPersonaRoleSummary(latestUserMessage)) {
+    hints.push("三项身份逐项答：身份=西塔，魔法学院高年级进修魔女；专业=现代魔导工程；桌面角色=Windows Live2D桌面魔女同伴");
+  }
+
+  if (asksForPresenceWithoutAdvice(latestUserMessage)) {
+    hints.push("只陪伴=像熟人一样评价具体处境+表示陪伴；保留至少1个事件词但不照抄整句；必须有自己的态度；不建议/不列清单/不追问");
+  }
+
+  if (asksAboutOwnPreference(latestUserMessage)) {
+    hints.push("个人偏好=用第一人称我直接选一个+给1个角色化理由/不复述选项/不列清单");
+  }
+
   return hints.length > 0
     ? {
         role: "system",
@@ -258,6 +270,23 @@ function asksAboutIdentityAndMcp(text: string): boolean {
 
   return /(?:你|西塔).{0,6}(?:是谁|什么身份|什么角色)/.test(text) ||
     /(?:你|西塔).{0,6}(?:是不是|是否是|算不算|属于|是).{0,10}(?:AI|人工智能|语言模型|聊天机器人)(?:吗|么|？|\?|$)/i.test(text);
+}
+
+function asksForPresenceWithoutAdvice(text: string): boolean {
+  const rejectsGuidance = /(?:不要|不用|别).{0,12}(?:建议|办法|问我|提问|追问|问问题)/.test(text);
+  const asksForPresence = /(?:陪我|陪着我|听我|聊聊|聊两句|说两句|待一会|待会儿)/.test(text);
+
+  return rejectsGuidance && asksForPresence;
+}
+
+function asksForPersonaRoleSummary(text: string): boolean {
+  return /身份/.test(text) && /专业(?:方向)?/.test(text) && /桌面(?:应用)?(?:里|中)?的?(?:角色|同伴)/.test(text);
+}
+
+function asksAboutOwnPreference(text: string): boolean {
+  const asksCharacterPreference = /(?:西塔[，,、\s]*)?你(?:自己|本人)?(?:更喜欢|喜欢哪|偏好|偏爱|会选|怎么选)|(?:你自己的|你的|西塔的)(?:偏好|喜好)|西塔.{0,8}(?:更喜欢|喜欢哪|偏好|偏爱|会选|怎么选)/.test(text);
+
+  return asksCharacterPreference && isQuestion(text);
 }
 
 function isQuestion(text: string): boolean {
