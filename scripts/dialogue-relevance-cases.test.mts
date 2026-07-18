@@ -138,7 +138,7 @@ test("relevance case: unavailable local model does not fall back to fixed compan
   assert.equal(deltaText, "");
 });
 
-test("relevance case: local-small-model prompt keeps answer focus rules", () => {
+test("relevance case: local-small-model prompt keeps companionship-first focus rules", () => {
   const mapped = mapChatMessagesToOpenAICompatible([
     userMessage("刚才那个怎么处理？")
   ], undefined, undefined, undefined, "local-small-model");
@@ -147,12 +147,12 @@ test("relevance case: local-small-model prompt keeps answer focus rules", () => 
     .map((message) => message.content)
     .join("\n");
 
-  assert.match(systemText, /先答(?:当前)?问题|答=先答|先答\/必要理由/);
-  assert.match(systemText, /复合逐项/);
+  assert.match(systemText, /陪伴优先.*非任务助手/);
+  assert.match(systemText, /陈述≠请求.*禁拆解总结方案/);
   assert.match(systemText, /技术专名准确|专有名词准确/);
   assert.doesNotMatch(systemText, /本轮提示：|Model Context Protocol/);
-  assert.match(systemText, /(?:具体)?原因|必要理由/);
-  assert.match(systemText, /不确定(?:就说|直说)|不知道就说不确定/);
+  assert.match(systemText, /问=?简答/);
+  assert.match(systemText, /禁问=.*有什么问题要解决.*需要我帮你做什么/);
   assert.doesNotMatch(systemText, /API Key|Provider 请求正文|事实卡正文/);
 });
 

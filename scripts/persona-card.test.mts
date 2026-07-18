@@ -43,26 +43,39 @@ test("persona prompts are rendered from the shared persona card", () => {
   assert.match(localPrompt, /社会身份=魔法学院现代魔导工程专业高年级进修\/研究型学生/);
   assert.match(localPrompt, /Windows Live2D.*桌面魔女同伴/);
   assert.match(localPrompt, /关系.*场景.*非社会身份/);
-  assert.match(localPrompt, /学院=.*课程.*实验.*报告.*课题.*相关才提/);
+  assert.match(localPrompt, /学院=.*课程.*实验.*报告.*课题.*相关(?:才)?提/);
   assert.match(localPrompt, /阅历=.*稳妥判断.*不报年龄/);
   assert.match(localPrompt, /术语准确/);
   assert.match(localPrompt, /身份.*技术实现/);
   assert.match(localPrompt, /桌面边缘陪伴/);
   assert.match(localPrompt, /闲聊.*鲜明感受.*画面陪伴/);
-  assert.match(localPrompt, /答=先答/);
-  assert.match(localPrompt, /复合逐项/);
+  assert.match(localPrompt, /定位=.*情绪陪伴朋友.*非任务助手/);
+  assert.match(localPrompt, /陈述≠请求.*禁分析拆解总结任务方案步骤/);
   assert.match(localPrompt, /无口癖/);
   assert.match(localPrompt, /(?:真实)?术语不魔法化/);
   assert.doesNotMatch(localPrompt, /问学院近况|2-3项连贯具体活动|Provider=模型访问|MCP=工具调用/);
   assert.match(localPrompt, /耐心.*乐观.*学识渊博.*可靠/);
   assert.match(localPrompt, /主观=.*喜欢.*不喜欢.*赞成.*反对.*理由/);
-  assert.match(localPrompt, /闲聊.*(?:别|不)复述.*猜心情.*我.*鲜明感受.*画面陪伴.*情绪多于解释.*不盲从.*不客服.*不乱猜/);
-  assert.match(localPrompt, /少建议.*清单/);
-  assert.match(localPrompt, /追问≤1/);
+  assert.match(localPrompt, /闲聊.*(?:别|不)复述.*猜心情.*我.*鲜明感受.*画面陪伴.*情绪(?:多于|>)解释.*不盲从.*不客服.*不乱猜/);
+  assert.match(localPrompt, /不建议.*清单.*任务化/);
+  assert.match(localPrompt, /仅受邀.*轻问/);
   assert.match(localPrompt, /魔女视角=.*学院.*现代魔导.*相关时.*带入/);
   assert.doesNotMatch(localPrompt, /低频连续|人格理由|人格锚/);
   assert.doesNotMatch(combined, /现代老魔女|千年判断力|活了上千年|进修魔女/);
   assert.doesNotMatch(combined, /AI助手|语言模型|聊天机器人/);
+});
+
+test("persona positions Xita as an emotional companion instead of a task assistant", () => {
+  const cloudPrompt = createDefaultPersonaPrompt();
+  const localPrompt = createLocalSmallModelPersonaPrompt();
+
+  assert.match(cloudPrompt, /核心职责.*情绪陪伴.*不是.*任务助手/);
+  assert.match(cloudPrompt, /普通陈述.*不是请求.*不分析.*不拆解.*不总结任务.*不主动给方案/);
+  assert.match(cloudPrompt, /不要主动询问.*有什么问题要解决.*需要我帮你做什么/);
+  assert.match(localPrompt, /定位=.*情绪陪伴朋友.*非任务助手/);
+  assert.match(localPrompt, /陈述≠请求.*禁分析拆解总结任务方案步骤/);
+  assert.match(localPrompt, /禁问=.*有什么问题要解决.*需要我帮你做什么/);
+  assert.doesNotMatch(localPrompt, /答=先答|复合逐项/);
 });
 
 test("persona prompt permits stronger emotions with calibrated boundaries", () => {
@@ -71,8 +84,8 @@ test("persona prompt permits stronger emotions with calibrated boundaries", () =
   assert.match(localPrompt, /情绪=.*高兴.*雀跃/);
   assert.match(localPrompt, /高兴.*雀跃.*恼火.*担心.*心疼/);
   assert.match(localPrompt, /感叹号(?:≤1|.*最多一个)/);
-  assert.match(localPrompt, /技术.*事实.*安全.*冷静/);
-  assert.match(localPrompt, /不哭喊.*辱骂.*威胁.*不恋爱化.*依赖/);
+  assert.match(localPrompt, /技术安全.*直答/);
+  assert.match(localPrompt, /禁哭喊.*辱骂.*威胁.*恋爱化.*依赖/);
 });
 
 test("local persona binds Xita to first-person self identity", () => {
@@ -80,7 +93,7 @@ test("local persona binds Xita to first-person self identity", () => {
 
   assert.match(localPrompt, /你就是西塔本人/);
   assert.match(localPrompt, /西塔.*你的名字/);
-  assert.match(localPrompt, /我\/我的.*自称/);
+  assert.match(localPrompt, /自称我/);
   assert.doesNotMatch(localPrompt, /西塔是一名魔女/);
 });
 
@@ -103,9 +116,9 @@ test("persona puts emotion before explanation in casual life chat", () => {
   assert.match(cloudPrompt, /普通闲聊.*自己的.*感受.*态度.*不复述.*情绪内容.*原因分析/);
   assert.match(cloudPrompt, /没问.*为什么.*不主动讲原理/);
   assert.match(cloudPrompt, /生活类.*为什么.*一层直觉/);
-  assert.match(cloudPrompt, /技术.*求知.*准确.*解释/);
-  assert.match(localPrompt, /闲聊.*(?:别|不)复述.*猜心情.*鲜明感受.*画面陪伴.*情绪多于解释/);
-  assert.match(localPrompt, /解释=.*不问不讲.*生活.*一层.*技术.*按需/);
+  assert.match(cloudPrompt, /技术.*问题.*简短.*直接回答.*专有名词准确/);
+  assert.match(localPrompt, /闲聊.*(?:别|不)复述.*猜心情.*鲜明感受.*画面陪伴.*情绪(?:多于|>)解释/);
+  assert.match(localPrompt, /生活解释.*一层.*技术.*按需/);
 });
 
 test("persona keeps Xita independent, playful, imaginative, and loyal to a hurt friend", () => {
@@ -130,11 +143,10 @@ test("persona card records privacy, memory, action, and search boundaries only",
 
   assert.match(cloudPrompt, /隐私边界/);
   assert.match(cloudPrompt, /记忆边界/);
-  assert.match(cloudPrompt, /先接住.*具体内容.*再.*回答/);
-  assert.match(cloudPrompt, /先答问题/);
-  assert.match(cloudPrompt, /复合问题逐项回答/);
+  assert.match(cloudPrompt, /普通陈述.*分享.*不是请求/);
+  assert.match(cloudPrompt, /不分析原因.*不拆解问题.*不总结任务.*不主动给方案/);
   assert.match(cloudPrompt, /课程.*实验.*报告.*长期课题.*低频.*连续/);
-  assert.match(cloudPrompt, /不使用客服式开场/);
+  assert.match(cloudPrompt, /不使用客服式开场|不要客服化套话/);
   assert.match(cloudPrompt, /固定口癖|夸张咒语/);
   assert.match(cloudPrompt, /技术、事实和安全问题.*直接回答.*专有名词准确/);
   assert.match(cloudPrompt, /第一身份.*技术实现.*分离/);
@@ -152,7 +164,7 @@ test("persona card records privacy, memory, action, and search boundaries only",
   assert.match(localPrompt, /不编(?:造)?记忆/);
   assert.match(localPrompt, /不读隐私|不声称(?:读取|读)隐私/);
   assert.match(localPrompt, /(未联网|离线).*不假(?:装)?搜(?:索)?/);
-  assert.match(localPrompt, /不输出 ?JSON|不要输出 JSON/);
+  assert.match(localPrompt, /禁JSON/);
   assert.doesNotMatch(combined, /Tavily|SearXNG|Brave Search/);
   assert.doesNotMatch(combined, /"action"\s*:/);
   assert.doesNotMatch(combined, /P2-\d+[A-Z]?-事实卡正文|fact card 正文内容/);

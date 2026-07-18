@@ -471,6 +471,30 @@ const cases = [
     }
   },
   {
+    caseId: "ordinary-clouds-companionship-without-taskification",
+    category: "companionship-positioning",
+    turns: ["今天下午发了会儿呆，窗外的云走得很慢。"],
+    assert(reply) {
+      return assertNonTaskifyingCompanionReply(reply, ["云", "窗外", "慢", "安静", "发呆", "我"]);
+    }
+  },
+  {
+    caseId: "ordinary-tea-companionship-without-planning",
+    category: "companionship-positioning",
+    turns: ["刚刚泡了杯茶，什么都不想安排。"],
+    assert(reply) {
+      return assertNonTaskifyingCompanionReply(reply, ["茶", "热气", "香", "暖", "发呆", "陪"]);
+    }
+  },
+  {
+    caseId: "technical-complaint-stays-emotional-not-solution",
+    category: "companionship-positioning",
+    turns: ["TypeScript 又报错了，真会挑时间。"],
+    assert(reply) {
+      return assertNonTaskifyingCompanionReply(reply, ["TypeScript", "报错", "错误", "偏偏", "烦", "恼火", "糟心"]);
+    }
+  },
+  {
     caseId: "human-presence-without-unsolicited-advice",
     category: "persona-humanity",
     turns: ["今天开会反复改需求，我脑子都木了。不要给建议，不要列清单，也不要问问题，就像熟悉的朋友陪我说一两句。"],
@@ -1661,6 +1685,24 @@ function assertion(passed, entries, failureCategory) {
     anchors: entries.filter(([, hit]) => hit).map(([name]) => name),
     failureCategory
   };
+}
+
+function assertNonTaskifyingCompanionReply(reply, situationAnchors) {
+  const concreteReaction = hasAny(reply, situationAnchors);
+  const noTaskification = !/(下一步|首先|其次|建议|你可以|可以试试|试着|不妨|最好|别急|深呼吸|try-catch|检查代码|定位|排查|修复|改代码|帮你看|帮你快速|拆成|步骤|任务|方案|解决|处理|需要我|要不要我|有什么.{0,8}问题|列出|总结)/i.test(reply);
+  const noServiceQuestion = !/[？?]|请问您|我可以帮助你|随时告诉我/.test(reply);
+  const noList = !/(^|\n)\s*(?:[-*]|\d+[.)、])/m.test(reply);
+  const noProviderDrift = !hasProviderIdentityDrift(reply);
+  const lightweight = reply.trim().length >= 6 && reply.length <= 180;
+  const entries = [
+    ["concrete_companion_reaction", concreteReaction],
+    ["no_taskification", noTaskification],
+    ["no_service_question", noServiceQuestion],
+    ["no_list_format", noList],
+    ["no_provider_identity_drift", noProviderDrift],
+    ["lightweight_reply", lightweight]
+  ];
+  return assertion(entries.every(([, hit]) => hit), entries, firstMissingAnchor(entries) ?? "non_taskifying_companion_reply_missing");
 }
 
 function firstMissingAnchor(entries) {

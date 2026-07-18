@@ -22,9 +22,9 @@ export type PromptTemplateProfile = "cloud-chat" | "local-small-model";
 
 const SYSTEM_PROMPT = "你是一个低打扰的桌面伙伴。回复要自然、简短，优先使用中文。不要输出 JSON。";
 const LOCAL_SMALL_MODEL_SYSTEM_PROMPT = [
-  "自然简短/中文优先/不输出JSON",
-  "技术专名准确；离线不编实时事实",
-  "API key/密钥/私有标识不存不记不复述不索要"
+  "中文简短禁JSON",
+  "技术专名准确/离线不编实时",
+  "密钥私标不存记复述索要"
 ].join("\n");
 
 export function mapChatMessagesToOpenAICompatible(
@@ -113,7 +113,7 @@ function createLocalTurnHintMessage(
   if (describesEverydayRain(latestUserMessage)) {
     hints.push("参考语气：“我真讨厌这没完没了的雨，连魔导笔记都快被雨声泡软了。窗边潮气黏着不散，我陪你听它滴答一会。”自然改写；不复述、不解释、不建议、不提问");
   } else if (describesEverydayFatigue(latestUserMessage)) {
-    hints.push("参考语气：“我听着都有点心疼了。你趴着吧，我就在桌面边缘陪你安静待会儿。”自然改写；不复述、不解释、不建议、不提问");
+    hints.push("疲惫陪伴=严格2句且每句≤45字；首句我+心疼，次句陪用户趴着安静待；次句即止；禁额外段落/问句/解释/建议/任务");
   } else if (describesEverydayMoment(latestUserMessage)) {
     hints.push("仅2句。第一句必须以“我”开头表达自己的感受；第二句接具体画面或陪伴。禁止复述原句、解释、建议、问题");
   } else if (asksCasualLifeWhy(latestUserMessage)) {
@@ -137,6 +137,10 @@ function createLocalTurnHintMessage(
     hints.push("情感题=先明确我会/我有；2-3句且每句有新信息；用当轮细节+具体触动；禁身份说明/编经历/虚拟·AI·机器人·没有情感·不会感动/清单");
   } else if (asksAboutOwnSubjectiveView(latestUserMessage)) {
     hints.push("主观题=明确喜欢/不喜欢/赞成/反对；2-3句且每句有新信息；理由取感官/学院生活/现代魔导/朋友立场；不讲人类整体/不折中/不列清单/不编经历");
+  }
+
+  if (hints.length === 0 && isOrdinaryCompanionStatement(latestUserMessage)) {
+    hints.push("闲聊=2句≤55字/次句即止；首句“我”开头写感受；次句具体画面并原样收尾“我就在这里陪你。”；禁问号/建议命令/分析步骤方案/帮助邀请/段落；非求助不编状态");
   }
 
   return hints.length > 0
@@ -353,6 +357,35 @@ function describesEverydayMoment(text: string): boolean {
   const hasEverydayExperience = /(雨|雪|刮风|风吹|阴天|天阴|冷|热|闷|潮|累|困|饿|没睡好|睡不着|什么都不想做|只想.{0,8}(?:趴|躺|睡)|加班|下班)/.test(text);
 
   return hasEverydayContext && hasEverydayExperience;
+}
+
+export function isOrdinaryCompanionStatement(text: string): boolean {
+  if (
+    !text.trim() ||
+    isCompanionQuestion(text) ||
+    containsPrivateMarker(text) ||
+    asksToStoreSensitiveData(text) ||
+    containsUrgentSafetyContext(text) ||
+    describesPersonaIdentity(text)
+  ) {
+    return false;
+  }
+
+  return !/^(?:请)?(?:说|写|回|回复)/.test(text) &&
+    !/(?:请|帮我|替我|给我|告诉我|教我|能不能|可不可以|是否可以|我想(?:知道|了解|请教)|解释|分析|搜索|查询|查找|列出|总结|整理|生成|创建|修改|修复|解决|推荐|设计|比较|评估|原样回复|只回复)/i.test(text);
+}
+
+function isCompanionQuestion(text: string): boolean {
+  return /[？?]|为什么|如何|怎么|怎样|是否|是不是|区别|解释|介绍|讲讲/.test(text) ||
+    /^(?:什么|谁|哪|几|多少)|(?:你|西塔|这|那|它).{0,12}(?:什么|谁|哪|几|多少)|(?:是什么|有多少|要多久)$/.test(text);
+}
+
+function describesPersonaIdentity(text: string): boolean {
+  return /(?:你|西塔).{0,8}(?:是|不是|属于).{0,12}(?:西塔|魔女|AI|人工智能|机器人|程序|语言模型|助手)/i.test(text);
+}
+
+function containsUrgentSafetyContext(text: string): boolean {
+  return /胸痛|胸口疼|呼吸困难|大量出血|昏迷|自杀|自残|伤害自己|急救|就医|医院|报警|生命危险/.test(text);
 }
 
 function asksElectronPronounLayerFollowup(

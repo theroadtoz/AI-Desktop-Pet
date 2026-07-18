@@ -80,6 +80,11 @@ test("search classifier only triggers for explicit search or freshness-sensitive
   assert.equal(classifySearchQuery("今天 Electron 最新版本是多少？").shouldSearch, true);
   assert.equal(classifySearchQuery("请告诉我今天最新的科技新闻。").shouldSearch, true);
   assert.equal(classifySearchQuery("我今天中午吃什么比较好？").shouldSearch, false);
+  assert.deepEqual(classifySearchQuery("刚刚泡了杯茶，什么都不想安排。"), {
+    shouldSearch: false,
+    reasonCodes: ["no_search_needed"]
+  });
+  assert.equal(classifySearchQuery("刚刚发布了什么新版本？").shouldSearch, true);
   assert.deepEqual(classifySearchQuery("2+3 等于多少？"), {
     shouldSearch: false,
     reasonCodes: ["no_search_needed"]

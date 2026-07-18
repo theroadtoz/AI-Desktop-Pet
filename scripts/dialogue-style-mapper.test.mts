@@ -35,6 +35,9 @@ test("dialogue style mapper creates distinct mode prompts without expanding memo
 
   assert.match(defaultMapped[2]?.content ?? "", /默认陪伴/);
   assert.match(workMapped[2]?.content ?? "", /当前模式：工作/);
+  assert.match(workMapped[2]?.content ?? "", /陪伴优先.*不是任务助手/);
+  assert.match(workMapped[2]?.content ?? "", /安静.*陪伴.*不.*拆任务.*下一步/);
+  assert.doesNotMatch(workMapped[2]?.content ?? "", /优先拆下一步|给清晰行动建议/);
   assert.match(gameMapped[2]?.content ?? "", /当前模式：游戏/);
   assert.match(readingMapped[2]?.content ?? "", /当前模式：读书/);
   assert.notEqual(defaultMapped[2]?.content, workMapped[2]?.content);
@@ -106,7 +109,8 @@ test("fake provider replies vary by dialogue mode and stay short", async () => {
   const readingReply = await streamFakeReply(provider, "conversation-mode", "我们聊聊", "reading");
 
   assert.match(defaultReply.result.text, /我听到了。|嗯，我在。/);
-  assert.match(workReply.result.text, /先抓下一步。|我们直接拆任务。/);
+  assert.match(workReply.result.text, /我安静陪你。|忙你的吧，我在旁边陪着。/);
+  assert.doesNotMatch(workReply.result.text, /下一步|拆任务|建议|需要我|要解决/);
   assert.match(gameReply.result.text, /好，来点轻快的。|可以，先轻松一下。/);
   assert.match(readingReply.result.text, /慢慢看。|我们安静地理一遍。/);
   assert.ok(workReply.result.text.length <= 60);

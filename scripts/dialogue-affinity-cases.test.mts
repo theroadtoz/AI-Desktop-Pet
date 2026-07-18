@@ -72,15 +72,15 @@ test("affinity reply case: emotional reply is warmer while keeping the concrete 
   assertNoForbiddenAffinity(reply.text);
 });
 
-test("affinity reply case: review setback gets a concrete next step", async () => {
+test("affinity reply case: review setback gets emotional support without task breakdown", async () => {
   const reply = await streamFakeReply("affinity-review-setback", [
     userMessage("今天评审被打回来了，我不知道怎么继续")
   ]);
 
   assert.match(reply.text, /评审|打回/);
-  assert.match(reply.text, /继续|下一步|先/);
-  assert.match(reply.text, /具体问题|最小|一处|小步/);
-  assert.ok(reply.text.length <= 90);
+  assert.match(reply.text, /憋屈|难受|心疼|陪着/);
+  assert.doesNotMatch(reply.text, /下一步|具体问题|最小行动|小步|列出|记下来/);
+  assert.ok(reply.text.length <= 100);
   assertNoForbiddenAffinity(reply.text);
 });
 
@@ -100,7 +100,7 @@ test("affinity reply case: fact, current time, and common sense answers stay dir
   assert.match(boilingReply.text, /100/);
 });
 
-test("affinity prompt case: style rules say warm tone must not outrank the answer", () => {
+test("affinity prompt case: companionship is primary while explicit facts stay accurate", () => {
   const mapped = mapChatMessagesToOpenAICompatible([
     userMessage("当前时间")
   ], undefined, undefined, undefined, "local-small-model", runtimeContext);
@@ -109,15 +109,15 @@ test("affinity prompt case: style rules say warm tone must not outrank the answe
     .map((message) => message.content)
     .join("\n");
 
-  assert.match(systemText, /先答(?:当前)?问题|答=先答|先答\/必要理由/);
-  assert.match(systemText, /复合逐项/);
+  assert.match(systemText, /陪伴优先.*非任务助手/);
+  assert.match(systemText, /陈述≠请求.*禁拆解总结方案/);
   assert.match(systemText, /耐心|乐观|亲切|共情/);
   assert.match(systemText, /事实|日期|时间/);
-  assert.match(systemText, /先答.*必要理由/);
-  assert.match(systemText, /日常情绪/);
-  assert.match(systemText, /普通闲聊.*自己的鲜明感受.*具体画面|闲聊.*鲜明感受.*画面陪伴|日常情绪.*自己感受.*画面陪伴/);
+  assert.match(systemText, /技术安全=直答|问简答.*技术专名准/);
+  assert.match(systemText, /日常=/);
+  assert.match(systemText, /闲聊=.*鲜明感受.*画面陪伴|日常=.*我先说感受.*画面陪伴/);
   assert.match(systemText, /桌面边缘陪伴/);
-  assert.match(systemText, /技术(?:事实)?安全.*无角色开场/);
+  assert.match(systemText, /技术.*无角色开场/);
   assert.doesNotMatch(systemText, /完整 prompt|Provider 请求正文|API Key|事实卡正文/);
 });
 

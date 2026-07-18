@@ -547,30 +547,73 @@ test("local OpenAI-compatible provider streams SSE without Authorization and kee
     assert.equal(body.stream, true);
     assert.equal(body.reasoning_effort, undefined);
     assert.equal(body.chat_template_kwargs, undefined);
-    assert.match(body.messages?.[0]?.content ?? "", /自然简短.*中文优先.*不输出 ?JSON/);
+    assert.match(body.messages?.[0]?.content ?? "", /中文简短禁JSON/);
     assert.match(body.messages?.[0]?.content ?? "", /技术专名准确/);
     assert.doesNotMatch(body.messages?.[0]?.content ?? "", /现代老魔女|千年判断力|活了上千年/);
     assert.doesNotMatch(body.messages?.[0]?.content ?? "", /西塔|进修魔女|现代魔导工程进修生|桌面魔女同伴/);
-    assert.match(body.messages?.[0]?.content ?? "", /API key\/密钥\/私有标识.*不存不记不复述不索要/);
+    assert.match(body.messages?.[0]?.content ?? "", /密钥私标.*不存记复述索要/);
     assert.match(body.messages?.[1]?.content ?? "", /你就是西塔本人.*魔女/);
     assert.match(body.messages?.[1]?.content ?? "", /社会身份=魔法学院现代魔导工程专业高年级进修\/研究型学生/);
     assert.match(body.messages?.[1]?.content ?? "", /Windows Live2D.*桌面魔女同伴/);
     assert.match(body.messages?.[1]?.content ?? "", /关系.*场景.*非社会身份/);
-    assert.match(body.messages?.[1]?.content ?? "", /西塔=你的名字.*我\/我的自称/);
+    assert.match(body.messages?.[1]?.content ?? "", /西塔=你的名字.*自称我/);
     assert.doesNotMatch(body.messages?.[1]?.content ?? "", /现代老魔女|千年判断力|活了上千年/);
-    assert.match(body.messages?.[2]?.content ?? "", /工作=下一步/);
-    assert.match(body.messages?.[2]?.content ?? "", /先答/);
-    assert.match(body.messages?.[2]?.content ?? "", /复合逐项/);
+    assert.match(body.messages?.[2]?.content ?? "", /工作=安静陪伴.*不拆任务下一步/);
+    assert.match(body.messages?.[2]?.content ?? "", /陪伴优先.*非任务助手/);
+    assert.match(body.messages?.[2]?.content ?? "", /陈述≠请求.*禁拆解总结方案/);
     assert.equal(body.messages?.some((message) => message.content?.startsWith("本轮提示：")), false);
-    assert.match(body.messages?.[1]?.content ?? "", /桌面边缘(?:轻声)?陪伴|收拢思路/);
-    assert.match(body.messages?.[2]?.content ?? "", /画面陪伴|下一步/);
-    assert.match(body.messages?.[2]?.content ?? "", /技术(?:事实)?安全.*无角色开场/);
+    assert.match(body.messages?.[1]?.content ?? "", /桌面边缘陪伴/);
+    assert.match(body.messages?.[2]?.content ?? "", /画面陪伴|安静陪伴/);
+    assert.match(body.messages?.[2]?.content ?? "", /技术.*无角色开场/);
     assert.ok(systemLength(body.messages ?? []) < 760);
     assert.ok(body.messages?.some((message) => message.content?.includes("用户喜欢被叫测试者")));
     assert.equal(deltaText, "你好，本地模型在。");
     assert.equal(result.text, "你好，本地模型在。");
     assert.ok(result.emotion.length > 0);
     assert.ok(result.intensity.length > 0);
+  } finally {
+    await close(server);
+  }
+});
+
+test("local provider removes service questions after an ordinary companionship reply", async () => {
+  const server = createServer((_request: IncomingMessage, response: ServerResponse) => {
+    response.writeHead(200, { "Content-Type": "text/event-stream" });
+    for (const chunk of [
+      "我很喜欢茶香慢慢散开的安静劲儿。",
+      "你最近有没有什么特别想聊的话题？",
+      "需要我帮你整理也可以。"
+    ]) {
+      response.write(`data: ${JSON.stringify({ choices: [{ delta: { content: chunk } }] })}\n\n`);
+    }
+    response.end("data: [DONE]\n\n");
+  });
+
+  try {
+    await listen(server);
+    const address = server.address();
+    assert.equal(typeof address, "object");
+    assert.ok(address);
+
+    const provider = createOpenAICompatibleProvider({
+      providerId: "local-openai-compatible",
+      baseURL: `http://127.0.0.1:${address.port}/v1`,
+      model: "qwen3.5-2b-q4_k_m",
+      temperature: 0.7,
+      maxTokens: 240,
+      timeoutMs: 60000
+    });
+    let deltaText = "";
+    const result = await provider.streamReply(createMinimalRequest("刚刚泡了杯茶，什么都不想安排。"), {
+      signal: new AbortController().signal,
+      onDelta(delta) {
+        deltaText += delta.text;
+      }
+    });
+
+    assert.equal(result.text, "我很喜欢茶香慢慢散开的安静劲儿。我就在这里陪你。");
+    assert.equal(deltaText, result.text);
+    assert.doesNotMatch(result.text, /[？?]|帮你|整理|话题/);
   } finally {
     await close(server);
   }
@@ -672,7 +715,7 @@ test("local Qwen3.5 provider merges system messages for its strict chat template
     assert.equal(body.chat_template_kwargs?.enable_thinking, false);
     assert.equal(systemMessages.length, 1);
     assert.equal(body.messages?.[0]?.role, "system");
-    assert.match(systemMessages[0]?.content ?? "", /自然简短.*中文优先/s);
+    assert.match(systemMessages[0]?.content ?? "", /中文简短禁JSON/s);
     assert.match(systemMessages[0]?.content ?? "", /你就是西塔本人.*魔女/s);
     assert.match(systemMessages[0]?.content ?? "", /技术(?:事实)?安全/s);
   } finally {

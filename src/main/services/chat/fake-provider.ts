@@ -8,58 +8,58 @@ import { getLatestUserMessage } from "./chat-message-mapper";
 import { classifyEmotion } from "./emotion-classifier";
 
 const REPLIES: Readonly<Record<EmotionTag, string>> = {
-  neutral: "我听到了。先陪你把这件事慢慢理清楚。",
+  neutral: "我听到了。就这样随便和我说说也很好。",
   happy: "听起来很不错，我也跟着开心起来了。",
-  sad: "我在这里。难过的时候可以先慢一点说。",
+  sad: "我在这里。难过的时候不用急着把自己说明白。",
   surprised: "这听起来有点突然，我会认真听你讲。",
-  confused: "我有点没完全理解，我们可以一步一步来。",
-  angry: "我明白这让人很烦，先深呼吸一下。"
+  confused: "我有点没完全听懂，不过我愿意继续陪你聊。",
+  angry: "这确实让人火大，我听着都替你不痛快。"
 };
 
 const REPLY_VARIANTS: Readonly<Record<EmotionTag, readonly string[]>> = {
   neutral: [
-    "我们先把最重要的一点抓住。",
-    "先把它拆成一小步就好。",
-    "我陪你把线头理出来。"
+    "我听着呢，就这样随便说说也很好。",
+    "嗯，我在，这句话我会好好接住。",
+    "我愿意陪你在这里多待一会儿。"
   ],
   happy: [
     "听起来很不错，我也跟着开心起来了。",
-    "这真是个好消息。要不要顺手把下一步也定下来？",
-    "太好了。先把这份顺利稳稳接住。"
+    "这真是个好消息，我听着都想笑起来了。",
+    "太好了，这份顺利真让人心里亮堂。"
   ],
   sad: [
-    "难过的时候可以先慢一点说。",
-    "听起来有点沉。你可以先说最难受的那一小块。",
-    "先缓一缓也没关系，我会认真听。"
+    "难过的时候不用急着说明白，我就在这里。",
+    "听起来有点沉，我会安静陪着你。",
+    "我听着有点心疼，会认真陪你待一会儿。"
   ],
   surprised: [
     "这听起来有点突然，我会认真听你讲。",
-    "确实挺意外的。我们先看眼下最需要处理什么。",
+    "确实挺意外的，我听着都愣了一下。",
     "嗯，这一下信息量不小。你先说，我跟上。"
   ],
   confused: [
-    "这里还没完全清楚，我们可以一步一步来。",
-    "这里可能有点绕。我们先把问题说成一句话。",
-    "没关系，先从你最不确定的地方开始。"
+    "我还没完全听懂，但我愿意继续听你说。",
+    "这里有点绕，不过不用急着把它讲得很完整。",
+    "没关系，我先陪你待在这份迷糊里。"
   ],
   angry: [
-    "我明白这让人很烦，先深呼吸一下。",
-    "这确实容易让人上火。我们先把可控的部分拎出来。",
-    "先别急着硬扛。你说，我帮你一起理。"
+    "这真的很烦，我听着都替你窝火。",
+    "这确实容易让人上火，换我也会不痛快。",
+    "真是的，偏偏要这样折腾人，我站你这边。"
   ]
 };
 
 const MODE_PREFIXES: Readonly<Record<DialogueModeId, readonly string[]>> = {
   default: ["我听到了。", "嗯，我在。"],
-  work: ["先抓下一步。", "我们直接拆任务。"],
+  work: ["我安静陪你。", "忙你的吧，我在旁边陪着。"],
   game: ["好，来点轻快的。", "可以，先轻松一下。"],
-  reading: ["慢慢看。", "我们安静地理一遍。"]
+  reading: ["慢慢看。", "我安静听着。"]
 };
 
 const PERSONA_ANCHOR = getPersonaDialogueAnchor(DEFAULT_PERSONA_CARD);
 const PERSONA_IDENTITY_REPLY =
   `我是${DEFAULT_PERSONA_CARD.name}，${PERSONA_ANCHOR.identity[0]}，也是${PERSONA_ANCHOR.identity[1]}；` +
-  `现在是你的 ${PERSONA_ANCHOR.identity[2]}。普通问题我会先答事，技术问题会用准确术语，再短短陪你收束。`;
+  `现在是你的 ${PERSONA_ANCHOR.identity[2]}。我主要陪你简单聊天、接住情绪，不会把随口分享拆成任务。`;
 
 export function createFakeChatProvider(): ChatProvider {
   return {
@@ -165,21 +165,21 @@ function createDailyCompanionReply(
 ): ChatProviderResult | null {
   if (/随便聊|聊两句|闲聊/.test(latestUserMessage)) {
     return {
-      text: "嗯，我在。可以随便聊两句，先从今天最占心的一件小事开始。",
+      text: "可以啊，没用的小事也很值得说。我就在桌面边缘，陪你想到哪儿聊到哪儿。",
       ...classification
     };
   }
 
   if (/茶|咖啡|脑子.*散|有点散/.test(latestUserMessage)) {
     return {
-      text: "茶先放在手边就好。脑子散的时候，我们只抓一个线头。",
+      text: "茶的热气慢慢飘着就很好。我也想挨着那点暖意，陪你发会儿呆。",
       ...classification
     };
   }
 
   if (/下午.*空|今天.*空|有点空|没什么事/.test(latestUserMessage)) {
     return {
-      text: "这个下午可以空一点。先留十分钟，再决定要不要做一小步。",
+      text: "空一点的下午也很好，像学院走廊忽然安静下来。我就在桌面边缘陪你待着。",
       ...classification
     };
   }
@@ -248,7 +248,7 @@ function createQualityReply(
 
   if (asksForUncertainFact(latestUserMessage)) {
     return {
-      text: "这点我不确定，需要查证后再下结论。先把已知条件列出来，会更稳一些。",
+      text: "这点我不确定，需要查证后再下结论；我不想拿猜测敷衍你。",
       ...classification
     };
   }
@@ -325,7 +325,7 @@ function createRelevanceReply(
 
   if (sharesSpecificEmotionalReason(latestUserMessage)) {
     return {
-      text: "评审没过当然会难受，我在这儿。先把被指出的一个具体问题记下来，今晚不急着全盘否定自己。",
+      text: "评审没过当然会难受，我听着都替你憋屈。今晚先让我陪着你，别急着把这次结果算成自己的错。",
       ...classification
     };
   }

@@ -6,6 +6,7 @@ import type { TelemetryPayload } from "../telemetry";
 import {
   mapChatMessagesToOpenAICompatible,
   getLatestUserMessage,
+  isOrdinaryCompanionStatement,
   type OpenAICompatibleMessage,
   type PromptTemplateProfile
 } from "./chat-message-mapper";
@@ -83,6 +84,8 @@ export function createOpenAICompatibleProvider(
       }
 
       const providerMessages = getProviderMessages(request);
+      const shouldConstrainCompanionReply = providerId === "local-openai-compatible" &&
+        isOrdinaryCompanionStatement(latestUserMessage);
 
       log(options, "provider_request_started", {
         providerId,
@@ -100,9 +103,16 @@ export function createOpenAICompatibleProvider(
           signal: streamOptions.signal,
           onDelta(text) {
             replyText += text;
-            streamOptions.onDelta({ text });
+            if (!shouldConstrainCompanionReply) {
+              streamOptions.onDelta({ text });
+            }
           }
         });
+
+        if (shouldConstrainCompanionReply) {
+          replyText = constrainOrdinaryCompanionReply(replyText, latestUserMessage);
+          streamOptions.onDelta({ text: replyText });
+        }
 
         const classification = classifyEmotion({
           latestUserMessage,
@@ -146,6 +156,58 @@ export function createOpenAICompatibleProvider(
       }
     }
   };
+}
+
+const TASKIFYING_COMPANION_TAIL_PATTERN = /下一步|首先|其次|建议|你可以|可以试试|试着|不妨|最好|别急|深呼吸|检查代码|定位|排查|修复|改代码|帮你|需要我|要不要我|有什么.{0,8}问题|想聊.{0,8}话题|列出|总结|整理|步骤|任务|方案|解决|处理/i;
+
+function constrainOrdinaryCompanionReply(reply: string, latestUserMessage: string): string {
+  const sentences = reply.trim().match(/[^。！？!?\r\n]+[。！？!?]?/g) ?? [];
+  const kept: string[] = [];
+
+  for (const sentence of sentences) {
+    const normalized = sentence.trim();
+    if (!normalized || /[？?]/.test(normalized) || TASKIFYING_COMPANION_TAIL_PATTERN.test(normalized)) {
+      break;
+    }
+
+    kept.push(normalized);
+    if (kept.length === 2) {
+      break;
+    }
+  }
+
+  let constrained = kept.join("").trim();
+  if (!constrained) {
+    constrained = createCompanionFallback(latestUserMessage);
+  }
+  if (!/[。！!]$/.test(constrained)) {
+    constrained += "。";
+  }
+  if (!/我就在这里陪你/.test(constrained)) {
+    constrained += "我就在这里陪你。";
+  }
+
+  return constrained;
+}
+
+function createCompanionFallback(latestUserMessage: string): string {
+  if (/茶|咖啡|热饮/.test(latestUserMessage)) {
+    return "我也喜欢热气慢慢散开的安静劲儿";
+  }
+  if (/云|窗外|发呆/.test(latestUserMessage)) {
+    return "我看着慢吞吞的云也会跟着安静下来";
+  }
+  if (/TypeScript|报错|错误|bug/i.test(latestUserMessage)) {
+    return "我也会被这种偏偏挑时候冒出来的报错惹恼";
+  }
+  if (/累|疲惫|趴|不想做/.test(latestUserMessage)) {
+    return "我有点心疼你";
+  }
+  if (/雨/.test(latestUserMessage)) {
+    return "我也讨厌这场没完没了的雨";
+  }
+
+  return "我听见了，也愿意陪你安静待一会儿";
 }
 
 async function streamChatCompletions(input: {
@@ -428,7 +490,7 @@ function createLocalExactReply(request: ChatRequest, latestUserMessage: string):
 
 function createPersonaIdentityReply(): string {
   const anchor = getPersonaDialogueAnchor(DEFAULT_PERSONA_CARD);
-  return `我是${DEFAULT_PERSONA_CARD.name}，${anchor.identity[0]}。当前社会身份是${anchor.identity[1]}；现在作为${anchor.identity[2]}待在你的桌面边缘，陪你聊天、整理事情和回答问题。`;
+  return `我是${DEFAULT_PERSONA_CARD.name}，${anchor.identity[0]}。当前社会身份是${anchor.identity[1]}；现在作为${anchor.identity[2]}待在你的桌面边缘，陪你简单聊天、接住情绪，不把随口分享拆成任务。`;
 }
 
 const TECHNICAL_IDENTITY_TERM = String.raw`(?:AI助手|人工智能助手|语言模型|聊天机器人|ChatGPT|OpenAI|通用助手|AI|人工智能|程序|软件|代码)`;

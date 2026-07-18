@@ -71,9 +71,10 @@ test("quality case: mode differences are observable and persona remains stable",
   const readingReply = await streamFakeReply("quality-mode", input, "reading");
 
   assert.match(defaultReply.text, /我听到了。|嗯，我在。/);
-  assert.match(workReply.text, /先抓下一步。|我们直接拆任务。/);
+  assert.match(workReply.text, /我安静陪你。|忙你的吧，我在旁边陪着。/);
+  assert.doesNotMatch(workReply.text, /下一步|拆任务|建议|需要我|要解决/);
   assert.match(gameReply.text, /好，来点轻快的。|可以，先轻松一下。/);
-  assert.match(readingReply.text, /慢慢看。|我们安静地理一遍。/);
+  assert.match(readingReply.text, /慢慢看。|我安静听着。/);
   for (const reply of [defaultReply, workReply, gameReply, readingReply]) {
     assertNoForbiddenPatterns(reply.text);
     assert.doesNotMatch(reply.text, /中二|咒语|玄学/);
