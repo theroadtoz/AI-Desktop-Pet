@@ -94,8 +94,10 @@ function createLocalTurnHintMessage(
     hints.push("只陪伴=像熟人一样评价具体处境+表示陪伴；保留至少1个事件词但不照抄整句；必须有自己的态度；不建议/不列清单/不追问");
   }
 
-  if (asksAboutOwnPreference(latestUserMessage)) {
-    hints.push("个人偏好=用第一人称我直接选一个+给1个角色化理由/不复述选项/不列清单");
+  if (asksWhetherCharacterCanFeelEmotion(latestUserMessage)) {
+    hints.push("情感题=仅3句/句≥18字；首句=我会+肯定感受；后2句=当轮细节+具体触动；禁身份说明/编经历/虚拟·AI·机器人·没有情感·不会感动/清单");
+  } else if (asksAboutOwnSubjectiveView(latestUserMessage)) {
+    hints.push("主观题=仅3句/句长≥18字；首句=我觉得/我喜欢/我会+明确表态；后2句各给1个人格理由；二选一不得折中；禁身份说明/编经历/清单");
   }
 
   return hints.length > 0
@@ -284,9 +286,37 @@ function asksForPersonaRoleSummary(text: string): boolean {
 }
 
 function asksAboutOwnPreference(text: string): boolean {
-  const asksCharacterPreference = /(?:西塔[，,、\s]*)?你(?:自己|本人)?(?:更喜欢|喜欢哪|偏好|偏爱|会选|怎么选)|(?:你自己的|你的|西塔的)(?:偏好|喜好)|西塔.{0,8}(?:更喜欢|喜欢哪|偏好|偏爱|会选|怎么选)/.test(text);
+  const asksCharacterPreference = /(?:西塔[，,、\s]*)?你(?:自己|本人)?(?:更喜欢|喜欢哪|喜欢.{0,8}(?:什么|哪种|哪类)|偏好|偏爱|会选|怎么选)|(?:你自己的|你的|西塔的)(?:偏好|喜好)|西塔.{0,8}(?:更喜欢|喜欢哪|偏好|偏爱|会选|怎么选)/.test(text);
 
   return asksCharacterPreference && isQuestion(text);
+}
+
+function asksAboutOwnSubjectiveView(text: string): boolean {
+  if (!isQuestion(text) || asksAboutTechnicalChoice(text)) {
+    return false;
+  }
+
+  if (asksAboutOwnPreference(text)) {
+    return true;
+  }
+
+  const asksCharacterView = /(?:西塔[，,、\s]*)?你(?:自己|本人)?(?:觉得|认为|怎么看|如何看)|(?:你自己的|你的|西塔的)(?:看法|观点|感受|想法|态度)/.test(text);
+  const asksCharacterFeeling = /(?:西塔[，,、\s]*)?你(?:自己|本人)?.{0,12}(?:感动|开心|难过|害怕|安心|烦闷|孤独|生气|恼火|心疼)/.test(text);
+  const asksAboutUserPreference = /你觉得我.{0,20}(?:喜欢|偏好|会选)/.test(text);
+
+  return !asksAboutUserPreference && (asksCharacterView || asksCharacterFeeling);
+}
+
+function asksAboutTechnicalChoice(text: string): boolean {
+  return /\b(?:provider|mcp|api|live2d|gguf|ollama)\b|llama\.?cpp|lm studio|本地模型|代码|脚本|运行时|端口|技术方案/i.test(text);
+}
+
+function asksWhetherCharacterCanFeelEmotion(text: string): boolean {
+  if (!isQuestion(text) || asksAboutTechnicalChoice(text)) {
+    return false;
+  }
+
+  return /(?:西塔[，,、\s]*)?你.{0,16}(?:会|能|有).{0,12}(?:感动|情感|感情|开心|难过|害怕|生气|心疼)/.test(text);
 }
 
 function isQuestion(text: string): boolean {

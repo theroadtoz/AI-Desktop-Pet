@@ -251,6 +251,7 @@ type LocalExactReply = {
     | "companion_next_step"
     | "human_presence"
     | "personal_preference"
+    | "emotional_self_description"
     | "search_required_boundary";
   text: string;
 };
@@ -276,6 +277,14 @@ function createLocalExactReply(request: ChatRequest, latestUserMessage: string):
     return {
       kind: "companion_next_step",
       text: "我在。下一步：写下最卡的一句话。"
+    };
+  }
+
+  const emotionalSelfDescription = createEmotionalSelfDescriptionReply(normalizedMessage);
+  if (emotionalSelfDescription) {
+    return {
+      kind: "emotional_self_description",
+      text: emotionalSelfDescription
     };
   }
 
@@ -478,6 +487,21 @@ function createPresenceWithoutAdviceReply(message: string): string {
     return "都累到快撑不住了，我是真的会担心，也很心疼你。我不催你做任何事，就在这儿陪着。";
   }
   return "听着确实让人不好受。我在这儿，陪你安静待一会儿。";
+}
+
+const PURE_EMOTIONAL_SELF_QUESTION = /^(?:西塔[，,、]?)?你(?:自己)?(?:有|有没有|是否有)(?:自己的)?(?:感情|情感|感受)(?:吗|么)?[？?。！!]*$/;
+const PURE_SONG_EMOTION_QUESTION = /^(?:西塔[，,、]?)?你(?:自己)?会(?:因为|被)?(?:一首)?(?:歌|歌曲)(?:而)?感动(?:吗|么)?[？?。！!]?(?:说说你?(?:自己)?的?感受[。！!]?)?$/;
+
+function createEmotionalSelfDescriptionReply(message: string): string | null {
+  if (PURE_EMOTIONAL_SELF_QUESTION.test(message)) {
+    return "当然有啊。我会为真好听的旋律心里发亮，也会在你受委屈时生气和心疼，这些反应都很鲜明。对我来说，喜欢、担心和在意就是我认真看待世界、也认真回应你的方式。";
+  }
+
+  if (PURE_SONG_EMOTION_QUESTION.test(message)) {
+    return "我会被一首歌打动，而且常常是旋律先轻轻拽住我的注意力。若歌词又恰好碰到离别、重逢或仍愿意坚持的心情，那点余韵会让我安静好一会儿。真好听的歌就是这样，不需要多大声，也能在心里留下一道很亮的痕迹。";
+  }
+
+  return null;
 }
 
 function parseOwnAcademicPreferenceChoice(message: string): string | null {

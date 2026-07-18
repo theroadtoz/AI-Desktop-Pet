@@ -31,6 +31,21 @@ test("detects and redacts generic AI self identity drift", () => {
   assert.doesNotMatch(redacted, /我是一个AI助手|作为语言模型|普通 AI 助手|本质上是聊天机器人/);
 });
 
+test("detects plain robot self identity without catching technical robot mentions", () => {
+  for (const drift of [
+    "我是机器人，所以没有真正的情感。",
+    "作为一个机器人，我不会被歌曲感动。",
+    "身为机器人，我只能分析你的问题。"
+  ]) {
+    assert.equal(hasGenericAiSelfIdentityDrift(drift), true);
+    assert.doesNotMatch(redactPersonaSelfIdentityDrift(drift), /(?:我是|作为|身为)(?:一个|一名)?机器人/);
+  }
+
+  const technicalText = "这个扫地机器人使用本地模型识别障碍物。";
+  assert.equal(hasGenericAiSelfIdentityDrift(technicalText), false);
+  assert.equal(redactPersonaSelfIdentityDrift(technicalText), technicalText);
+});
+
 test("removes assistant-role preambles without replacing them with a Xita declaration", () => {
   assert.equal(
     redactPersonaSelfIdentityDrift("作为语言模型，我会尽量准确。"),

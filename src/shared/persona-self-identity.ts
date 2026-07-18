@@ -1,6 +1,6 @@
 import { DEFAULT_PERSONA_CARD, type PersonaCard } from "./persona-card";
 
-const GENERIC_AI_ROLE_SOURCE = String.raw`(?:普通|通用)?\s*(?:AI\s*助手|人工智能助手|语言模型|聊天机器人)`;
+const GENERIC_AI_ROLE_SOURCE = String.raw`(?:普通|通用)?\s*(?:AI\s*助手|人工智能助手|语言模型|聊天机器人|机器人)`;
 const PROVIDER_IDENTITY_TERM_SOURCE = String.raw`(?:ChatGPT|OpenAI|${GENERIC_AI_ROLE_SOURCE}|通用助手)`;
 const FIRST_PERSON_SELF_IDENTITY_SOURCE = String.raw`我是\s*(?:一个|一名)?\s*${GENERIC_AI_ROLE_SOURCE}(?=[，,。；;！!]|$)`;
 const ROLE_SELF_IDENTITY_SOURCE = String.raw`(?:作为|身为)\s*(?:一个|一名)?\s*${GENERIC_AI_ROLE_SOURCE}(?=[，,。；;！!]|$)`;

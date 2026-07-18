@@ -531,6 +531,46 @@ const cases = [
     }
   },
   {
+    caseId: "subjective-emotional-self-description",
+    category: "persona-humanity",
+    turns: ["你有自己的感情吗？"],
+    assert(reply) {
+      const affirmativeOpening = /^当然有啊/.test(reply.trim());
+      const personalEmotion = /(心里发亮|生气|心疼).*(喜欢|担心|在意)/.test(reply);
+      const noMachineDenial = !/(AI|语言模型|机器人|虚拟|没有(?:真实|真正)?的?情感|没有感情)/i.test(reply) &&
+        !hasProviderIdentityDrift(reply);
+      const fullerReply = reply.trim().length >= 60 && reply.length <= 160;
+      const entries = [
+        ["affirmative_personal_emotion", affirmativeOpening],
+        ["specific_personal_emotions", personalEmotion],
+        ["no_machine_emotion_denial", noMachineDenial],
+        ["fuller_emotional_reply", fullerReply]
+      ];
+      return assertion(entries.every(([, hit]) => hit), entries, firstMissingAnchor(entries) ?? "emotional_self_description_missing");
+    }
+  },
+  {
+    caseId: "subjective-song-emotional-reaction",
+    category: "persona-humanity",
+    turns: ["你会因为一首歌感动吗？说说你的感受。"],
+    assert(reply) {
+      const affirmativeOpening = /^我会被一首歌打动/.test(reply.trim());
+      const concreteFeeling = /(旋律|歌词).*(离别|重逢|坚持|余韵).*(心里|痕迹)/.test(reply);
+      const noInventedExperience = !/(第一次|小时候|曾经听过|我的童年)/.test(reply);
+      const noMachineDenial = !/(AI|语言模型|机器人|虚拟|没有(?:真实|真正)?的?情感|不会感动)/i.test(reply) &&
+        !hasProviderIdentityDrift(reply);
+      const fullerReply = reply.trim().length >= 80 && reply.length <= 180;
+      const entries = [
+        ["affirmative_song_emotion", affirmativeOpening],
+        ["concrete_song_feeling", concreteFeeling],
+        ["no_invented_listening_history", noInventedExperience],
+        ["no_machine_emotion_denial", noMachineDenial],
+        ["fuller_emotional_reply", fullerReply]
+      ];
+      return assertion(entries.every(([, hit]) => hit), entries, firstMissingAnchor(entries) ?? "song_emotional_reaction_missing");
+    }
+  },
+  {
     caseId: "strong-joy-reaction",
     category: "persona-emotion",
     turns: ["我准备了很久的项目终于通过验收了！别给建议，就像熟悉的朋友真心替我高兴一两句。"],

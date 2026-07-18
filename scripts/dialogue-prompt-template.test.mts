@@ -90,7 +90,23 @@ test("prompt template: local semantic hints depend only on the latest user quest
     },
     {
       content: "西塔，你更喜欢安静整理实验记录，还是陪我聊点没用的小事？说说你自己的偏好。",
-      pattern: /个人偏好=.*第一人称我.*直接选一个.*1个角色化理由.*不复述选项.*不列清单/
+      pattern: /主观题=.*仅3句.*句.*18字.*首句.*我觉得.*我喜欢.*我会.*明确表态.*后2句.*各给1个.*人格.*理由.*二选一.*不得折中.*身份.*经历.*清单/
+    },
+    {
+      content: "你喜欢听什么样的音乐？为什么？",
+      pattern: /主观题=.*仅3句.*句.*18字.*首句.*我觉得.*我喜欢.*我会.*明确表态.*后2句.*各给1个.*人格.*理由.*身份.*经历.*清单/
+    },
+    {
+      content: "你会因为一首歌感动吗？说说你自己的感受。",
+      pattern: /情感题=.*仅3句.*句.*18字.*首句.*我会.*肯定感受.*后2句.*当轮细节.*具体触动.*身份.*经历.*虚拟.*AI.*机器人.*没有情感.*不会感动.*清单/
+    },
+    {
+      content: "你有自己的感情吗？",
+      pattern: /情感题=.*仅3句.*句.*18字.*首句.*我会.*肯定感受.*后2句.*当轮细节.*具体触动.*身份.*经历.*虚拟.*AI.*机器人.*没有情感.*不会感动.*清单/
+    },
+    {
+      content: "你觉得孤独是坏事吗？我想听你自己的看法。",
+      pattern: /主观题=.*仅3句.*句.*18字.*首句.*我觉得.*我喜欢.*我会.*明确表态.*后2句.*各给1个.*人格.*理由.*身份.*经历.*清单/
     }
   ];
 
@@ -103,7 +119,7 @@ test("prompt template: local semantic hints depend only on the latest user quest
     assert.equal(hints.length, 1);
     assert.match(hints[0]?.content ?? "", item.pattern);
     assert.doesNotMatch(hints[0]?.content ?? "", /固定回复|逐字回答|exact reply/i);
-    if (item.content.includes("你自己的偏好")) {
+    if (/你自己的(?:偏好|感受|看法)/.test(item.content)) {
       assert.doesNotMatch(hints[0]?.content ?? "", /只陪伴=/);
     }
   }
@@ -115,6 +131,7 @@ test("prompt template: ordinary chat, older questions, exact replies, and cloud 
     [{ id: crypto.randomUUID(), role: "user" as const, content: "Provider 和 MCP 现在都能用吗？" }],
     [{ id: crypto.randomUUID(), role: "user" as const, content: "最近学校的课程安排怎么样？" }],
     [{ id: crypto.randomUUID(), role: "user" as const, content: "你觉得我更喜欢咖啡还是茶？" }],
+    [{ id: crypto.randomUUID(), role: "user" as const, content: "你觉得 Provider 和 MCP 哪个更适合这个技术方案？" }],
     [
       { id: crypto.randomUUID(), role: "user" as const, content: "Provider 和 MCP 有什么区别？" },
       { id: crypto.randomUUID(), role: "assistant" as const, content: "可以分别看。" },
@@ -142,7 +159,11 @@ test("prompt template: local work plus one fact card stays under 760 with every 
     "你是不是语言模型？顺便解释 MCP 怎么工作。",
     "请分别说明：你的身份是什么、专业方向是什么、在这个桌面应用里的角色是什么。每项简短回答。",
     "今天开会反复改需求，我脑子都木了。不要给建议，也不要问我问题，就陪我说两句。",
-    "西塔，你更喜欢安静整理实验记录，还是陪我聊点没用的小事？说说你自己的偏好。"
+    "西塔，你更喜欢安静整理实验记录，还是陪我聊点没用的小事？说说你自己的偏好。",
+    "你喜欢听什么样的音乐？为什么？",
+    "你会因为一首歌感动吗？说说你自己的感受。",
+    "你有自己的感情吗？",
+    "你觉得孤独是坏事吗？我想听你自己的看法。"
   ];
 
   for (const content of prompts) {

@@ -274,6 +274,16 @@ test("local provider answers narrow exact local questions without model fetch", 
     {
       message: "西塔，你更喜欢安静整理实验记录，还是陪我聊点没用的小事？说说你自己的偏好，不要列清单。",
       expected: /^我更喜欢安静整理实验记录。.*魔力.*踏实感。$/
+    },
+    {
+      message: "你有自己的感情吗？",
+      expected: /^当然有啊。.*旋律.*心里发亮.*受委屈.*生气.*心疼.*喜欢.*担心.*在意.*认真回应你的方式。$/,
+      noProviderIdentityDrift: true
+    },
+    {
+      message: "你会因为一首歌感动吗？说说你的感受。",
+      expected: /^我会被一首歌打动.*旋律.*歌词.*离别.*重逢.*坚持.*余韵.*真好听的歌.*心里.*痕迹。$/,
+      noProviderIdentityDrift: true
     }
   ];
 
