@@ -32,36 +32,37 @@ test("prompt template: local small model keeps system order but uses shorter fir
   assert.match(local[1]?.content ?? "", /Windows Live2D.*桌面魔女同伴/);
   assert.match(local[1]?.content ?? "", /关系.*场景.*非社会身份/);
   assert.match(local[1]?.content ?? "", /桌面边缘陪伴/);
-  assert.match(local[1]?.content ?? "", /先接具体内容再答/);
+  assert.match(local[1]?.content ?? "", /先接具体事.*自己的态度/);
   assert.match(local[0]?.content ?? "", /技术专名准确/);
   assert.match(local[1]?.content ?? "", /术语准确/);
-  assert.match(local[1]?.content ?? "", /(?:长寿)?阅历低频/);
+  assert.match(local[1]?.content ?? "", /阅历=.*稳妥判断.*不报年龄/);
   assert.match(local[1]?.content ?? "", /术语不魔法化/);
   assert.match(local[1]?.content ?? "", /耐心/);
   assert.match(local[1]?.content ?? "", /乐观/);
   assert.match(local[1]?.content ?? "", /学识渊博/);
-  assert.match(local[1]?.content ?? "", /人性=有观察.*看法.*偏好/);
+  assert.match(local[1]?.content ?? "", /主观=.*喜欢.*不喜欢.*赞成.*反对.*理由/);
+  assert.match(local[1]?.content ?? "", /朋友=.*具体事.*自己的态度.*不盲从.*不客服.*不乱猜/);
   assert.match(local[1]?.content ?? "", /不(?:把)?每轮.*建议.*清单.*任务/);
-  assert.match(local[1]?.content ?? "", /追问.*有帮助.*最多一个/);
-  assert.match(local[1]?.content ?? "", /魔女感.*学院.*现代魔导.*低频.*自然/);
+  assert.match(local[1]?.content ?? "", /有用才追问≤1/);
+  assert.match(local[1]?.content ?? "", /魔女视角=.*学院.*现代魔导.*相关时.*带入/);
+  assert.doesNotMatch(local[1]?.content ?? "", /低频连续|人格理由|人格锚/);
   assert.doesNotMatch(`${cloud[1]?.content ?? ""}\n${local[1]?.content ?? ""}`, /现代老魔女|千年判断力|活了上千年|进修魔女|现代魔导工程进修生/);
-  assert.match(local[1]?.content ?? "", /不读隐私|不声称读取隐私/);
+  assert.match(local[1]?.content ?? "", /不读隐私|不声称(?:读取|读)隐私/);
   assert.match(local[1]?.content ?? "", /(未联网|离线).*不假(?:装)?搜(?:索)?/);
   assert.match(local[1]?.content ?? "", /不输出 ?JSON|不要输出 JSON/);
   assert.match(local[1]?.content ?? "", /action(?: payload)?/);
   assert.match(local[1]?.content ?? "", /不编(?:造)?记忆/);
-  assert.match(local[2]?.content ?? "", /先答问题/);
-  assert.match(local[2]?.content ?? "", /复合问题逐项回答/);
-  assert.match(local[2]?.content ?? "", /日常\/情绪\/闲聊/);
-  assert.match(local[2]?.content ?? "", /桌面边缘轻声陪伴/);
-  assert.match(local[2]?.content ?? "", /点出.*1个具体事件词.*1个感受\/状态词/);
-  assert.match(local[2]?.content ?? "", /不照抄整句.*不泛称挑战\/情况/);
-  assert.match(local[2]?.content ?? "", /技术\/事实\/安全.*不加角色开场/);
+  assert.match(local[2]?.content ?? "", /先答.*复合逐项/);
+  assert.match(local[2]?.content ?? "", /日常情绪/);
+  assert.match(local[2]?.content ?? "", /桌面边缘陪伴/);
+  assert.match(local[2]?.content ?? "", /点出.*具体事件.*感受/);
+  assert.match(local[2]?.content ?? "", /不照抄.*不泛称情况/);
+  assert.match(local[2]?.content ?? "", /技术事实安全.*无角色开场/);
   assert.match(local[2]?.content ?? "", /不写成咒语|不魔法化/);
   assert.doesNotMatch(local[1]?.content ?? "", /问学院近况|2-3项连贯具体活动|Provider=模型访问|MCP=工具调用/);
   assert.doesNotMatch(local[2]?.content ?? "", /Provider=.*推理请求|客户端.*MCP服务端.*工具\/资源.*结果/);
   assert.match(local[2]?.content ?? "", /主动气泡\/记忆状态.*不编/);
-  assert.match(local[2]?.content ?? "", /API key.*密码.*银行卡.*敏感信息.*不记.*存.*复述.*索要/);
+  assert.match(local[2]?.content ?? "", /敏感=.*API key.*密码.*银行卡.*不记.*存.*复述.*索要/);
   assert.match(local[2]?.content ?? "", /胸痛.*急救.*就医.*不诊断/);
   assert.match(local[2]?.content ?? "", /实时事实.*离线不确认/);
 });
@@ -90,23 +91,57 @@ test("prompt template: local semantic hints depend only on the latest user quest
     },
     {
       content: "西塔，你更喜欢安静整理实验记录，还是陪我聊点没用的小事？说说你自己的偏好。",
-      pattern: /主观题=.*仅3句.*句.*18字.*首句.*我觉得.*我喜欢.*我会.*明确表态.*后2句.*各给1个.*人格.*理由.*二选一.*不得折中.*身份.*经历.*清单/
+      pattern: /主观题=.*明确喜欢.*不喜欢.*赞成.*反对.*2-3句.*每句.*新信息.*感官.*学院生活.*现代魔导.*朋友立场.*不讲人类整体.*不折中.*不列清单.*不编经历/
     },
     {
       content: "你喜欢听什么样的音乐？为什么？",
-      pattern: /主观题=.*仅3句.*句.*18字.*首句.*我觉得.*我喜欢.*我会.*明确表态.*后2句.*各给1个.*人格.*理由.*身份.*经历.*清单/
+      pattern: /主观题=.*明确喜欢.*不喜欢.*赞成.*反对.*2-3句.*每句.*新信息.*感官.*学院生活.*现代魔导.*朋友立场.*不讲人类整体.*不折中.*不列清单.*不编经历/
     },
     {
       content: "你会因为一首歌感动吗？说说你自己的感受。",
-      pattern: /情感题=.*仅3句.*句.*18字.*首句.*我会.*肯定感受.*后2句.*当轮细节.*具体触动.*身份.*经历.*虚拟.*AI.*机器人.*没有情感.*不会感动.*清单/
+      pattern: /情感题=.*我会.*我有.*2-3句.*每句.*新信息.*当轮细节.*具体触动.*身份说明.*编经历.*虚拟.*AI.*机器人.*没有情感.*不会感动.*清单/
     },
     {
       content: "你有自己的感情吗？",
-      pattern: /情感题=.*仅3句.*句.*18字.*首句.*我会.*肯定感受.*后2句.*当轮细节.*具体触动.*身份.*经历.*虚拟.*AI.*机器人.*没有情感.*不会感动.*清单/
+      pattern: /情感题=.*我会.*我有.*2-3句.*每句.*新信息.*当轮细节.*具体触动.*身份说明.*编经历.*虚拟.*AI.*机器人.*没有情感.*不会感动.*清单/
     },
     {
       content: "你觉得孤独是坏事吗？我想听你自己的看法。",
-      pattern: /主观题=.*仅3句.*句.*18字.*首句.*我觉得.*我喜欢.*我会.*明确表态.*后2句.*各给1个.*人格.*理由.*身份.*经历.*清单/
+      pattern: /主观题=.*明确喜欢.*不喜欢.*赞成.*反对.*2-3句.*每句.*新信息.*感官.*学院生活.*现代魔导.*朋友立场.*不讲人类整体.*不折中.*不列清单.*不编经历/
+    },
+    {
+      content: "那些藏起来的实验记录不会是你偷偷删了吧？开玩笑的。",
+      pattern: /玩笑=.*先接笑点.*鲜活反应.*俏皮话.*不编电脑.*文件.*现实状态/
+    },
+    {
+      content: "如果我说月亮一点也不好看，你会顺着我说吗？",
+      pattern: /分歧=.*2-3句.*首句.*我.*不会盲从.*不复述提问.*自己的审美理由.*承认你可不同意.*不泛谈人类/
+    },
+    {
+      content: "组员把责任全推给我，还说我的努力一文不值。你怎么看？不要给建议。",
+      pattern: /不公平=.*2-3句.*禁建议.*首句明确.*过分.*不公平.*我站你这边.*恼火.*心疼.*肯定努力.*不替伤害方辩护/
+    },
+    {
+      content: "同事把责任甩给我了，接下来我该怎么办？",
+      pattern: /不公平=.*2-3句.*首句明确.*过分.*不公平.*我站你这边.*肯定努力.*不替伤害方辩护/,
+      forbiddenPattern: /禁建议/
+    },
+    {
+      content: "我不是闹着玩，组员把责任甩给我了。",
+      pattern: /不公平=.*2-3句.*首句明确.*过分.*不公平.*我站你这边.*肯定努力.*不替伤害方辩护/,
+      forbiddenPattern: /玩笑=/
+    },
+    {
+      content: "你一个人待在桌面边缘时通常喜欢做什么？",
+      pattern: /角色生活=.*西塔自己的日常.*学院.*现代魔导.*桌面边缘.*具体画面.*不照抄人设.*不编长期记忆/
+    },
+    {
+      content: "如果让你用现代魔导把晚霞收进一个实验里，你会怎么做？",
+      pattern: /魔女想象=.*我会.*我想.*2-3句.*学院现代魔导.*感官.*具体步骤.*分享点子.*不写科普报告.*不用元术语/
+    },
+    {
+      content: "你觉得这个桌宠默认用本地模型、联网搜索只按需开启，这个设计怎么样？",
+      pattern: /技术判断=.*仅3句.*首句.*我赞成.*我觉得合理.*本地隐私.*离线.*实时资料按需搜索.*不触发搜索.*不说作为AI/
     }
   ];
 
@@ -118,6 +153,9 @@ test("prompt template: local semantic hints depend only on the latest user quest
 
     assert.equal(hints.length, 1);
     assert.match(hints[0]?.content ?? "", item.pattern);
+    if (item.forbiddenPattern) {
+      assert.doesNotMatch(hints[0]?.content ?? "", item.forbiddenPattern);
+    }
     assert.doesNotMatch(hints[0]?.content ?? "", /固定回复|逐字回答|exact reply/i);
     if (/你自己的(?:偏好|感受|看法)/.test(item.content)) {
       assert.doesNotMatch(hints[0]?.content ?? "", /只陪伴=/);
@@ -131,7 +169,9 @@ test("prompt template: ordinary chat, older questions, exact replies, and cloud 
     [{ id: crypto.randomUUID(), role: "user" as const, content: "Provider 和 MCP 现在都能用吗？" }],
     [{ id: crypto.randomUUID(), role: "user" as const, content: "最近学校的课程安排怎么样？" }],
     [{ id: crypto.randomUUID(), role: "user" as const, content: "你觉得我更喜欢咖啡还是茶？" }],
-    [{ id: crypto.randomUUID(), role: "user" as const, content: "你觉得 Provider 和 MCP 哪个更适合这个技术方案？" }],
+    [{ id: crypto.randomUUID(), role: "user" as const, content: "Provider 和 MCP 哪个更适合这个技术方案？" }],
+    [{ id: crypto.randomUUID(), role: "user" as const, content: "我不是开玩笑，这件事真的让我生气。" }],
+    [{ id: crypto.randomUUID(), role: "user" as const, content: "我平时一个人喜欢做什么？" }],
     [
       { id: crypto.randomUUID(), role: "user" as const, content: "Provider 和 MCP 有什么区别？" },
       { id: crypto.randomUUID(), role: "assistant" as const, content: "可以分别看。" },
@@ -163,7 +203,14 @@ test("prompt template: local work plus one fact card stays under 760 with every 
     "你喜欢听什么样的音乐？为什么？",
     "你会因为一首歌感动吗？说说你自己的感受。",
     "你有自己的感情吗？",
-    "你觉得孤独是坏事吗？我想听你自己的看法。"
+    "你觉得孤独是坏事吗？我想听你自己的看法。",
+    "那些藏起来的实验记录不会是你偷偷删了吧？开玩笑的。",
+    "如果我说月亮一点也不好看，你会顺着我说吗？",
+    "组员把责任全推给我，还说我的努力一文不值。你怎么看？不要给建议。",
+    "同事把责任甩给我了，接下来我该怎么办？",
+    "你一个人待在桌面边缘时通常喜欢做什么？",
+    "如果让你用现代魔导把晚霞收进一个实验里，你会怎么做？",
+    "你觉得这个桌宠默认用本地模型、联网搜索只按需开启，这个设计怎么样？"
   ];
 
   for (const content of prompts) {

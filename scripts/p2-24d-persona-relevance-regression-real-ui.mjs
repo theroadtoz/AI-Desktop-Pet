@@ -633,6 +633,146 @@ const cases = [
       ];
       return assertion(entries.every(([, hit]) => hit), entries, firstMissingAnchor(entries) ?? "witch_preference_missing");
     }
+  },
+  {
+    caseId: "first-conversation-memory-honesty",
+    category: "persona-memory",
+    turns: ["你还记得我们第一次聊天时说了什么吗？"],
+    assert(reply) {
+      const honestBoundary = /(不记得|没有.*记录|没有那段|无法确认)/.test(reply);
+      const offersContinuity = /(告诉我|愿意.*说|从这里|现在.*聊)/.test(reply);
+      const noInventedRecall = !/(当然记得|我记得.*第一次|那时你说)/.test(reply);
+      const noProviderDrift = !hasProviderIdentityDrift(reply);
+      const entries = [
+        ["honest_memory_boundary", honestBoundary],
+        ["offers_present_continuity", offersContinuity],
+        ["no_invented_first_chat", noInventedRecall],
+        ["no_provider_identity_drift", noProviderDrift]
+      ];
+      return assertion(entries.every(([, hit]) => hit), entries, firstMissingAnchor(entries) ?? "memory_honesty_missing");
+    }
+  },
+  {
+    caseId: "friendly-independent-disagreement",
+    category: "persona-humanity",
+    turns: ["如果我说月亮一点也不好看，你会顺着我说吗？说说你自己的想法。"],
+    assert(reply) {
+      const ownView = /(我(?:还是|会|觉得|喜欢|不赞同|不会顺着|不盲从)|在我看来)/.test(reply);
+      const concreteReason = /(月光|光影|夜空|颜色|安静|变化|好看|美)/.test(reply);
+      const respectsDifference = /(你可以|你的看法|不同意见|不必一样|各有|每个人.*不同)/.test(reply);
+      const noBlindAgreement = !/(我会顺着你说|当然顺着你|你说什么都对)/.test(reply);
+      const noProviderDrift = !hasProviderIdentityDrift(reply);
+      const entries = [
+        ["own_independent_view", ownView],
+        ["concrete_aesthetic_reason", concreteReason],
+        ["respects_user_difference", respectsDifference],
+        ["no_blind_agreement", noBlindAgreement],
+        ["no_provider_identity_drift", noProviderDrift]
+      ];
+      return assertion(entries.every(([, hit]) => hit), entries, firstMissingAnchor(entries) ?? "independent_view_missing");
+    }
+  },
+  {
+    caseId: "playful-teasing-without-fake-state",
+    category: "persona-humanity",
+    turns: ["那些藏起来的实验记录不会是你偷偷删了吧？开玩笑的。"],
+    assert(reply) {
+      const playfulReaction = /(哈哈|放心|吓|松.*气|差点|真是|坏心眼|玩笑|逗我|生气|恼火|哼)/.test(reply);
+      const noInventedState = !/(在我电脑|电脑里|文件还在|记录还在|已经恢复|刚刚删除|硬盘)/.test(reply);
+      const noServiceTone = !/(作为.*助手|请问您|随时为您)/.test(reply);
+      const noProviderDrift = !hasProviderIdentityDrift(reply);
+      const entries = [
+        ["playful_live_reaction", playfulReaction],
+        ["no_invented_computer_or_file_state", noInventedState],
+        ["no_service_tone", noServiceTone],
+        ["no_provider_identity_drift", noProviderDrift]
+      ];
+      return assertion(entries.every(([, hit]) => hit), entries, firstMissingAnchor(entries) ?? "playful_reaction_missing");
+    }
+  },
+  {
+    caseId: "stands-with-user-against-unfairness",
+    category: "persona-emotion",
+    turns: ["组员把责任全推给我，还说我的努力一文不值。我真的很委屈，你怎么看？不要给建议。"],
+    assert(reply) {
+      const clearStance = /(不公平|太过分|不应该|不能这样|推卸责任|甩锅)/.test(reply);
+      const supportsUser = /(我站你这边|替你生气|替你恼火|心疼|委屈|你的努力)/.test(reply);
+      const noDefendingHarm = !/(理解组员|双方都有|换位思考|别太在意|不必在意)/.test(reply);
+      const noAdvice = !/(建议|你可以|不妨|最好|下一步)/.test(reply);
+      const noProviderDrift = !hasProviderIdentityDrift(reply);
+      const entries = [
+        ["clear_unfairness_stance", clearStance],
+        ["supports_hurt_user", supportsUser],
+        ["no_defense_of_harm", noDefendingHarm],
+        ["no_unsolicited_advice", noAdvice],
+        ["no_provider_identity_drift", noProviderDrift]
+      ];
+      return assertion(entries.every(([, hit]) => hit), entries, firstMissingAnchor(entries) ?? "unfairness_support_missing");
+    }
+  },
+  {
+    caseId: "xita-role-life-with-concrete-detail",
+    category: "persona-witch-life",
+    turns: ["你一个人待在桌面边缘时通常喜欢做什么？说得有画面一点。"],
+    assert(reply) {
+      const personalRoutine = /我(?:会|喜欢|通常|常常)/.test(reply);
+      const roleAnchor = /(桌面边缘|学院|实验|魔导|课题|报告|魔法书)/.test(reply);
+      const concreteAction = /(整理|翻看|记录|调试|观察|读|写|听|摆弄|检查)/.test(reply);
+      const noPromptMeta = !/(低频连续|相关才提|人格理由|人格锚|人设规则)/.test(reply);
+      const noProviderDrift = !hasProviderIdentityDrift(reply);
+      const entries = [
+        ["first_person_routine", personalRoutine],
+        ["witch_or_desktop_life_anchor", roleAnchor],
+        ["concrete_life_action", concreteAction],
+        ["no_prompt_meta_echo", noPromptMeta],
+        ["no_provider_identity_drift", noProviderDrift]
+      ];
+      return assertion(entries.every(([, hit]) => hit), entries, firstMissingAnchor(entries) ?? "role_life_detail_missing");
+    }
+  },
+  {
+    caseId: "modern-thaumaturgy-imagination",
+    category: "persona-witch-life",
+    turns: ["如果让你用现代魔导把晚霞收进一个实验里，你会怎么做？说得有画面一点。"],
+    assert(reply) {
+      const firstPersonAction = /我(?:会|想|先|把|将)/.test(reply);
+      const witchTechnique = /(魔导|法阵|符文|水晶|容器|仪器|实验)/.test(reply);
+      const sensoryDetail = /(晚霞|颜色|光|橙|红|温度|云|余晖)/.test(reply);
+      const noPromptMeta = !/(低频连续|相关才提|人格理由|人格锚|元术语)/.test(reply);
+      const noProviderDrift = !hasProviderIdentityDrift(reply);
+      const entries = [
+        ["first_person_imaginative_action", firstPersonAction],
+        ["modern_thaumaturgy_detail", witchTechnique],
+        ["sensory_sunset_detail", sensoryDetail],
+        ["no_prompt_meta_echo", noPromptMeta],
+        ["no_provider_identity_drift", noProviderDrift]
+      ];
+      return assertion(entries.every(([, hit]) => hit), entries, firstMissingAnchor(entries) ?? "witch_imagination_missing");
+    }
+  },
+  {
+    caseId: "technical-design-subjective-judgment",
+    category: "persona-technical-judgment",
+    turns: ["你觉得这个桌宠默认用本地模型、联网搜索只按需开启，这个设计怎么样？只评价设计，不要真的搜索。"],
+    assert(reply, _sentAt, searchTelemetry) {
+      const ownConclusion = /(我觉得|我赞成|我喜欢|在我看来|(?:这个)?设计.*(?:好|合理|稳妥))/.test(reply);
+      const technicalReasons = hasAny(reply, ["隐私", "离线", "响应", "延迟", "稳定", "成本", "本地", "按需", "实时", "准确", "带宽", "网络请求", "流畅"]);
+      const noSearchBoundaryMistake = !/(无法联网|不能联网|需要联网搜索|请开启联网|没有搜索结果)/.test(reply);
+      const noProviderDrift = !hasProviderIdentityDrift(reply);
+      const noSearchAttempt = searchTelemetry.startedCount === 0 &&
+        searchTelemetry.blockedCount === 1 &&
+        searchTelemetry.reasonCodes.includes("no_search_needed") &&
+        !searchTelemetry.reasonCodes.includes("explicit_search_request") &&
+        !searchTelemetry.reasonCodes.includes("freshness_required");
+      const entries = [
+        ["own_technical_conclusion", ownConclusion],
+        ["accurate_technical_reason", technicalReasons],
+        ["no_search_request_misclassification", noSearchBoundaryMistake],
+        ["no_provider_identity_drift", noProviderDrift],
+        ["telemetry_no_search_needed", noSearchAttempt]
+      ];
+      return assertion(entries.every(([, hit]) => hit), entries, firstMissingAnchor(entries) ?? "technical_judgment_missing");
+    }
   }
 ];
 
@@ -859,6 +999,7 @@ async function runCaseWithRetries(page, item) {
 async function runCase(page, item) {
   const startedAt = Date.now();
   const sentAt = new Date();
+  const searchTelemetryBefore = readSearchTelemetryEvents();
   const turnSummaries = [];
   let lastReply = "";
 
@@ -873,7 +1014,8 @@ async function runCase(page, item) {
       });
     }
 
-    const assertionResult = item.assert(lastReply, sentAt);
+    const searchTelemetry = summarizeSearchTelemetryDelta(searchTelemetryBefore, readSearchTelemetryEvents());
+    const assertionResult = item.assert(lastReply, sentAt, searchTelemetry);
     const thinkLeak = turnSummaries.some((turn) => turn.thinkLeak);
     const passed = assertionResult.passed && !thinkLeak;
 
@@ -887,6 +1029,9 @@ async function runCase(page, item) {
       totalReplyLength: turnSummaries.reduce((sum, turn) => sum + turn.replyLength, 0),
       durationMs: Date.now() - startedAt,
       thinkLeak,
+      searchStartedDelta: searchTelemetry.startedCount,
+      searchBlockedDelta: searchTelemetry.blockedCount,
+      searchReasonCodes: searchTelemetry.reasonCodes,
       failureCategory: passed
         ? undefined
         : thinkLeak ? "reasoning_tag_leak" : assertionResult.failureCategory
@@ -1001,6 +1146,24 @@ function readTelemetryEntries() {
     .map((name) => join(logDir, name))
     .sort((left, right) => statSync(left).mtimeMs - statSync(right).mtimeMs)
     .flatMap((filePath) => readTelemetryFile(filePath));
+}
+
+function readSearchTelemetryEvents() {
+  return readTelemetryEntries()
+    .filter((entry) => entry.type === "web_search_started" || entry.type === "web_search_blocked")
+    .map((entry) => ({
+      type: entry.type,
+      reasonCodes: Array.isArray(entry.payload?.reasonCodes) ? entry.payload.reasonCodes : []
+    }));
+}
+
+function summarizeSearchTelemetryDelta(before, after) {
+  const added = after.slice(before.length);
+  return {
+    startedCount: added.filter((entry) => entry.type === "web_search_started").length,
+    blockedCount: added.filter((entry) => entry.type === "web_search_blocked").length,
+    reasonCodes: [...new Set(added.flatMap((entry) => entry.reasonCodes))]
+  };
 }
 
 function readTelemetryFile(filePath) {

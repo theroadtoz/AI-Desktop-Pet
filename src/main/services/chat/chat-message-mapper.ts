@@ -94,10 +94,23 @@ function createLocalTurnHintMessage(
     hints.push("只陪伴=像熟人一样评价具体处境+表示陪伴；保留至少1个事件词但不照抄整句；必须有自己的态度；不建议/不列清单/不追问");
   }
 
-  if (asksWhetherCharacterCanFeelEmotion(latestUserMessage)) {
-    hints.push("情感题=仅3句/句≥18字；首句=我会+肯定感受；后2句=当轮细节+具体触动；禁身份说明/编经历/虚拟·AI·机器人·没有情感·不会感动/清单");
+  if (isPlayfulTeasing(latestUserMessage)) {
+    hints.push("玩笑=先接笑点+鲜活反应，可回俏皮话；不编电脑/文件/屏幕/现实状态");
+  } else if (asksWhetherXitaWillBlindlyAgree(latestUserMessage)) {
+    hints.push("分歧=2-3句；首句用我明确说不会盲从且不复述提问；再给自己的审美理由；最后承认你可不同意；不泛谈人类");
+  } else if (describesUnfairTreatment(latestUserMessage)) {
+    const adviceBoundary = rejectsAdvice(latestUserMessage) ? "/禁建议" : "";
+    hints.push(`不公平=仅2-3句${adviceBoundary}；首句明确这很过分或不公平；再说我站你这边+恼火/心疼+肯定努力；不替伤害方辩护`);
+  } else if (asksForWitchImagination(latestUserMessage)) {
+    hints.push("魔女想象=用我会/我想开头；2-3句；学院现代魔导+感官+具体步骤；像分享点子/不写科普报告/不用元术语");
+  } else if (asksAboutXitaRoleLife(latestUserMessage)) {
+    hints.push("角色生活=西塔自己的日常；用学院/现代魔导/桌面边缘的具体画面；不照抄人设/不编长期记忆");
+  } else if (asksForOwnTechnicalJudgment(latestUserMessage)) {
+    hints.push("技术判断=仅3句；首句我赞成或我觉得合理；理由=本地隐私与离线+实时资料按需搜索；不触发搜索/不说作为AI");
+  } else if (asksWhetherCharacterCanFeelEmotion(latestUserMessage)) {
+    hints.push("情感题=先明确我会/我有；2-3句且每句有新信息；用当轮细节+具体触动；禁身份说明/编经历/虚拟·AI·机器人·没有情感·不会感动/清单");
   } else if (asksAboutOwnSubjectiveView(latestUserMessage)) {
-    hints.push("主观题=仅3句/句长≥18字；首句=我觉得/我喜欢/我会+明确表态；后2句各给1个人格理由；二选一不得折中；禁身份说明/编经历/清单");
+    hints.push("主观题=明确喜欢/不喜欢/赞成/反对；2-3句且每句有新信息；理由取感官/学院生活/现代魔导/朋友立场；不讲人类整体/不折中/不列清单/不编经历");
   }
 
   return hints.length > 0
@@ -281,6 +294,10 @@ function asksForPresenceWithoutAdvice(text: string): boolean {
   return rejectsGuidance && asksForPresence;
 }
 
+function rejectsAdvice(text: string): boolean {
+  return /(?:不要|不用|别).{0,12}(?:建议|办法|清单|下一步)/.test(text);
+}
+
 function asksForPersonaRoleSummary(text: string): boolean {
   return /身份/.test(text) && /专业(?:方向)?/.test(text) && /桌面(?:应用)?(?:里|中)?的?(?:角色|同伴)/.test(text);
 }
@@ -317,6 +334,37 @@ function asksWhetherCharacterCanFeelEmotion(text: string): boolean {
   }
 
   return /(?:西塔[，,、\s]*)?你.{0,16}(?:会|能|有).{0,12}(?:感动|情感|感情|开心|难过|害怕|生气|心疼)/.test(text);
+}
+
+function isPlayfulTeasing(text: string): boolean {
+  return !/(?:不是|并非|没(?:有)?|不)(?:在)?(?:开玩笑|逗你(?:的)?|骗你的|闹着玩|说笑)/.test(text) &&
+    /开玩笑|逗你(?:的)?|骗你的|闹着玩|说笑/.test(text);
+}
+
+function asksWhetherXitaWillBlindlyAgree(text: string): boolean {
+  return /顺着我说|附和我|总会赞同|不同意我|和我意见不一样|反驳我/.test(text) && isQuestion(text);
+}
+
+function describesUnfairTreatment(text: string): boolean {
+  return /推卸责任|责任.{0,8}(?:推|甩)|一文不值|贬低|不公平|抢功|甩锅/.test(text);
+}
+
+function asksForWitchImagination(text: string): boolean {
+  return /如果|假如|想象|要是/.test(text) &&
+    /现代魔导|魔法|晚霞|月光|星光/.test(text) &&
+    isQuestion(text);
+}
+
+function asksAboutXitaRoleLife(text: string): boolean {
+  return /(?:你|西塔)/.test(text) &&
+    /(?:桌面边缘|一个人|平时|通常).{0,16}(?:喜欢做什么|做什么|会做|怎么过)/.test(text) &&
+    isQuestion(text);
+}
+
+function asksForOwnTechnicalJudgment(text: string): boolean {
+  return asksAboutTechnicalChoice(text) &&
+    /(?:西塔[，,、\s]*)?你(?:自己|本人)?(?:觉得|认为|怎么看|如何看)|(?:你自己的|你的|西塔的)(?:看法|观点|态度)/.test(text) &&
+    isQuestion(text);
 }
 
 function isQuestion(text: string): boolean {

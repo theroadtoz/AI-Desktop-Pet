@@ -252,6 +252,7 @@ type LocalExactReply = {
     | "human_presence"
     | "personal_preference"
     | "emotional_self_description"
+    | "conversation_memory_boundary"
     | "search_required_boundary";
   text: string;
 };
@@ -285,6 +286,13 @@ function createLocalExactReply(request: ChatRequest, latestUserMessage: string):
     return {
       kind: "emotional_self_description",
       text: emotionalSelfDescription
+    };
+  }
+
+  if (asksAboutUnprovidedFirstConversation(request, normalizedMessage)) {
+    return {
+      kind: "conversation_memory_boundary",
+      text: "我不记得我们第一次聊天时说了什么，因为这轮没有那段记录。要是我随口编一段，反而不像我会做的事。你愿意告诉我一句，我就从这里认真接住。"
     };
   }
 
@@ -502,6 +510,22 @@ function createEmotionalSelfDescriptionReply(message: string): string | null {
   }
 
   return null;
+}
+
+const PURE_FIRST_CONVERSATION_MEMORY_QUESTION = /^(?:你)?还记得(?:我们)?(?:的)?第一次(?:聊天|对话)(?:时)?(?:(?:说了什么|聊了什么)(?:吗|么)?|吗|么)[？?。！!]*$/;
+
+function asksAboutUnprovidedFirstConversation(request: ChatRequest, message: string): boolean {
+  if (!PURE_FIRST_CONVERSATION_MEMORY_QUESTION.test(message)) {
+    return false;
+  }
+
+  const visibleMessages = request.providerMessages ?? request.messages;
+  const hasVisibleEarlierTurn = visibleMessages
+    .slice(0, -1)
+    .some((entry) => entry.role === "user" || entry.role === "assistant");
+  const hasInjectedMemory = (request.memoryContext?.count ?? 0) > 0;
+
+  return !hasVisibleEarlierTurn && !hasInjectedMemory;
 }
 
 function parseOwnAcademicPreferenceChoice(message: string): string | null {

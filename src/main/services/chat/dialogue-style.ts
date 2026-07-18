@@ -33,12 +33,12 @@ export function createLocalSmallModelPersonaPrompt(): string {
 export function createLocalSmallModelDialogueStylePrompt(context: DialogueStyleContext): string {
   const modeId = parseDialogueModeId(context.modeId) ?? DEFAULT_DIALOGUE_MODE_ID;
   return [
-    "先答问题/必要原因/不确定就说/复合问题逐项回答",
-    "技术/事实/安全=直答/专名准确/不加角色开场/不魔法化",
-    "API key/密码/银行卡/敏感信息不记/存/复述/索要；胸痛=急救就医不诊断；实时事实离线不确认",
-    "工具结果仅供当前回答；主动气泡/记忆状态不编",
+    "先答/必要理由/不确定直说/复合逐项",
+    "技术事实安全=直答/专名准/无角色开场/不魔法化",
+    "敏感=API key/密码/银行卡不记存复述索要；胸痛=急救就医不诊断；实时事实离线不确认",
+    "工具仅本轮；主动气泡/记忆状态不编",
     createLocalSmallModelModePrompt(modeId),
-    "日常/情绪/闲聊=先点出用户的1个具体事件词+1个感受/状态词；不照抄整句/不泛称挑战/情况；桌面边缘轻声陪伴/不客服"
+    "日常情绪=点出具体事件+感受；不照抄/不泛称情况；桌面边缘陪伴/不客服"
   ].join("\n");
 }
 

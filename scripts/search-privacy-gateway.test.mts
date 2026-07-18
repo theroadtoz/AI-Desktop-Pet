@@ -68,6 +68,15 @@ const {
 
 test("search classifier only triggers for explicit search or freshness-sensitive questions", () => {
   assert.deepEqual(classifySearchQuery("请联网搜索 Live2D 动作实现方式").reasonCodes, ["explicit_search_request"]);
+  assert.deepEqual(classifySearchQuery("你觉得默认用本地模型、联网搜索只按需开启，这个设计怎么样？"), {
+    shouldSearch: false,
+    reasonCodes: ["no_search_needed"]
+  });
+  assert.equal(classifySearchQuery("你觉得现在联网搜索功能的设计怎么样？").shouldSearch, false);
+  assert.equal(classifySearchQuery("这个联网搜索机制是怎么工作的？").shouldSearch, false);
+  assert.equal(classifySearchQuery("请先评价这个设计，再联网搜索相关资料").shouldSearch, true);
+  assert.equal(classifySearchQuery("你觉得这个设计怎么样？接着搜索相关资料。").shouldSearch, true);
+  assert.equal(classifySearchQuery("请搜索一下这个按需联网功能的设计怎么样").shouldSearch, true);
   assert.equal(classifySearchQuery("今天 Electron 最新版本是多少？").shouldSearch, true);
   assert.equal(classifySearchQuery("请告诉我今天最新的科技新闻。").shouldSearch, true);
   assert.equal(classifySearchQuery("我今天中午吃什么比较好？").shouldSearch, false);

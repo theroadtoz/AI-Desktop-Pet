@@ -7,6 +7,10 @@ export type SearchQueryClassification = {
 
 const EXPLICIT_SEARCH_PATTERN =
   /(联网|上网|网络|网页|web|internet|mcp).{0,8}(搜索|查询|查找|查证|检索|找一下|看一下)|(?:搜索|查一下|查找|检索|查证|搜一下|搜搜|看看网上|网上看看)/i;
+const SEARCH_FEATURE_DESIGN_PATTERN =
+  /(?:设计|方案|策略|机制|功能|设置).{0,10}(?:怎么样|怎么(?:工作|运作|运行|实现)|如何(?:工作|运作|运行|实现)?|合理|好不好|看法)|(?:怎么样|怎么(?:工作|运作|运行|实现)|如何(?:工作|运作|运行|实现)?|是否合理|好不好).{0,10}(?:设计|方案|策略|机制|功能|设置)/i;
+const EXPLICIT_SEARCH_DIRECTIVE_PATTERN =
+  /(?:请(?:帮我|替我|为我)?|帮我|替我|给我)(?:(?:联网|上网|网络|网页|web|internet|mcp).{0,8})?(?:搜索|搜一下|查询|查一下|查找|查证|检索|找一下|看一下)|(?:^|[。！？?!，,；;])(?:再|然后|并|接着|随后)(?:(?:联网|上网|网络|网页|web|internet|mcp).{0,8})?(?:搜索|搜一下|查询|查一下|查找|查证|检索)/i;
 
 const FRESHNESS_PATTERN =
   /(最新|实时|刚刚|新闻|价格|股价|汇率|天气|政策|法规|版本|发布日期|下载链接|官网|赛程|比分|总统|CEO|首席执行官)/i;
@@ -27,7 +31,10 @@ export function classifySearchQuery(input: string): SearchQueryClassification {
     };
   }
 
-  if (EXPLICIT_SEARCH_PATTERN.test(text)) {
+  const discussesSearchFeatureDesign = SEARCH_FEATURE_DESIGN_PATTERN.test(text) &&
+    !EXPLICIT_SEARCH_DIRECTIVE_PATTERN.test(text);
+
+  if (EXPLICIT_SEARCH_PATTERN.test(text) && !discussesSearchFeatureDesign) {
     reasonCodes.push("explicit_search_request");
   }
 

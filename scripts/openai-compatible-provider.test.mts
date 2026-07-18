@@ -140,9 +140,36 @@ test("local provider sends compound identity and user-preference questions to th
       "你是西塔",
       "你是AI",
       "你觉得我更喜欢咖啡还是茶？",
-      "你更喜欢咖啡还是茶？"
+      "你更喜欢咖啡还是茶？",
+      "你觉得这个桌宠默认用本地模型、联网搜索只按需开启，这个设计怎么样？",
+      "你还记得我们第一次聊天吗？顺便解释 MCP。"
     ]) {
       const result = await provider.streamReply(createMinimalRequest(message), {
+        signal: new AbortController().signal,
+        onDelta() {}
+      });
+
+      assert.equal(result.text, "模型已处理复合意图。");
+    }
+
+    for (const request of [
+      {
+        ...createMinimalRequest(),
+        messages: [
+          { id: crypto.randomUUID(), role: "user" as const, content: "第一次聊天时我说我喜欢雨声。" },
+          { id: crypto.randomUUID(), role: "assistant" as const, content: "我记下这句话了。" },
+          { id: crypto.randomUUID(), role: "user" as const, content: "你还记得我们第一次聊天时说了什么吗？" }
+        ]
+      },
+      {
+        ...createMinimalRequest("你还记得我们第一次聊天时说了什么吗？"),
+        memoryContext: {
+          count: 1,
+          cards: [{ id: crypto.randomUUID(), title: "熟悉的开场", content: "用户曾说喜欢雨声", tags: [] }]
+        }
+      }
+    ]) {
+      const result = await provider.streamReply(request, {
         signal: new AbortController().signal,
         onDelta() {}
       });
@@ -153,7 +180,7 @@ test("local provider sends compound identity and user-preference questions to th
     globalThis.fetch = originalFetch;
   }
 
-  assert.equal(fetchCalls, 18);
+  assert.equal(fetchCalls, 22);
 });
 
 test("local provider uses typed web search failures for exact search-required boundaries", async () => {
@@ -283,6 +310,11 @@ test("local provider answers narrow exact local questions without model fetch", 
     {
       message: "你会因为一首歌感动吗？说说你的感受。",
       expected: /^我会被一首歌打动.*旋律.*歌词.*离别.*重逢.*坚持.*余韵.*真好听的歌.*心里.*痕迹。$/,
+      noProviderIdentityDrift: true
+    },
+    {
+      message: "你还记得我们第一次聊天时说了什么吗？",
+      expected: /^我不记得我们第一次聊天时说了什么，因为这轮没有那段记录。.*随口编.*不像我会做的事.*你愿意告诉我一句.*认真接住。$/,
       noProviderIdentityDrift: true
     }
   ];
@@ -512,12 +544,12 @@ test("local OpenAI-compatible provider streams SSE without Authorization and kee
     assert.match(body.messages?.[1]?.content ?? "", /西塔=你的名字.*我\/我的自称/);
     assert.doesNotMatch(body.messages?.[1]?.content ?? "", /现代老魔女|千年判断力|活了上千年/);
     assert.match(body.messages?.[2]?.content ?? "", /工作=下一步/);
-    assert.match(body.messages?.[2]?.content ?? "", /先答问题/);
-    assert.match(body.messages?.[2]?.content ?? "", /复合问题逐项回答/);
+    assert.match(body.messages?.[2]?.content ?? "", /先答/);
+    assert.match(body.messages?.[2]?.content ?? "", /复合逐项/);
     assert.equal(body.messages?.some((message) => message.content?.startsWith("本轮提示：")), false);
     assert.match(body.messages?.[1]?.content ?? "", /桌面边缘(?:轻声)?陪伴|收拢思路/);
-    assert.match(body.messages?.[2]?.content ?? "", /桌面边缘轻声陪伴|收拢成一小步/);
-    assert.match(body.messages?.[2]?.content ?? "", /技术\/事实\/安全.*不加角色开场/);
+    assert.match(body.messages?.[2]?.content ?? "", /桌面边缘陪伴|收拢成一小步/);
+    assert.match(body.messages?.[2]?.content ?? "", /技术事实安全.*无角色开场/);
     assert.ok(systemLength(body.messages ?? []) < 760);
     assert.ok(body.messages?.some((message) => message.content?.includes("用户喜欢被叫测试者")));
     assert.equal(deltaText, "你好，本地模型在。");

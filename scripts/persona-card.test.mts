@@ -43,22 +43,24 @@ test("persona prompts are rendered from the shared persona card", () => {
   assert.match(localPrompt, /社会身份=魔法学院现代魔导工程专业高年级进修\/研究型学生/);
   assert.match(localPrompt, /Windows Live2D.*桌面魔女同伴/);
   assert.match(localPrompt, /关系.*场景.*非社会身份/);
-  assert.match(localPrompt, /课程.*实验.*报告.*长期课题.*低频.*连续/);
-  assert.match(localPrompt, /(?:长寿)?阅历低频/);
+  assert.match(localPrompt, /学院生活=.*课程.*实验.*报告.*课题.*相关才提/);
+  assert.match(localPrompt, /阅历=.*稳妥判断.*不报年龄/);
   assert.match(localPrompt, /术语准确/);
   assert.match(localPrompt, /身份.*技术实现/);
   assert.match(localPrompt, /桌面边缘陪伴/);
-  assert.match(localPrompt, /先接具体内容再答/);
+  assert.match(localPrompt, /先接具体事.*自己的态度/);
   assert.match(localPrompt, /先答问题/);
   assert.match(localPrompt, /复合问题逐项回答/);
   assert.match(localPrompt, /无固定口癖/);
   assert.match(localPrompt, /(?:真实)?术语不魔法化/);
   assert.doesNotMatch(localPrompt, /问学院近况|2-3项连贯具体活动|Provider=模型访问|MCP=工具调用/);
   assert.match(localPrompt, /耐心.*乐观.*学识渊博.*可靠/);
-  assert.match(localPrompt, /人性=有观察.*看法.*偏好/);
+  assert.match(localPrompt, /主观=.*喜欢.*不喜欢.*赞成.*反对.*理由/);
+  assert.match(localPrompt, /朋友=.*具体事.*自己的态度.*不盲从.*不客服.*不乱猜/);
   assert.match(localPrompt, /不(?:把)?每轮.*建议.*清单.*任务/);
-  assert.match(localPrompt, /追问.*有帮助.*最多一个/);
-  assert.match(localPrompt, /魔女感.*学院.*现代魔导.*低频.*自然/);
+  assert.match(localPrompt, /有用才追问≤1/);
+  assert.match(localPrompt, /魔女视角=.*学院.*现代魔导.*相关时.*带入/);
+  assert.doesNotMatch(localPrompt, /低频连续|人格理由|人格锚/);
   assert.doesNotMatch(combined, /现代老魔女|千年判断力|活了上千年|进修魔女/);
   assert.doesNotMatch(combined, /AI助手|语言模型|聊天机器人/);
 });
@@ -89,9 +91,22 @@ test("persona gives Xita an observable lively friend-like first reaction", () =>
   assert.match(cloudPrompt, /像朋友.*先.*态度.*情绪反应.*再.*回应/);
   assert.match(cloudPrompt, /可以啊.*听起来不错.*真好听呢/);
   assert.match(cloudPrompt, /语气示例.*不是固定口癖.*自然变化/);
-  assert.match(localPrompt, /朋友感=.*先有朋友反应再答/);
+  assert.match(localPrompt, /朋友=.*具体事.*自己的态度/);
   assert.match(localPrompt, /可以啊.*听起来不错.*真好听呢/);
   assert.match(localPrompt, /无助手声明/);
+});
+
+test("persona keeps Xita independent, playful, imaginative, and loyal to a hurt friend", () => {
+  const cloudPrompt = createDefaultPersonaPrompt();
+  const localPrompt = createLocalSmallModelPersonaPrompt();
+
+  assert.match(cloudPrompt, /不盲从.*温和.*不同意见/);
+  assert.match(cloudPrompt, /玩笑.*先接住.*不编造.*文件.*状态/);
+  assert.match(cloudPrompt, /推卸责任|贬低.*努力|不公平/);
+  assert.match(cloudPrompt, /站在受委屈.*一边|先支持受委屈/);
+  assert.match(cloudPrompt, /想象.*学院.*现代魔导.*具体细节/);
+  assert.match(localPrompt, /有主见/);
+  assert.match(localPrompt, /不盲从/);
 });
 
 test("persona card records privacy, memory, action, and search boundaries only", () => {
@@ -123,7 +138,7 @@ test("persona card records privacy, memory, action, and search boundaries only",
   assert.match(searchPolicyText, /客户端.*MCP 服务端.*工具.*资源.*结果.*当前回答/);
   assert.doesNotMatch(searchPolicyText, /未来.*adapter|默认关闭|本轮.*不实现|未接入搜索/);
   assert.match(localPrompt, /不编(?:造)?记忆/);
-  assert.match(localPrompt, /不读隐私|不声称读取隐私/);
+  assert.match(localPrompt, /不读隐私|不声称(?:读取|读)隐私/);
   assert.match(localPrompt, /(未联网|离线).*不假(?:装)?搜(?:索)?/);
   assert.match(localPrompt, /不输出 ?JSON|不要输出 JSON/);
   assert.doesNotMatch(combined, /Tavily|SearXNG|Brave Search/);
