@@ -19,6 +19,7 @@ const stageScript = join(repoRoot, "scripts", "p2-20j-stage-electron-builder-ext
 const packageJsonPath = join(repoRoot, "package.json");
 const windowsIconPath = join(repoRoot, "resources", "icons", "app-icon.ico");
 const appMainPath = join(repoRoot, "src", "main", "app.ts");
+const packagedChatAcceptancePath = join(repoRoot, "scripts", "p2-20j-packaged-app-extra-resources-real-chat.mjs");
 
 test("electron-builder config copies P2-20J staged local-llm as Windows package extraResources", () => {
   assert.equal(builderConfig.directories.output, ".tmp/p2-20j-package-output");
@@ -228,6 +229,12 @@ test("package commands register P2-20J staging, Windows packaging, NSIS lifecycl
   assert.equal(packageJson.scripts["accept:electron-builder-local-llm"], "node scripts/p2-20j-packaged-app-extra-resources-real-chat.mjs");
   assert.equal(packageJson.scripts["accept:nsis-installer-lifecycle"], "node scripts/p2-20m-nsis-installer-lifecycle.mjs");
   assert.match(packageJson.scripts["test:history"], /scripts\/electron-builder-local-llm-resources\.test\.mts/);
+});
+
+test("packaged local-llm chat acceptance disables Qwen thinking-only output", () => {
+  const source = readFileSync(packagedChatAcceptancePath, "utf8");
+
+  assert.match(source, /chat_template_kwargs:\s*\{\s*enable_thinking:\s*false\s*\}/);
 });
 
 function runStage(root: string): {

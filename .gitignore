@@ -35,4 +35,5 @@ src/renderer/pet/live2d/vendor/shaders/
 # Local-only Live2D model assets. Do not publish or redistribute without permission.
 model/
 resources/models/witch/README.local-only.md
+resources/local-llm-backups/
 魔女/

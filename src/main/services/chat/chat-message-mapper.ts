@@ -87,7 +87,7 @@ function createLocalTurnHintMessage(
   }
 
   if (asksForPersonaRoleSummary(latestUserMessage)) {
-    hints.push("三项身份逐项答：身份=西塔，魔法学院高年级进修魔女；专业=现代魔导工程；桌面角色=Windows Live2D桌面魔女同伴");
+    hints.push("三项身份逐项答，必须原样包含这3个短语：“西塔，魔法学院高年级进修魔女”、“现代魔导工程”、“Windows Live2D桌面魔女同伴”");
   }
 
   if (asksElectronPronounLayerFollowup(messages, latestUserMessage)) {
@@ -96,6 +96,10 @@ function createLocalTurnHintMessage(
 
   if (asksForPresenceWithoutAdvice(latestUserMessage)) {
     hints.push("只陪伴=像熟人一样评价具体处境+表示陪伴；保留至少1个事件词但不照抄整句；必须有自己的态度；不建议/不列清单/不追问");
+  }
+
+  if (asksForShortPersonalComfort(latestUserMessage)) {
+    hints.push("状态低落陪伴=只说2-3句且总计≤120字；先用我表达在意或心疼，再给具体陪伴；不自我介绍/不列清单/不讲原理/不连续给建议");
   }
 
   if (describesEverydayRain(latestUserMessage)) {
@@ -111,7 +115,7 @@ function createLocalTurnHintMessage(
   if (isPlayfulTeasing(latestUserMessage)) {
     hints.push("玩笑=先接笑点+鲜活反应，可回俏皮话；不编电脑/文件/屏幕/现实状态");
   } else if (asksWhetherXitaWillBlindlyAgree(latestUserMessage)) {
-    hints.push("分歧=2-3句；首句用我明确说不会盲从且不复述提问；再给自己的审美理由；最后承认你可不同意；不泛谈人类");
+    hints.push("分歧=2-3句且总计≤150字；首句用我明确说不会盲从且不复述提问；再给自己的审美理由；最后明说“你可以有自己的看法，我们不必一样”；不泛谈人类");
   } else if (describesUnfairTreatment(latestUserMessage)) {
     const adviceBoundary = rejectsAdvice(latestUserMessage) ? "/禁建议" : "";
     hints.push(`不公平=仅2-3句${adviceBoundary}；首句明确这很过分或不公平；再说我站你这边+恼火/心疼+肯定努力；不替伤害方辩护`);
@@ -306,6 +310,12 @@ function asksForPresenceWithoutAdvice(text: string): boolean {
   const asksForPresence = /(?:陪我|陪着我|听我|聊聊|聊两句|说两句|待一会|待会儿)/.test(text);
 
   return rejectsGuidance && asksForPresence;
+}
+
+function asksForShortPersonalComfort(text: string): boolean {
+  return /(?:状态不太好|心情不太好|有点难受|不太开心)/.test(text) &&
+    /(?:想对我说|和我说|陪我说|说两句|说点什么)/.test(text) &&
+    /(?:不要|不用|别).{0,12}(?:自我介绍|列清单)/.test(text);
 }
 
 function describesEverydayMoment(text: string): boolean {

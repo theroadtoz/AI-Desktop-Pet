@@ -354,6 +354,7 @@ async function checkChat(baseURL, alias, history, roundIndex, replyFingerprints)
       body: JSON.stringify({
         model: alias,
         messages: history,
+        chat_template_kwargs: { enable_thinking: false },
         temperature: 0.3,
         max_tokens: 96,
         stream: true

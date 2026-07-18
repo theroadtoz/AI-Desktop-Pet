@@ -473,7 +473,12 @@ test("local Ollama OpenAI-compatible provider sends reasoning-off parameter", as
     globalThis.fetch = originalFetch;
   }
 
-  assert.equal((requestBody as { reasoning_effort?: string }).reasoning_effort, "none");
+  const body = requestBody as {
+    reasoning_effort?: string;
+    chat_template_kwargs?: { enable_thinking?: boolean };
+  };
+  assert.equal(body.reasoning_effort, "none");
+  assert.equal(body.chat_template_kwargs, undefined);
 });
 
 test("local OpenAI-compatible provider streams SSE without Authorization and keeps main-process mapping", async () => {
@@ -531,6 +536,7 @@ test("local OpenAI-compatible provider streams SSE without Authorization and kee
       model?: string;
       stream?: boolean;
       reasoning_effort?: string;
+      chat_template_kwargs?: { enable_thinking?: boolean };
       messages?: Array<{ role?: string; content?: string }>;
     };
 
@@ -540,6 +546,7 @@ test("local OpenAI-compatible provider streams SSE without Authorization and kee
     assert.equal(body.model, "qwen2.5:3b-instruct");
     assert.equal(body.stream, true);
     assert.equal(body.reasoning_effort, undefined);
+    assert.equal(body.chat_template_kwargs, undefined);
     assert.match(body.messages?.[0]?.content ?? "", /自然简短.*中文优先.*不输出 ?JSON/);
     assert.match(body.messages?.[0]?.content ?? "", /技术专名准确/);
     assert.doesNotMatch(body.messages?.[0]?.content ?? "", /现代老魔女|千年判断力|活了上千年/);
@@ -633,6 +640,46 @@ test("OpenAI-compatible provider maps budgeted context messages without older te
   }
 });
 
+test("local Qwen3.5 provider merges system messages for its strict chat template", async () => {
+  let requestBody: unknown = null;
+  const server = createServer(async (request: IncomingMessage, response: ServerResponse) => {
+    requestBody = JSON.parse(await readRequestBody(request));
+    response.writeHead(200, { "Content-Type": "text/event-stream" });
+    response.end(`data: ${JSON.stringify({ choices: [{ delta: { content: "我是西塔。" } }] })}\n\ndata: [DONE]\n\n`);
+  });
+
+  try {
+    await listen(server);
+
+    await createOpenAICompatibleProvider({
+      providerId: "local-openai-compatible",
+      baseURL: localBaseURL(server),
+      model: "qwen3.5-2b-q4_k_m",
+      temperature: 0.7,
+      maxTokens: 240,
+      timeoutMs: 60000
+    }).streamReply(createMinimalRequest("请介绍你自己"), {
+      signal: new AbortController().signal,
+      onDelta() {}
+    });
+
+    const body = requestBody as {
+      chat_template_kwargs?: { enable_thinking?: boolean };
+      messages?: Array<{ role?: string; content?: string }>;
+    };
+    const systemMessages = body.messages?.filter((message) => message.role === "system") ?? [];
+
+    assert.equal(body.chat_template_kwargs?.enable_thinking, false);
+    assert.equal(systemMessages.length, 1);
+    assert.equal(body.messages?.[0]?.role, "system");
+    assert.match(systemMessages[0]?.content ?? "", /自然简短.*中文优先/s);
+    assert.match(systemMessages[0]?.content ?? "", /你就是西塔本人.*魔女/s);
+    assert.match(systemMessages[0]?.content ?? "", /技术(?:事实)?安全/s);
+  } finally {
+    await close(server);
+  }
+});
+
 test("cloud OpenAI-compatible provider keeps cloud prompt template", async () => {
   let requestBody: unknown = null;
   let authorization = "";
@@ -672,11 +719,13 @@ test("cloud OpenAI-compatible provider keeps cloud prompt template", async () =>
 
     const body = requestBody as {
       reasoning_effort?: string;
+      chat_template_kwargs?: { enable_thinking?: boolean };
       messages?: Array<{ role?: string; content?: string }>;
     };
 
     assert.equal(authorization, "Bearer test-cloud-key");
     assert.equal(body.reasoning_effort, undefined);
+    assert.equal(body.chat_template_kwargs, undefined);
     assert.match(body.messages?.[0]?.content ?? "", /低打扰的桌面伙伴/);
     assert.match(body.messages?.[1]?.content ?? "", /掌握现代科技/);
     assert.match(body.messages?.[1]?.content ?? "", /学识渊博/);

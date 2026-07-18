@@ -6,6 +6,7 @@ import type { TelemetryPayload } from "../telemetry";
 import {
   mapChatMessagesToOpenAICompatible,
   getLatestUserMessage,
+  type OpenAICompatibleMessage,
   type PromptTemplateProfile
 } from "./chat-message-mapper";
 import { classifyEmotion } from "./emotion-classifier";
@@ -181,18 +182,25 @@ async function streamChatCompletions(input: {
       headers,
       body: JSON.stringify({
         model: input.options.model,
-        messages: mapChatMessagesToOpenAICompatible(
-          getProviderMessages(input.request),
-          input.request.memoryContext,
-          input.request.dialogueStyleContext,
-          input.request.userProfileContext,
-          getPromptTemplateProfile(providerId),
-          input.request.runtimeContext,
-          input.request.webSearchContext
+        messages: normalizeMessagesForLocalModel(
+          mapChatMessagesToOpenAICompatible(
+            getProviderMessages(input.request),
+            input.request.memoryContext,
+            input.request.dialogueStyleContext,
+            input.request.userProfileContext,
+            getPromptTemplateProfile(providerId),
+            input.request.runtimeContext,
+            input.request.webSearchContext
+          ),
+          providerId,
+          input.options.model
         ),
         temperature: input.options.temperature,
         max_tokens: input.options.maxTokens,
         stream: true,
+        ...(isLocalQwen35Model(providerId, input.options.model)
+          ? { chat_template_kwargs: { enable_thinking: false } }
+          : {}),
         ...(providerId === "local-openai-compatible" && isLocalOllamaOpenAICompatibleEndpoint(input.options.baseURL)
           ? { reasoning_effort: "none" }
           : {})
@@ -231,6 +239,34 @@ async function streamChatCompletions(input: {
 
 function getProviderMessages(request: ChatRequest): readonly ChatProviderMessage[] {
   return request.providerMessages ?? request.messages;
+}
+
+function normalizeMessagesForLocalModel(
+  messages: readonly OpenAICompatibleMessage[],
+  providerId: Extract<ProviderId, "openai-compatible" | "local-openai-compatible">,
+  model: string
+): OpenAICompatibleMessage[] {
+  if (!isLocalQwen35Model(providerId, model)) {
+    return [...messages];
+  }
+
+  const systemContent = messages
+    .filter((message) => message.role === "system")
+    .map((message) => message.content.trim())
+    .filter(Boolean)
+    .join("\n\n");
+  const conversationMessages = messages.filter((message) => message.role !== "system");
+
+  return systemContent
+    ? [{ role: "system", content: systemContent }, ...conversationMessages]
+    : conversationMessages;
+}
+
+function isLocalQwen35Model(
+  providerId: Extract<ProviderId, "openai-compatible" | "local-openai-compatible">,
+  model: string
+): boolean {
+  return providerId === "local-openai-compatible" && /qwen[\s_.-]*3[\s_.-]*5/i.test(model);
 }
 
 function getPromptTemplateProfile(providerId: Extract<ProviderId, "openai-compatible" | "local-openai-compatible">): PromptTemplateProfile {
