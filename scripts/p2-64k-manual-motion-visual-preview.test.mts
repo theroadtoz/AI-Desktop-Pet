@@ -26,8 +26,10 @@ import {
   createManualPreviewRunContext,
   getIsolatedManualPreviewBuildSteps,
   injectManualPreviewAction,
+  injectManualPreviewFramePipelinePatch,
   injectManualPreviewPreset,
   injectManualPreviewReason,
+  injectManualPreviewPlayerLifecyclePatch,
   injectManualPreviewTrigger,
   P2_64J_MOTION_PROFILES,
   P2_64J_PROFILE_IDS,
@@ -39,6 +41,7 @@ import {
   P2_64K_DRAFT_ROOT,
   prepareIsolatedManualPreview,
   readVisualOnlyCandidate,
+  waitForManualPreviewRealStartGate,
   waitForManualPreviewTriggerAcceptance
 } from "./p2-64k-manual-motion-visual-preview.mjs";
 
@@ -80,6 +83,7 @@ function makeCandidatePath(root: string, profile = "listen-soft", suffix = "2026
 const SYNTHETIC_PARAMETER_IDS = [
   "Param59",
   "Param60",
+  "ParamAngleY",
   "Param67",
   "Param68",
   "Param69",
@@ -98,6 +102,7 @@ function createSyntheticMotionBytes(durationSeconds: number): Buffer {
     Curves: [
       { Target: "Parameter", Id: "Param59", Segments: [0, 0, 2, 1.5, 0] },
       { Target: "Parameter", Id: "Param60", Segments: [0, 0, 2, 1.5, 30] },
+      { Target: "Parameter", Id: "ParamAngleY", Segments: [0, -8, 0, 1.5, 8] },
       { Target: "Parameter", Id: "Param67", Segments: [0, 0, 2, 1.5, 30] },
       { Target: "Parameter", Id: "Param68", Segments: [0, 0, 2, 1.5, 0] },
       { Target: "Parameter", Id: "Param69", Segments: [0, 0, 2, 1.5, 30] },
@@ -109,6 +114,11 @@ function createSyntheticMotionBytes(durationSeconds: number): Buffer {
       { Target: "Parameter", Id: "ParamBodyAngleX", Segments: [0, -10, 0, 2, 10, 0, 4, -10] }
     ]
   }), "utf8");
+}
+
+function makeSequentialStatusReader<T>(samples: readonly T[]) {
+  let index = 0;
+  return async () => samples[Math.min(index++, samples.length - 1)] as T;
 }
 
 function exactArrayBuffer(bytes: Buffer): ArrayBuffer {
@@ -144,7 +154,41 @@ function makeSyntheticWorkspace(root: string) {
   writeTreeFile(
     root,
     "src/renderer/pet/interaction-action-player.ts",
-    "export type Reason =\n  | \"startup_first_visible_frame\";\n"
+    `export type Reason =
+  | "startup_first_visible_frame";
+
+function syntheticNativeStartedBlock(activeAction: {
+  playbackPhase: string;
+  timeoutId?: ReturnType<typeof setTimeout>;
+}, clearScheduledTimeout: (timeoutId: ReturnType<typeof setTimeout>) => void, reportActionStarted: (action: unknown) => void): void {
+  const state = "started";
+  if (state === "started") {
+        activeAction.playbackPhase = "started";
+        if (activeAction.timeoutId !== undefined) {
+          clearScheduledTimeout(activeAction.timeoutId);
+          delete activeAction.timeoutId;
+        }
+        reportActionStarted(activeAction);
+  }
+}
+`
+  );
+  writeTreeFile(
+    root,
+    "src/renderer/pet/live2d/cubism-frame-pipeline.ts",
+    `const EMPTY_PARAMETER_IDS = new Set<string>();
+const previousMotionParameterIdsByModel = new WeakMap<object, ReadonlySet<string>>();
+
+function syntheticFramePipeline(model: object, layers: { applyMotion?: (deltaSeconds: number) => ReadonlySet<string> }, deltaSeconds: number): void {
+  const ownedParameterIds = layers.applyMotion?.(deltaSeconds) ?? EMPTY_PARAMETER_IDS;
+  restoreReleasedMotionParameterDefaults(model, ownedParameterIds);
+  const ownedParameterIndices = findOwnedParameterIndices(model, ownedParameterIds);
+  void ownedParameterIndices;
+}
+
+declare function restoreReleasedMotionParameterDefaults(model: object, ownedParameterIds: ReadonlySet<string>): void;
+declare function findOwnedParameterIndices(model: object, ownedParameterIds: ReadonlySet<string>): readonly number[];
+`
   );
   writeTreeFile(root, "public/cubism/live2dcubismcore.min.js", "core");
   writeTreeFile(root, "resources/icons/app-icon-256.png", "icon");
@@ -257,7 +301,8 @@ test("P2-64Z profiles preserve timed accessory curves as raw bytes in their isol
         id: `p2-64k-manual-preview-${profile.id}`,
         motionPath: `motions/p2-64k-manual-preview-${profile.id}.motion3.json`,
         durationSeconds: profile.durationSeconds,
-        durationMs: profile.durationSeconds * 1_000
+        durationMs: profile.durationSeconds * 1_000,
+        probeParameterId: "ParamAngleY"
       });
 
       const wrongPrefixPath = makeCandidatePath(drafts, "listen-soft", `${profile.id}-wrong-prefix`);
@@ -317,6 +362,7 @@ test("P2-64K fixture motion runs through the real controller and frame ownership
     const motionValues: Record<(typeof SYNTHETIC_PARAMETER_IDS)[number], number> = {
       Param59: 0,
       Param60: 30,
+      ParamAngleY: 8,
       Param67: 30,
       Param68: 0,
       Param69: 30,
@@ -430,12 +476,12 @@ test("candidate path rejects root escapes, wrong filenames, links, and non-files
   const outside = mkdtempSync(join(tmpdir(), "p2-64k-outside-"));
   try {
     const candidate = makeCandidatePath(root);
-    writeFileSync(candidate, "not even structured motion data", "utf8");
+    writeFileSync(candidate, createSyntheticMotionBytes(2.4));
     assert.equal(readVisualOnlyCandidate({ profile: "listen-soft", candidateDraft: candidate }, root).sourcePath, candidate);
     assert.throws(() => readVisualOnlyCandidate({ profile: "unknown", candidateDraft: candidate }, root), /profile-not-allowed/u);
 
     const wrongName = makeCandidatePath(root, "think-soft");
-    writeFileSync(wrongName, "bytes", "utf8");
+    writeFileSync(wrongName, createSyntheticMotionBytes(2.8));
     assert.throws(() => readVisualOnlyCandidate({ profile: "listen-soft", candidateDraft: wrongName }, root), /filename-profile-mismatch/u);
     assert.throws(
       () => readVisualOnlyCandidate({ profile: "listen-soft", candidateDraft: makeCandidatePath(outside) }, root),
@@ -465,7 +511,7 @@ test("candidate path rejects root escapes, wrong filenames, links, and non-files
     const linkedTarget = join(outside, "linked-target");
     mkdirSync(linkedTarget);
     const linkedChild = makeCandidatePath(linkedTarget, "listen-soft", "through-linked-parent");
-    writeFileSync(linkedChild, "bytes", "utf8");
+    writeFileSync(linkedChild, createSyntheticMotionBytes(2.4));
     try {
       symlinkSync(linkedTarget, linkedParent, process.platform === "win32" ? "junction" : "dir");
       assert.throws(
@@ -482,15 +528,16 @@ test("candidate path rejects root escapes, wrong filenames, links, and non-files
   }
 });
 
-test("candidate reading is raw-byte only and makes no technical verdict", () => {
+test("candidate reading is raw-byte only and skips technical judging", () => {
   const root = mkdtempSync(join(tmpdir(), "p2-64k-raw-bytes-"));
   try {
     const candidatePath = makeCandidatePath(root, "flustered-big");
-    const originalBytes = Buffer.from([0, 255, 123, 10, 77, 101, 116, 97, 58, 0]);
+    const originalBytes = createSyntheticMotionBytes(4.2);
     writeFileSync(candidatePath, originalBytes);
     const candidate = readVisualOnlyCandidate({ profile: "flustered-big", candidateDraft: candidatePath }, root);
     assert.deepEqual(candidate.bytes, originalBytes);
     assert.equal(candidate.durationSeconds, 4.2);
+    assert.equal(candidate.probeParameterId, "ParamAngleY");
     assert.deepEqual(candidate.summary, {
       visualOnly: true,
       profile: "flustered-big",
@@ -500,9 +547,50 @@ test("candidate reading is raw-byte only and makes no technical verdict", () => 
 
     const source = readFileSync(new URL("./p2-64k-manual-motion-visual-preview.mjs", import.meta.url), "utf8");
     assert.doesNotMatch(source, /createHash|validateExplicitDraftMotion|canonicalizeMotion3/u);
-    assert.doesNotMatch(source, /JSON\.parse\(\s*(bytes|readFileSync\(candidatePath|candidateBytes)/u);
-    assert.doesNotMatch(source, /candidate\.motion|candidate\.sha|Meta\.Duration|Curves/u);
-    assert.doesNotMatch(JSON.stringify(candidate.summary), /validated|accepted|passed|allowlist|variation/u);
+    assert.doesNotMatch(source, /candidate\.motion|candidate\.sha|allowlist|variation|validated|passed/u);
+    assert.doesNotMatch(JSON.stringify(candidate.summary), /validated|accepted|allowlist|variation/u);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("candidate reading rejects flat and stepped-only motion curves as continuous probes", () => {
+  const root = mkdtempSync(join(tmpdir(), "p2-64k-unobservable-"));
+  try {
+    const candidatePath = makeCandidatePath(root, "flustered-big", "flat-motion");
+    const originalBytes = Buffer.from(JSON.stringify({
+      Version: 3,
+      Meta: { Duration: 4.2, Fps: 30, Loop: false },
+      Curves: [
+        { Target: "Parameter", Id: "Param59", Segments: [0, 0, 2, 1, 30] },
+        { Target: "Parameter", Id: "Param60", Segments: [0, 0, 3, 2, 30] }
+      ]
+    }), "utf8");
+    writeFileSync(candidatePath, originalBytes);
+    assert.throws(
+      () => readVisualOnlyCandidate({ profile: "flustered-big", candidateDraft: candidatePath }, root),
+      /candidate-motion-has-no-observable-curve/u
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("candidate reading never embeds an unsafe parameter id into the isolated renderer", () => {
+  const root = mkdtempSync(join(tmpdir(), "p2-64k-unsafe-probe-"));
+  try {
+    const candidatePath = makeCandidatePath(root, "listen-soft");
+    writeFileSync(candidatePath, JSON.stringify({
+      Version: 3,
+      Meta: { Duration: 2.4, Fps: 30, Loop: false },
+      Curves: [
+        { Target: "Parameter", Id: "ParamAngleX\";globalThis.injected=true;//", Segments: [0, -5, 0, 2.4, 5] },
+        { Target: "Parameter", Id: "ParamAngleY", Segments: [0, -4, 0, 2.4, 4] }
+      ]
+    }), "utf8");
+
+    const candidate = readVisualOnlyCandidate({ profile: "listen-soft", candidateDraft: candidatePath }, root);
+    assert.equal(candidate.probeParameterId, "ParamAngleY");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -517,7 +605,7 @@ test("isolated fixture copies bytes and only patches its own app", () => {
     makeSyntheticWorkspace(workspace);
     mkdirSync(drafts);
     const candidatePath = makeCandidatePath(drafts, "listen-soft");
-    const originalBytes = Buffer.from("unparsed source bytes\n", "utf8");
+    const originalBytes = createSyntheticMotionBytes(2.4);
     writeFileSync(candidatePath, originalBytes);
     const sourcePreset = readFileSync(join(workspace, "src/shared/pet-motion-presets.ts"), "utf8");
     const sourceAction = readFileSync(join(workspace, "src/renderer/pet/interaction-actions.ts"), "utf8");
@@ -536,7 +624,15 @@ test("isolated fixture copies bytes and only patches its own app", () => {
       preset: injectManualPreviewPreset(sourcePreset, config),
       action: injectManualPreviewAction(sourceAction, config),
       trigger: injectManualPreviewTrigger(readFileSync(join(workspace, "src/renderer/pet/main.ts"), "utf8"), config),
-      reason: injectManualPreviewReason(readFileSync(join(workspace, "src/renderer/pet/interaction-action-player.ts"), "utf8"))
+      reason: injectManualPreviewReason(readFileSync(join(workspace, "src/renderer/pet/interaction-action-player.ts"), "utf8")),
+      actionPlayer: injectManualPreviewPlayerLifecyclePatch(
+        readFileSync(join(workspace, "src/renderer/pet/interaction-action-player.ts"), "utf8"),
+        config
+      ),
+      framePipeline: injectManualPreviewFramePipelinePatch(
+        readFileSync(join(workspace, "src/renderer/pet/live2d/cubism-frame-pipeline.ts"), "utf8"),
+        config.probeParameterId
+      )
     };
     for (const [name, source] of Object.entries(transformed)) {
       const result = ts.transpileModule(source, {
@@ -546,6 +642,14 @@ test("isolated fixture copies bytes and only patches its own app", () => {
       });
       assert.deepEqual(result.diagnostics?.filter((diagnostic) => diagnostic.category === ts.DiagnosticCategory.Error), [], name);
     }
+    assert.match(transformed.trigger, /p2_64kManualMotionPreviewStatus/u);
+    assert.match(transformed.actionPlayer, /const previewStatus = previewGlobal\.__P2_64K_MANUAL_MOTION_VISUAL_PREVIEW_STATUS__;[\s\S]*if \(previewStatus\) \{[\s\S]*previewStatus\.motionStarted = true;/u);
+    assert.doesNotMatch(transformed.actionPlayer, /\?\.[A-Za-z_$][\w$]*\s*=/u);
+    assert.match(transformed.framePipeline, /PREVIEW_PROBE_STATE_BY_MODEL/u);
+    assert.match(transformed.framePipeline, /previewProbeParameterId = "ParamAngleY"/u);
+    assert.match(transformed.framePipeline, /previewMotionStarted = previewGlobal\.__P2_64K_MANUAL_MOTION_VISUAL_PREVIEW_STATUS__\?\.motionStarted === true/u);
+    assert.match(transformed.framePipeline, /previewOwnedProbe = previewMotionStarted &&/u);
+    assert.match(transformed.framePipeline, /parameterObserved = true/u);
     assert.match(transformed.preset, /\.\.\.APPROVED_MOTION_PRESETS/u);
     assert.deepEqual(getIsolatedManualPreviewBuildSteps().map(({ label, args }) => ({ label, args })), [
       { label: "main", args: ["-p", "tsconfig.main.json"] },
@@ -567,7 +671,7 @@ test("isolated fixture registers preview motion while preserving approved manage
     makeSyntheticWorkspace(workspace);
     mkdirSync(drafts);
     const candidatePath = makeCandidatePath(drafts, "listen-soft");
-    writeFileSync(candidatePath, Buffer.from("visual-only-bytes\n", "utf8"));
+    writeFileSync(candidatePath, createSyntheticMotionBytes(2.4));
     const candidate = readVisualOnlyCandidate({ profile: "listen-soft", candidateDraft: candidatePath }, drafts);
     const fixture = prepareIsolatedManualPreview(fixtureRoot, candidate, workspace);
 
@@ -625,6 +729,191 @@ test("preview trigger retries until startup action clears instead of relying on 
     },
     trigger: async () => false
   }), /preview-trigger-rejected/u);
+});
+
+test("real start gate fails closed while the Live2D model is not ready", async () => {
+  const stages = {
+    windowReady: false,
+    modelReady: false,
+    motionStarted: false,
+    parameterObserved: false
+  };
+  let tick = 0;
+  let triggerCalls = 0;
+  let cleanupCalls = 0;
+
+  await assert.rejects(() => waitForManualPreviewRealStartGate({
+    stages,
+    timeoutMs: 10,
+    intervalMs: 5,
+    now: () => tick,
+    sleepFn: async () => {
+      tick += 5;
+    },
+    readStatus: async () => ({ modelReady: false }),
+    trigger: async () => {
+      triggerCalls += 1;
+      return { modelReady: false, motionStarted: false, parameterObserved: false };
+    },
+    cleanupOnFailure: async () => {
+      cleanupCalls += 1;
+    }
+  }), /preview-model-not-ready/u);
+
+  assert.equal(triggerCalls, 0);
+  assert.equal(cleanupCalls, 1);
+  assert.deepEqual(stages, {
+    windowReady: false,
+    modelReady: false,
+    motionStarted: false,
+    parameterObserved: false
+  });
+});
+
+test("real start gate succeeds after model-ready and motion/parameter-start signals", async () => {
+  const stages = {
+    windowReady: false,
+    modelReady: false,
+    motionStarted: false,
+    parameterObserved: false
+  };
+  let tick = 0;
+  let triggerCalls = 0;
+  const statusSequence = [
+    { windowReady: false, modelReady: false, motionStarted: false, parameterObserved: false },
+    { windowReady: true, modelReady: false, motionStarted: false, parameterObserved: false },
+    { windowReady: true, modelReady: true, motionStarted: false, parameterObserved: false },
+    { windowReady: true, modelReady: true, motionStarted: true, parameterObserved: false },
+    { windowReady: true, modelReady: true, motionStarted: true, parameterObserved: true }
+  ];
+
+  const status = await waitForManualPreviewRealStartGate({
+    stages,
+    timeoutMs: 40,
+    intervalMs: 5,
+    now: () => tick,
+    sleepFn: async () => {
+      tick += 5;
+    },
+    readStatus: makeSequentialStatusReader(statusSequence),
+    trigger: async () => {
+      triggerCalls += 1;
+      return triggerCalls >= 2;
+    }
+  });
+  assert.deepEqual(stages, {
+    windowReady: true,
+    modelReady: true,
+    motionStarted: true,
+    parameterObserved: true
+  });
+  assert.equal(status.windowReady, true);
+  assert.equal(status.motionStarted, true);
+  assert.equal(triggerCalls, 2);
+});
+
+test("real start gate reports preview model-not-started timeout and runs cleanup", async () => {
+  const stages = {
+    windowReady: false,
+    modelReady: false,
+    motionStarted: false,
+    parameterObserved: false
+  };
+  let tick = 0;
+  let triggerCalls = 0;
+  let cleanupCalls = 0;
+
+  await assert.rejects(() => waitForManualPreviewRealStartGate({
+    stages,
+    timeoutMs: 10,
+    intervalMs: 5,
+    now: () => tick,
+    sleepFn: async () => {
+      tick += 5;
+    },
+    readStatus: makeSequentialStatusReader([
+      { windowReady: true, modelReady: true, motionStarted: false, parameterObserved: false },
+      { windowReady: true, modelReady: true, motionStarted: false, parameterObserved: false },
+      { windowReady: true, modelReady: true, motionStarted: false, parameterObserved: false }
+    ]),
+    trigger: async () => {
+      triggerCalls += 1;
+      return true;
+    },
+    cleanupOnFailure: async () => {
+      cleanupCalls += 1;
+    }
+  }), /preview-motion-start-gate-timeout/u);
+
+  assert.equal(triggerCalls, 1);
+  assert.equal(cleanupCalls, 1);
+  assert.equal(stages.modelReady, true);
+});
+
+test("real start gate reports missing probe variation timeout and runs cleanup", async () => {
+  const stages = {
+    windowReady: false,
+    modelReady: false,
+    motionStarted: false,
+    parameterObserved: false
+  };
+  let tick = 0;
+  let triggerCalls = 0;
+  let cleanupCalls = 0;
+
+  await assert.rejects(() => waitForManualPreviewRealStartGate({
+    stages,
+    timeoutMs: 10,
+    intervalMs: 5,
+    now: () => tick,
+    sleepFn: async () => {
+      tick += 5;
+    },
+    readStatus: makeSequentialStatusReader([
+      { windowReady: true, modelReady: true, motionStarted: false, parameterObserved: false },
+      { windowReady: true, modelReady: true, motionStarted: true, parameterObserved: false },
+      { windowReady: true, modelReady: true, motionStarted: true, parameterObserved: false },
+      { windowReady: true, modelReady: true, motionStarted: true, parameterObserved: false }
+    ]),
+    trigger: async () => {
+      triggerCalls += 1;
+      return true;
+    },
+    cleanupOnFailure: async () => {
+      cleanupCalls += 1;
+    }
+  }), /preview-motion-start-gate-timeout/u);
+
+  assert.equal(triggerCalls, 1);
+  assert.equal(cleanupCalls, 1);
+  assert.equal(stages.parameterObserved, false);
+});
+
+test("real start gate aborts when signal is already canceled", async () => {
+  const stages = {
+    windowReady: false,
+    modelReady: false,
+    motionStarted: false,
+    parameterObserved: false
+  };
+  let cleanupCalls = 0;
+  const aborted = new AbortController();
+  aborted.abort();
+
+  await assert.rejects(() => waitForManualPreviewRealStartGate({
+    stages,
+    timeoutMs: 100,
+    intervalMs: 5,
+    now: () => 0,
+    readStatus: async () => ({ windowReady: false, modelReady: false, motionStarted: false, parameterObserved: false }),
+    trigger: async () => true,
+    cleanupOnFailure: async () => {
+      cleanupCalls += 1;
+    },
+    signal: aborted.signal
+  }), /preview-start-aborted/u);
+
+  assert.equal(cleanupCalls, 1);
 });
 
 test("cleanup removes only its run directory and preserves sibling/user files", () => {

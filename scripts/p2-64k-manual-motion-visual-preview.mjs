@@ -26,12 +26,17 @@ import {
   waitFor,
   waitForWindow
 } from "./support/real-ui-harness.mjs";
+import { parseMotion3Segments } from "./support/motion3-canonicalizer.mts";
 
 const ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const RUN_NAME = "p2-64k-manual-motion-visual-preview";
 const TRIGGER_GLOBAL = "__P2_64K_MANUAL_MOTION_VISUAL_PREVIEW_TRIGGER__";
+const PREVIEW_STATUS_GLOBAL = "__P2_64K_MANUAL_MOTION_VISUAL_PREVIEW_STATUS__";
+const PREVIEW_STATUS_GETTER = "__P2_64K_MANUAL_MOTION_VISUAL_PREVIEW_STATUS_GETTER__";
 const PREVIEW_REASON = "p2_64k_manual_motion_visual_preview";
 const REPLAY_GAP_MS = 1_000;
+const PREVIEW_PROBE_EPSILON = 0.0001;
+const SAFE_CUBISM_PARAMETER_ID = /^[A-Za-z][A-Za-z0-9_]{0,127}$/u;
 
 export const P2_64K_DRAFT_ROOT = "C:/Users/1/AppData/Roaming/Electron/motion-drafts/vts-drafts";
 export const P2_64J_MOTION_PROFILES = Object.freeze([
@@ -82,6 +87,74 @@ function publicError(error) {
     name: error instanceof Error ? error.name : "Error",
     message: String(error instanceof Error ? error.message : error).slice(0, 300)
   };
+}
+
+function finiteNumber(value) {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function extractMotion3CurveProbeSummary(curveSegments, durationSeconds) {
+  if (!Array.isArray(curveSegments) || !finiteNumber(durationSeconds) || durationSeconds <= 0) return null;
+  if (curveSegments.length < 5 || !curveSegments.every(finiteNumber)) return null;
+
+  const values = [];
+  const summary = parseMotion3Segments(curveSegments, durationSeconds);
+  if (!summary.validEncoding || !summary.validTime) return null;
+
+  const duration = Math.max(0, durationSeconds);
+  let cursor = 0;
+  let previousTime = curveSegments[cursor];
+  if (previousTime < 0 || previousTime > duration) return null;
+  values.push(curveSegments[cursor + 1]);
+  let hasContinuousSegment = false;
+
+  cursor = 2;
+  while (cursor < curveSegments.length) {
+    const segmentType = curveSegments[cursor];
+    const segmentLength = segmentType === 0 ? 3 : segmentType === 1 ? 7 : segmentType === 2 ? 3 : segmentType === 3 ? 3 : undefined;
+    if (!Number.isInteger(segmentType) || segmentLength === undefined || cursor + segmentLength > curveSegments.length) {
+      return null;
+    }
+    if (segmentType === 0 || segmentType === 1) hasContinuousSegment = true;
+    for (let pointOffset = 1; pointOffset < segmentLength; pointOffset += 2) {
+      const currentTime = curveSegments[cursor + pointOffset];
+      const currentValue = curveSegments[cursor + pointOffset + 1];
+      if (currentTime < previousTime || currentTime < 0 || currentTime > duration || !finiteNumber(currentValue)) {
+        return null;
+      }
+      previousTime = currentTime;
+      values.push(currentValue);
+    }
+    cursor += segmentLength;
+  }
+
+  return cursor === curveSegments.length ? { values, hasContinuousSegment } : null;
+}
+
+function selectFirstVisibleProbeParameterId(candidateBytes, fallbackDurationSeconds) {
+  let motion;
+  try {
+    motion = JSON.parse(candidateBytes.toString("utf8"));
+  } catch {
+    return null;
+  }
+  if (!motion || typeof motion !== "object" || !Array.isArray(motion.Curves)) return null;
+  const durationSeconds = finiteNumber(motion?.Meta?.Duration) ? motion.Meta.Duration : fallbackDurationSeconds;
+
+  for (const curve of motion.Curves) {
+    if (!curve || typeof curve !== "object") continue;
+    if (curve.Target !== "Parameter" || typeof curve.Id !== "string" || !SAFE_CUBISM_PARAMETER_ID.test(curve.Id)) continue;
+    const probeSummary = extractMotion3CurveProbeSummary(curve.Segments, durationSeconds);
+    if (!probeSummary?.hasContinuousSegment || probeSummary.values.length < 2) continue;
+    const { values } = probeSummary;
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    if (Number.isFinite(min) && Number.isFinite(max) && max - min > PREVIEW_PROBE_EPSILON) {
+      return curve.Id;
+    }
+  }
+
+  return null;
 }
 
 function replaceExactlyOnce(source, marker, replacement, label) {
@@ -242,12 +315,18 @@ export function readVisualOnlyCandidate({ profile, candidateDraft }, draftRoot =
     throw new Error("candidate-reparse-path-rejected");
   }
 
+  const probeParameterId = selectFirstVisibleProbeParameterId(readFileSync(candidatePath), profileContract.durationSeconds);
+  if (!probeParameterId) {
+    throw new Error("candidate-motion-has-no-observable-curve");
+  }
+
   return {
     sourcePath: candidatePath,
     bytes: readFileSync(candidatePath),
     profile,
     durationSeconds: profileContract.durationSeconds,
     durationMs: Math.round(profileContract.durationSeconds * 1_000),
+    probeParameterId,
     summary: {
       visualOnly: true,
       profile,
@@ -263,7 +342,8 @@ function previewConfig(candidate) {
     id,
     motionPath: `motions/${id}.motion3.json`,
     durationSeconds: candidate.durationSeconds,
-    durationMs: candidate.durationMs
+    durationMs: candidate.durationMs,
+    probeParameterId: candidate.probeParameterId
   };
 }
 
@@ -318,12 +398,39 @@ export function injectManualPreviewTrigger(source, config) {
   const replacement = `
 });
 
-type P2_64KPreviewGlobal = typeof globalThis & { ${TRIGGER_GLOBAL}?: () => boolean };
-(globalThis as P2_64KPreviewGlobal).${TRIGGER_GLOBAL} = () => interactionActionPlayer.playAction(
-  getPetInteractionAction("${config.id}"),
-  "${PREVIEW_REASON}",
-  { stateId: "idle", modeId: "default", presenceModeId: "default", candidateActionTypes: ["${config.id}"] }
-);
+type P2_64KPreviewStatus = {
+  windowReady: boolean;
+  modelReady: boolean;
+  motionStarted: boolean;
+  parameterObserved: boolean;
+};
+type P2_64KPreviewGlobal = typeof globalThis & {
+  ${PREVIEW_STATUS_GLOBAL}?: P2_64KPreviewStatus;
+  ${PREVIEW_STATUS_GETTER}?: () => P2_64KPreviewStatus;
+  ${TRIGGER_GLOBAL}?: () => boolean;
+};
+const p2_64kManualMotionPreviewStatus: P2_64KPreviewStatus = {
+  get windowReady() {
+    return true;
+  },
+  get modelReady() {
+    return Boolean(live2DModel);
+  },
+  motionStarted: false,
+  parameterObserved: false
+};
+(globalThis as P2_64KPreviewGlobal).${PREVIEW_STATUS_GLOBAL} = p2_64kManualMotionPreviewStatus;
+(globalThis as P2_64KPreviewGlobal).${PREVIEW_STATUS_GETTER} = () => p2_64kManualMotionPreviewStatus;
+(globalThis as P2_64KPreviewGlobal).${TRIGGER_GLOBAL} = () => {
+  if (!p2_64kManualMotionPreviewStatus.modelReady) return false;
+  p2_64kManualMotionPreviewStatus.motionStarted = false;
+  p2_64kManualMotionPreviewStatus.parameterObserved = false;
+  return interactionActionPlayer.playAction(
+    getPetInteractionAction("${config.id}"),
+    "${PREVIEW_REASON}",
+    { stateId: "idle", modeId: "default", presenceModeId: "default", candidateActionTypes: ["${config.id}"] }
+  );
+};
 
 function applyBasePresentation(`;
   return replaceExactlyOnce(source, marker, replacement, "manual preview trigger");
@@ -336,6 +443,91 @@ export function injectManualPreviewReason(source) {
     `  | "${PREVIEW_REASON}"\n  | "startup_first_visible_frame"`,
     "manual preview reason"
   );
+}
+
+export function injectManualPreviewPlayerLifecyclePatch(source, config) {
+  const marker = `        activeAction.playbackPhase = "started";
+        if (activeAction.timeoutId !== undefined) {
+          clearScheduledTimeout(activeAction.timeoutId);
+          delete activeAction.timeoutId;
+        }
+        reportActionStarted(activeAction);`;
+  return replaceExactlyOnce(
+    source,
+    marker,
+    `        activeAction.playbackPhase = "started";
+      if (
+        activeAction.reason === "${PREVIEW_REASON}" &&
+        activeAction.action.type === "${config.id}"
+      ) {
+        const previewGlobal = globalThis as typeof globalThis & {
+          ${PREVIEW_STATUS_GLOBAL}?: { motionStarted?: boolean; }
+        };
+        const previewStatus = previewGlobal.${PREVIEW_STATUS_GLOBAL};
+        if (previewStatus) {
+          previewStatus.motionStarted = true;
+        }
+      }
+      if (activeAction.timeoutId !== undefined) {
+        clearScheduledTimeout(activeAction.timeoutId);
+        delete activeAction.timeoutId;
+      }
+      reportActionStarted(activeAction);`,
+    "manual preview player lifecycle patch"
+  );
+}
+
+export function injectManualPreviewFramePipelinePatch(source, probeParameterId) {
+  const insertionMarker = `  const ownedParameterIds = layers.applyMotion?.(deltaSeconds) ?? EMPTY_PARAMETER_IDS;
+  restoreReleasedMotionParameterDefaults(model, ownedParameterIds);
+  const ownedParameterIndices = findOwnedParameterIndices(model, ownedParameterIds);`;
+  const patchedSource = replaceExactlyOnce(
+    source,
+    insertionMarker,
+    `  const ownedParameterIds = layers.applyMotion?.(deltaSeconds) ?? EMPTY_PARAMETER_IDS;
+  restoreReleasedMotionParameterDefaults(model, ownedParameterIds);
+  const ownedParameterIndices = findOwnedParameterIndices(model, ownedParameterIds);`
+    + "\n"
+    + `  const previewGlobal = globalThis as typeof globalThis & {
+    ${PREVIEW_STATUS_GLOBAL}?: { motionStarted?: boolean; parameterObserved?: boolean; }
+  };
+  const previewProbeParameterId = "${probeParameterId}";
+  const previewMotionStarted = previewGlobal.${PREVIEW_STATUS_GLOBAL}?.motionStarted === true;
+  const previewOwnedProbe = previewMotionStarted && previewProbeParameterId.length > 0 && ownedParameterIds.has(previewProbeParameterId);
+  if (!previewOwnedProbe) {
+    PREVIEW_PROBE_STATE_BY_MODEL.delete(model);
+  }
+  if (previewOwnedProbe) {
+    const previewProbeIndices = findOwnedParameterIndices(model, new Set([previewProbeParameterId]));
+    const previewProbeIndex = previewProbeIndices[0] ?? -1;
+    if (previewProbeIndex >= 0) {
+      const previewProbeValue = model.getParameterValueByIndex(previewProbeIndex);
+      if (Number.isFinite(previewProbeValue)) {
+        const existingProbeState = PREVIEW_PROBE_STATE_BY_MODEL.get(model);
+        if (existingProbeState) {
+          if (Math.abs(previewProbeValue - existingProbeState.baseline) > ${PREVIEW_PROBE_EPSILON}) {
+            if (previewGlobal.${PREVIEW_STATUS_GLOBAL}) {
+              previewGlobal.${PREVIEW_STATUS_GLOBAL}.parameterObserved = true;
+            }
+          }
+        } else {
+          PREVIEW_PROBE_STATE_BY_MODEL.set(model, { baseline: previewProbeValue });
+        }
+      }
+    }
+  }`,
+    "manual preview probe motion sampling"
+  );
+
+  const headerMarker = "const previousMotionParameterIdsByModel = new WeakMap<object, ReadonlySet<string>>();";
+  const headerPatched = replaceExactlyOnce(
+    patchedSource,
+    headerMarker,
+    `const previousMotionParameterIdsByModel = new WeakMap<object, ReadonlySet<string>>();
+const PREVIEW_PROBE_STATE_BY_MODEL = new WeakMap<object, { baseline: number; }>();`,
+    "manual preview probe state map"
+  );
+  return headerPatched;
 }
 
 function patchFile(path, transform) {
@@ -469,7 +661,14 @@ export function prepareIsolatedManualPreview(fixtureRoot, candidate, workspaceRo
   patchFile(join(targetRoot, "src", "shared", "pet-motion-presets.ts"), (source) => injectManualPreviewPreset(source, config));
   patchFile(join(targetRoot, "src", "renderer", "pet", "interaction-actions.ts"), (source) => injectManualPreviewAction(source, config));
   patchFile(join(targetRoot, "src", "renderer", "pet", "main.ts"), (source) => injectManualPreviewTrigger(source, config));
-  patchFile(join(targetRoot, "src", "renderer", "pet", "interaction-action-player.ts"), injectManualPreviewReason);
+  patchFile(join(targetRoot, "src", "renderer", "pet", "interaction-action-player.ts"), (source) => injectManualPreviewPlayerLifecyclePatch(
+    injectManualPreviewReason(source),
+    config
+  ));
+  patchFile(
+    join(targetRoot, "src", "renderer", "pet", "live2d", "cubism-frame-pipeline.ts"),
+    (source) => injectManualPreviewFramePipelinePatch(source, config.probeParameterId)
+  );
 
   return { config, fixtureMotionPath: relative(targetRoot, fixtureMotionPath).split(sep).join("/") };
 }
@@ -492,6 +691,72 @@ export async function waitForManualPreviewTriggerAcceptance({
     await sleepFn(intervalMs);
   }
   throw new Error("preview-trigger-rejected");
+}
+
+export async function waitForManualPreviewRealStartGate({
+  stages,
+  readStatus,
+  trigger,
+  cleanupOnFailure = async () => undefined,
+  timeoutMs = 12_000,
+  intervalMs = 150,
+  now = () => Date.now(),
+  sleepFn = sleep,
+  signal
+}) {
+  const deadline = now() + timeoutMs;
+
+  try {
+    while (now() <= deadline) {
+      if (signal?.aborted) throw new Error("preview-start-aborted");
+      const status = await readStatus();
+      if (status?.windowReady === true) {
+        stages.windowReady = true;
+      }
+      if (status?.modelReady === true) {
+        stages.modelReady = true;
+        break;
+      }
+      if (now() >= deadline) break;
+      await sleepFn(intervalMs);
+    }
+    if (!stages.modelReady) {
+      throw new Error("preview-model-not-ready");
+    }
+
+    let accepted = false;
+    while (now() <= deadline) {
+      if (signal?.aborted) throw new Error("preview-start-aborted");
+      if (await trigger()) {
+        accepted = true;
+        break;
+      }
+      if (now() >= deadline) break;
+      await sleepFn(intervalMs);
+    }
+    if (!accepted) {
+      throw new Error("preview-trigger-rejected");
+    }
+
+    while (now() <= deadline) {
+      if (signal?.aborted) throw new Error("preview-start-aborted");
+      const status = await readStatus();
+      stages.windowReady = status?.windowReady === true ? true : stages.windowReady;
+      stages.motionStarted = status?.motionStarted === true;
+      stages.parameterObserved = status?.parameterObserved === true;
+      if (stages.motionStarted && stages.parameterObserved) {
+        return status;
+      }
+      if (now() >= deadline) {
+        break;
+      }
+      await sleepFn(intervalMs);
+    }
+    throw new Error("preview-motion-start-gate-timeout");
+  } catch (error) {
+    await cleanupOnFailure();
+    throw error;
+  }
 }
 
 export function createManualPreviewRunContext({ workspaceRoot = ROOT, port = 9696 } = {}) {
@@ -601,9 +866,23 @@ async function main() {
     await waitFor(pet, "Boolean(window.petApi && document.querySelector('#pet-canvas'))", { timeoutMs: 20_000 });
     await waitFor(pet, "document.querySelector('#pet-canvas')?.width > 0", { timeoutMs: 20_000 });
     await waitFor(pet, `typeof globalThis.${TRIGGER_GLOBAL} === "function"`, { timeoutMs: 10_000 });
-    await waitForManualPreviewTriggerAcceptance({
+    const previewStages = {
+      windowReady: false,
+      modelReady: false,
+      motionStarted: false,
+      parameterObserved: false
+    };
+    const readPreviewStatus = async () => evaluate(pet, `
+      (typeof globalThis.${PREVIEW_STATUS_GETTER} === "function")
+        ? globalThis.${PREVIEW_STATUS_GETTER}?.()
+        : null
+    `);
+    await waitForManualPreviewRealStartGate({
+      stages: previewStages,
+      trigger: () => evaluate(pet, `globalThis.${TRIGGER_GLOBAL}()`),
+      readStatus: readPreviewStatus,
       timeoutMs: 12_000,
-      trigger: () => evaluate(pet, `globalThis.${TRIGGER_GLOBAL}()`)
+      signal: controller.signal
     });
     opened = true;
     await evaluate(pet, `
@@ -615,6 +894,7 @@ async function main() {
       candidate: candidate.summary,
       isolatedFixture: true,
       technicalValidation: "not-run",
+      previewStages,
       replayEveryMs: fixture.config.durationMs + REPLAY_GAP_MS,
       close: "Close the isolated desktop pet window or press Ctrl+C to finish and clean this preview."
     }, null, 2));
