@@ -90,9 +90,17 @@ test("assistant reply redaction replaces generic AI self identity with Xita iden
 
   assert.match(redacted, /我是西塔，魔法学院高年级的现代魔导工程进修魔女/);
   assert.match(redacted, /作为西塔/);
-  assert.match(redacted, /西塔的身份是桌面魔女同伴/);
+  assert.match(redacted, /我的身份是桌面魔女同伴/);
   assert.doesNotMatch(redacted, /我是一个AI助手|作为语言模型|普通 AI 助手|本质上是聊天机器人/);
   assert.equal(hasGenericAiSelfIdentityDrift(redacted), false);
+});
+
+test("assistant reply stream guard keeps Xita in first person across deltas", () => {
+  const source = "我知道你今天不太好。西塔就在这里，随时准备支持你。";
+  const expected = "我知道你今天不太好。我就在这里，随时准备支持你。";
+
+  assert.equal(sanitizeAssistantReplyForDisplay(source), expected);
+  assert.equal(collectSafeReplyDeltas(["我知道你今天不太好。西", "塔就在这里，随时准备支持你。"]), expected);
 });
 
 test("assistant reply stream guard redacts markers split across deltas", () => {

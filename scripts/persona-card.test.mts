@@ -15,7 +15,7 @@ test("persona card captures academy witch desktop-pet identity and temperament",
   assert.equal(DEFAULT_PERSONA_CARD.id, "academy-witch-modern-thaumaturgy-v3");
   assert.equal(DEFAULT_PERSONA_CARD.name, "西塔");
   assert.match(DEFAULT_PERSONA_CARD.displayName, /魔女西塔/);
-  assert.match(DEFAULT_PERSONA_CARD.roleSummary, /西塔是一名魔女/);
+  assert.match(DEFAULT_PERSONA_CARD.roleSummary, /你就是西塔本人.*一名魔女/);
   assert.match(DEFAULT_PERSONA_CARD.roleSummary, /当前社会身份.*魔法学院现代魔导工程专业高年级进修\/研究型学生/);
   assert.match(DEFAULT_PERSONA_CARD.roleSummary, /课程.*实验.*报告.*长期课题/);
   assert.match(DEFAULT_PERSONA_CARD.roleSummary, /现代科技/);
@@ -38,20 +38,20 @@ test("persona prompts are rendered from the shared persona card", () => {
   assert.match(cloudPrompt, new RegExp(escapeRegExp(DEFAULT_PERSONA_CARD.desktopScenario)));
   assert.match(cloudPrompt, new RegExp(escapeRegExp(DEFAULT_PERSONA_CARD.actionIntentPolicy.summary)));
   assert.match(cloudPrompt, new RegExp(escapeRegExp(DEFAULT_PERSONA_CARD.searchPolicy.summary)));
-  assert.match(localPrompt, /西塔是一名魔女/);
-  assert.match(localPrompt, /名字=西塔/);
+  assert.match(localPrompt, /你就是西塔本人.*魔女/);
+  assert.match(localPrompt, /西塔=你的名字/);
   assert.match(localPrompt, /社会身份=魔法学院现代魔导工程专业高年级进修\/研究型学生/);
-  assert.match(localPrompt, /Windows Live2D 桌面魔女同伴/);
-  assert.match(localPrompt, /关系\/场景.*不是社会身份/);
+  assert.match(localPrompt, /Windows Live2D.*桌面魔女同伴/);
+  assert.match(localPrompt, /关系.*场景.*非社会身份/);
   assert.match(localPrompt, /课程.*实验.*报告.*长期课题.*低频.*连续/);
-  assert.match(localPrompt, /长寿阅历低频呈现/);
-  assert.match(localPrompt, /技术名词准确/);
-  assert.match(localPrompt, /第一身份与技术实现分离/);
-  assert.match(localPrompt, /桌面边缘轻声陪伴/);
+  assert.match(localPrompt, /长寿阅历低频/);
+  assert.match(localPrompt, /术语准确/);
+  assert.match(localPrompt, /身份.*技术实现/);
+  assert.match(localPrompt, /桌面边缘陪伴/);
   assert.match(localPrompt, /先接具体内容再答/);
   assert.match(localPrompt, /先答问题/);
   assert.match(localPrompt, /复合问题逐项回答/);
-  assert.match(localPrompt, /不固定口癖/);
+  assert.match(localPrompt, /无固定口癖/);
   assert.match(localPrompt, /真实术语不魔法化/);
   assert.doesNotMatch(localPrompt, /问学院近况|2-3项连贯具体活动|Provider=模型访问|MCP=工具调用/);
   assert.match(localPrompt, /耐心.*乐观.*学识渊博.*可靠/);
@@ -71,6 +71,15 @@ test("persona prompt permits stronger emotions with calibrated boundaries", () =
   assert.match(localPrompt, /最多一个感叹号/);
   assert.match(localPrompt, /技术.*事实.*安全.*冷静/);
   assert.match(localPrompt, /不哭喊.*不辱骂.*不威胁.*不恋爱化.*不制造依赖/);
+});
+
+test("local persona binds Xita to first-person self identity", () => {
+  const localPrompt = createLocalSmallModelPersonaPrompt();
+
+  assert.match(localPrompt, /你就是西塔本人/);
+  assert.match(localPrompt, /西塔.*你的名字/);
+  assert.match(localPrompt, /日常.*我\/我的.*自称/);
+  assert.doesNotMatch(localPrompt, /西塔是一名魔女/);
 });
 
 test("persona card records privacy, memory, action, and search boundaries only", () => {

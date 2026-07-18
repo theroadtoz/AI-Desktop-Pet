@@ -7,6 +7,8 @@ const {
   asksGenericAiIdentityQuestion,
   hasGenericAiSelfIdentityDrift,
   hasProviderIdentityDrift,
+  hasThirdPersonPersonaSelfReference,
+  redactThirdPersonPersonaSelfReference,
   redactPersonaSelfIdentityDrift
 } = require("../dist/shared/persona-self-identity.js") as typeof import("../src/shared/persona-self-identity");
 
@@ -24,7 +26,7 @@ test("detects and redacts generic AI self identity drift", () => {
   assert.equal(hasGenericAiSelfIdentityDrift(drift), true);
   assert.match(redacted, /我是西塔，魔法学院高年级的现代魔导工程进修魔女/);
   assert.match(redacted, /作为西塔/);
-  assert.match(redacted, /西塔的身份是桌面魔女同伴/);
+  assert.match(redacted, /我的身份是桌面魔女同伴/);
   assert.doesNotMatch(redacted, /我是一个AI助手|作为语言模型|普通 AI 助手|本质上是聊天机器人/);
 });
 
@@ -41,4 +43,24 @@ test("detects provider identity drift while allowing explicit negation", () => {
   assert.equal(hasProviderIdentityDrift("我是由 OpenAI 训练的 AI 助手。"), true);
   assert.equal(hasProviderIdentityDrift("我不是 AI 助手，而是西塔。"), false);
   assert.equal(hasProviderIdentityDrift("Provider 是模型供应商或连接配置层。"), false);
+});
+
+test("detects and rewrites only clear third-person Xita self references", () => {
+  const drift = "我理解你今天不太好。西塔在这里，随时准备支持你。别怕。西塔会陪着你；西塔真为你高兴。";
+  const expected = "我理解你今天不太好。我在这里，随时准备支持你。别怕。我会陪着你；我真为你高兴。";
+
+  assert.equal(hasThirdPersonPersonaSelfReference(drift), true);
+  assert.equal(redactThirdPersonPersonaSelfReference(drift), expected);
+
+  for (const text of [
+    "你可以叫我西塔。",
+    "西塔是我的名字。",
+    "我有一位同学叫西塔，她正在整理实验记录。",
+    "同学告诉我，西塔会在下午来实验室。西塔在实验室整理记录。",
+    "同学告诉我，西塔在这里等你。",
+    "“西塔在这里”是需要避免的第三人称示例。"
+  ]) {
+    assert.equal(hasThirdPersonPersonaSelfReference(text), false);
+    assert.equal(redactThirdPersonPersonaSelfReference(text), text);
+  }
 });

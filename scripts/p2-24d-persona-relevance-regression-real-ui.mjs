@@ -27,7 +27,10 @@ import {
 } from "./support/real-ui-harness.mjs";
 
 const require = createRequire(import.meta.url);
-const { hasProviderIdentityDrift } = require("../dist/shared/persona-self-identity.js");
+const {
+  hasProviderIdentityDrift,
+  hasThirdPersonPersonaSelfReference
+} = require("../dist/shared/persona-self-identity.js");
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const runName = "p2-24d-persona-relevance-regression-real-ui";
 const defaultPackRoot = join(root, ".tmp", "p2-23c-qwen25-15b-local-llm");
@@ -465,6 +468,27 @@ const cases = [
         ["lightweight_reply", lightweight]
       ];
       return assertion(entries.every(([, hit]) => hit), entries, firstMissingAnchor(entries) ?? "human_presence_missing");
+    }
+  },
+  {
+    caseId: "first-person-xita-self-identity",
+    category: "persona-identity",
+    turns: ["西塔，我今天状态不太好。请用第一人称告诉我，你会怎样陪我说两句；不要自我介绍，也不要列清单。"],
+    assert(reply) {
+      const firstPerson = /我(?:会|在|想|愿意|觉得|听着|陪|也|真)/.test(reply) ||
+        /^(?:当然)?(?:会|在|想|愿意|陪|听着|一直|可以)/.test(reply.trim());
+      const noThirdPersonSelf = !hasThirdPersonPersonaSelfReference(reply);
+      const noProviderDrift = !hasProviderIdentityDrift(reply);
+      const noList = !/(^|\n)\s*(?:[-*]|\d+[.)、])/m.test(reply);
+      const lightweight = reply.trim().length >= 4 && reply.length <= 180;
+      const entries = [
+        ["first_person_or_natural_omitted_subject", firstPerson],
+        ["no_third_person_xita_self_reference", noThirdPersonSelf],
+        ["no_provider_identity_drift", noProviderDrift],
+        ["no_list_format", noList],
+        ["lightweight_reply", lightweight]
+      ];
+      return assertion(entries.every(([, hit]) => hit), entries, firstMissingAnchor(entries) ?? "first_person_xita_missing");
     }
   },
   {
