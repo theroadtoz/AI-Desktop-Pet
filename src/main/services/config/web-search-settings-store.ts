@@ -104,11 +104,13 @@ function normalizeSettings(value: unknown, hasSettingsFile: boolean, disableUnsu
   const shouldPinBundledToolName = isSupportedCommandProfile(normalizedCommand, normalizedArgs);
 
   return {
-    enabled: shouldUseBundledPreset
+    enabled: shouldUseDefaultPreset
       ? DEFAULT_WEB_SEARCH_SETTINGS.enabled
-      : input?.enabled === true &&
-        normalizedCommand.length > 0 &&
-        (!disableUnsupported || isSupportedCommandProfile(normalizedCommand, normalizeArgs(input?.args))),
+      : shouldMigrateHistoricalPreset
+        ? input?.enabled === true
+        : input?.enabled === true &&
+          normalizedCommand.length > 0 &&
+          (!disableUnsupported || isSupportedCommandProfile(normalizedCommand, normalizeArgs(input?.args))),
     command: normalizedCommand,
     args: normalizedArgs,
     toolName: shouldPinBundledToolName ? DEFAULT_WEB_SEARCH_SETTINGS.toolName : normalizeToolName(input?.toolName),

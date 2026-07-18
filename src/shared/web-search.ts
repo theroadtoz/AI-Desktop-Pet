@@ -114,7 +114,7 @@ export function getWebSearchFailurePrompt(errorType?: WebSearchErrorType): strin
 }
 
 export const DEFAULT_WEB_SEARCH_SETTINGS: WebSearchSettings = {
-  enabled: false,
+  enabled: true,
   command: BUNDLED_BAIDU_SEARCH_COMMAND,
   args: [],
   toolName: "search",

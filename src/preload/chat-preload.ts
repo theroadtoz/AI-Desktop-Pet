@@ -138,7 +138,7 @@ const localModelDiagnosticEndpointStatuses = [
   "skipped"
 ] as const;
 const DEFAULT_WEB_SEARCH_SETTINGS: WebSearchSettings = {
-  enabled: false,
+  enabled: true,
   command: "bundled-baidu-search",
   args: [],
   toolName: "search",

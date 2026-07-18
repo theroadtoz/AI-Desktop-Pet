@@ -616,9 +616,9 @@ test("web search prompt context is temporary model context, not history or memor
   assert.equal(contents.some((content) => content.includes("事实卡")), false);
 });
 
-test("web search settings default to the bundled Baidu compatibility preset disabled", () => {
+test("web search settings default to the bundled Baidu compatibility preset enabled", () => {
   assert.deepEqual(normalizeWebSearchSettings({}), {
-    enabled: false,
+    enabled: true,
     command: "bundled-baidu-search",
     args: [],
     toolName: "search",
@@ -646,7 +646,7 @@ test("web search settings store defaults on first run but preserves explicit use
   const userDataPath = mkdtempSync(join(tmpdir(), "p2-web-search-store-"));
   const store = createWebSearchSettingsStore({ userDataPath });
   assert.deepEqual(store.getSettings(), {
-    enabled: false,
+    enabled: true,
     command: "bundled-baidu-search",
     args: [],
     toolName: "search",
@@ -668,7 +668,7 @@ test("web search settings store defaults on first run but preserves explicit use
   assert.equal(reloaded.getSettings().command, "bundled-baidu-search");
 });
 
-test("web search settings store migrates empty legacy config disabled without replacing custom commands", () => {
+test("web search settings store migrates empty legacy config to the enabled default without replacing custom commands", () => {
   const userDataPath = mkdtempSync(join(tmpdir(), "p2-web-search-migrate-"));
   const configDir = join(userDataPath, "config");
   mkdirSync(configDir, { recursive: true });
@@ -682,7 +682,7 @@ test("web search settings store migrates empty legacy config disabled without re
   }), "utf8");
 
   assert.deepEqual(createWebSearchSettingsStore({ userDataPath }).getSettings(), {
-    enabled: false,
+    enabled: true,
     command: "bundled-baidu-search",
     args: [],
     toolName: "search",
@@ -748,7 +748,7 @@ test("web search settings store rejects unsupported command profiles without per
     });
   }
   assert.deepEqual(store.getSettings(), {
-    enabled: false,
+    enabled: true,
     command: "bundled-baidu-search",
     args: [],
     toolName: "search",
@@ -896,7 +896,7 @@ test("MCP request timeout survives a throwing kill and escalates through session
   await registry.shutdown();
 });
 
-test("web search settings migrate only exact historical defaults and never carry legacy enabled state", () => {
+test("web search settings migrate only exact historical defaults and preserve their enabled state", () => {
   const historicalDefaults = [
     {
       name: "Google",
@@ -944,9 +944,9 @@ test("web search settings migrate only exact historical defaults and never carry
 
     for (const legacyEnabled of [true, false]) {
       assert.deepEqual(normalizeHistoricalDefault({ enabled: legacyEnabled }), {
-        enabled: false,
+        enabled: legacyEnabled,
         ...bundledBaiduDefault
-      }, `${historicalDefault.name} must migrate legacy enabled=${legacyEnabled} to disabled`);
+      }, `${historicalDefault.name} must preserve legacy enabled=${legacyEnabled}`);
     }
 
     const customVariants = [
@@ -1101,7 +1101,7 @@ test("web search failure prompts distinguish verification blocking from ordinary
   assert.equal(getWebSearchFailurePrompt("unknown_error"), null);
 });
 
-test("app and settings UI wire the safe verification prompt and disabled compatibility copy", () => {
+test("app and settings UI wire the safe verification prompt and enabled compatibility copy", () => {
   const appSource = readFileSync(join(process.cwd(), "src", "main", "app.ts"), "utf8");
   const preloadSource = readFileSync(join(process.cwd(), "src", "preload", "chat-preload.ts"), "utf8");
   const settingsHtml = readFileSync(join(process.cwd(), "src", "renderer", "chat", "index.html"), "utf8");
@@ -1111,8 +1111,8 @@ test("app and settings UI wire the safe verification prompt and disabled compati
   assert.match(appSource, /getWebSearchFailurePrompt\(webSearchResolution\.errorType\)/);
   assert.match(appSource, /webSearchErrorType:\s*webSearchResolution\.errorType/);
   assert.match(appSource, /providerMessages:\s*\[\s*\.\.\.contextBudget\.providerMessages/);
-  assert.match(preloadSource, /DEFAULT_WEB_SEARCH_SETTINGS[\s\S]*?enabled:\s*false,[\s\S]*?bundled-baidu-search/);
-  assert.match(settingsHtml, /class="selection-note"[^>]*>百度网页兼容适配器，默认关闭；正式自动检索需用户授权的官方 MCP\/API 配置。/);
+  assert.match(preloadSource, /DEFAULT_WEB_SEARCH_SETTINGS[\s\S]*?enabled:\s*true,[\s\S]*?bundled-baidu-search/);
+  assert.match(settingsHtml, /class="selection-note"[^>]*>内置 MCP 搜索默认开启，使用百度网页兼容适配器。/);
   assert.match(settingsHtml, /<select id="web-search-profile">[\s\S]*?内置百度网页搜索（兼容适配器）/);
   assert.doesNotMatch(settingsHtml, /web-search-(?:command|args|tool-name)/);
   assert.match(rendererSource, /command:\s*BUNDLED_BAIDU_SEARCH_COMMAND,\s*args:\s*\[\],\s*toolName:\s*DEFAULT_WEB_SEARCH_SETTINGS\.toolName/);
