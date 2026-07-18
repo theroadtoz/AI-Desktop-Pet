@@ -139,7 +139,8 @@ test("local provider sends compound identity and user-preference questions to th
       "这段介绍是不是把你写成 AI 助手？请分析措辞",
       "你是西塔",
       "你是AI",
-      "你觉得我更喜欢咖啡还是茶？"
+      "你觉得我更喜欢咖啡还是茶？",
+      "你更喜欢咖啡还是茶？"
     ]) {
       const result = await provider.streamReply(createMinimalRequest(message), {
         signal: new AbortController().signal,
@@ -152,7 +153,7 @@ test("local provider sends compound identity and user-preference questions to th
     globalThis.fetch = originalFetch;
   }
 
-  assert.equal(fetchCalls, 17);
+  assert.equal(fetchCalls, 18);
 });
 
 test("local provider uses typed web search failures for exact search-required boundaries", async () => {

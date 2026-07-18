@@ -279,7 +279,7 @@ function createLocalExactReply(request: ChatRequest, latestUserMessage: string):
     };
   }
 
-  const personalPreference = parseOwnPreferenceChoice(normalizedMessage);
+  const personalPreference = parseOwnAcademicPreferenceChoice(normalizedMessage);
   if (personalPreference) {
     return {
       kind: "personal_preference",
@@ -471,11 +471,21 @@ function createPresenceWithoutAdviceReply(message: string): string {
   return "听着确实让人不好受。我在这儿，陪你安静待一会儿。";
 }
 
-function parseOwnPreferenceChoice(message: string): string | null {
+function parseOwnAcademicPreferenceChoice(message: string): string | null {
   const match = message.match(/(?:西塔[，,、]?)?你(?:自己|本人)?(?:更喜欢|更偏好|更偏爱)(.{1,40}?)还是(.{1,40}?)(?:[？?。！!]|说说|$)/);
   const firstChoice = match?.[1]?.replace(/^[，,、]+|[，,、]+$/g, "").trim();
+  const secondChoice = match?.[2]?.replace(/^[，,、]+|[，,、]+$/g, "").trim();
+  if (!firstChoice || !secondChoice) {
+    return null;
+  }
 
-  return firstChoice || null;
+  const choices = [firstChoice, secondChoice];
+  const academicChoice = choices.find((choice) => /(?:实验|记录|研究|课题|整理)/.test(choice));
+  const companionChoice = choices.find((choice) => /(?:陪|聊|小事)/.test(choice));
+
+  return academicChoice && companionChoice && academicChoice !== companionChoice
+    ? academicChoice
+    : null;
 }
 
 function parseSimpleAddition(message: string): { left: number; right: number; sum: number } | null {
