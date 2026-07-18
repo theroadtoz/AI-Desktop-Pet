@@ -889,18 +889,22 @@ export function injectFramePipelineProbe(source, runId = "p2-63b2-test-run") {
   output = replaceExactlyOnce(
     output,
     `  const ownedParameterIds = layers.applyMotion?.(deltaSeconds) ?? EMPTY_PARAMETER_IDS;
+  restoreReleasedMotionParameterDefaults(model, ownedParameterIds);
   const ownedParameterIndices = findOwnedParameterIndices(model, ownedParameterIds);`,
     `  const ownedParameterIds = layers.applyMotion?.(deltaSeconds) ?? EMPTY_PARAMETER_IDS;
   const angleYIndex = findOwnedParameterIndices(model, P2_63B2_ANGLE_Y_IDS)[0] ?? -1;
   const sourceAngleY = angleYIndex >= 0 ? model.getParameterValueByIndex(angleYIndex) : null;
+  restoreReleasedMotionParameterDefaults(model, ownedParameterIds);
   const ownedParameterIndices = findOwnedParameterIndices(model, ownedParameterIds);`,
     "motion source parameter sample"
   );
   output = replaceExactlyOnce(
     output,
     `  applyProtectedLayer(model, ownedParameterIndices, deltaSeconds, layers.applyBreath);
+  applyProtectedLayer(model, ownedParameterIndices, deltaSeconds, layers.applyAccessory);
   model.update();`,
     `  applyProtectedLayer(model, ownedParameterIndices, deltaSeconds, layers.applyBreath);
+  applyProtectedLayer(model, ownedParameterIndices, deltaSeconds, layers.applyAccessory);
   reportP263B2Probe("frame_parameter_sample", {
     owned: ownedParameterIds.has("ParamAngleY"),
     sourceAngleY,

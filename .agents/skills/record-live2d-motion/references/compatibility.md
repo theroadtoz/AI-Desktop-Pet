@@ -5,7 +5,7 @@
 ## Contract Authority
 
 - 本 Skill 不维护 release identity、package digest 或双副本 parity 要求。
-- 每次录制均以 `E:\Work-26\Live2dREC` 的受信 catalog 与当前 UI resolved profile 为唯一契约来源。只有其中相互一致的 profile ID、revision、status、duration、padding、FPS、Loop、allowlist、outputPrefix 和 profile digest 可以进入 arm。
+- 每次录制均以 `E:\Work-26\Live2dREC` 的受信 catalog 与当前 UI resolved profile 为唯一契约来源。P2-64Z-2 要求 revision 2；只有其中相互一致的 profile ID、revision、status、duration、padding、FPS、Loop、完整 41 参数 allowlist、requiredOutputParameterIds、outputPrefix 和 profile digest 可以进入 arm。
 - `references/motion-catalog.md` 和 `references/profiles/` 仅用于历史或技术说明，不属于 active contract，不能由 resolve、preflight、arm 或 record 使用，也不得覆盖当前 summary。
 
 ### Quick Validation
@@ -22,17 +22,17 @@ python -X utf8 "C:\Users\1\.codex\skills\.system\skill-creator\scripts\quick_val
 - 每个手动选择的 ready profile 仍必须自动比对 CurrentModel、完整参数签名、当前 summary 的 allowlist、duration、padding、FPS、Loop 和 outputPrefix，并生成独立 take contract、digest、candidate 与 output。renderer 不得覆盖这些受信字段。
 - 只在应用重启/销毁、用户取消、connection configuration 变化、认证/连接失败、profile prerequisite definition 变化，或 preflight/recording 发现模型身份或参数签名变化时撤销会话许可。take 结束、readback/write 失败、TTL 到期、重新 prepare 或切换 ready profile 只撤销当前 take。
 - 每个 take 发布前仅运行一次内建自动技术 readback：managed output、parser/readback、active allowlist、有限有序曲线、当前 summary 要求的 semantic variation、endpoint/seam 规则和 cleanup。通过时原子发布并标记 `draft / technical-pass / user-visual-review-pending`；该结果是 Live2dREC 发布安全门禁，不等于 P2-64X 式额外 post-hoc 正式技术验收。
-- P2-64Z 当前阶段覆盖 10 段长动作：每段完成内建 readback、原子发布与 cleanup 后立即隔离展示并由用户人工审查；全部 10 段完成人工裁决后，才对用户通过的锁定 exact sources 批量执行额外 post-hoc 正式技术验收。
+- P2-64Z-2 当前阶段覆盖 10 段长动作：每段完成内建 readback、原子发布与 cleanup 后立即隔离展示并由用户人工审查；全部 10 段完成人工裁决后，才对用户通过的锁定 exact sources 批量执行额外 post-hoc 正式技术验收。
 
 ## Live2dREC Contract
 
 - 接受 main/core 的受信 current profile summary、revision/digest、允许时长、padding、FPS、Loop、受管相对 outputPrefix 和 immutable take contract。
 - 拒绝 unknown、非 `ready`、对象注入、过期 revision/digest、非法时长、参数/路径/Loop/FPS/padding 覆盖和 profile 选择不一致。
 - 变化必须撤销 armed take；在 VTS 连接、授权、倒数和写文件前失败。
-- 每条实际导出的 allowlist 曲线必须有限、时间有序，并按当前 summary 要求满足 closed endpoint 或 seam 规则。closed endpoint 阈值、规范化口径、required semantic variation 与辅助曲线是否可省略都由当前 summary 决定；parser readback 必须独立复验，不能仅比较序列化 JSON 与内存对象。
-- 连接或 preflight 失败时，必须先消费当前 take 的人工前置条件确认，再等待或触发 candidate adapter 清理。
+- 每条实际导出的曲线必须有限、时间有序且属于完整 required output；连续参数即使平坦也不得省略，定时组件必须完整输出全零组。连续参数只能使用连续插值；定时组件只能使用 `0/30` stepped、fade=0、不去尖峰。
+- 录制前 preflight 必须验证 41 参数全部存在；缺任一项、组成员、required output 或 v2 revision 即阻塞。连接或 preflight 失败时，必须先消费当前 take 的人工前置条件确认，再等待或触发 candidate adapter 清理。
 - 输出必须先成为本 take ownership ledger 中的 staging candidate，经独立 parser readback 成功后原子发布。只有原子发布成功才可报告成功 draft；发布后，以及发布前/readback 失败或取消时，均必须重试本 take 临时 candidate 的 unlink，并单独追踪 `cleanupPending`。临时 unlink 持续失败时，必须生成含 `take_id`、owner、受控临时路径、重试状态和禁止删除 final 标记的结构化 cleanup handle，移交 managed drain；发布成功时合法 final 仍为成功 draft，发布前/readback 失败时保留原始录制失败，且 managed drain 不得删除或改报任何合法 final。
-- 若 profile 含 `timedAccessoryGroups`，参与组必须以完整成员输出 `0/30` 值域的 Motion3 stepped 曲线，检查初始值、每次切换、最终值、时间单调、时长范围和 Meta 计数；`requiredAccessoryStates` 不得充当该时间线。`ParamMouthForm` 与 `ParamMouthOpenY` 必须作为同一 `all-of` variation group 且均真实变化；不得引入眼泪/生气旧组件要求。
+- v2 的七个定时组件组必须以完整成员输出 `0/30` 值域的 Motion3 stepped 曲线，检查初始值、每次切换、最终值、时间单调、时长范围和 Meta 计数；`eye-symbol` 与 `held-prop` 必须满足合法状态/互斥，`requiredAccessoryStates` 不得充当时间线。`Param25/26/27/70` 旧泪眼/生气路径保持停用。
 
 ## VTube Studio Public API
 
@@ -43,7 +43,7 @@ python -X utf8 "C:\Users\1\.codex\skills\.system\skill-creator\scripts\quick_val
 
 ## Motion3 And Cubism
 
-- parser readback 必须证明 Motion3 `Version: 3`、`Meta`、正且匹配当前 take contract 的 Duration、有限单调曲线、参数 allowlist、计数一致和冻结的 draft Loop 值。
+- parser readback 必须证明 Motion3 `Version: 3`、`Meta`、正且匹配当前 take contract 的 Duration、完整 41 参数曲线、连续/stepped 插值边界、有限单调曲线、计数一致和冻结的 draft Loop 值；播放验证还必须证明 motion-owned 参数优先，并在结束/中断/超时/失败/release 后恢复最新持久状态。
 - loop draft 的 `Loop=false`、seam 数值闭合、速度连续、三周期视觉复核和最终 `Loop=true` 是不同门禁，不能互相替代。
 - Cubism Animator 精修与重新导出是 production intake 前置条件；parser 通过或 VTS 连接成功都不等于视觉通过。
 

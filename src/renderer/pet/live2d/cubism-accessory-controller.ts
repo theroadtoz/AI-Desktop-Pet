@@ -38,7 +38,6 @@ const MANAGED_PARAMETER_NAMES = [
   "Param71",
   "Param72"
 ] as const satisfies readonly AccessoryParameterName[];
-const MANAGED_PARAMETER_NAME_SET: ReadonlySet<string> = new Set(MANAGED_PARAMETER_NAMES);
 
 export type CubismTemporaryAccessoryId = Extract<
   PetAccessoryId,
@@ -93,22 +92,6 @@ export class CubismAccessoryController {
 
   public restoreResolvedSelection(): void {
     this.temporaryAccessoryId = null;
-  }
-
-  public retainNonAccessoryMotionParameterIds(
-    motionParameterIds: ReadonlySet<string>
-  ): ReadonlySet<string> {
-    for (const parameterId of motionParameterIds) {
-      if (!MANAGED_PARAMETER_NAME_SET.has(parameterId)) {
-        continue;
-      }
-
-      return new Set(
-        [...motionParameterIds].filter((candidate) => !MANAGED_PARAMETER_NAME_SET.has(candidate))
-      );
-    }
-
-    return motionParameterIds;
   }
 
   public update(model: CubismAccessoryModel): void {

@@ -11,7 +11,7 @@ import {
   type PetAccessoryId
 } from "../src/shared/pet-accessory.ts";
 
-const PARAMETER_NAMES = [
+const ACCESSORY_PARAMETER_NAMES = [
   "Param61",
   "Param62",
   "Param64",
@@ -21,6 +21,14 @@ const PARAMETER_NAMES = [
   "Param72"
 ] as const;
 
+const PARAMETER_NAMES = [
+  "Param59",
+  "Param60",
+  ...ACCESSORY_PARAMETER_NAMES,
+  "ParamBodyAngleX"
+] as const;
+
+type AccessoryParameterName = (typeof ACCESSORY_PARAMETER_NAMES)[number];
 type ParameterName = (typeof PARAMETER_NAMES)[number];
 
 class FakeParameterId {
@@ -42,6 +50,7 @@ function createFakeModel() {
     model: {
       getParameterCount: () => PARAMETER_NAMES.length,
       getParameterId: (index: number) => new FakeParameterId(PARAMETER_NAMES[index] ?? "unknown"),
+      getParameterDefaultValue: () => 0,
       getParameterValueByIndex: (index: number) => values.get(PARAMETER_NAMES[index] ?? "Param61") ?? 0,
       setParameterValueByIndex: (index: number, value: number) => {
         const name = PARAMETER_NAMES[index];
@@ -61,9 +70,12 @@ function createFakeModel() {
         values.set(name, value);
       }
     },
-    snapshot(): Record<ParameterName, number> {
-      return Object.fromEntries(PARAMETER_NAMES.map((name) => [name, values.get(name) ?? Number.NaN])) as Record<
-        ParameterName,
+    value(name: ParameterName): number {
+      return values.get(name) ?? Number.NaN;
+    },
+    snapshot(): Record<AccessoryParameterName, number> {
+      return Object.fromEntries(ACCESSORY_PARAMETER_NAMES.map((name) => [name, values.get(name) ?? Number.NaN])) as Record<
+        AccessoryParameterName,
         number
       >;
     }
@@ -74,7 +86,7 @@ function selection(accessoryIds: readonly PetAccessoryId[]) {
   return resolvePetAccessorySelection({ userAccessoryIds: accessoryIds });
 }
 
-const ZERO_TARGETS: Record<ParameterName, number> = {
+const ZERO_TARGETS: Record<AccessoryParameterName, number> = {
   Param61: 0,
   Param62: 0,
   Param64: 0,
@@ -85,7 +97,7 @@ const ZERO_TARGETS: Record<ParameterName, number> = {
 };
 
 test("Cubism accessory controller applies the fixed seven-item manifest and zeros unselected parameters", () => {
-  const cases: ReadonlyArray<readonly [PetAccessoryId, Partial<Record<ParameterName, number>>]> = [
+  const cases: ReadonlyArray<readonly [PetAccessoryId, Partial<Record<AccessoryParameterName, number>>]> = [
     ["ghost", { Param64: 30 }],
     ["bow", { Param65: 30 }],
     ["glasses", { Param66: 30 }],
@@ -169,39 +181,83 @@ test("the frame-final accessory layer corrects late expression parameter writes 
   assert.deepEqual(reloaded.snapshot(), first.snapshot());
 });
 
-test("accessory parameters are excluded from native motion ownership", () => {
+test("motion-owned eyes, held props, and body survive later layers while other accessories stay persistent", () => {
   const fake = createFakeModel();
   const controller = createCubismAccessoryController(fake.model as never);
-  const motionParameterIds = new Set(["ParamAngleX", "Param61", "Param66", "Param72"]);
-
-  assert.deepEqual(
-    [...controller.retainNonAccessoryMotionParameterIds(motionParameterIds)],
-    ["ParamAngleX"]
-  );
-
-  const unrelatedIds = new Set(["ParamAngleX", "ParamBodyAngleY"]);
-  assert.equal(controller.retainNonAccessoryMotionParameterIds(unrelatedIds), unrelatedIds);
-});
-
-test("accessories remain the final owner when a native motion and expression write the same parameter", () => {
-  const fake = createFakeModel();
-  const controller = createCubismAccessoryController(fake.model as never);
-  controller.setResolvedSelection(selection(["game-controller"]));
+  controller.setResolvedSelection(selection(["ghost", "bow", "glasses", "hat", "game-controller"]));
 
   updateCubismFrame(fake.model as never, 1 / 60, {
     applyMotion: () => {
-      fake.set("Param61", 9);
-      return controller.retainNonAccessoryMotionParameterIds(new Set(["Param61"]));
+      fake.set("Param59", 0);
+      fake.set("Param60", 30);
+      fake.set("Param61", 0);
+      fake.set("Param62", 30);
+      fake.set("Param72", 0);
+      fake.set("ParamBodyAngleX", -12);
+      return new Set([
+        "Param59",
+        "Param60",
+        "Param61",
+        "Param62",
+        "Param72",
+        "ParamBodyAngleX"
+      ]);
     },
-    applyExpression: () => fake.set("Param61", 18),
-    applyBreath: () => controller.update(fake.model as never)
+    applyExpression: () => {
+      for (const parameterName of PARAMETER_NAMES) {
+        fake.set(parameterName, 18);
+      }
+    },
+    applyAccessory: () => controller.update(fake.model as never)
   });
 
-  assert.equal(fake.snapshot().Param61, 30);
-  assert.equal(fake.snapshot().Param62, 0);
+  assert.equal(fake.value("Param59"), 0);
+  assert.equal(fake.value("Param60"), 30);
+  assert.equal(fake.value("Param61"), 0);
+  assert.equal(fake.value("Param62"), 30);
+  assert.equal(fake.value("Param72"), 0);
+  assert.equal(fake.value("ParamBodyAngleX"), -12);
+  assert.deepEqual(fake.snapshot(), {
+    Param61: 0,
+    Param62: 30,
+    Param64: 30,
+    Param65: 30,
+    Param66: 30,
+    Param71: 30,
+    Param72: 0
+  });
 });
 
-test("Cubism model applies accessories after expression and breath layers in each frame", async () => {
+test("released ownership restores the latest persistent selection on the next frame", () => {
+  const fake = createFakeModel();
+  const controller = createCubismAccessoryController(fake.model as never);
+  controller.setResolvedSelection(selection(["ghost", "game-controller"]));
+
+  updateCubismFrame(fake.model as never, 1 / 60, {
+    applyMotion: () => {
+      fake.set("Param61", 0);
+      fake.set("Param62", 30);
+      fake.set("Param72", 0);
+      return new Set(["Param61", "Param62", "Param72"]);
+    },
+    applyAccessory: () => controller.update(fake.model as never)
+  });
+  assert.equal(fake.value("Param62"), 30);
+
+  controller.setResolvedSelection(selection(["bow", "staff"]));
+  updateCubismFrame(fake.model as never, 1 / 60, {
+    applyMotion: () => new Set(),
+    applyAccessory: () => controller.update(fake.model as never)
+  });
+
+  assert.deepEqual(fake.snapshot(), {
+    ...ZERO_TARGETS,
+    Param65: 30,
+    Param72: 30
+  });
+});
+
+test("Cubism model wires accessories as an explicit protected frame layer", async () => {
   const source = await readFile(
     new URL("../src/renderer/pet/live2d/cubism-model.ts", import.meta.url),
     "utf8"
@@ -212,8 +268,11 @@ test("Cubism model applies accessories after expression and breath layers in eac
 
   const expressionIndex = frameSource.indexOf("expressionController.update");
   const breathIndex = frameSource.indexOf("breathController?.update");
-  const accessoryIndex = frameSource.indexOf("accessoryController?.update");
+  const accessoryLayerIndex = frameSource.indexOf("applyAccessory:");
+  const accessoryUpdateIndex = frameSource.indexOf("accessoryController?.update");
 
-  assert.ok(expressionIndex >= 0 && expressionIndex < accessoryIndex);
-  assert.ok(breathIndex >= 0 && breathIndex < accessoryIndex);
+  assert.ok(expressionIndex >= 0 && expressionIndex < accessoryLayerIndex);
+  assert.ok(breathIndex >= 0 && breathIndex < accessoryLayerIndex);
+  assert.ok(accessoryLayerIndex >= 0 && accessoryLayerIndex < accessoryUpdateIndex);
+  assert.doesNotMatch(frameSource, /retainNonAccessoryMotionParameterIds/u);
 });

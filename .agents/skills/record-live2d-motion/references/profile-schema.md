@@ -16,9 +16,10 @@ Schema version: `live2d-recorder-profile/v1`.
 | `fps` / `padding` | 受 profile 控制，不能由 renderer 覆盖。 |
 | `draftLoop` / `productionLoopCandidate` | draft 必须独立声明；loop candidate 不等于生产 Loop。 |
 | `outputPrefix` | 受管相对前缀；不得为绝对路径、上跳路径或用户注入路径。 |
-| `allowlist` | 精确参数 ID 集合。未知、缺失或不匹配即阻塞。 |
-| `variationGroups` | 必须声明 profile 要求的变化组；`ParamMouthForm` 与 `ParamMouthOpenY` 固定为同一 `all-of` 组，不能只录其中一个。 |
-| `timedAccessoryGroups` | 可选的定时配件组及精确成员；组成员进入采样 allowlist 时，录制者可手动开关，输出按采样时间复现的 Motion3 stepped 曲线。 |
+| `allowlist` | P2-64Z-2 v2 的完整 41 参数 ID 集合。未知、缺失或不匹配即阻塞。 |
+| `requiredOutputParameterIds` | 必须包含完整 29 个连续参数和 12 个定时组件参数；平坦连续曲线与全零组件组也必须输出。 |
+| `variationGroups` | 必须声明连续表演集与定时组件组；连续组保持连续曲线，定时组使用 `0/30` stepped。 |
+| `timedAccessoryGroups` | v2 必填的七个定时组件组及精确成员；完整组按采样时间复现 stepped 曲线。 |
 | `ownership` | 参数排除项、运行时通道所有权和冲突说明。 |
 | `gates` | endpoint、模型、parser、seam、视觉、Cubism 与 intake 门禁。 |
 | `blockers` | `planned-blocked` 的可审计原因；不得用猜测 allowlist 填充。 |
@@ -44,9 +45,14 @@ loop draft 的首尾数值闭合只证明位置可闭合，不证明速度连续
 - `planned-blocked` profile 可被 catalog 安全列出，但不得连接、倒数、录制或写 Motion3。
 - 不认识的 profile 或 allowlist 一律按 `planned-blocked` 处理；不要推测参数。
 
-## P2-64Z Recording Rules
+## P2-64Z-2 v2 Recording Rules
 
-- `timedAccessoryGroups` 的采样值只允许量化为 `0` 或 `30`；参与组必须记录完整组的初始值、每次切换和最终值，输出 stepped 曲线。它不是静态状态声明。
-- 静态 `requiredAccessoryStates` 只能表达非时间化的 required state，不得替代或推导定时配件时间线；不存在该字段时也不得猜测配件。
-- 本阶段的 profile 不要求眼泪或生气旧组件；只要求 summary 明确声明的参数和 variation groups。
-- 这些字段仍属于每段内建 parser readback 与原子发布 draft 的安全门禁；P2-64Z 延后的仅是全部 10 段人工裁决后、针对用户通过 exact sources 的额外 post-hoc 正式技术验收。
+- 每个 P2-64Z-2 profile 必须升至 revision 2，并绑定 41 参数合同；CurrentModel 缺任一参数时，录制前 preflight 明确失败。
+- `requiredOutputParameterIds` 必须逐项覆盖 29 个连续参数与 12 个定时组件参数；连续参数全程平坦也保留曲线，定时组件全程关闭也保留完整全零成员组。
+- 连续参数使用连续采样与普通滤波；定时组件值只允许 `0` 或 `30`，使用 stepped、fade=0、不去尖峰，并记录完整组的初始值、切换和最终值。
+- `eye-symbol` 的 `Param59/60` 只允许 off/heart/star 三种状态；`held-prop` 的 `Param61/62/72` 状态互斥。身体 X/Y/Z 必须是连续曲线。
+- `Param25/26/27/70` 旧泪眼/生气路径保持停用，不得重新猜测或启用。
+- 静态 `requiredAccessoryStates` 不得替代时间线；不得从缺失字段猜测组件。
+- 播放时 motion-owned 参数优先；动作结束、异常或 release 后恢复下一帧的最新持久状态，不恢复开始快照。
+- 旧 `head-pat` 草稿保留并标记 `visual-retry`；修复后必须重录。
+- 这些字段仍属于每段内建 parser readback 与原子发布 draft 的安全门禁；P2-64Z-2 延后的仅是全部 10 段人工裁决后、针对用户通过 exact sources 的额外 post-hoc 正式技术验收。

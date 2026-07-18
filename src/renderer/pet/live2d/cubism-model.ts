@@ -110,12 +110,9 @@ export async function loadWitchLive2DModel(
       };
 
       updateCubismFrame(model, deltaSeconds, {
-        applyMotion: () => {
-          const motionParameterIds = motionController?.update(model, deltaSeconds)
-            ?? EMPTY_NATIVE_MOTION_PARAMETER_IDS;
-          return accessoryController?.retainNonAccessoryMotionParameterIds(motionParameterIds)
-            ?? motionParameterIds;
-        },
+        applyMotion: () => (
+          motionController?.update(model, deltaSeconds) ?? EMPTY_NATIVE_MOTION_PARAMETER_IDS
+        ),
         applyLook: () => lookController?.update(model, deltaSeconds),
         applyPose: () => poseTargetController?.update(model, deltaSeconds),
         applyDrag: () => dragPhysicsController?.advance(deltaSeconds),
@@ -125,10 +122,8 @@ export async function loadWitchLive2DModel(
         evaluatePhysics: () => this._physics?.evaluate(model, deltaSeconds),
         applyExpression: () => expressionController.update(model, deltaSeconds),
         applyMicroExpression: () => microExpressionController?.update(model, deltaSeconds),
-        applyBreath: () => {
-          breathController?.update(model, deltaSeconds);
-          accessoryController?.update(model);
-        }
+        applyBreath: () => breathController?.update(model, deltaSeconds),
+        applyAccessory: () => accessoryController?.update(model)
       });
 
       return sample;

@@ -4,6 +4,7 @@ type CubismFrameModel = Pick<
   CubismModel,
   | "getParameterCount"
   | "getParameterId"
+  | "getParameterDefaultValue"
   | "getParameterValueByIndex"
   | "setParameterValueByIndex"
   | "loadParameters"
@@ -16,6 +17,7 @@ type ComparableParameterId = {
 };
 
 const EMPTY_PARAMETER_IDS: ReadonlySet<string> = new Set();
+const previousMotionParameterIdsByModel = new WeakMap<object, ReadonlySet<string>>();
 
 export type CubismFrameLayers = Partial<{
   applyMotion(deltaSeconds: number): ReadonlySet<string>;
@@ -27,6 +29,7 @@ export type CubismFrameLayers = Partial<{
   applyExpression(deltaSeconds: number): void;
   applyMicroExpression(deltaSeconds: number): void;
   applyBreath(deltaSeconds: number): void;
+  applyAccessory(deltaSeconds: number): void;
 }>;
 
 function findOwnedParameterIndices(
@@ -51,6 +54,29 @@ function findOwnedParameterIndices(
   }
 
   return indices;
+}
+
+function restoreReleasedMotionParameterDefaults(
+  model: CubismFrameModel,
+  ownedParameterIds: ReadonlySet<string>
+): void {
+  const previousParameterIds = previousMotionParameterIdsByModel.get(model);
+
+  if (previousParameterIds) {
+    const releasedParameterIds = new Set(
+      [...previousParameterIds].filter((parameterId) => !ownedParameterIds.has(parameterId))
+    );
+
+    for (const index of findOwnedParameterIndices(model, releasedParameterIds)) {
+      model.setParameterValueByIndex(index, model.getParameterDefaultValue(index));
+    }
+  }
+
+  if (ownedParameterIds.size > 0) {
+    previousMotionParameterIdsByModel.set(model, new Set(ownedParameterIds));
+  } else {
+    previousMotionParameterIdsByModel.delete(model);
+  }
 }
 
 function applyProtectedLayer(
@@ -94,6 +120,7 @@ export function updateCubismFrame(
 ): void {
   model.loadParameters();
   const ownedParameterIds = layers.applyMotion?.(deltaSeconds) ?? EMPTY_PARAMETER_IDS;
+  restoreReleasedMotionParameterDefaults(model, ownedParameterIds);
   const ownedParameterIndices = findOwnedParameterIndices(model, ownedParameterIds);
 
   applyProtectedLayer(model, ownedParameterIndices, deltaSeconds, layers.applyLook);
@@ -105,5 +132,6 @@ export function updateCubismFrame(
   applyProtectedLayer(model, ownedParameterIndices, deltaSeconds, layers.applyExpression);
   applyProtectedLayer(model, ownedParameterIndices, deltaSeconds, layers.applyMicroExpression);
   applyProtectedLayer(model, ownedParameterIndices, deltaSeconds, layers.applyBreath);
+  applyProtectedLayer(model, ownedParameterIndices, deltaSeconds, layers.applyAccessory);
   model.update();
 }

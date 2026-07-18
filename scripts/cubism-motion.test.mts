@@ -4,6 +4,9 @@ import {
   createCubismMotionController,
   parseControlledParameterIds
 } from "../src/renderer/pet/live2d/cubism-motion.ts";
+import { createCubismAccessoryController } from "../src/renderer/pet/live2d/cubism-accessory-controller.ts";
+import { updateCubismFrame } from "../src/renderer/pet/live2d/cubism-frame-pipeline.ts";
+import { resolvePetAccessorySelection } from "../src/shared/pet-accessory.ts";
 
 const PRESET = {
   id: "test-motion",
@@ -67,6 +70,7 @@ class FakeManager {
   motionQueueActive = false;
   onUpdate: (() => void) | null = null;
   onStop: (() => void) | null = null;
+  parameterWriter: ((model: unknown) => void) | null = null;
   updateError: Error | null = null;
 
   startMotionPriority(): object | -1 {
@@ -80,9 +84,10 @@ class FakeManager {
     return handle;
   }
 
-  updateMotion(): boolean {
+  updateMotion(model?: unknown): boolean {
     if (this.motionQueueActive) {
       this.parameterWriteCount += 1;
+      this.parameterWriter?.(model);
     }
     if (this.updateError) {
       throw this.updateError;
@@ -111,6 +116,55 @@ class FakeManager {
   release(): void {
     this.releaseCount += 1;
   }
+}
+
+const RELEASE_OWNED_PARAMETER_VALUES = {
+  Param59: 30,
+  Param60: 0,
+  Param67: 30,
+  Param68: 30,
+  Param69: 30,
+  Param61: 0,
+  Param62: 30,
+  Param72: 0
+} as const;
+
+function createLifecycleParameterModel() {
+  const parameterIds = [
+    ...Object.keys(RELEASE_OWNED_PARAMETER_VALUES),
+    "Param64",
+    "Param65",
+    "Param66",
+    "Param71"
+  ];
+  const defaults = parameterIds.map(() => 0);
+  const values = [...defaults];
+  const savedValues = [...defaults];
+
+  return {
+    getParameterCount: () => parameterIds.length,
+    getParameterId: (index: number) => ({
+      isEqual: (parameterId: string) => parameterIds[index] === parameterId
+    }),
+    getParameterDefaultValue: (index: number) => defaults[index],
+    getParameterValueByIndex: (index: number) => values[index],
+    setParameterValueByIndex: (index: number, value: number) => {
+      values[index] = value;
+    },
+    loadParameters: () => {
+      values.splice(0, values.length, ...savedValues);
+    },
+    saveParameters: () => {
+      savedValues.splice(0, savedValues.length, ...values);
+    },
+    update: () => undefined,
+    set(parameterId: string, value: number): void {
+      values[parameterIds.indexOf(parameterId)] = value;
+    },
+    value(parameterId: string): number {
+      return values[parameterIds.indexOf(parameterId)] ?? Number.NaN;
+    }
+  };
 }
 
 async function makeController(options: {
@@ -375,6 +429,101 @@ test("update failures settle, stop the manager queue, and clear ownership", asyn
   manager.updateError = null;
   assert.deepEqual([...controller.update({} as never, 0.016)], []);
   assert.equal(manager.parameterWriteCount, writesBeforeRetry);
+});
+
+test("completed, interrupted, timed_out, failed, and release restore current layered baselines", async (t) => {
+  const cases = [
+    { name: "completed", expectedStatus: "completed" },
+    { name: "interrupted", expectedStatus: "interrupted" },
+    { name: "timed_out", expectedStatus: "timed_out" },
+    { name: "failed", expectedStatus: "failed" },
+    { name: "release", expectedStatus: "interrupted" }
+  ] as const;
+
+  for (const lifecycle of cases) {
+    await t.test(lifecycle.name, async () => {
+      const manager = new FakeManager();
+      const model = createLifecycleParameterModel();
+      const accessoryController = createCubismAccessoryController(model as never);
+      const { controller } = await makeController({
+        manager,
+        buffer: motionBuffer(Object.keys(RELEASE_OWNED_PARAMETER_VALUES))
+      });
+      let activeController: typeof controller | null = controller;
+      const expressionValues = { Param67: 3, Param68: 4, Param69: 5 };
+      const runFrame = () => updateCubismFrame(model as never, 1 / 60, {
+        applyMotion: () => activeController?.update(model as never, 1 / 60) ?? new Set(),
+        applyExpression: () => {
+          for (const [parameterId, value] of Object.entries(expressionValues)) {
+            model.set(parameterId, value);
+          }
+        },
+        applyAccessory: () => accessoryController.update(model as never)
+      });
+
+      accessoryController.setResolvedSelection(resolvePetAccessorySelection({
+        userAccessoryIds: ["ghost", "game-controller"]
+      }));
+      manager.parameterWriter = (target) => {
+        const targetModel = target as typeof model;
+        for (const [parameterId, value] of Object.entries(RELEASE_OWNED_PARAMETER_VALUES)) {
+          targetModel.set(parameterId, value);
+        }
+      };
+
+      const result = await controller.playMotionPreset(PRESET.id);
+      assert.equal(result.status, "started");
+      if (result.status !== "started") return;
+      const handle = manager.handles[0];
+      manager.started.add(handle);
+      runFrame();
+      assert.equal(model.value("Param59"), 30);
+      assert.equal(model.value("Param67"), 30);
+      assert.equal(model.value("Param62"), 30);
+
+      accessoryController.setResolvedSelection(resolvePetAccessorySelection({
+        userAccessoryIds: ["bow", "staff"]
+      }));
+      expressionValues.Param67 = 11;
+      expressionValues.Param68 = 12;
+      expressionValues.Param69 = 13;
+
+      if (lifecycle.name === "completed") {
+        manager.finished.add(handle);
+        runFrame();
+      } else if (lifecycle.name === "failed") {
+        manager.updateError = new Error("update failed");
+        assert.throws(runFrame, /update failed/u);
+        manager.updateError = null;
+      } else if (lifecycle.name === "release") {
+        controller.release();
+        activeController = null;
+      } else {
+        controller.stop(lifecycle.name);
+      }
+
+      assert.deepEqual(await result.playback.terminal, {
+        status: lifecycle.expectedStatus,
+        motionPresetId: PRESET.id
+      });
+      runFrame();
+
+      assert.equal(model.value("Param59"), 0, lifecycle.name);
+      assert.equal(model.value("Param60"), 0, lifecycle.name);
+      assert.equal(model.value("Param67"), 11, lifecycle.name);
+      assert.equal(model.value("Param68"), 12, lifecycle.name);
+      assert.equal(model.value("Param69"), 13, lifecycle.name);
+      assert.equal(model.value("Param61"), 0, lifecycle.name);
+      assert.equal(model.value("Param62"), 0, lifecycle.name);
+      assert.equal(model.value("Param72"), 30, lifecycle.name);
+      assert.equal(model.value("Param64"), 0, lifecycle.name);
+      assert.equal(model.value("Param65"), 30, lifecycle.name);
+
+      if (lifecycle.name !== "release") {
+        controller.release();
+      }
+    });
+  }
 });
 
 test("stop cancels a late load before it can create a queue handle", async () => {

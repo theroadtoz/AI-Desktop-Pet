@@ -446,8 +446,10 @@ export function injectGreetOwnershipProbe(source, runId = "greet-small-review-te
   output = replaceExactlyOnce(
     output,
     `  const ownedParameterIds = layers.applyMotion?.(deltaSeconds) ?? EMPTY_PARAMETER_IDS;
+  restoreReleasedMotionParameterDefaults(model, ownedParameterIds);
   const ownedParameterIndices = findOwnedParameterIndices(model, ownedParameterIds);`,
     `  const ownedParameterIds = layers.applyMotion?.(deltaSeconds) ?? EMPTY_PARAMETER_IDS;
+  restoreReleasedMotionParameterDefaults(model, ownedParameterIds);
   const ownedParameterIndices = findOwnedParameterIndices(model, ownedParameterIds);
   const greetSmallOwnedValuesBeforeLayers = !greetSmallOwnershipReported && ownedParameterIds.size > 0
     ? new Map(ownedParameterIndices.map((index) => [index, model.getParameterValueByIndex(index)] as const))
@@ -457,8 +459,10 @@ export function injectGreetOwnershipProbe(source, runId = "greet-small-review-te
   output = replaceExactlyOnce(
     output,
     `  applyProtectedLayer(model, ownedParameterIndices, deltaSeconds, layers.applyBreath);
+  applyProtectedLayer(model, ownedParameterIndices, deltaSeconds, layers.applyAccessory);
   model.update();`,
     `  applyProtectedLayer(model, ownedParameterIndices, deltaSeconds, layers.applyBreath);
+  applyProtectedLayer(model, ownedParameterIndices, deltaSeconds, layers.applyAccessory);
   if (greetSmallOwnedValuesBeforeLayers) {
     const overwrittenParameterIndices = [...greetSmallOwnedValuesBeforeLayers]
       .filter(([index, value]) => !Object.is(model.getParameterValueByIndex(index), value))

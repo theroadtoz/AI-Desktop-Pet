@@ -251,7 +251,10 @@ test("fixture transforms register a neutral greet-only trigger and observable na
     (nativeSource.match(/manager\.stopAllMotions\(\);/gu) ?? []).length
   );
   const ownership = injectGreetOwnershipProbe(readFile("src/renderer/pet/live2d/cubism-frame-pipeline.ts"), "run-1");
-  assert.match(ownership, /layers\.applyLook[\s\S]*layers\.applyBreath[\s\S]*ownership_applied/u);
+  assert.match(
+    ownership,
+    /layers\.applyMotion[\s\S]*restoreReleasedMotionParameterDefaults[\s\S]*layers\.applyLook[\s\S]*layers\.applyBreath[\s\S]*layers\.applyAccessory[\s\S]*ownership_applied/u
+  );
   assert.match(ownership, /protectedLayerValuesPreserved[\s\S]*overwrittenParameterIndexCount/u);
 
   for (const [name, transformed] of Object.entries({ preset, action, trigger, player, native, ownership })) {

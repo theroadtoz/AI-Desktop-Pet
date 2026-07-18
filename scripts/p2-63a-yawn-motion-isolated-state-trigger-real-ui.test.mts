@@ -618,7 +618,7 @@ test("player and frame transforms structurally observe bounded start and indepen
   );
   assert.match(
     pipeline,
-    /layers\.applyMotion[\s\S]*sourceAngleY[\s\S]*applyProtectedLayer[\s\S]*layers\.applyBreath[\s\S]*runtimeAngleY/u
+    /layers\.applyMotion[\s\S]*sourceAngleY[\s\S]*restoreReleasedMotionParameterDefaults[\s\S]*layers\.applyBreath[\s\S]*layers\.applyAccessory[\s\S]*runtimeAngleY/u
   );
   assert.match(pipeline, /ownedParameterIds\.has\("ParamAngleY"\)/u);
 

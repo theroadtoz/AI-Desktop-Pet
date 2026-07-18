@@ -13,6 +13,13 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
 import ts from "typescript";
+import { createCubismAccessoryController } from "../src/renderer/pet/live2d/cubism-accessory-controller.ts";
+import { updateCubismFrame } from "../src/renderer/pet/live2d/cubism-frame-pipeline.ts";
+import {
+  createCubismMotionController,
+  parseControlledParameterIds
+} from "../src/renderer/pet/live2d/cubism-motion.ts";
+import { resolvePetAccessorySelection } from "../src/shared/pet-accessory.ts";
 
 import {
   cleanupOwnManualPreviewArtifacts,
@@ -68,6 +75,44 @@ function writeTreeFile(root: string, relativePath: string, contents = relativePa
 
 function makeCandidatePath(root: string, profile = "listen-soft", suffix = "20260717-072342-699") {
   return join(root, `${profile}-${suffix}.motion3.json`);
+}
+
+const SYNTHETIC_PARAMETER_IDS = [
+  "Param59",
+  "Param60",
+  "Param67",
+  "Param68",
+  "Param69",
+  "Param64",
+  "Param61",
+  "Param62",
+  "Param72",
+  "Param20",
+  "ParamBodyAngleX"
+] as const;
+
+function createSyntheticMotionBytes(durationSeconds: number): Buffer {
+  return Buffer.from(JSON.stringify({
+    Version: 3,
+    Meta: { Duration: durationSeconds, Fps: 30, Loop: false },
+    Curves: [
+      { Target: "Parameter", Id: "Param59", Segments: [0, 0, 2, 1.5, 0] },
+      { Target: "Parameter", Id: "Param60", Segments: [0, 0, 2, 1.5, 30] },
+      { Target: "Parameter", Id: "Param67", Segments: [0, 0, 2, 1.5, 30] },
+      { Target: "Parameter", Id: "Param68", Segments: [0, 0, 2, 1.5, 0] },
+      { Target: "Parameter", Id: "Param69", Segments: [0, 0, 2, 1.5, 30] },
+      { Target: "Parameter", Id: "Param64", Segments: [0, 0, 2, 1.5, 30] },
+      { Target: "Parameter", Id: "Param61", Segments: [0, 0, 2, 2.5, 30, 2, 4.5, 0] },
+      { Target: "Parameter", Id: "Param62", Segments: [0, 30, 2, 2.5, 0, 2, 4.5, 30] },
+      { Target: "Parameter", Id: "Param72", Segments: [0, 0, 2, 2.5, 0] },
+      { Target: "Parameter", Id: "Param20", Segments: [0, 0, 0, 2, 20, 0, 4, 0] },
+      { Target: "Parameter", Id: "ParamBodyAngleX", Segments: [0, -10, 0, 2, 10, 0, 4, -10] }
+    ]
+  }), "utf8");
+}
+
+function exactArrayBuffer(bytes: Buffer): ArrayBuffer {
+  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
 }
 
 function makeSyntheticWorkspace(root: string) {
@@ -194,14 +239,7 @@ test("P2-64Z profiles preserve timed accessory curves as raw bytes in their isol
 
     for (const profile of P2_64Z_MOTION_PROFILES) {
       const candidatePath = makeCandidatePath(drafts, profile.id);
-      const originalBytes = Buffer.from(JSON.stringify({
-        Version: 3,
-        Meta: { Duration: profile.durationSeconds, Fps: 30, Loop: false },
-        Curves: [
-          { Target: "Parameter", Id: "Param64", Segments: [0, 0, 2, 1.5, 30] },
-          { Target: "Parameter", Id: "Param61", Segments: [0, 0, 2, 2.5, 30] }
-        ]
-      }), "utf8");
+      const originalBytes = createSyntheticMotionBytes(profile.durationSeconds);
       writeFileSync(candidatePath, originalBytes);
 
       const candidate = readVisualOnlyCandidate({ profile: profile.id, candidateDraft: candidatePath }, drafts);
@@ -211,6 +249,10 @@ test("P2-64Z profiles preserve timed accessory curves as raw bytes in their isol
       assert.equal(candidate.durationSeconds, profile.durationSeconds);
       assert.equal(candidate.durationMs, profile.durationSeconds * 1_000);
       assert.deepEqual(readFileSync(join(fixtureRoot, fixture.fixtureMotionPath)), originalBytes);
+      assert.deepEqual(
+        [...parseControlledParameterIds(exactArrayBuffer(originalBytes))],
+        SYNTHETIC_PARAMETER_IDS
+      );
       assert.deepEqual(fixture.config, {
         id: `p2-64k-manual-preview-${profile.id}`,
         motionPath: `motions/p2-64k-manual-preview-${profile.id}.motion3.json`,
@@ -228,6 +270,156 @@ test("P2-64Z profiles preserve timed accessory curves as raw bytes in their isol
 
     const source = readFileSync(new URL("./p2-64k-manual-motion-visual-preview.mjs", import.meta.url), "utf8");
     assert.doesNotMatch(source, /canonicalizeMotion3|validateExplicitDraftMotion/u);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("P2-64K fixture motion runs through the real controller and frame ownership pipeline", async () => {
+  const root = mkdtempSync(join(tmpdir(), "p2-64k-ownership-"));
+  try {
+    const workspace = join(root, "workspace");
+    const drafts = join(root, "drafts");
+    const fixtureRoot = join(root, "fixture");
+    makeSyntheticWorkspace(workspace);
+    mkdirSync(drafts);
+    const candidatePath = makeCandidatePath(drafts, "head-pat-linger");
+    writeFileSync(candidatePath, createSyntheticMotionBytes(6.4));
+    const candidate = readVisualOnlyCandidate({
+      profile: "head-pat-linger",
+      candidateDraft: candidatePath
+    }, drafts);
+    const fixture = prepareIsolatedManualPreview(fixtureRoot, candidate, workspace);
+    const fixtureBytes = readFileSync(join(fixtureRoot, fixture.fixtureMotionPath));
+    const parameterIds = [...SYNTHETIC_PARAMETER_IDS, "Param65", "Param66", "Param71"];
+    const values = parameterIds.map(() => 0);
+    const savedValues = [...values];
+    const model = {
+      getParameterCount: () => parameterIds.length,
+      getParameterId: (index: number) => ({
+        isEqual: (parameterId: string) => parameterIds[index] === parameterId
+      }),
+      getParameterDefaultValue: () => 0,
+      getParameterValueByIndex: (index: number) => values[index],
+      setParameterValueByIndex: (index: number, value: number) => {
+        values[index] = value;
+      },
+      loadParameters: () => values.splice(0, values.length, ...savedValues),
+      saveParameters: () => savedValues.splice(0, savedValues.length, ...values),
+      update: () => undefined,
+      set(parameterId: string, value: number): void {
+        values[parameterIds.indexOf(parameterId)] = value;
+      },
+      value(parameterId: string): number {
+        return values[parameterIds.indexOf(parameterId)] ?? Number.NaN;
+      }
+    };
+    const motionValues: Record<(typeof SYNTHETIC_PARAMETER_IDS)[number], number> = {
+      Param59: 0,
+      Param60: 30,
+      Param67: 30,
+      Param68: 0,
+      Param69: 30,
+      Param64: 30,
+      Param61: 30,
+      Param62: 0,
+      Param72: 0,
+      Param20: 20,
+      ParamBodyAngleX: -10
+    };
+    const handle = {};
+    let finished = false;
+    const manager = {
+      startMotionPriority: () => handle,
+      updateMotion: (target: typeof model) => {
+        if (!finished) {
+          for (const [parameterId, value] of Object.entries(motionValues)) {
+            target.set(parameterId, value);
+          }
+        }
+        return true;
+      },
+      getCubismMotionQueueEntry: () => finished ? null : { isStarted: () => true },
+      isFinishedByHandle: () => finished,
+      stopAllMotions: () => undefined,
+      release: () => undefined
+    };
+    const preset = {
+      id: "p2-64k-fixture-motion",
+      path: fixture.config.motionPath,
+      semanticKind: "reaction",
+      loop: false,
+      fadeInSeconds: 0,
+      fadeOutSeconds: 0,
+      durationHintSeconds: 6.4,
+      priority: 3,
+      cooldownMs: 0,
+      restorePolicy: "restore-current-state",
+      allowedStates: [],
+      allowedPresenceModes: [],
+      allowedDialogueModes: [],
+      visualRisk: "low",
+      assetLicenseStatus: "user-provided"
+    } as const;
+    const motionController = await createCubismMotionController({
+      motionPresets: [preset],
+      getMotionPreset: (id) => id === preset.id ? preset : null,
+      fetchArrayBuffer: async () => exactArrayBuffer(fixtureBytes),
+      createMotion: () => ({
+        setEffectIds: () => undefined,
+        setFadeInTime: () => undefined,
+        setFadeOutTime: () => undefined,
+        setLoop: () => undefined,
+        release: () => undefined
+      }) as never,
+      manager: manager as never
+    });
+    const accessoryController = createCubismAccessoryController(model as never);
+    const expressionValues = { Param67: 1, Param68: 2, Param69: 3 };
+    const runFrame = () => updateCubismFrame(model as never, 1 / 60, {
+      applyMotion: () => motionController.update(model as never, 1 / 60),
+      applyExpression: () => {
+        for (const [parameterId, value] of Object.entries(expressionValues)) {
+          model.set(parameterId, value);
+        }
+      },
+      applyAccessory: () => accessoryController.update(model as never)
+    });
+
+    accessoryController.setResolvedSelection(resolvePetAccessorySelection({
+      userAccessoryIds: ["ghost", "game-controller"]
+    }));
+    const result = await motionController.playMotionPreset(preset.id);
+    assert.equal(result.status, "started");
+    runFrame();
+    assert.equal(model.value("Param60"), 30);
+    assert.equal(model.value("Param67"), 30);
+    assert.equal(model.value("Param61"), 30);
+    assert.equal(model.value("ParamBodyAngleX"), -10);
+
+    accessoryController.setResolvedSelection(resolvePetAccessorySelection({
+      userAccessoryIds: ["bow", "staff"]
+    }));
+    expressionValues.Param67 = 7;
+    expressionValues.Param68 = 8;
+    expressionValues.Param69 = 9;
+    finished = true;
+    runFrame();
+    runFrame();
+
+    assert.equal(model.value("Param59"), 0);
+    assert.equal(model.value("Param60"), 0);
+    assert.equal(model.value("Param67"), 7);
+    assert.equal(model.value("Param68"), 8);
+    assert.equal(model.value("Param69"), 9);
+    assert.equal(model.value("Param61"), 0);
+    assert.equal(model.value("Param62"), 0);
+    assert.equal(model.value("Param72"), 30);
+    assert.equal(model.value("Param64"), 0);
+    assert.equal(model.value("Param65"), 30);
+    assert.equal(model.value("Param20"), 0);
+    assert.equal(model.value("ParamBodyAngleX"), 0);
+    motionController.release();
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
