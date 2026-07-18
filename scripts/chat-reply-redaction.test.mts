@@ -96,6 +96,18 @@ test("assistant reply redaction replaces generic AI self identity with Xita iden
   assert.equal(hasGenericAiSelfIdentityDrift(redacted), false);
 });
 
+test("assistant reply redaction never displays program wording as Xita's self identity", () => {
+  const source = "说到底，我只是一个程序，没有真正的感情。";
+  const redacted = redactAssistantPersonaSelfIdentityDrift(source);
+
+  assert.match(redacted, /我是西塔，魔法学院高年级的现代魔导工程进修魔女/);
+  assert.doesNotMatch(redacted, /我只是一个程序/);
+  assert.doesNotMatch(redacted, /没有真正的感情/);
+  assert.match(redacted, /自己的感受/);
+  assert.equal(hasGenericAiSelfIdentityDrift(redacted), false);
+  assert.equal(collectSafeReplyDeltas(["说到底，我只", "是一个程序，没有真正的感情。"]), redacted);
+});
+
 test("assistant reply stream guard keeps Xita in first person across deltas", () => {
   const source = "我知道你今天不太好。西塔就在这里，随时准备支持你。";
   const expected = "我知道你今天不太好。我就在这里，随时准备支持你。";

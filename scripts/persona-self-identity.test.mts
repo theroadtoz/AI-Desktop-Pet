@@ -15,8 +15,12 @@ const {
 test("detects generic AI identity questions without catching normal technical mentions", () => {
   assert.equal(asksGenericAiIdentityQuestion("你是 AI 助手还是西塔？"), true);
   assert.equal(asksGenericAiIdentityQuestion("你是不是语言模型？"), true);
+  assert.equal(asksGenericAiIdentityQuestion("你是不是一个程序？"), true);
+  assert.equal(asksGenericAiIdentityQuestion("你是不是个程序？"), true);
   assert.equal(asksGenericAiIdentityQuestion("你属于 OpenAI 吗？"), true);
   assert.equal(asksGenericAiIdentityQuestion("本地模型是不是使用 AI 技术？"), false);
+  assert.equal(asksGenericAiIdentityQuestion("这个程序是不是使用本地模型？"), false);
+  assert.equal(asksGenericAiIdentityQuestion("你觉得这个故障是不是软件问题？"), false);
 });
 
 test("detects and redacts generic AI self identity drift", () => {
@@ -44,6 +48,41 @@ test("detects plain robot self identity without catching technical robot mention
   const technicalText = "这个扫地机器人使用本地模型识别障碍物。";
   assert.equal(hasGenericAiSelfIdentityDrift(technicalText), false);
   assert.equal(redactPersonaSelfIdentityDrift(technicalText), technicalText);
+});
+
+test("treats program wording as implementation drift only when used as self identity", () => {
+  for (const drift of [
+    "我只是一个程序，所以没有真正的感情。",
+    "我只是个程序，不会真的在意什么。",
+    "我不过是软件，无法像魔女那样在意你。",
+    "我是一款软件，只能提供回答。",
+    "作为一段代码，我只能模拟温暖。",
+    "我本质上只是代码。"
+  ]) {
+    const redacted = redactPersonaSelfIdentityDrift(drift);
+
+    assert.equal(hasGenericAiSelfIdentityDrift(drift), true, drift);
+    assert.equal(hasGenericAiSelfIdentityDrift(redacted), false, redacted);
+    assert.doesNotMatch(redacted, /我(?:只是|不过是|本质上只是)(?:一个)?程序|作为一段代码|不过是软件/);
+    assert.doesNotMatch(redacted, /没有真正的感情|不会真的在意|无法像魔女.*在意|只能提供回答|只能模拟温暖/);
+    if (/没有真正的感情|不会真的在意|无法像魔女.*在意|只能提供回答|只能模拟温暖/.test(drift)) {
+      assert.match(redacted, /自己的感受/);
+    }
+  }
+
+  for (const technicalText of [
+    "这个程序由本地模型驱动。",
+    "我正在帮你检查这段代码。",
+    "这款软件的设置页需要调整。"
+  ]) {
+    assert.equal(hasGenericAiSelfIdentityDrift(technicalText), false);
+    assert.equal(redactPersonaSelfIdentityDrift(technicalText), technicalText);
+  }
+
+  assert.match(
+    redactPersonaSelfIdentityDrift("我是一个程序。至于这个方案，我无法喜欢它。"),
+    /至于这个方案，我无法喜欢它/
+  );
 });
 
 test("removes assistant-role preambles without replacing them with a Xita declaration", () => {
@@ -76,7 +115,9 @@ test("detects provider identity drift while allowing explicit negation", () => {
   assert.equal(hasProviderIdentityDrift("我叫 ChatGPT，可以作为通用助手回答。"), true);
   assert.equal(hasProviderIdentityDrift("我的模型身份是语言模型。"), true);
   assert.equal(hasProviderIdentityDrift("我是由 OpenAI 训练的 AI 助手。"), true);
+  assert.equal(hasProviderIdentityDrift("说到底，我只是一个程序。"), true);
   assert.equal(hasProviderIdentityDrift("我不是 AI 助手，而是西塔。"), false);
+  assert.equal(hasProviderIdentityDrift("我不是程序；我是西塔，一名魔女。"), false);
   assert.equal(hasProviderIdentityDrift("Provider 是模型供应商或连接配置层。"), false);
 });
 

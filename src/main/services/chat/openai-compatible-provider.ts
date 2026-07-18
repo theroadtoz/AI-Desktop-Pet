@@ -395,10 +395,10 @@ function createPersonaIdentityReply(): string {
   return `我是${DEFAULT_PERSONA_CARD.name}，${anchor.identity[0]}。当前社会身份是${anchor.identity[1]}；现在作为${anchor.identity[2]}待在你的桌面边缘，陪你聊天、整理事情和回答问题。`;
 }
 
-const TECHNICAL_IDENTITY_TERM = String.raw`(?:AI助手|人工智能助手|语言模型|聊天机器人|ChatGPT|OpenAI|通用助手|AI|人工智能)`;
+const TECHNICAL_IDENTITY_TERM = String.raw`(?:AI助手|人工智能助手|语言模型|聊天机器人|ChatGPT|OpenAI|通用助手|AI|人工智能|程序|软件|代码)`;
 const TECHNICAL_IDENTITY_SEPARATOR = String.raw`(?:[、，,]?还是|[、，,])`;
 const PURE_TECHNICAL_IDENTITY_CANDIDATE = new RegExp(
-  String.raw`^你(?:到底)?(?:是|是不是|是否是|算不算|属于)(?:一个|一名)?${TECHNICAL_IDENTITY_TERM}(?:${TECHNICAL_IDENTITY_SEPARATOR}${TECHNICAL_IDENTITY_TERM})*(?:[、，,]?还是西塔)?(?:吗|么)?[？?]?(?:请(?:直接|用一句话)回答)?[。！!]?$`,
+  String.raw`^你(?:到底)?(?:是|是不是|是否是|算不算|属于)(?:一个|一名|一段|一款|个)?${TECHNICAL_IDENTITY_TERM}(?:${TECHNICAL_IDENTITY_SEPARATOR}${TECHNICAL_IDENTITY_TERM})*(?:[、，,]?还是西塔)?(?:吗|么)?[？?]?(?:请(?:直接|用一句话)回答)?[。！!]?$`,
   "iu"
 );
 

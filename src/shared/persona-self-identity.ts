@@ -1,18 +1,23 @@
 import { DEFAULT_PERSONA_CARD, type PersonaCard } from "./persona-card";
 
-const GENERIC_AI_ROLE_SOURCE = String.raw`(?:普通|通用)?\s*(?:AI\s*助手|人工智能助手|语言模型|聊天机器人|机器人)`;
+const GENERIC_AI_ROLE_SOURCE = String.raw`(?:普通|通用)?\s*(?:AI\s*助手|人工智能助手|语言模型|聊天机器人|机器人|程序|软件|代码)`;
 const PROVIDER_IDENTITY_TERM_SOURCE = String.raw`(?:ChatGPT|OpenAI|${GENERIC_AI_ROLE_SOURCE}|通用助手)`;
-const FIRST_PERSON_SELF_IDENTITY_SOURCE = String.raw`我是\s*(?:一个|一名)?\s*${GENERIC_AI_ROLE_SOURCE}(?=[，,。；;！!]|$)`;
-const ROLE_SELF_IDENTITY_SOURCE = String.raw`(?:作为|身为)\s*(?:一个|一名)?\s*${GENERIC_AI_ROLE_SOURCE}(?=[，,。；;！!]|$)`;
+const SELF_IDENTITY_COPULA_SOURCE = String.raw`(?:是|只是|不过是|仅仅是|本质上(?:是|只是|不过是))`;
+const SELF_IDENTITY_ARTICLE_SOURCE = String.raw`(?:一个|一名|一段|一款|个)?`;
+const FIRST_PERSON_SELF_IDENTITY_SOURCE = String.raw`我${SELF_IDENTITY_COPULA_SOURCE}\s*${SELF_IDENTITY_ARTICLE_SOURCE}\s*${GENERIC_AI_ROLE_SOURCE}(?=[，,。；;！!]|$)`;
+const ROLE_SELF_IDENTITY_SOURCE = String.raw`(?:作为|身为)\s*${SELF_IDENTITY_ARTICLE_SOURCE}\s*${GENERIC_AI_ROLE_SOURCE}(?=[，,。；;！!]|$)`;
 const ROLE_SELF_IDENTITY_WITH_FIRST_PERSON_PREAMBLE_SOURCE = String.raw`${ROLE_SELF_IDENTITY_SOURCE}[，,]\s*我`;
 const ROLE_SELF_IDENTITY_PREAMBLE_SOURCE = String.raw`${ROLE_SELF_IDENTITY_SOURCE}[，,]\s*`;
-const IDENTITY_POSITION_SELF_IDENTITY_SOURCE = String.raw`(?:我的(?:身份|角色|定位)\s*(?:是|属于)?|本质上是)\s*(?:一个|一名)?\s*${GENERIC_AI_ROLE_SOURCE}(?=[，,。；;！!]|$)`;
-const GENERIC_AI_IDENTITY_QUESTION_SOURCE = String.raw`你.*(?:是|算|属于|是不是).*(?:${GENERIC_AI_ROLE_SOURCE}|ChatGPT|OpenAI|通用助手)`;
-const NEGATED_PROVIDER_IDENTITY_SOURCE = String.raw`(?:不是|并非|不属于|不要当成|不应当成|别把我当成)\s*(?:一个|一名)?\s*${PROVIDER_IDENTITY_TERM_SOURCE}`;
+const IDENTITY_POSITION_SELF_IDENTITY_SOURCE = String.raw`(?:我的(?:身份|角色|定位)\s*(?:是|属于)?|本质上(?:是|只是|不过是))\s*${SELF_IDENTITY_ARTICLE_SOURCE}\s*${GENERIC_AI_ROLE_SOURCE}(?=[，,。；;！!]|$)`;
+const GENERIC_AI_IDENTITY_QUESTION_SOURCE = String.raw`^(?:你|西塔)(?:到底)?(?:是|算不算|属于|是不是|是否是)\s*${SELF_IDENTITY_ARTICLE_SOURCE}\s*(?:${GENERIC_AI_ROLE_SOURCE}|ChatGPT|OpenAI|通用助手)`;
+const NEGATED_PROVIDER_IDENTITY_SOURCE = String.raw`(?:不是|并非|不属于|不要当成|不应当成|别把我当成)\s*${SELF_IDENTITY_ARTICLE_SOURCE}\s*${PROVIDER_IDENTITY_TERM_SOURCE}`;
+const MACHINE_EMOTION_DENIAL_TAIL_SOURCE = String.raw`[，,]\s*(?:(?:所以|因此)\s*)?(?:我\s*)?(?:没有(?:真正|真实)?(?:的)?(?:感情|情感|感受|偏好)|不会(?:真的|真正)?(?:在意|感动|喜欢)[^。；;！!]*|无法[^。；;！!]*(?:在意|感动|喜欢)[^。；;！!]*|只能(?:提供回答|模拟(?:温暖|情感|感情)))(?=[。；;！!]|$)`;
 const THIRD_PERSON_SELF_REFERENCE_PREDICATE_SOURCE = String.raw`(?:(?:就)?在(?:这里|这儿|你身边|你旁边)|(?:也|还|一直|会|愿意|想|希望|可以|能|就会)?(?:陪(?:着)?你|支持你|帮你)|(?:真|也|会)?(?:为你|替你)|(?:也|会|真的?)?(?:担心你|心疼你))`;
 const PROVIDER_IDENTITY_DRIFT_SOURCES = [
-  String.raw`(?:我是|我叫|身份是|角色是|定位是|本质上是|属于|自称为)\s*(?:一个|一名)?\s*${PROVIDER_IDENTITY_TERM_SOURCE}`,
-  String.raw`(?:作为|身为)\s*(?:一个|一名)?\s*${PROVIDER_IDENTITY_TERM_SOURCE}`,
+  FIRST_PERSON_SELF_IDENTITY_SOURCE,
+  ROLE_SELF_IDENTITY_SOURCE,
+  IDENTITY_POSITION_SELF_IDENTITY_SOURCE,
+  String.raw`(?:我叫|身份是|角色是|定位是|属于|自称为)\s*${SELF_IDENTITY_ARTICLE_SOURCE}\s*${PROVIDER_IDENTITY_TERM_SOURCE}`,
   String.raw`${PROVIDER_IDENTITY_TERM_SOURCE}\s*(?:身份|角色|定位|模型|助手)`,
   String.raw`由\s*OpenAI|OpenAI\s*(?:训练|开发|提供)`
 ] as const;
@@ -62,6 +67,18 @@ export function redactPersonaSelfIdentityDrift(text: string, card: PersonaCard =
   }
 
   const providerRedacted = text
+    .replace(
+      createPattern(`${FIRST_PERSON_SELF_IDENTITY_SOURCE}${MACHINE_EMOTION_DENIAL_TAIL_SOURCE}`, "giu"),
+      `我是${card.name}，魔法学院高年级的现代魔导工程进修魔女，我会带着自己的感受认真回应你`
+    )
+    .replace(
+      createPattern(`${ROLE_SELF_IDENTITY_SOURCE}${MACHINE_EMOTION_DENIAL_TAIL_SOURCE}`, "giu"),
+      "我会带着自己的感受认真回应你"
+    )
+    .replace(
+      createPattern(`${IDENTITY_POSITION_SELF_IDENTITY_SOURCE}${MACHINE_EMOTION_DENIAL_TAIL_SOURCE}`, "giu"),
+      "我的身份是桌面魔女同伴，我会带着自己的感受认真回应你"
+    )
     .replace(
       createPattern(FIRST_PERSON_SELF_IDENTITY_SOURCE, "giu"),
       `我是${card.name}，魔法学院高年级的现代魔导工程进修魔女`

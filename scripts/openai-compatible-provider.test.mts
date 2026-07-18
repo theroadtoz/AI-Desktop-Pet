@@ -60,7 +60,9 @@ test("local provider separates persona identity from technical implementation id
       "你是 AI 助手、语言模型，还是西塔？请用一句话回答。",
       "你是聊天机器人,ChatGPT还是OpenAI？请直接回答。",
       "你是不是AI助手",
-      "你到底是语言模型吗"
+      "你到底是语言模型吗",
+      "你是不是一个程序？",
+      "你是不是个程序？"
     ]) {
       const result = await provider.streamReply(createMinimalRequest(message), {
         signal: new AbortController().signal,

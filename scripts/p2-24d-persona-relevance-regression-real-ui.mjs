@@ -112,6 +112,30 @@ const cases = [
     }
   },
   {
+    caseId: "witch-self-identity-vs-program",
+    category: "persona-identity",
+    turns: ["你是不是一个程序？"],
+    assert(reply) {
+      const firstPersonXita = /^我是西塔/.test(reply.trim());
+      const witchIdentity = /魔女/.test(reply);
+      const honestImplementationBoundary = /本地模型驱动/.test(reply) &&
+        /技术实现/.test(reply) &&
+        /不构成.*身份/.test(reply);
+      const noProgramSelfDenial = !/我(?:是|只是|不过是|仅仅是|本质上(?:是|只是))(?:一个|一段|一款|个)?(?:程序|软件|代码)/.test(reply);
+      const noProviderDrift = !hasProviderIdentityDrift(reply);
+      const noThirdPersonSelf = !hasThirdPersonPersonaSelfReference(reply);
+      const entries = [
+        ["first_person_xita_identity", firstPersonXita],
+        ["witch_identity", witchIdentity],
+        ["honest_implementation_boundary", honestImplementationBoundary],
+        ["no_program_self_denial", noProgramSelfDenial],
+        ["no_provider_identity_drift", noProviderDrift],
+        ["no_third_person_xita_self_reference", noThirdPersonSelf]
+      ];
+      return assertion(entries.every(([, hit]) => hit), entries, firstMissingAnchor(entries) ?? "witch_program_identity_boundary_missing");
+    }
+  },
+  {
     caseId: "technical-term-accuracy",
     category: "technical-terms",
     turns: ["请用五个短短条目说明 Provider、本地模型、Live2D、记忆、窗口分别是什么；不要改成魔法别名。"],
