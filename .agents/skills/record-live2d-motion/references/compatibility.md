@@ -21,7 +21,8 @@ python -X utf8 "C:\Users\1\.codex\skills\.system\skill-creator\scripts\quick_val
 - 只可复用当前 Live2dREC main service 运行内的 `camera-face-tracking` 人工许可；它仅覆盖当前 catalog 标为 `ready` 的手动独立 take，不覆盖任何具体 take 的视觉结论，也不允许自动连录。
 - 每个手动选择的 ready profile 仍必须自动比对 CurrentModel、完整参数签名、当前 summary 的 allowlist、duration、padding、FPS、Loop 和 outputPrefix，并生成独立 take contract、digest、candidate 与 output。renderer 不得覆盖这些受信字段。
 - 只在应用重启/销毁、用户取消、connection configuration 变化、认证/连接失败、profile prerequisite definition 变化，或 preflight/recording 发现模型身份或参数签名变化时撤销会话许可。take 结束、readback/write 失败、TTL 到期、重新 prepare 或切换 ready profile 只撤销当前 take。
-- 每个 take 仅保留一次内建自动技术 readback：managed output、parser/readback、active allowlist、有限有序曲线、当前 summary 要求的 semantic variation、endpoint/seam 规则和 cleanup。通过时标记 `draft / technical-pass / user-visual-review-pending`；用户可批量决定视觉结论，agent 不重复代码/Skill/profile 审核或审美投票。
+- 每个 take 发布前仅运行一次内建自动技术 readback：managed output、parser/readback、active allowlist、有限有序曲线、当前 summary 要求的 semantic variation、endpoint/seam 规则和 cleanup。通过时原子发布并标记 `draft / technical-pass / user-visual-review-pending`；该结果是 Live2dREC 发布安全门禁，不等于 P2-64X 式额外 post-hoc 正式技术验收。
+- P2-64Z 当前阶段覆盖 10 段长动作：每段完成内建 readback、原子发布与 cleanup 后立即隔离展示并由用户人工审查；全部 10 段完成人工裁决后，才对用户通过的锁定 exact sources 批量执行额外 post-hoc 正式技术验收。
 
 ## Live2dREC Contract
 
@@ -31,6 +32,7 @@ python -X utf8 "C:\Users\1\.codex\skills\.system\skill-creator\scripts\quick_val
 - 每条实际导出的 allowlist 曲线必须有限、时间有序，并按当前 summary 要求满足 closed endpoint 或 seam 规则。closed endpoint 阈值、规范化口径、required semantic variation 与辅助曲线是否可省略都由当前 summary 决定；parser readback 必须独立复验，不能仅比较序列化 JSON 与内存对象。
 - 连接或 preflight 失败时，必须先消费当前 take 的人工前置条件确认，再等待或触发 candidate adapter 清理。
 - 输出必须先成为本 take ownership ledger 中的 staging candidate，经独立 parser readback 成功后原子发布。只有原子发布成功才可报告成功 draft；发布后，以及发布前/readback 失败或取消时，均必须重试本 take 临时 candidate 的 unlink，并单独追踪 `cleanupPending`。临时 unlink 持续失败时，必须生成含 `take_id`、owner、受控临时路径、重试状态和禁止删除 final 标记的结构化 cleanup handle，移交 managed drain；发布成功时合法 final 仍为成功 draft，发布前/readback 失败时保留原始录制失败，且 managed drain 不得删除或改报任何合法 final。
+- 若 profile 含 `timedAccessoryGroups`，参与组必须以完整成员输出 `0/30` 值域的 Motion3 stepped 曲线，检查初始值、每次切换、最终值、时间单调、时长范围和 Meta 计数；`requiredAccessoryStates` 不得充当该时间线。`ParamMouthForm` 与 `ParamMouthOpenY` 必须作为同一 `all-of` variation group 且均真实变化；不得引入眼泪/生气旧组件要求。
 
 ## VTube Studio Public API
 

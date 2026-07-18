@@ -16,6 +16,8 @@ Schema version: `live2d-take-contract/v1`.
 | `model_identity` | CurrentModel 的安全身份、模型参数签名或等价受信标识。 |
 | `capabilities` | API state、鉴权、CurrentModel、Live2DParameterList 与允许参数存在性的快照。 |
 | `allowlist` | 从 profile 冻结的精确参数 ID 集合。 |
+| `variation_groups` | 冻结的 variation group 定义；嘴部必须包含 `ParamMouthForm` 与 `ParamMouthOpenY` 的 `all-of` 组。 |
+| `timed_accessory_groups` | 冻结的定时配件组成员、值域和 stepped 规则；不得由静态 `requiredAccessoryStates` 代替。 |
 | `capture_duration` | 由当前 profile summary 冻结的实际采集时长。 |
 | `motion_duration` | 由当前 profile summary 冻结的预期 Motion3 Meta.Duration。 |
 | `cycle_duration` | loop 的周期语义；one-shot/enter/exit 必须明确为不适用。 |
@@ -44,6 +46,8 @@ Schema version: `live2d-take-contract/v1`.
 ## Output Publication
 
 录制文件先是当前 take ledger 中的 staging candidate，不是成功 draft。独立 Motion3 parser readback 必须重验冻结 profile summary 要求的 variation IDs、mode、endpoint 或 seam 规则，并对微小辅助曲线完成真实 write/read 回读验证，而不只比较序列化 JSON 与内存对象。readback 通过后，才可将它原子发布到 profile/take ID 派生的受管相对 output；原子发布成功是唯一可报告输出成功的时点。发布后，以及发布前/readback 失败或取消时，均必须重试本 take 临时 candidate 的 unlink，并单独追踪 `cleanupPending`。临时 unlink 持续失败时，必须生成含 `take_id`、owner、受控临时路径、重试状态和禁止删除 final 标记的结构化 cleanup handle，移交 managed drain；发布成功时合法 final 仍为成功 draft，发布前/readback 失败时保留原始录制失败，且 managed drain 不得删除或改报任何合法 final。
+
+P2-64Z 不改变上述 Output Publication 安全链：每段都必须完成内建 parser readback、原子发布 draft 以及相应 cleanup，随后才可隔离展示并记录用户人工裁决。延后的仅是 P2-64X 式额外 post-hoc 正式技术验收；全部 10 段完成人工裁决后，才锁定用户通过的 exact sources 并批量执行该验收。
 
 ## User-Authorized VTS Draft Intake Summary
 
