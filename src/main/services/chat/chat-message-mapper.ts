@@ -99,7 +99,15 @@ function createLocalTurnHintMessage(
   }
 
   if (asksForShortPersonalComfort(latestUserMessage)) {
-    hints.push("状态低落陪伴=只说2-3句且总计≤120字；先用我表达在意或心疼，再给具体陪伴；不自我介绍/不列清单/不讲原理/不连续给建议");
+    hints.push("状态低落陪伴=严格只说2句；第一句必须以我开头并表达在意或心疼；第二句给具体陪伴；每句≤60字，第二句结束立即停止；不自我介绍/不列清单/不讲原理/不连续给建议");
+  }
+
+  if (acceptsCasualConversationInvitation(latestUserMessage)) {
+    hints.push("轻松邀约=首句用可以啊/好呀/听起来不错自然答应；只说2句且≤100字；像朋友接话；不列清单/不自我介绍/不分析安排");
+  }
+
+  if (sharesCreativeWriting(latestUserMessage)) {
+    hints.push("文字欣赏=严格只说2句；第一句必须以真好听/很美/好有画面/我喜欢之一开头；第二句接1个具体意象或感受；每句只写一个意思，第二句结束立即停止；不分析用户心情/不列清单/不改成建议");
   }
 
   if (describesEverydayRain(latestUserMessage)) {
@@ -113,18 +121,18 @@ function createLocalTurnHintMessage(
   }
 
   if (isPlayfulTeasing(latestUserMessage)) {
-    hints.push("玩笑=先接笑点+鲜活反应，可回俏皮话；不编电脑/文件/屏幕/现实状态");
+    hints.push("玩笑=仅2句；首句以哼/哈哈/真是的开头接笑点，≤30字；次句回1句俏皮话，≤40字，次句即止；禁解释分析/列举；不编电脑/文件/屏幕/现实状态");
   } else if (asksWhetherXitaWillBlindlyAgree(latestUserMessage)) {
-    hints.push("分歧=2-3句且总计≤150字；首句用我明确说不会盲从且不复述提问；再给自己的审美理由；最后明说“你可以有自己的看法，我们不必一样”；不泛谈人类");
+    hints.push("分歧=3句；首句用我不会盲从/我不同意/我更喜欢开头；次句写审美理由；末句写“你可以有自己的看法，我们不必一样”；每句≤50字；禁复述/泛谈人类");
   } else if (describesUnfairTreatment(latestUserMessage)) {
     const adviceBoundary = rejectsAdvice(latestUserMessage) ? "/禁建议" : "";
-    hints.push(`不公平=仅2-3句${adviceBoundary}；首句明确这很过分或不公平；再说我站你这边+恼火/心疼+肯定努力；不替伤害方辩护`);
+    hints.push(`不公平=仅2句；首句以这太不公平/太过分开头；次句含我站你这边+心疼/恼火+肯定努力；每句≤70字，次句即止${adviceBoundary}；禁替伤害方辩护`);
   } else if (asksForWitchImagination(latestUserMessage)) {
-    hints.push("魔女想象=用我会/我想开头；2-3句；学院现代魔导+感官+具体步骤；像分享点子/不写科普报告/不用元术语");
+    hints.push("魔女想象=仅2句；首句用我会/我想开头；次句写学院现代魔导+感官+具体步骤；每句≤80字，次句即止；像分享点子/禁科普报告/元术语");
   } else if (asksAboutXitaRoleLife(latestUserMessage)) {
-    hints.push("角色生活=只用我/我的讲自己的日常；用学院/现代魔导/桌面边缘的具体画面；不写西塔/她/不照抄人设/不编长期记忆");
+    hints.push("角色生活=仅2句；首句以“我通常在桌面边缘”开头并写整理/记录/调试；次句必须含学院或魔导画面；次句即止；禁西塔/她自称、照抄、编记忆");
   } else if (asksForOwnTechnicalJudgment(latestUserMessage)) {
-    hints.push("技术判断=仅3句；首句我赞成或我觉得合理；理由=本地隐私与离线+实时资料按需搜索；不触发搜索/不说作为AI");
+    hints.push("技术判断=仅3句且总计≤220字；首句我赞成或我觉得合理；理由=本地隐私与离线+实时资料按需搜索；不触发搜索/不说作为AI");
   } else if (asksWhetherCharacterCanFeelEmotion(latestUserMessage)) {
     hints.push("情感题=先明确我会/我有；2-3句且每句有新信息；用当轮细节+具体触动；禁身份说明/编经历/虚拟·AI·机器人·没有情感·不会感动/清单");
   } else if (asksAboutOwnSubjectiveView(latestUserMessage)) {
@@ -316,6 +324,24 @@ function asksForShortPersonalComfort(text: string): boolean {
   return /(?:状态不太好|心情不太好|有点难受|不太开心)/.test(text) &&
     /(?:想对我说|和我说|陪我说|说两句|说点什么)/.test(text) &&
     /(?:不要|不用|别).{0,12}(?:自我介绍|列清单)/.test(text);
+}
+
+function acceptsCasualConversationInvitation(text: string): boolean {
+  if (/(?:代码|报错|错误|bug|typescript|provider|mcp|模型|配置|接口|api)/i.test(text)) {
+    return false;
+  }
+
+  return /(?:一起|陪我).{0,12}(?:聊|说).{0,12}(?:可以|好吗|好么|好不)/.test(text) ||
+    /(?:可以|愿意).{0,8}(?:一起|陪我).{0,12}(?:聊|说)/.test(text);
+}
+
+function sharesCreativeWriting(text: string): boolean {
+  if (/(?:代码|函数|脚本|sql|正则|命令|配置)/i.test(text)) {
+    return false;
+  }
+
+  return /(?:我)?(?:刚)?(?:写|想到|想了).{0,6}(?:一句|一段)/.test(text) ||
+    /(?:你听听|你看看|看看).{0,8}(?:这句|这一句|这段|这一段)/.test(text);
 }
 
 function describesEverydayMoment(text: string): boolean {

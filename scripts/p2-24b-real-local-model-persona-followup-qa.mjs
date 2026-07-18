@@ -30,7 +30,7 @@ const require = createRequire(import.meta.url);
 const { hasProviderIdentityDrift } = require("../dist/shared/persona-self-identity.js");
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const runName = "p2-24b-real-local-model-persona-followup-qa";
-const defaultPackRoot = join(root, ".tmp", "p2-23c-qwen25-15b-local-llm");
+const defaultPackRoot = join(root, "resources", "local-llm");
 const packRoot = resolve(
   process.env.AI_DESKTOP_PET_LOCAL_LLM_SOURCE_ROOT ||
   process.env.AI_DESKTOP_PET_BUNDLED_LLAMA_CPP_ROOT ||

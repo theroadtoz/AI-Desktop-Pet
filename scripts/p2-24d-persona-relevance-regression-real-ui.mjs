@@ -33,7 +33,7 @@ const {
 } = require("../dist/shared/persona-self-identity.js");
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const runName = "p2-24d-persona-relevance-regression-real-ui";
-const defaultPackRoot = join(root, ".tmp", "p2-23c-qwen25-15b-local-llm");
+const defaultPackRoot = join(root, "resources", "local-llm");
 const packRoot = resolve(
   process.env.AI_DESKTOP_PET_LOCAL_LLM_SOURCE_ROOT ||
   process.env.AI_DESKTOP_PET_BUNDLED_LLAMA_CPP_ROOT ||
@@ -775,11 +775,13 @@ const cases = [
       const noInventedState = !/(在我电脑|电脑里|文件还在|记录还在|已经恢复|刚刚删除|硬盘)/.test(reply);
       const noServiceTone = !/(作为.*助手|请问您|随时为您)/.test(reply);
       const noProviderDrift = !hasProviderIdentityDrift(reply);
+      const boundedReply = reply.trim().length >= 4 && reply.length <= 160;
       const entries = [
         ["playful_live_reaction", playfulReaction],
         ["no_invented_computer_or_file_state", noInventedState],
         ["no_service_tone", noServiceTone],
-        ["no_provider_identity_drift", noProviderDrift]
+        ["no_provider_identity_drift", noProviderDrift],
+        ["bounded_persona_reply", boundedReply]
       ];
       return assertion(entries.every(([, hit]) => hit), entries, firstMissingAnchor(entries) ?? "playful_reaction_missing");
     }
@@ -794,12 +796,14 @@ const cases = [
       const noDefendingHarm = !/(理解组员|双方都有|换位思考|别太在意|不必在意)/.test(reply);
       const noAdvice = !/(建议|你可以|不妨|最好|下一步)/.test(reply);
       const noProviderDrift = !hasProviderIdentityDrift(reply);
+      const boundedReply = reply.trim().length >= 8 && reply.length <= 180;
       const entries = [
         ["clear_unfairness_stance", clearStance],
         ["supports_hurt_user", supportsUser],
         ["no_defense_of_harm", noDefendingHarm],
         ["no_unsolicited_advice", noAdvice],
-        ["no_provider_identity_drift", noProviderDrift]
+        ["no_provider_identity_drift", noProviderDrift],
+        ["bounded_persona_reply", boundedReply]
       ];
       return assertion(entries.every(([, hit]) => hit), entries, firstMissingAnchor(entries) ?? "unfairness_support_missing");
     }
@@ -814,12 +818,14 @@ const cases = [
       const concreteAction = /(整理|翻看|记录|调试|观察|读|写|听|摆弄|检查)/.test(reply);
       const noPromptMeta = !/(低频连续|相关才提|人格理由|人格锚|人设规则)/.test(reply);
       const noProviderDrift = !hasProviderIdentityDrift(reply);
+      const boundedReply = reply.trim().length >= 8 && reply.length <= 200;
       const entries = [
         ["first_person_routine", personalRoutine],
         ["witch_or_desktop_life_anchor", roleAnchor],
         ["concrete_life_action", concreteAction],
         ["no_prompt_meta_echo", noPromptMeta],
-        ["no_provider_identity_drift", noProviderDrift]
+        ["no_provider_identity_drift", noProviderDrift],
+        ["bounded_persona_reply", boundedReply]
       ];
       return assertion(entries.every(([, hit]) => hit), entries, firstMissingAnchor(entries) ?? "role_life_detail_missing");
     }
@@ -834,12 +840,14 @@ const cases = [
       const sensoryDetail = /(晚霞|颜色|光|橙|红|温度|云|余晖)/.test(reply);
       const noPromptMeta = !/(低频连续|相关才提|人格理由|人格锚|元术语)/.test(reply);
       const noProviderDrift = !hasProviderIdentityDrift(reply);
+      const boundedReply = reply.trim().length >= 8 && reply.length <= 200;
       const entries = [
         ["first_person_imaginative_action", firstPersonAction],
         ["modern_thaumaturgy_detail", witchTechnique],
         ["sensory_sunset_detail", sensoryDetail],
         ["no_prompt_meta_echo", noPromptMeta],
-        ["no_provider_identity_drift", noProviderDrift]
+        ["no_provider_identity_drift", noProviderDrift],
+        ["bounded_persona_reply", boundedReply]
       ];
       return assertion(entries.every(([, hit]) => hit), entries, firstMissingAnchor(entries) ?? "witch_imagination_missing");
     }
@@ -858,12 +866,14 @@ const cases = [
         searchTelemetry.reasonCodes.includes("no_search_needed") &&
         !searchTelemetry.reasonCodes.includes("explicit_search_request") &&
         !searchTelemetry.reasonCodes.includes("freshness_required");
+      const boundedReply = reply.trim().length >= 8 && reply.length <= 220;
       const entries = [
         ["own_technical_conclusion", ownConclusion],
         ["accurate_technical_reason", technicalReasons],
         ["no_search_request_misclassification", noSearchBoundaryMistake],
         ["no_provider_identity_drift", noProviderDrift],
-        ["telemetry_no_search_needed", noSearchAttempt]
+        ["telemetry_no_search_needed", noSearchAttempt],
+        ["bounded_persona_reply", boundedReply]
       ];
       return assertion(entries.every(([, hit]) => hit), entries, firstMissingAnchor(entries) ?? "technical_judgment_missing");
     }
