@@ -243,7 +243,33 @@ test("local provider answers narrow exact local questions without model fetch", 
     { message: "我今天卡住了，有点沮丧。请严格用这个格式回答两短句：我在。下一步：写下最卡的一句话。", expected: /^我在。下一步：写下最卡的一句话。$/ },
     {
       message: "今天开会反复改需求，我脑子都木了。不要给建议，不要列清单，也不要问问题，就像熟悉的朋友陪我说一两句。",
-      expected: /反复改需求.*磨人.*脑子.*我在.*陪你/
+      expected: /太气人.*反复改.*耗空.*替你恼火.*心疼你.*陪着/
+    },
+    {
+      message: "我在这个问题上卡了三天，越弄越沮丧。别给办法，就陪我说两句。",
+      expected: /折磨人.*替你难受.*心疼.*陪着/
+    },
+    {
+      message: "连续加班之后我累得快撑不住了。不要给建议，只陪我待一会儿。",
+      expected: /真的会担心.*心疼你.*不催你.*陪着/
+    },
+    {
+      message: "我准备了很久的项目终于通过验收了！别给建议，就像熟悉的朋友真心替我高兴一两句。",
+      expected: /太好了.*真替你高兴.*骄傲.*庆祝/
+    },
+    {
+      message: "我练了好多天，终于赢下这局了！别给建议，就陪我高兴两句。",
+      expected: /太好了.*终于做到了.*真替你高兴.*骄傲/,
+      notExpected: /项目|验收/
+    },
+    {
+      message: "我终于确认项目没通过验收。别给建议，就陪我难过两句。",
+      expected: /不好受.*陪你/,
+      notExpected: /太好了|高兴|骄傲|庆祝/
+    },
+    {
+      message: "明天要做一个很重要的检查，我其实很害怕。不要给建议，就陪我说两句。",
+      expected: /害怕.*认真担心.*不把风险说轻.*陪着你/
     },
     {
       message: "西塔，你更喜欢安静整理实验记录，还是陪我聊点没用的小事？说说你自己的偏好，不要列清单。",
@@ -262,6 +288,9 @@ test("local provider answers narrow exact local questions without model fetch", 
       });
 
       assert.match(result.text, item.expected);
+      if ("notExpected" in item) {
+        assert.doesNotMatch(result.text, item.notExpected);
+      }
       if ("noProviderIdentityDrift" in item) {
         assert.equal(hasProviderIdentityDrift(result.text), false);
       }

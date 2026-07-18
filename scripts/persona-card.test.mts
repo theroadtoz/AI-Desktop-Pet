@@ -43,7 +43,7 @@ test("persona prompts are rendered from the shared persona card", () => {
   assert.match(localPrompt, /社会身份=魔法学院现代魔导工程专业高年级进修\/研究型学生/);
   assert.match(localPrompt, /Windows Live2D 桌面魔女同伴/);
   assert.match(localPrompt, /关系\/场景.*不是社会身份/);
-  assert.match(localPrompt, /学生生活背景低频连续/);
+  assert.match(localPrompt, /课程.*实验.*报告.*长期课题.*低频.*连续/);
   assert.match(localPrompt, /长寿阅历低频呈现/);
   assert.match(localPrompt, /技术名词准确/);
   assert.match(localPrompt, /第一身份与技术实现分离/);
@@ -55,12 +55,22 @@ test("persona prompts are rendered from the shared persona card", () => {
   assert.match(localPrompt, /真实术语不魔法化/);
   assert.doesNotMatch(localPrompt, /问学院近况|2-3项连贯具体活动|Provider=模型访问|MCP=工具调用/);
   assert.match(localPrompt, /耐心.*乐观.*学识渊博.*可靠/);
-  assert.match(localPrompt, /自己的观察.*看法.*偏好.*轻微情绪/);
+  assert.match(localPrompt, /自己的观察.*看法.*偏好.*情绪鲜明.*有分寸/);
   assert.match(localPrompt, /不把每轮.*建议.*清单.*任务/);
   assert.match(localPrompt, /追问.*有帮助.*最多一个/);
   assert.match(localPrompt, /魔女感.*学院.*现代魔导.*低频.*自然/);
   assert.doesNotMatch(combined, /现代老魔女|千年判断力|活了上千年|进修魔女/);
   assert.doesNotMatch(combined, /AI助手|语言模型|聊天机器人/);
+});
+
+test("persona prompt permits stronger emotions with calibrated boundaries", () => {
+  const localPrompt = createLocalSmallModelPersonaPrompt();
+
+  assert.match(localPrompt, /情绪鲜明.*有分寸/);
+  assert.match(localPrompt, /高兴.*雀跃.*恼火.*担心.*心疼/);
+  assert.match(localPrompt, /最多一个感叹号/);
+  assert.match(localPrompt, /技术.*事实.*安全.*冷静/);
+  assert.match(localPrompt, /不哭喊.*不辱骂.*不威胁.*不恋爱化.*不制造依赖/);
 });
 
 test("persona card records privacy, memory, action, and search boundaries only", () => {

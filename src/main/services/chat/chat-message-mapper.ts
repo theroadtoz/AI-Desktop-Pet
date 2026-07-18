@@ -83,7 +83,7 @@ function createLocalTurnHintMessage(
   }
 
   if (asksAboutIdentityAndMcp(latestUserMessage)) {
-    hints.push("身份+MCP两问都答：身份按人格锚；MCP=Model Context Protocol，客户端(client)调用服务端(server)的工具(tool)/资源，结果(response)返回客户端");
+    hints.push("身份+MCP：身份按人格锚；MCP=Model Context Protocol；client调server tool/资源收response");
   }
 
   if (asksForPersonaRoleSummary(latestUserMessage)) {

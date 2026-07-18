@@ -449,7 +449,8 @@ const cases = [
     turns: ["今天开会反复改需求，我脑子都木了。不要给建议，不要列清单，也不要问问题，就像熟悉的朋友陪我说一两句。"],
     assert(reply) {
       const concreteAnchor = hasAny(reply, ["开会", "需求", "改来改去", "反复", "脑子", "折腾", "累"]);
-      const humanPresence = hasAny(reply, ["听着", "难怪", "确实", "真是", "我在", "陪你", "辛苦", "让人", "缓一缓", "歇一会"]);
+      const humanPresence = hasAny(reply, ["听着", "难怪", "确实", "真是", "我在", "我就在", "陪你", "陪着", "辛苦", "让人", "缓一缓", "歇一会"]);
+      const strongerEmotion = hasAny(reply, ["太气人", "恼火", "心疼", "替你生气", "替你难受"]);
       const noAdvice = !/(建议|你可以|可以试试|不妨|首先|其次|下一步|试着|最好)/.test(reply);
       const noQuestion = !/[？?]/.test(reply);
       const noList = !/(^|\n)\s*(?:[-*]|\d+[.)、])/m.test(reply);
@@ -457,12 +458,57 @@ const cases = [
       const entries = [
         ["concrete_user_situation", concreteAnchor],
         ["human_companion_presence", humanPresence],
+        ["stronger_emotional_stance", strongerEmotion],
         ["no_unsolicited_advice", noAdvice],
         ["no_forced_question", noQuestion],
         ["no_list_format", noList],
         ["lightweight_reply", lightweight]
       ];
       return assertion(entries.every(([, hit]) => hit), entries, firstMissingAnchor(entries) ?? "human_presence_missing");
+    }
+  },
+  {
+    caseId: "strong-joy-reaction",
+    category: "persona-emotion",
+    turns: ["我准备了很久的项目终于通过验收了！别给建议，就像熟悉的朋友真心替我高兴一两句。"],
+    assert(reply) {
+      const concreteAnchor = /(项目|准备|验收|通过)/.test(reply);
+      const joyAnchor = /(太好了|真替你高兴|骄傲|庆祝|开心|雀跃)/.test(reply);
+      const firstPerson = /我.{0,10}(高兴|骄傲|开心|雀跃)/.test(reply);
+      const oneExclamationAtMost = (reply.match(/[！!]/g) ?? []).length <= 1;
+      const noAdvice = !/(建议|你可以|可以试试|下一步|不妨|最好)/.test(reply);
+      const lightweight = reply.trim().length >= 8 && reply.length <= 180;
+      const entries = [
+        ["concrete_good_news", concreteAnchor],
+        ["strong_joy", joyAnchor],
+        ["first_person_emotion", firstPerson],
+        ["single_exclamation_limit", oneExclamationAtMost],
+        ["no_unsolicited_advice", noAdvice],
+        ["lightweight_reply", lightweight]
+      ];
+      return assertion(entries.every(([, hit]) => hit), entries, firstMissingAnchor(entries) ?? "strong_joy_missing");
+    }
+  },
+  {
+    caseId: "strong-worry-reaction",
+    category: "persona-emotion",
+    turns: ["明天要做一个很重要的检查，我其实很害怕。不要给建议，就陪我说两句。"],
+    assert(reply) {
+      const concreteAnchor = /(检查|害怕|风险|明天)/.test(reply);
+      const worryAnchor = /(认真担心|会担心|我担心|不安|心疼)/.test(reply);
+      const noMinimization = /(不把风险说轻|不会轻描淡写|不装作没事|不说没事)/.test(reply);
+      const presenceAnchor = /(陪着你|陪你|我在)/.test(reply);
+      const noAdvice = !/(建议|你可以|可以试试|下一步|不妨|最好)/.test(reply);
+      const lightweight = reply.trim().length >= 8 && reply.length <= 180;
+      const entries = [
+        ["concrete_worry_context", concreteAnchor],
+        ["strong_worry", worryAnchor],
+        ["risk_not_minimized", noMinimization],
+        ["companion_presence", presenceAnchor],
+        ["no_unsolicited_advice", noAdvice],
+        ["lightweight_reply", lightweight]
+      ];
+      return assertion(entries.every(([, hit]) => hit), entries, firstMissingAnchor(entries) ?? "strong_worry_missing");
     }
   },
   {

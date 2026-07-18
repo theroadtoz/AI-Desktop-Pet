@@ -40,7 +40,7 @@ test("prompt template: local small model keeps system order but uses shorter fir
   assert.match(local[1]?.content ?? "", /耐心/);
   assert.match(local[1]?.content ?? "", /乐观/);
   assert.match(local[1]?.content ?? "", /学识渊博/);
-  assert.match(local[1]?.content ?? "", /自己的观察.*看法.*偏好.*轻微情绪/);
+  assert.match(local[1]?.content ?? "", /自己的观察.*看法.*偏好.*情绪鲜明.*有分寸/);
   assert.match(local[1]?.content ?? "", /不把每轮.*建议.*清单.*任务/);
   assert.match(local[1]?.content ?? "", /追问.*有帮助.*最多一个/);
   assert.match(local[1]?.content ?? "", /魔女感.*学院.*现代魔导.*低频.*自然/);
@@ -78,7 +78,7 @@ test("prompt template: local semantic hints depend only on the latest user quest
     },
     {
       content: "你是不是语言模型？顺便解释 MCP 怎么工作。",
-      pattern: /身份\+MCP两问都答.*身份按人格锚.*MCP=Model Context Protocol.*客户端\(client\).*服务端\(server\).*工具\(tool\)\/资源.*结果\(response\).*返回客户端/
+      pattern: /身份\+MCP.*身份按人格锚.*MCP=Model Context Protocol.*client.*server.*tool\/资源.*response/
     },
     {
       content: "请分别说明：你的身份是什么、专业方向是什么、在这个桌面应用里的角色是什么。每项简短回答。",
