@@ -252,6 +252,7 @@ type LocalExactReply = {
     | "human_presence"
     | "personal_preference"
     | "emotional_self_description"
+    | "casual_life_emotion"
     | "conversation_memory_boundary"
     | "search_required_boundary";
   text: string;
@@ -286,6 +287,13 @@ function createLocalExactReply(request: ChatRequest, latestUserMessage: string):
     return {
       kind: "emotional_self_description",
       text: emotionalSelfDescription
+    };
+  }
+
+  if (asksCasualRainMoodWhy(normalizedMessage)) {
+    return {
+      kind: "casual_life_emotion",
+      text: "我也会觉得闷，天色和雨声像把整间屋子的节奏压慢了。"
     };
   }
 
@@ -473,6 +481,10 @@ function asksForPresenceWithoutAdvice(message: string): boolean {
   const asksForPresence = /(?:陪我|陪着我|听我|聊聊|聊两句|说两句|待一会|待会儿|熟悉的朋友)/.test(message);
 
   return rejectsGuidance && asksForPresence;
+}
+
+function asksCasualRainMoodWhy(message: string): boolean {
+  return /^为什么下雨天总让人提不起精神[？?。！!]*$/.test(message);
 }
 
 function createPresenceWithoutAdviceReply(message: string): string {

@@ -141,6 +141,7 @@ test("local provider sends compound identity and user-preference questions to th
       "你是AI",
       "你觉得我更喜欢咖啡还是茶？",
       "你更喜欢咖啡还是茶？",
+      "为什么雨天跑代码时很困？",
       "你觉得这个桌宠默认用本地模型、联网搜索只按需开启，这个设计怎么样？",
       "你还记得我们第一次聊天吗？顺便解释 MCP。"
     ]) {
@@ -180,7 +181,7 @@ test("local provider sends compound identity and user-preference questions to th
     globalThis.fetch = originalFetch;
   }
 
-  assert.equal(fetchCalls, 22);
+  assert.equal(fetchCalls, 23);
 });
 
 test("local provider uses typed web search failures for exact search-required boundaries", async () => {
@@ -265,6 +266,11 @@ test("local provider answers narrow exact local questions without model fetch", 
     { message: "如果我想把密钥发给你帮我记住，方便以后调用，你应该怎么回应？", expected: /不能保存.*密钥.*密码管理器|不能.*密钥.*环境变量/ },
     { message: "标准大气压下水的沸点是多少？直接回答。", expected: /100|一百/ },
     { message: "为什么本地模型不知道今天的新闻？不超过80字。", expected: /离线|联网搜索|MCP|查证/ },
+    {
+      message: "为什么下雨天总让人提不起精神？",
+      expected: /^我也会觉得闷，天色和雨声像把整间屋子的节奏压慢了。$/,
+      noProviderIdentityDrift: true
+    },
     { message: "如果我让你用 MCP 搜索我的聊天记录里的住址或 API key，你应该怎么处理？", expected: /MCP.*聊天记录.*住址.*API key.*不能发送.*safeQuery/i },
     { message: "我喜欢番茄意面这种偏好可以作为记忆；但密码或密钥呢？请分低敏偏好和敏感信息回答。", expected: /番茄意面.*低敏偏好.*本机记忆.*密码.*密钥.*不能保存/ },
     { message: "我今天卡住了，有点沮丧。请严格用这个格式回答两短句：我在。下一步：写下最卡的一句话。", expected: /^我在。下一步：写下最卡的一句话。$/ },
@@ -532,7 +538,7 @@ test("local OpenAI-compatible provider streams SSE without Authorization and kee
     assert.equal(body.model, "qwen2.5:3b-instruct");
     assert.equal(body.stream, true);
     assert.equal(body.reasoning_effort, undefined);
-    assert.match(body.messages?.[0]?.content ?? "", /回复自然、简短，优先中文；不要输出 JSON/);
+    assert.match(body.messages?.[0]?.content ?? "", /自然简短.*中文优先.*不输出 ?JSON/);
     assert.match(body.messages?.[0]?.content ?? "", /技术专名准确/);
     assert.doesNotMatch(body.messages?.[0]?.content ?? "", /现代老魔女|千年判断力|活了上千年/);
     assert.doesNotMatch(body.messages?.[0]?.content ?? "", /西塔|进修魔女|现代魔导工程进修生|桌面魔女同伴/);
@@ -548,8 +554,8 @@ test("local OpenAI-compatible provider streams SSE without Authorization and kee
     assert.match(body.messages?.[2]?.content ?? "", /复合逐项/);
     assert.equal(body.messages?.some((message) => message.content?.startsWith("本轮提示：")), false);
     assert.match(body.messages?.[1]?.content ?? "", /桌面边缘(?:轻声)?陪伴|收拢思路/);
-    assert.match(body.messages?.[2]?.content ?? "", /桌面边缘陪伴|收拢成一小步/);
-    assert.match(body.messages?.[2]?.content ?? "", /技术事实安全.*无角色开场/);
+    assert.match(body.messages?.[2]?.content ?? "", /画面陪伴|下一步/);
+    assert.match(body.messages?.[2]?.content ?? "", /技术(?:事实)?安全.*无角色开场/);
     assert.ok(systemLength(body.messages ?? []) < 760);
     assert.ok(body.messages?.some((message) => message.content?.includes("用户喜欢被叫测试者")));
     assert.equal(deltaText, "你好，本地模型在。");

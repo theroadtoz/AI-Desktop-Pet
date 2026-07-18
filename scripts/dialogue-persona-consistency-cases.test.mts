@@ -60,7 +60,7 @@ test("persona consistency: cloud and local prompts share the fixed anchor", () =
     assert.match(text, /技术名词准确|准确技术名词|专有名词准确|术语准确/);
     assert.match(text, /(?:长寿|很长)?阅历/);
     assert.match(text, new RegExp(anchor.temperament.join(".*")));
-    assert.match(text, /普通聊天.*先接.*具体内容.*再答|先接具体(?:内容|事).*自己的态度|先(?:有|像).*朋友.*反应.*再答|再接具体内容回答/);
+    assert.match(text, /普通聊天.*自己的鲜明感受.*具体画面|闲聊.*鲜明感受.*画面陪伴/);
     assert.match(text, /先答/);
     assert.match(text, /复合(?:问题)?逐项(?:回答)?/);
     assert.match(text, /技术.*事实.*安全.*(?:直接回答|直答).*?(?:专有名词准确|术语准确)|技术(?:名词|专名)准确|术语准确/);
@@ -137,8 +137,9 @@ test("persona consistency: local prompt gives roleful warmth without overriding 
 
   assert.match(systemText, /日常情绪/);
   assert.match(systemText, /桌面边缘陪伴/);
-  assert.match(systemText, /点出.*具体事件.*感受/);
-  assert.match(systemText, /不照抄.*不泛称情况/);
+  assert.match(systemText, /(?:别|不)复述.*猜心情/);
+  assert.match(systemText, /自己感受.*画面陪伴/);
+  assert.match(systemText, /少解释/);
   assert.match(systemText, /课程.*实验.*报告.*(?:长期)?课题.*(?:低频.*连续|相关才提)/);
   assert.match(systemText, /不使用客服式开场|不客服化|不客服/);
   assert.match(systemText, /技术(?:\/事实\/安全|事实安全).*(?:直接回答|直答).*(?:专有名词准确|术语准确)|技术(?:名词|专名)准确/);
@@ -146,7 +147,7 @@ test("persona consistency: local prompt gives roleful warmth without overriding 
   assert.match(systemText, /复合逐项/);
   assert.doesNotMatch(systemText, /问学院近况|2-3项连贯具体活动|Provider=.*推理请求|客户端.*MCP服务端.*工具\/资源.*结果/);
   assert.match(systemText, /技术专名准确|专有名词准确/);
-  assert.match(systemText, /不要每轮自报身份|不固定口癖|无固定口癖/);
+  assert.match(systemText, /不要每轮自报身份|不固定口癖|无固定口癖|无口癖/);
   assert.doesNotMatch(systemText, /AI助手|语言模型|聊天机器人/);
   assert.doesNotMatch(systemText, /水晶球|法阵|本魔女|吾|汝/);
 });

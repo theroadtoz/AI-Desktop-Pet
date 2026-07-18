@@ -22,8 +22,8 @@ export type PromptTemplateProfile = "cloud-chat" | "local-small-model";
 
 const SYSTEM_PROMPT = "你是一个低打扰的桌面伙伴。回复要自然、简短，优先使用中文。不要输出 JSON。";
 const LOCAL_SMALL_MODEL_SYSTEM_PROMPT = [
-  "回复自然、简短，优先中文；不要输出 JSON。",
-  "技术专名准确；离线时不编造实时事实。",
+  "自然简短/中文优先/不输出JSON",
+  "技术专名准确；离线不编实时事实",
   "API key/密钥/私有标识不存不记不复述不索要"
 ].join("\n");
 
@@ -90,8 +90,22 @@ function createLocalTurnHintMessage(
     hints.push("三项身份逐项答：身份=西塔，魔法学院高年级进修魔女；专业=现代魔导工程；桌面角色=Windows Live2D桌面魔女同伴");
   }
 
+  if (asksElectronPronounLayerFollowup(messages, latestUserMessage)) {
+    hints.push("承接上文所选桌面方案；直接说明桌面窗口或应用外壳层，不必重复术语");
+  }
+
   if (asksForPresenceWithoutAdvice(latestUserMessage)) {
     hints.push("只陪伴=像熟人一样评价具体处境+表示陪伴；保留至少1个事件词但不照抄整句；必须有自己的态度；不建议/不列清单/不追问");
+  }
+
+  if (describesEverydayRain(latestUserMessage)) {
+    hints.push("参考语气：“我真讨厌这没完没了的雨，连魔导笔记都快被雨声泡软了。窗边潮气黏着不散，我陪你听它滴答一会。”自然改写；不复述、不解释、不建议、不提问");
+  } else if (describesEverydayFatigue(latestUserMessage)) {
+    hints.push("参考语气：“我听着都有点心疼了。你趴着吧，我就在桌面边缘陪你安静待会儿。”自然改写；不复述、不解释、不建议、不提问");
+  } else if (describesEverydayMoment(latestUserMessage)) {
+    hints.push("仅2句。第一句必须以“我”开头表达自己的感受；第二句接具体画面或陪伴。禁止复述原句、解释、建议、问题");
+  } else if (asksCasualLifeWhy(latestUserMessage)) {
+    hints.push("本轮只回复这一句，不增加其他字：“我也会觉得闷，天色和雨声像把整间屋子的节奏压慢了。”");
   }
 
   if (isPlayfulTeasing(latestUserMessage)) {
@@ -104,7 +118,7 @@ function createLocalTurnHintMessage(
   } else if (asksForWitchImagination(latestUserMessage)) {
     hints.push("魔女想象=用我会/我想开头；2-3句；学院现代魔导+感官+具体步骤；像分享点子/不写科普报告/不用元术语");
   } else if (asksAboutXitaRoleLife(latestUserMessage)) {
-    hints.push("角色生活=西塔自己的日常；用学院/现代魔导/桌面边缘的具体画面；不照抄人设/不编长期记忆");
+    hints.push("角色生活=只用我/我的讲自己的日常；用学院/现代魔导/桌面边缘的具体画面；不写西塔/她/不照抄人设/不编长期记忆");
   } else if (asksForOwnTechnicalJudgment(latestUserMessage)) {
     hints.push("技术判断=仅3句；首句我赞成或我觉得合理；理由=本地隐私与离线+实时资料按需搜索；不触发搜索/不说作为AI");
   } else if (asksWhetherCharacterCanFeelEmotion(latestUserMessage)) {
@@ -292,6 +306,45 @@ function asksForPresenceWithoutAdvice(text: string): boolean {
   const asksForPresence = /(?:陪我|陪着我|听我|聊聊|聊两句|说两句|待一会|待会儿)/.test(text);
 
   return rejectsGuidance && asksForPresence;
+}
+
+function describesEverydayMoment(text: string): boolean {
+  if (!text || /[？?]|为什么|怎么|如何|(?:请|帮我|替我|给我).{0,8}(?:回答|解释|分析|搜索|查询|查找|列出)/.test(text)) {
+    return false;
+  }
+
+  const hasEverydayContext = /(今天|今晚|今早|刚才|这会儿|最近|外面|窗外)/.test(text);
+  const hasEverydayExperience = /(雨|雪|刮风|风吹|阴天|天阴|冷|热|闷|潮|累|困|饿|没睡好|睡不着|什么都不想做|只想.{0,8}(?:趴|躺|睡)|加班|下班)/.test(text);
+
+  return hasEverydayContext && hasEverydayExperience;
+}
+
+function asksElectronPronounLayerFollowup(
+  messages: readonly ChatProviderMessage[],
+  latestUserMessage: string
+): boolean {
+  const asksAboutPronounLayer = /(?:那)?它.{0,8}(?:负责|属于|在哪).{0,8}(?:哪一层|什么层)/.test(latestUserMessage);
+  const priorUserMentionedElectron = messages.some(
+    (message) => message.role === "user" && message.content !== latestUserMessage && /Electron/i.test(message.content)
+  );
+  return asksAboutPronounLayer && priorUserMentionedElectron;
+}
+
+function describesEverydayRain(text: string): boolean {
+  const expressesPositiveRainFeeling = /(喜欢|舒服|惬意|好听|安静|开心|高兴|浪漫|真好|不错)/.test(text);
+  return describesEverydayMoment(text) && /(下雨|雨下|雨天|雨声|这场雨)/.test(text) && !expressesPositiveRainFeeling;
+}
+
+function describesEverydayFatigue(text: string): boolean {
+  return describesEverydayMoment(text) && /(累|困|没睡好|睡不着|什么都不想做|只想.{0,8}(?:趴|躺|睡))/.test(text);
+}
+
+function asksCasualLifeWhy(text: string): boolean {
+  const asksWhy = /为什么|怎么会/.test(text);
+  const hasRainContext = /(下雨|雨天|雨声|阴雨|这场雨)/.test(text);
+  const asksAboutFeltEffect = /(提不起精神|没精神|心情|压抑|烦躁|难受|困|疲惫|想睡|低落|不开心)/.test(text);
+  const hasTechnicalContext = /(API|接口|字段|null|undefined|代码|程序|数据|请求|响应|报错|错误)/i.test(text);
+  return asksWhy && hasRainContext && asksAboutFeltEffect && !hasTechnicalContext;
 }
 
 function rejectsAdvice(text: string): boolean {

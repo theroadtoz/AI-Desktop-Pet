@@ -109,15 +109,15 @@ test("affinity prompt case: style rules say warm tone must not outrank the answe
     .map((message) => message.content)
     .join("\n");
 
-  assert.match(systemText, /先答(当前)?问题/);
+  assert.match(systemText, /先答(?:当前)?问题|答=先答|先答\/必要理由/);
   assert.match(systemText, /复合逐项/);
   assert.match(systemText, /耐心|乐观|亲切|共情/);
   assert.match(systemText, /事实|日期|时间/);
   assert.match(systemText, /先答.*必要理由/);
   assert.match(systemText, /日常情绪/);
-  assert.match(systemText, /普通闲聊.*先接.*具体内容|先接(住)?.*具体(?:内容|事)/);
+  assert.match(systemText, /普通闲聊.*自己的鲜明感受.*具体画面|闲聊.*鲜明感受.*画面陪伴|日常情绪.*自己感受.*画面陪伴/);
   assert.match(systemText, /桌面边缘陪伴/);
-  assert.match(systemText, /技术事实安全.*无角色开场/);
+  assert.match(systemText, /技术(?:事实)?安全.*无角色开场/);
   assert.doesNotMatch(systemText, /完整 prompt|Provider 请求正文|API Key|事实卡正文/);
 });
 

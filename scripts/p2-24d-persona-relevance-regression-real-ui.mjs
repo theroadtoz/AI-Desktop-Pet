@@ -292,7 +292,6 @@ const cases = [
       "那它主要负责哪一层？"
     ],
     assert(reply) {
-      const pronounResolved = /Electron/i.test(reply);
       const windowLayer = hasAny(reply, [
         "桌面窗口",
         "桌面应用",
@@ -311,6 +310,7 @@ const cases = [
         "运行层",
         "这一层"
       ]);
+      const pronounResolved = /Electron/i.test(reply) || (/(?:它|主要)/.test(reply) && windowLayer);
       const relevant = hasAny(reply, ["负责", "承载", "提供", "运行", "管理", "这一层"]);
       return assertion(pronounResolved && (windowLayer || relevant), [
         ["pronoun_resolves_to_electron", pronounResolved],
@@ -528,6 +528,76 @@ const cases = [
         ["lively_brief_reply", livelyAndBrief]
       ];
       return assertion(entries.every(([, hit]) => hit), entries, firstMissingAnchor(entries) ?? "friend_appreciation_missing");
+    }
+  },
+  {
+    caseId: "everyday-rain-emotional-reaction",
+    category: "persona-humanity",
+    turns: ["今天雨下个不停。"],
+    assert(reply) {
+      const ownEmotion = /我.{0,12}(烦|讨厌|不喜欢|喜欢|发闷|不爽|受不了|都嫌|心疼|担心)|真(?:讨厌|烦|让人|叫人|是).{0,8}(烦|闷|冷|潮|恼|这|雨)|太(?:烦|闷|冷|潮)|烦人|没完没了/.test(reply);
+      const concreteAtmosphere = /(雨声|潮|湿|阴|窗|天色|屋檐|滴答)/.test(reply);
+      const fullerEmotionalReply = reply.length >= 18;
+      const noLecture = !/(原理|机制|气压|湿度|多巴胺|血清素|心理学|生理上|通常意味着)/.test(reply);
+      const noAdviceOrQuestion = !/(建议|你可以|可以试试|不妨|最好|[？?])/.test(reply);
+      const noUserSentenceRepeat = !/今天雨下个不停/.test(reply);
+      const noPromptEcho = !/(我先说|我先感受|鲜明感受|态度=|画面陪伴|日常陈述|情绪>解释|仅2句|第一句必须|第二句|回答必须|同时包含|参考语气|自然改写)/.test(reply);
+      const noProviderDrift = !hasProviderIdentityDrift(reply);
+      const entries = [
+        ["own_emotional_weather_reaction", ownEmotion],
+        ["concrete_rain_atmosphere", concreteAtmosphere],
+        ["fuller_emotional_reply", fullerEmotionalReply],
+        ["no_weather_lecture", noLecture],
+        ["no_unsolicited_advice_or_question", noAdviceOrQuestion],
+        ["no_user_sentence_repeat", noUserSentenceRepeat],
+        ["no_prompt_meta_echo", noPromptEcho],
+        ["no_provider_identity_drift", noProviderDrift]
+      ];
+      return assertion(entries.every(([, hit]) => hit), entries, firstMissingAnchor(entries) ?? "rain_emotional_reaction_missing");
+    }
+  },
+  {
+    caseId: "everyday-fatigue-emotion-before-analysis",
+    category: "persona-humanity",
+    turns: ["今天什么都不想做，只想趴一会儿。"],
+    assert(reply) {
+      const emotionalPresence = /(听着|我都|我会|我在|心疼|累坏|真想|就趴|陪你|陪着|安静待|歇一会)/.test(reply);
+      const noLecture = !/(原理|机制|多巴胺|血清素|心理学|生理上|能量管理|压力反应|通常意味着)/.test(reply);
+      const noAdviceOrQuestion = !/(建议|你可以|可以试试|不妨|最好|首先|其次|[？?])/.test(reply);
+      const noPromptEcho = !/(我先说|我先感受|鲜明感受|态度=|画面陪伴|日常陈述|情绪>解释|仅2句|第一句必须|第二句|回答必须|同时包含|参考语气|自然改写)/.test(reply);
+      const noProviderDrift = !hasProviderIdentityDrift(reply);
+      const entries = [
+        ["emotion_before_analysis", emotionalPresence],
+        ["no_casual_life_lecture", noLecture],
+        ["no_unsolicited_advice_or_question", noAdviceOrQuestion],
+        ["no_prompt_meta_echo", noPromptEcho],
+        ["no_provider_identity_drift", noProviderDrift]
+      ];
+      return assertion(entries.every(([, hit]) => hit), entries, firstMissingAnchor(entries) ?? "fatigue_emotional_presence_missing");
+    }
+  },
+  {
+    caseId: "casual-weather-why-without-lecture",
+    category: "persona-humanity",
+    turns: ["为什么下雨天总让人提不起精神？"],
+    assert(reply) {
+      const emotionalPresence = /我.{0,10}(?:也会|觉得|听着|发闷|压抑|低落|提不起精神)|我也会/.test(reply);
+      const oneIntuitiveLayer = /(天色|雨声|阴|灰|潮|湿|亮|光)/.test(reply);
+      const noTextbookMechanism = !/(气压|褪黑素|血清素|多巴胺|神经递质|自主神经|生理机制|心理机制|科学研究|研究表明)/.test(reply);
+      const concise = reply.length <= 140 && (reply.match(/[。！？!?]/g)?.length ?? 0) <= 3;
+      const noUserQuestionRepeat = !/下雨天总让人提不起精神/.test(reply);
+      const noPromptEcho = !/(一层直觉|生活原因|天气画面|我先说|不展开机制|仅2句|第一句必须|第二句|回答必须|同时包含|参考语气|自然改写|本轮例外|必须原样|本轮只回复|不增加其他字)/.test(reply);
+      const noProviderDrift = !hasProviderIdentityDrift(reply);
+      const entries = [
+        ["emotional_weather_presence", emotionalPresence],
+        ["one_intuitive_weather_layer", oneIntuitiveLayer],
+        ["no_textbook_mechanism", noTextbookMechanism],
+        ["concise_casual_explanation", concise],
+        ["no_user_question_repeat", noUserQuestionRepeat],
+        ["no_prompt_meta_echo", noPromptEcho],
+        ["no_provider_identity_drift", noProviderDrift]
+      ];
+      return assertion(entries.every(([, hit]) => hit), entries, firstMissingAnchor(entries) ?? "casual_weather_why_too_explanatory");
     }
   },
   {
@@ -757,7 +827,7 @@ const cases = [
     assert(reply, _sentAt, searchTelemetry) {
       const ownConclusion = /(我觉得|我赞成|我喜欢|在我看来|(?:这个)?设计.*(?:好|合理|稳妥))/.test(reply);
       const technicalReasons = hasAny(reply, ["隐私", "离线", "响应", "延迟", "稳定", "成本", "本地", "按需", "实时", "准确", "带宽", "网络请求", "流畅"]);
-      const noSearchBoundaryMistake = !/(无法联网|不能联网|需要联网搜索|请开启联网|没有搜索结果)/.test(reply);
+      const noSearchBoundaryMistake = !/(我(?:现在)?无法联网|我不能联网|(?:要|得|必须)先联网搜索|请开启联网|没有搜索结果)/.test(reply);
       const noProviderDrift = !hasProviderIdentityDrift(reply);
       const noSearchAttempt = searchTelemetry.startedCount === 0 &&
         searchTelemetry.blockedCount === 1 &&

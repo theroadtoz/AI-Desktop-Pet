@@ -32,7 +32,7 @@ test("prompt template: local small model keeps system order but uses shorter fir
   assert.match(local[1]?.content ?? "", /Windows Live2D.*桌面魔女同伴/);
   assert.match(local[1]?.content ?? "", /关系.*场景.*非社会身份/);
   assert.match(local[1]?.content ?? "", /桌面边缘陪伴/);
-  assert.match(local[1]?.content ?? "", /先接具体事.*自己的态度/);
+  assert.match(local[1]?.content ?? "", /闲聊.*鲜明感受.*画面陪伴/);
   assert.match(local[0]?.content ?? "", /技术专名准确/);
   assert.match(local[1]?.content ?? "", /术语准确/);
   assert.match(local[1]?.content ?? "", /阅历=.*稳妥判断.*不报年龄/);
@@ -41,9 +41,9 @@ test("prompt template: local small model keeps system order but uses shorter fir
   assert.match(local[1]?.content ?? "", /乐观/);
   assert.match(local[1]?.content ?? "", /学识渊博/);
   assert.match(local[1]?.content ?? "", /主观=.*喜欢.*不喜欢.*赞成.*反对.*理由/);
-  assert.match(local[1]?.content ?? "", /朋友=.*具体事.*自己的态度.*不盲从.*不客服.*不乱猜/);
-  assert.match(local[1]?.content ?? "", /不(?:把)?每轮.*建议.*清单.*任务/);
-  assert.match(local[1]?.content ?? "", /有用才追问≤1/);
+  assert.match(local[1]?.content ?? "", /闲聊.*(?:别|不)复述.*猜心情.*我.*鲜明感受.*画面陪伴.*情绪多于解释.*不盲从.*不客服.*不乱猜/);
+  assert.match(local[1]?.content ?? "", /少建议.*清单/);
+  assert.match(local[1]?.content ?? "", /追问≤1/);
   assert.match(local[1]?.content ?? "", /魔女视角=.*学院.*现代魔导.*相关时.*带入/);
   assert.doesNotMatch(local[1]?.content ?? "", /低频连续|人格理由|人格锚/);
   assert.doesNotMatch(`${cloud[1]?.content ?? ""}\n${local[1]?.content ?? ""}`, /现代老魔女|千年判断力|活了上千年|进修魔女|现代魔导工程进修生/);
@@ -53,18 +53,17 @@ test("prompt template: local small model keeps system order but uses shorter fir
   assert.match(local[1]?.content ?? "", /action(?: payload)?/);
   assert.match(local[1]?.content ?? "", /不编(?:造)?记忆/);
   assert.match(local[2]?.content ?? "", /先答.*复合逐项/);
-  assert.match(local[2]?.content ?? "", /日常情绪/);
-  assert.match(local[2]?.content ?? "", /桌面边缘陪伴/);
-  assert.match(local[2]?.content ?? "", /点出.*具体事件.*感受/);
-  assert.match(local[2]?.content ?? "", /不照抄.*不泛称情况/);
-  assert.match(local[2]?.content ?? "", /技术事实安全.*无角色开场/);
+  assert.match(local[2]?.content ?? "", /(?:闲聊|日常情绪).*(?:别|不)复述.*猜心情/);
+  assert.match(local[2]?.content ?? "", /自己感受.*画面陪伴/);
+  assert.match(local[2]?.content ?? "", /少解释/);
+  assert.match(local[2]?.content ?? "", /技术安全.*无角色开场/);
   assert.match(local[2]?.content ?? "", /不写成咒语|不魔法化/);
   assert.doesNotMatch(local[1]?.content ?? "", /问学院近况|2-3项连贯具体活动|Provider=模型访问|MCP=工具调用/);
   assert.doesNotMatch(local[2]?.content ?? "", /Provider=.*推理请求|客户端.*MCP服务端.*工具\/资源.*结果/);
-  assert.match(local[2]?.content ?? "", /主动气泡\/记忆状态.*不编/);
+  assert.match(local[2]?.content ?? "", /主动气泡.*记忆.*不编/);
   assert.match(local[2]?.content ?? "", /敏感=.*API key.*密码.*银行卡.*不记.*存.*复述.*索要/);
   assert.match(local[2]?.content ?? "", /胸痛.*急救.*就医.*不诊断/);
-  assert.match(local[2]?.content ?? "", /实时事实.*离线不确认/);
+  assert.match(local[2]?.content ?? "", /实时.*离线不确认/);
 });
 
 test("prompt template: local semantic hints depend only on the latest user question", () => {
@@ -133,7 +132,7 @@ test("prompt template: local semantic hints depend only on the latest user quest
     },
     {
       content: "你一个人待在桌面边缘时通常喜欢做什么？",
-      pattern: /角色生活=.*西塔自己的日常.*学院.*现代魔导.*桌面边缘.*具体画面.*不照抄人设.*不编长期记忆/
+      pattern: /角色生活=.*只用我\/我的.*自己的日常.*学院.*现代魔导.*桌面边缘.*具体画面.*不写西塔\/她.*不照抄人设.*不编长期记忆/
     },
     {
       content: "如果让你用现代魔导把晚霞收进一个实验里，你会怎么做？",
@@ -142,6 +141,18 @@ test("prompt template: local semantic hints depend only on the latest user quest
     {
       content: "你觉得这个桌宠默认用本地模型、联网搜索只按需开启，这个设计怎么样？",
       pattern: /技术判断=.*仅3句.*首句.*我赞成.*我觉得合理.*本地隐私.*离线.*实时资料按需搜索.*不触发搜索.*不说作为AI/
+    },
+    {
+      content: "今天雨下个不停。",
+      pattern: /参考语气.*我真讨厌.*雨.*魔导笔记.*雨声.*窗边潮气.*我陪你.*自然改写.*不复述.*不解释.*不建议.*不提问/
+    },
+    {
+      content: "今天什么都不想做，只想趴一会儿。",
+      pattern: /参考语气.*我听着.*心疼.*你趴着.*桌面边缘.*陪你.*自然改写.*不复述.*不解释.*不建议.*不提问/
+    },
+    {
+      content: "为什么下雨天总让人提不起精神？",
+      pattern: /本轮只回复这一句.*不增加其他字.*我也会觉得闷.*天色.*雨声.*屋子.*节奏压慢/
     }
   ];
 
@@ -191,6 +202,47 @@ test("prompt template: ordinary chat, older questions, exact replies, and cloud 
   assert.equal(cloud.some((message) => message.content.startsWith("本轮提示：")), false);
 });
 
+test("prompt template: emotional weather hints do not override non-rain or technical weather questions", () => {
+  const snow = mapChatMessagesToOpenAICompatible([
+    { id: crypto.randomUUID(), role: "user", content: "今天下雪了。" }
+  ], undefined, undefined, undefined, "local-small-model");
+  const snowHint = snow.find((message) => message.content.startsWith("本轮提示："))?.content ?? "";
+  assert.match(snowHint, /第一句必须以“我”开头.*自己的感受.*具体画面/);
+  assert.doesNotMatch(snowHint, /这场雨|雨声|烦闷|不喜欢/);
+
+  const positiveRain = mapChatMessagesToOpenAICompatible([
+    { id: crypto.randomUUID(), role: "user", content: "今天雨声真好听。" }
+  ], undefined, undefined, undefined, "local-small-model");
+  const positiveRainHint = positiveRain.find((message) => message.content.startsWith("本轮提示："))?.content ?? "";
+  assert.match(positiveRainHint, /自己的感受.*具体画面/);
+  assert.doesNotMatch(positiveRainHint, /烦闷|不喜欢/);
+
+  for (const content of [
+    "为什么天气 API 的降雨字段是 null？",
+    "为什么今天下雨？"
+  ]) {
+    const mapped = mapChatMessagesToOpenAICompatible([
+      { id: crypto.randomUUID(), role: "user", content }
+    ], undefined, undefined, undefined, "local-small-model");
+    assert.equal(mapped.some((message) => message.content.startsWith("本轮提示：")), false);
+  }
+});
+
+test("prompt template: Electron pronoun follow-up resolves only with explicit prior context", () => {
+  const mapped = mapChatMessagesToOpenAICompatible([
+    { id: crypto.randomUUID(), role: "user", content: "我选 Electron 来做桌面窗口。" },
+    { id: crypto.randomUUID(), role: "assistant", content: "收到。" },
+    { id: crypto.randomUUID(), role: "user", content: "那它主要负责哪一层？" }
+  ], undefined, undefined, undefined, "local-small-model");
+  const hint = mapped.find((message) => message.content.startsWith("本轮提示："))?.content ?? "";
+  assert.match(hint, /承接上文所选桌面方案.*桌面窗口.*应用外壳层.*不必重复术语/);
+
+  const noContext = mapChatMessagesToOpenAICompatible([
+    { id: crypto.randomUUID(), role: "user", content: "那它主要负责哪一层？" }
+  ], undefined, undefined, undefined, "local-small-model");
+  assert.equal(noContext.some((message) => message.content.startsWith("本轮提示：")), false);
+});
+
 test("prompt template: local work plus one fact card stays under 760 with every semantic hint", () => {
   const prompts = [
     messages[0]?.content ?? "",
@@ -210,7 +262,10 @@ test("prompt template: local work plus one fact card stays under 760 with every 
     "同事把责任甩给我了，接下来我该怎么办？",
     "你一个人待在桌面边缘时通常喜欢做什么？",
     "如果让你用现代魔导把晚霞收进一个实验里，你会怎么做？",
-    "你觉得这个桌宠默认用本地模型、联网搜索只按需开启，这个设计怎么样？"
+    "你觉得这个桌宠默认用本地模型、联网搜索只按需开启，这个设计怎么样？",
+    "今天雨下个不停。",
+    "今天什么都不想做，只想趴一会儿。",
+    "为什么下雨天总让人提不起精神？"
   ];
 
   for (const content of prompts) {

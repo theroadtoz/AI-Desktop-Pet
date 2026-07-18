@@ -43,22 +43,22 @@ test("persona prompts are rendered from the shared persona card", () => {
   assert.match(localPrompt, /社会身份=魔法学院现代魔导工程专业高年级进修\/研究型学生/);
   assert.match(localPrompt, /Windows Live2D.*桌面魔女同伴/);
   assert.match(localPrompt, /关系.*场景.*非社会身份/);
-  assert.match(localPrompt, /学院生活=.*课程.*实验.*报告.*课题.*相关才提/);
+  assert.match(localPrompt, /学院=.*课程.*实验.*报告.*课题.*相关才提/);
   assert.match(localPrompt, /阅历=.*稳妥判断.*不报年龄/);
   assert.match(localPrompt, /术语准确/);
   assert.match(localPrompt, /身份.*技术实现/);
   assert.match(localPrompt, /桌面边缘陪伴/);
-  assert.match(localPrompt, /先接具体事.*自己的态度/);
-  assert.match(localPrompt, /先答问题/);
-  assert.match(localPrompt, /复合问题逐项回答/);
-  assert.match(localPrompt, /无固定口癖/);
+  assert.match(localPrompt, /闲聊.*鲜明感受.*画面陪伴/);
+  assert.match(localPrompt, /答=先答/);
+  assert.match(localPrompt, /复合逐项/);
+  assert.match(localPrompt, /无口癖/);
   assert.match(localPrompt, /(?:真实)?术语不魔法化/);
   assert.doesNotMatch(localPrompt, /问学院近况|2-3项连贯具体活动|Provider=模型访问|MCP=工具调用/);
   assert.match(localPrompt, /耐心.*乐观.*学识渊博.*可靠/);
   assert.match(localPrompt, /主观=.*喜欢.*不喜欢.*赞成.*反对.*理由/);
-  assert.match(localPrompt, /朋友=.*具体事.*自己的态度.*不盲从.*不客服.*不乱猜/);
-  assert.match(localPrompt, /不(?:把)?每轮.*建议.*清单.*任务/);
-  assert.match(localPrompt, /有用才追问≤1/);
+  assert.match(localPrompt, /闲聊.*(?:别|不)复述.*猜心情.*我.*鲜明感受.*画面陪伴.*情绪多于解释.*不盲从.*不客服.*不乱猜/);
+  assert.match(localPrompt, /少建议.*清单/);
+  assert.match(localPrompt, /追问≤1/);
   assert.match(localPrompt, /魔女视角=.*学院.*现代魔导.*相关时.*带入/);
   assert.doesNotMatch(localPrompt, /低频连续|人格理由|人格锚/);
   assert.doesNotMatch(combined, /现代老魔女|千年判断力|活了上千年|进修魔女/);
@@ -80,7 +80,7 @@ test("local persona binds Xita to first-person self identity", () => {
 
   assert.match(localPrompt, /你就是西塔本人/);
   assert.match(localPrompt, /西塔.*你的名字/);
-  assert.match(localPrompt, /日常.*我\/我的.*自称/);
+  assert.match(localPrompt, /我\/我的.*自称/);
   assert.doesNotMatch(localPrompt, /西塔是一名魔女/);
 });
 
@@ -91,9 +91,21 @@ test("persona gives Xita an observable lively friend-like first reaction", () =>
   assert.match(cloudPrompt, /像朋友.*先.*态度.*情绪反应.*再.*回应/);
   assert.match(cloudPrompt, /可以啊.*听起来不错.*真好听呢/);
   assert.match(cloudPrompt, /语气示例.*不是固定口癖.*自然变化/);
-  assert.match(localPrompt, /朋友=.*具体事.*自己的态度/);
+  assert.match(localPrompt, /闲聊.*我.*鲜明感受.*画面陪伴/);
   assert.match(localPrompt, /可以啊.*听起来不错.*真好听呢/);
   assert.match(localPrompt, /无助手声明/);
+});
+
+test("persona puts emotion before explanation in casual life chat", () => {
+  const cloudPrompt = createDefaultPersonaPrompt();
+  const localPrompt = createLocalSmallModelPersonaPrompt();
+
+  assert.match(cloudPrompt, /普通闲聊.*自己的.*感受.*态度.*不复述.*情绪内容.*原因分析/);
+  assert.match(cloudPrompt, /没问.*为什么.*不主动讲原理/);
+  assert.match(cloudPrompt, /生活类.*为什么.*一层直觉/);
+  assert.match(cloudPrompt, /技术.*求知.*准确.*解释/);
+  assert.match(localPrompt, /闲聊.*(?:别|不)复述.*猜心情.*鲜明感受.*画面陪伴.*情绪多于解释/);
+  assert.match(localPrompt, /解释=.*不问不讲.*生活.*一层.*技术.*按需/);
 });
 
 test("persona keeps Xita independent, playful, imaginative, and loyal to a hurt friend", () => {
