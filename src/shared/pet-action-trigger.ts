@@ -14,6 +14,12 @@ export const PET_ACTION_TRIGGER_REASONS = [
   "pet_edge_settled",
   "rapid_touch_combo",
   "chat_reply_sustain",
+  "chat_reply_completed",
+  "state_music_playing_stable",
+  "state_game_presence_stable",
+  "return_from_idle",
+  "evening_companion_tick",
+  "long_work_session_complete",
   "state_idle",
   "state_greet",
   "state_listen",
@@ -46,19 +52,33 @@ export type PetActionTriggerActionType =
   | "doze"
   | "edgeGlance"
   | "flusteredGlance"
-  | "replySustain";
+  | "replySustain"
+  | "dialogueOpenWelcome"
+  | "replyWarmSettle"
+  | "musicListenSway"
+  | "gamePresenceGlance"
+  | "returnFromIdle"
+  | "eveningWindowGlance"
+  | "longWorkRecovery"
+  | "searchNoteSettle";
 
 export type PetActionTrigger = {
   reason: PetActionTriggerReason;
 };
 
 export const PET_ACTION_TRIGGER_ACTION_BY_REASON: Readonly<Record<PetActionTriggerReason, PetActionTriggerActionType>> = {
-  chat_opened: "listen",
+  chat_opened: "dialogueOpenWelcome",
   chat_input_focus: "listen",
   chat_reply_waiting: "replyThinking",
   pet_edge_settled: "edgeGlance",
   rapid_touch_combo: "flusteredGlance",
   chat_reply_sustain: "replySustain",
+  chat_reply_completed: "replyWarmSettle",
+  state_music_playing_stable: "musicListenSway",
+  state_game_presence_stable: "gamePresenceGlance",
+  return_from_idle: "returnFromIdle",
+  evening_companion_tick: "eveningWindowGlance",
+  long_work_session_complete: "longWorkRecovery",
   state_idle: "softSmile",
   state_greet: "greeting",
   state_listen: "listen",
@@ -73,7 +93,7 @@ export const PET_ACTION_TRIGGER_ACTION_BY_REASON: Readonly<Record<PetActionTrigg
   state_local_model_busy: "replyThinking",
   state_memory_injected: "quietNod",
   state_memory_skipped: "quietNod",
-  state_search_cited: "readingIdle",
+  state_search_cited: "searchNoteSettle",
   state_proactive_bubble_visible: "softSmile"
 };
 

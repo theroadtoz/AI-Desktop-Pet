@@ -122,6 +122,26 @@
                 <button id="save-proactive-companion-settings-button" class="button-light" type="button">保存主动气泡设置</button>
               </div>
             </section>
+            <section class="content-stack" aria-labelledby="environment-action-settings-title">
+              <h3 id="environment-action-settings-title" class="settings-section-title">环境动作感知</h3>
+              <p id="environment-action-status" class="status-box" data-state="fallback" aria-live="polite">环境动作感知：关闭。</p>
+              <label class="field-label">
+                <span>
+                  <input id="environment-music-enabled" type="checkbox" />
+                  感知正在播放的媒体
+                </span>
+              </label>
+              <label class="field-label">
+                <span>
+                  <input id="environment-game-enabled" type="checkbox" />
+                  感知正在运行的游戏
+                </span>
+              </label>
+              <p class="selection-note">默认关闭。开启后只在本机判断播放布尔值与游戏闭集状态，不保存或显示媒体标题、窗口标题、进程名、路径或命令行。</p>
+              <div class="settings-actions">
+                <button id="save-environment-action-settings-button" class="button-light" type="button">保存环境感知设置</button>
+              </div>
+            </section>
           </section>
           <section id="memory-page" class="settings-page memory-page content-stack" hidden aria-label="本地记忆">
             <div class="memory-actions">

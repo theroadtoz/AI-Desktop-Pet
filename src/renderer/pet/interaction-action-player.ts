@@ -145,6 +145,7 @@ export function createInteractionActionPlayer({
   let lastHeadPatFinishedAtMs: number | undefined;
   let lastWindowShakeFeedbackStartedAtMs: number | undefined;
   const lastStrongInteractionActionFinishedAtMsByType: Partial<Record<PetInteractionActionType, number>> = {};
+  const lastActionFinishedAtMsByType: Partial<Record<PetInteractionActionType, number>> = {};
 
   function createStrategyTelemetry(strategy: InteractionActionStrategy | undefined, action: PetInteractionAction): Record<string, unknown> {
     if (!strategy) {
@@ -188,6 +189,7 @@ export function createInteractionActionPlayer({
 
     const finishedAtMs = now();
     lastInteractionActionFinishedAtMs = finishedAtMs;
+    lastActionFinishedAtMsByType[action.type] = finishedAtMs;
     if (action.type === "headPat") {
       lastHeadPatFinishedAtMs = finishedAtMs;
     }
@@ -315,11 +317,33 @@ export function createInteractionActionPlayer({
     reason: InteractionActionReason,
     strategy?: InteractionActionStrategy
   ): boolean {
+    const welcomeFollowupListen =
+      activeInteractionAction?.action.type === "dialogueOpenWelcome" && action.type === "listen";
+    const interruptedActiveAction = Boolean(
+      !welcomeFollowupListen &&
+      activeInteractionAction?.action.interruptible &&
+      (action.runtimePriority ?? 30) > (activeInteractionAction.action.runtimePriority ?? 30)
+    );
+
+    if (interruptedActiveAction && activeInteractionAction) {
+      const activeAction = activeInteractionAction;
+      if (activeAction.action.motionPresetId) {
+        stopMotion("interrupted");
+      }
+      finishActiveAction(
+        activeAction,
+        !activeAction.action.motionPresetId || activeAction.playbackPhase === "started"
+          ? "interrupted"
+          : undefined
+      );
+    }
+
     const skipReason = getCooldownSkipReason(action, now(), {
       activeType: activeInteractionAction?.action.type,
-      lastActionFinishedAtMs: lastInteractionActionFinishedAtMs,
+      lastActionFinishedAtMs: interruptedActiveAction ? undefined : lastInteractionActionFinishedAtMs,
       lastHeadPatFinishedAtMs,
-      strongActionFinishedAtMsByType: lastStrongInteractionActionFinishedAtMsByType
+      strongActionFinishedAtMsByType: lastStrongInteractionActionFinishedAtMsByType,
+      actionFinishedAtMsByType: lastActionFinishedAtMsByType
     });
 
     if (skipReason) {

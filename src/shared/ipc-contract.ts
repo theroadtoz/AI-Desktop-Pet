@@ -25,6 +25,10 @@ import type {
   ProactiveCompanionSettingsUpdate
 } from "./proactive-companion-settings";
 import type {
+  EnvironmentActionSettings,
+  EnvironmentActionSettingsUpdate
+} from "./environment-action-settings";
+import type {
   WebSearchCitationPayload,
   WebSearchConnectionTestResult,
   WebSearchSettings,
@@ -292,6 +296,11 @@ export type ProactiveCompanionApi = {
   getSettings(): Promise<ProactiveCompanionSettings>;
   setSettings(update: ProactiveCompanionSettingsUpdate): Promise<ProactiveCompanionSettings>;
   onSettingsChanged(handler: (settings: ProactiveCompanionSettings) => void): () => void;
+};
+
+export type EnvironmentActionApi = {
+  getSettings(): Promise<EnvironmentActionSettings>;
+  setSettings(update: EnvironmentActionSettingsUpdate): Promise<EnvironmentActionSettings>;
 };
 
 export type UserProfileApi = {

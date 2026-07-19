@@ -11,6 +11,15 @@ import type { PresenceModeId } from "../../shared/presence-mode";
 export const PET_INTERACTION_ACTION_TYPES = [
   "appearance",
   "headPat",
+  "bodyAttentionTurn",
+  "dialogueOpenWelcome",
+  "replyWarmSettle",
+  "musicListenSway",
+  "gamePresenceGlance",
+  "searchNoteSettle",
+  "returnFromIdle",
+  "eveningWindowGlance",
+  "longWorkRecovery",
   "greeting",
   "listen",
   "curiousTilt",
@@ -61,6 +70,9 @@ export type PetInteractionAction = {
   temporaryAccessoryId?: CubismTemporaryAccessoryId;
   lookTarget?: PetInteractionLookTarget;
   poseTarget?: PetInteractionPoseTarget;
+  cooldownMs?: number;
+  runtimePriority?: number;
+  interruptible?: boolean;
 };
 
 type TimeoutHandle = ReturnType<typeof setTimeout>;
@@ -75,6 +87,11 @@ export type RapidTouchComboDetector = {
   reset(): void;
 };
 
+export type ReturnFromIdleController = {
+  markActivity(): void;
+  consumeClick(presenceModeId: PresenceModeId): boolean;
+};
+
 type ClickActionSchedulerOptions = {
   delayMs: number;
   trigger(): void;
@@ -83,11 +100,34 @@ type ClickActionSchedulerOptions = {
 };
 
 export const PET_INTERACTION_GLOBAL_COOLDOWN_MS = 450;
-export const PET_INTERACTION_HEAD_PAT_COOLDOWN_MS = 1_200;
+export const PET_INTERACTION_HEAD_PAT_COOLDOWN_MS = 20_000;
 export const PET_INTERACTION_STRONG_ACTION_COOLDOWN_MS = 4_500;
 export const PET_WINDOW_SHAKE_LIGHT_FEEDBACK_COOLDOWN_MS = 10_000;
 export const PET_RAPID_TOUCH_COMBO_WINDOW_MS = 2_500;
 export const PET_RAPID_TOUCH_COMBO_COUNT = 3;
+export const PET_RETURN_FROM_IDLE_THRESHOLD_MS = 2 * 60 * 60_000;
+
+export function createReturnFromIdleController({
+  now = Date.now,
+  idleThresholdMs = PET_RETURN_FROM_IDLE_THRESHOLD_MS
+}: {
+  now?: () => number;
+  idleThresholdMs?: number;
+} = {}): ReturnFromIdleController {
+  let lastActivityAtMs = now();
+
+  return {
+    markActivity(): void {
+      lastActivityAtMs = now();
+    },
+    consumeClick(presenceModeId: PresenceModeId): boolean {
+      const currentTimeMs = now();
+      const shouldTrigger = presenceModeId !== "sleep" && currentTimeMs - lastActivityAtMs >= idleThresholdMs;
+      lastActivityAtMs = currentTimeMs;
+      return shouldTrigger;
+    }
+  };
+}
 
 const STRONG_INTERACTION_ACTION_TYPES = new Set<PetInteractionActionType>([
   "playGame",
@@ -120,6 +160,7 @@ export type InteractionActionCooldownState = {
   lastActionFinishedAtMs?: number | undefined;
   lastHeadPatFinishedAtMs?: number | undefined;
   strongActionFinishedAtMsByType?: Partial<Record<PetInteractionActionType, number>>;
+  actionFinishedAtMsByType?: Partial<Record<PetInteractionActionType, number>>;
 };
 
 export type WindowShakeLightFeedbackCooldownState = InteractionActionCooldownState & {
@@ -139,10 +180,98 @@ export const PET_INTERACTION_ACTIONS: readonly PetInteractionAction[] = [
   {
     type: "headPat",
     weight: 2,
-    durationMs: 1_500,
+    durationMs: 6_400,
     presentation: { emotion: "happy", intensity: "high", mode: "emphasis" },
-    motionPresetId: "happy-small",
-    ...useExpressionPreset("happy")
+    motionPresetId: "head-pat-linger",
+    ...useExpressionPreset("happy"),
+    cooldownMs: 20_000,
+    runtimePriority: 90
+  },
+  {
+    type: "bodyAttentionTurn",
+    weight: 1,
+    durationMs: 6_200,
+    presentation: { emotion: "neutral", intensity: "low", mode: "neutral" },
+    motionPresetId: "body-attention-turn",
+    cooldownMs: 15_000,
+    runtimePriority: 90
+  },
+  {
+    type: "dialogueOpenWelcome",
+    weight: 1,
+    durationMs: 6_400,
+    presentation: { emotion: "happy", intensity: "medium", mode: "micro" },
+    motionPresetId: "dialogue-open-welcome",
+    cooldownMs: 90_000,
+    runtimePriority: 20,
+    interruptible: true
+  },
+  {
+    type: "replyWarmSettle",
+    weight: 1,
+    durationMs: 6_200,
+    presentation: { emotion: "happy", intensity: "low", mode: "micro" },
+    motionPresetId: "reply-warm-settle",
+    cooldownMs: 45_000,
+    runtimePriority: 50
+  },
+  {
+    type: "musicListenSway",
+    weight: 1,
+    durationMs: 8_400,
+    presentation: { emotion: "happy", intensity: "low", mode: "micro" },
+    motionPresetId: "music-listen-sway",
+    cooldownMs: 30 * 60_000,
+    runtimePriority: 10,
+    interruptible: true
+  },
+  {
+    type: "gamePresenceGlance",
+    weight: 1,
+    durationMs: 7_200,
+    presentation: { emotion: "happy", intensity: "low", mode: "micro" },
+    motionPresetId: "game-presence-glance",
+    cooldownMs: 60 * 60_000,
+    runtimePriority: 15,
+    interruptible: true
+  },
+  {
+    type: "searchNoteSettle",
+    weight: 1,
+    durationMs: 6_400,
+    presentation: { emotion: "neutral", intensity: "low", mode: "neutral" },
+    motionPresetId: "search-note-settle",
+    cooldownMs: 60_000,
+    runtimePriority: 90
+  },
+  {
+    type: "returnFromIdle",
+    weight: 1,
+    durationMs: 6_600,
+    presentation: { emotion: "happy", intensity: "medium", mode: "micro" },
+    motionPresetId: "return-from-idle",
+    cooldownMs: 2 * 60 * 60_000,
+    runtimePriority: 80
+  },
+  {
+    type: "eveningWindowGlance",
+    weight: 1,
+    durationMs: 7_800,
+    presentation: { emotion: "neutral", intensity: "low", mode: "neutral" },
+    motionPresetId: "evening-window-glance",
+    cooldownMs: 24 * 60 * 60_000,
+    runtimePriority: 5,
+    interruptible: true
+  },
+  {
+    type: "longWorkRecovery",
+    weight: 1,
+    durationMs: 7_600,
+    presentation: { emotion: "neutral", intensity: "low", mode: "neutral" },
+    motionPresetId: "long-work-recovery",
+    cooldownMs: 4 * 60 * 60_000,
+    runtimePriority: 40,
+    interruptible: true
   },
   {
     type: "greeting",
@@ -169,7 +298,8 @@ export const PET_INTERACTION_ACTIONS: readonly PetInteractionAction[] = [
     type: "softSmile",
     weight: 2,
     durationMs: 1_300,
-    presentation: { emotion: "happy", intensity: "low", mode: "micro" }
+    presentation: { emotion: "happy", intensity: "low", mode: "micro" },
+    motionPresetId: "happy-small"
   },
   {
     type: "quietNod",
@@ -206,7 +336,9 @@ export const PET_INTERACTION_ACTIONS: readonly PetInteractionAction[] = [
     weight: 2,
     durationMs: 1_250,
     presentation: { emotion: "confused", intensity: "low", mode: "micro" },
-    lookTarget: { x: 0.18, y: 0.08 }
+    lookTarget: { x: 0.18, y: 0.08 },
+    runtimePriority: 80,
+    interruptible: true
   },
   {
     type: "playGame",
@@ -316,7 +448,19 @@ export const PET_INTERACTION_ACTIONS: readonly PetInteractionAction[] = [
 ];
 
 export const PET_RANDOM_INTERACTION_ACTIONS: readonly PetInteractionAction[] = PET_INTERACTION_ACTIONS.filter((action) => (
-  action.type !== "appearance" && action.type !== "headPat"
+  ![
+    "appearance",
+    "headPat",
+    "bodyAttentionTurn",
+    "dialogueOpenWelcome",
+    "replyWarmSettle",
+    "musicListenSway",
+    "gamePresenceGlance",
+    "searchNoteSettle",
+    "returnFromIdle",
+    "eveningWindowGlance",
+    "longWorkRecovery"
+  ].includes(action.type)
 ));
 
 const MODE_RANDOM_INTERACTION_ACTION_WEIGHTS: Readonly<Record<DialogueModeId, Readonly<Partial<Record<PetInteractionActionType, number>>>>> = {
@@ -514,6 +658,14 @@ export function getInteractionActionCooldownSkipReason(
 ): InteractionActionCooldownSkipReason | null {
   if (state.activeType) {
     return "active_action";
+  }
+
+  if (action.cooldownMs && isWithinCooldown(
+    nowMs,
+    state.actionFinishedAtMsByType?.[action.type],
+    action.cooldownMs
+  )) {
+    return action.type === "headPat" ? "head_pat_cooldown" : "same_action_cooldown";
   }
 
   if (action.type === "headPat" && isWithinCooldown(nowMs, state.lastHeadPatFinishedAtMs, PET_INTERACTION_HEAD_PAT_COOLDOWN_MS)) {

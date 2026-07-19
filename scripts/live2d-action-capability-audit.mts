@@ -242,8 +242,89 @@ export function auditWitchActionCapabilities(repositoryRoot = REPOSITORY_ROOT): 
       parameters: faceParameters.slice(0, 8),
       parts: [],
       hitAreas: headHitArea,
-      implementationRecommendation: "头部命中后优先使用已注册的 happy-small motion，并叠加 happy 表情与小幅头部/身体参数反应。",
-      risk: "命中区仍是项目侧矩形；happy-small 的视觉强度需要真实 UI 复核。"
+      implementationRecommendation: "头部命中后使用已注册的 head-pat-linger motion，并叠加 happy 表情。",
+      risk: "命中区仍是项目侧矩形；长动作的视觉强度需要真实 UI 复核。"
+    }),
+    actionEntry("bodyAttentionTurn", "native-motion", {
+      nativeMotions: nativeMotionForAction("bodyAttentionTurn"),
+      expressions: [],
+      parameters: bodyParameters.slice(0, 8),
+      parts: [],
+      hitAreas: bodyHitArea,
+      implementationRecommendation: "身体点击使用已注册的 body-attention-turn motion。",
+      risk: "长动作必须受点击冷却和 active action 策略保护。"
+    }),
+    actionEntry("dialogueOpenWelcome", "native-motion", {
+      nativeMotions: nativeMotionForAction("dialogueOpenWelcome"),
+      expressions: [expressionReference("happy", manifest, modelDirectory, repositoryRoot)],
+      parameters: faceParameters.slice(0, 8),
+      parts: [],
+      hitAreas: [],
+      implementationRecommendation: "对话窗口打开使用已注册的 dialogue-open-welcome motion。",
+      risk: "欢迎动作需要能被后续对话生命周期事件中断。"
+    }),
+    actionEntry("replyWarmSettle", "native-motion", {
+      nativeMotions: nativeMotionForAction("replyWarmSettle"),
+      expressions: [expressionReference("happy", manifest, modelDirectory, repositoryRoot)],
+      parameters: faceParameters.slice(0, 8),
+      parts: [],
+      hitAreas: [],
+      implementationRecommendation: "正常回复完成使用已注册的 reply-warm-settle motion。",
+      risk: "搜索、错误和强情绪回复需要优先于这条常规收束动作。"
+    }),
+    actionEntry("musicListenSway", "native-motion", {
+      nativeMotions: nativeMotionForAction("musicListenSway"),
+      expressions: [expressionReference("happy", manifest, modelDirectory, repositoryRoot)],
+      parameters: bodyParameters.slice(0, 8),
+      parts: [],
+      hitAreas: [],
+      implementationRecommendation: "稳定媒体播放状态使用已注册的 music-listen-sway motion。",
+      risk: "环境感知关闭时不得触发。"
+    }),
+    actionEntry("gamePresenceGlance", "native-motion", {
+      nativeMotions: nativeMotionForAction("gamePresenceGlance"),
+      expressions: [expressionReference("happy", manifest, modelDirectory, repositoryRoot)],
+      parameters: bodyParameters.slice(0, 8),
+      parts: gameParts,
+      hitAreas: [],
+      implementationRecommendation: "稳定游戏存在状态使用已注册的 game-presence-glance motion。",
+      risk: "环境感知关闭或游戏状态不稳定时不得触发。"
+    }),
+    actionEntry("searchNoteSettle", "native-motion", {
+      nativeMotions: nativeMotionForAction("searchNoteSettle"),
+      expressions: [expressionReference("glasses", manifest, modelDirectory, repositoryRoot)],
+      parameters: bodyParameters.slice(0, 8),
+      parts: glassesParts,
+      hitAreas: [],
+      implementationRecommendation: "有效搜索引用返回后使用已注册的 search-note-settle motion。",
+      risk: "没有引用或搜索失败时不得触发。"
+    }),
+    actionEntry("returnFromIdle", "native-motion", {
+      nativeMotions: nativeMotionForAction("returnFromIdle"),
+      expressions: [expressionReference("happy", manifest, modelDirectory, repositoryRoot)],
+      parameters: bodyParameters.slice(0, 8),
+      parts: [],
+      hitAreas: bodyHitArea,
+      implementationRecommendation: "长时间闲置后的首次互动使用已注册的 return-from-idle motion。",
+      risk: "睡眠状态下需要抑制，且只能在冷却到期后触发。"
+    }),
+    actionEntry("eveningWindowGlance", "native-motion", {
+      nativeMotions: nativeMotionForAction("eveningWindowGlance"),
+      expressions: [],
+      parameters: bodyParameters.slice(0, 8),
+      parts: [],
+      hitAreas: [],
+      implementationRecommendation: "夜间 companion tick 使用已注册的 evening-window-glance motion。",
+      risk: "每日频率限制的持久化仍由运行时策略负责。"
+    }),
+    actionEntry("longWorkRecovery", "native-motion", {
+      nativeMotions: nativeMotionForAction("longWorkRecovery"),
+      expressions: [],
+      parameters: bodyParameters.slice(0, 8),
+      parts: glassesParts,
+      hitAreas: [],
+      implementationRecommendation: "连续工作完成后使用已注册的 long-work-recovery motion。",
+      risk: "工作计时和睡眠暂停规则由运行时策略负责。"
     }),
     actionEntry("greeting", "accessory-enhanced", {
       nativeMotions: [],
@@ -272,14 +353,14 @@ export function auditWitchActionCapabilities(repositoryRoot = REPOSITORY_ROOT): 
       implementationRecommendation: "使用低幅 look target 与 poseTarget 表现好奇侧头；不要写成原生侧头 motion。",
       risk: "单个姿态目标不是完整侧头动画，视觉语义需要真实 UI 观察确认。"
     }),
-    actionEntry("softSmile", "expression-parameter-composition", {
-      nativeMotions: [],
+    actionEntry("softSmile", "native-motion", {
+      nativeMotions: nativeMotionForAction("softSmile"),
       expressions: [expressionReference("happy", manifest, modelDirectory, repositoryRoot)],
       parameters: faceParameters.slice(0, 8),
       parts: [],
       hitAreas: bodyHitArea,
-      implementationRecommendation: "使用 happy 微表情参数做轻微开心，避免高强度强调表情常态化。",
-      risk: "如果 happy 资产过强，运行时应保留微表情降级而不是强表情。"
+      implementationRecommendation: "使用 happy-small 原生 Motion3 配合 happy 微表情表达轻微开心，避免高强度强调表情常态化。",
+      risk: "happy-small 的视觉强度需要在 idle 和主动气泡的真实 UI 中保持克制。"
     }),
     actionEntry("quietNod", "expression-parameter-composition", {
       nativeMotions: [],

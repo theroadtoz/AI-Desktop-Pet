@@ -49,12 +49,18 @@ const EXPECTED_STATE_ACTIONS = {
 } as const;
 
 const EXPECTED_ACTIONS_BY_REASON = {
-  chat_opened: "listen",
+  chat_opened: "dialogueOpenWelcome",
   chat_input_focus: "listen",
   chat_reply_waiting: "replyThinking",
   pet_edge_settled: "edgeGlance",
   rapid_touch_combo: "flusteredGlance",
   chat_reply_sustain: "replySustain",
+  chat_reply_completed: "replyWarmSettle",
+  state_music_playing_stable: "musicListenSway",
+  state_game_presence_stable: "gamePresenceGlance",
+  return_from_idle: "returnFromIdle",
+  evening_companion_tick: "eveningWindowGlance",
+  long_work_session_complete: "longWorkRecovery",
   state_idle: "softSmile",
   state_greet: "greeting",
   state_listen: "listen",
@@ -69,7 +75,7 @@ const EXPECTED_ACTIONS_BY_REASON = {
   state_local_model_busy: "replyThinking",
   state_memory_injected: "quietNod",
   state_memory_skipped: "quietNod",
-  state_search_cited: "readingIdle",
+  state_search_cited: "searchNoteSettle",
   state_proactive_bubble_visible: "softSmile"
 } as const;
 
@@ -120,6 +126,12 @@ test("pet action state machine keeps legacy trigger reasons as compatibility ent
     pet_edge_settled: "edge",
     rapid_touch_combo: "flustered",
     chat_reply_sustain: "reply-sustain",
+    chat_reply_completed: "reply-sustain",
+    state_music_playing_stable: "idle",
+    state_game_presence_stable: "game",
+    return_from_idle: "greet",
+    evening_companion_tick: "idle",
+    long_work_session_complete: "work",
     state_idle: "idle",
     state_greet: "greet",
     state_listen: "listen",
@@ -141,7 +153,7 @@ test("pet action state machine keeps legacy trigger reasons as compatibility ent
   for (const reason of PET_ACTION_TRIGGER_REASONS) {
     const state = getPetActionStateForReason(reason);
     assert.equal(state.stateId, expectedStatesByReason[reason]);
-    assert.equal(state.actionType, EXPECTED_ACTIONS_BY_REASON[reason]);
+    assert.equal(getPetActionTriggerActionType(reason), EXPECTED_ACTIONS_BY_REASON[reason]);
   }
 });
 
@@ -245,6 +257,12 @@ test("pet action trigger allowlist only exposes fixed action and reason combinat
     "pet_edge_settled",
     "rapid_touch_combo",
     "chat_reply_sustain",
+    "chat_reply_completed",
+    "state_music_playing_stable",
+    "state_game_presence_stable",
+    "return_from_idle",
+    "evening_companion_tick",
+    "long_work_session_complete",
     "state_idle",
     "state_greet",
     "state_listen",

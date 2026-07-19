@@ -35,7 +35,97 @@ export const PET_INTERACTION_ACTION_CATALOG = {
     strongAccessory: false,
     startupOnly: false,
     headOnly: true,
-    defaultDurationMs: 1_500
+    defaultDurationMs: 6_400
+  },
+  bodyAttentionTurn: {
+    actionType: "bodyAttentionTurn",
+    safeEchoMessage: "刚刚认真看向你",
+    supportLevel: "parameter-composition",
+    bodyPoolEligible: false,
+    strongAccessory: false,
+    startupOnly: false,
+    headOnly: false,
+    defaultDurationMs: 6_200
+  },
+  dialogueOpenWelcome: {
+    actionType: "dialogueOpenWelcome",
+    safeEchoMessage: "刚刚迎接你打开对话",
+    supportLevel: "parameter-composition",
+    bodyPoolEligible: false,
+    strongAccessory: false,
+    startupOnly: false,
+    headOnly: false,
+    defaultDurationMs: 6_400
+  },
+  replyWarmSettle: {
+    actionType: "replyWarmSettle",
+    safeEchoMessage: "刚刚温和地收住了回复",
+    supportLevel: "parameter-composition",
+    bodyPoolEligible: false,
+    strongAccessory: false,
+    startupOnly: false,
+    headOnly: false,
+    defaultDurationMs: 6_200
+  },
+  musicListenSway: {
+    actionType: "musicListenSway",
+    safeEchoMessage: "刚刚随着音乐轻轻摇摆",
+    supportLevel: "parameter-composition",
+    bodyPoolEligible: false,
+    strongAccessory: false,
+    startupOnly: false,
+    headOnly: false,
+    defaultDurationMs: 8_400
+  },
+  gamePresenceGlance: {
+    actionType: "gamePresenceGlance",
+    safeEchoMessage: "刚刚陪你看了一眼游戏",
+    supportLevel: "parameter-composition",
+    bodyPoolEligible: false,
+    strongAccessory: false,
+    startupOnly: false,
+    headOnly: false,
+    defaultDurationMs: 7_200
+  },
+  searchNoteSettle: {
+    actionType: "searchNoteSettle",
+    safeEchoMessage: "刚刚整理好了找到的资料",
+    supportLevel: "parameter-composition",
+    bodyPoolEligible: false,
+    strongAccessory: false,
+    startupOnly: false,
+    headOnly: false,
+    defaultDurationMs: 6_400
+  },
+  returnFromIdle: {
+    actionType: "returnFromIdle",
+    safeEchoMessage: "刚刚重新注意到你",
+    supportLevel: "parameter-composition",
+    bodyPoolEligible: false,
+    strongAccessory: false,
+    startupOnly: false,
+    headOnly: false,
+    defaultDurationMs: 6_600
+  },
+  eveningWindowGlance: {
+    actionType: "eveningWindowGlance",
+    safeEchoMessage: "刚刚在夜色里安静远望",
+    supportLevel: "parameter-composition",
+    bodyPoolEligible: false,
+    strongAccessory: false,
+    startupOnly: false,
+    headOnly: false,
+    defaultDurationMs: 7_800
+  },
+  longWorkRecovery: {
+    actionType: "longWorkRecovery",
+    safeEchoMessage: "刚刚从长时间工作中缓了缓",
+    supportLevel: "parameter-composition",
+    bodyPoolEligible: false,
+    strongAccessory: false,
+    startupOnly: false,
+    headOnly: false,
+    defaultDurationMs: 7_600
   },
   greeting: {
     actionType: "greeting",

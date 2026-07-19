@@ -19,6 +19,7 @@ import {
   getPetActionStateForReason
 } from "../src/shared/pet-action-state-machine.ts";
 import { PET_ACTION_TRIGGER_REASONS } from "../src/shared/pet-action-trigger.ts";
+import { APPROVED_MOTION_PRESETS } from "../src/shared/approved-motion-presets.ts";
 import { PET_MOTION_PRESET_IDS } from "../src/shared/pet-motion-presets.ts";
 import { PET_TELEMETRY_ALLOWED_FIELDS } from "../src/shared/pet-telemetry-contract.ts";
 import { PRESENCE_MODE_VIEWS } from "../src/shared/presence-mode.ts";
@@ -101,7 +102,9 @@ test("layered action decisions declare presence and dialogue boundaries as safe 
 });
 
 test("layered action decisions retain their fallback metadata beside the approved motion catalog", () => {
-  assert.deepEqual(PET_MOTION_PRESET_IDS, ["yawn-once", "happy-small", "surprised-small", "flustered-small"]);
+  const approvedPresetIds = APPROVED_MOTION_PRESETS.map((preset) => preset.id);
+  assert.deepEqual(PET_MOTION_PRESET_IDS, approvedPresetIds);
+  assert.equal(new Set(PET_MOTION_PRESET_IDS).size, PET_MOTION_PRESET_IDS.length);
 
   for (const decision of listPetLayeredActionDecisions()) {
     assert.deepEqual(decision.motionPresetFallback, {

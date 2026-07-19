@@ -49,6 +49,10 @@ import {
   type ProactiveCompanionSettings
 } from "../../shared/proactive-companion-settings";
 import {
+  DEFAULT_ENVIRONMENT_ACTION_SETTINGS,
+  type EnvironmentActionSettings
+} from "../../shared/environment-action-settings";
+import {
   applyChatTurnDelta,
   createInitialChatTurnState,
   finishChatTurn,
@@ -173,6 +177,10 @@ const proactiveCadenceControls = document.querySelector<HTMLElement>("#proactive
 const proactiveMemorySourceBubbles = document.querySelector<HTMLInputElement>("#proactive-memory-source-bubbles");
 const proactiveSearchSourceBubbles = document.querySelector<HTMLInputElement>("#proactive-search-source-bubbles");
 const saveProactiveCompanionSettingsButton = document.querySelector<HTMLButtonElement>("#save-proactive-companion-settings-button");
+const environmentActionStatus = document.querySelector<HTMLElement>("#environment-action-status");
+const environmentMusicEnabled = document.querySelector<HTMLInputElement>("#environment-music-enabled");
+const environmentGameEnabled = document.querySelector<HTMLInputElement>("#environment-game-enabled");
+const saveEnvironmentActionSettingsButton = document.querySelector<HTMLButtonElement>("#save-environment-action-settings-button");
 const shortcutList = document.querySelector<HTMLElement>("#shortcut-list");
 const shortcutStatus = document.querySelector<HTMLElement>("#shortcut-status");
 const webSearchStatus = document.querySelector<HTMLElement>("#web-search-status");
@@ -252,6 +260,7 @@ if (
   !settingsUserDisplayName || !settingsUserPreferredName || !saveUserProfileButton || !clearUserProfileButton ||
   !settingsDialogueModeSummary || !settingsPresenceModeSummary || !proactiveCompanionStatus || !proactiveCadenceControls ||
   !proactiveMemorySourceBubbles || !proactiveSearchSourceBubbles || !saveProactiveCompanionSettingsButton ||
+  !environmentActionStatus || !environmentMusicEnabled || !environmentGameEnabled || !saveEnvironmentActionSettingsButton ||
   !shortcutList || !shortcutStatus ||
   !webSearchStatus || !webSearchEnabled || !webSearchProfile || !webSearchProfileNote ||
   !webSearchTimeout || !webSearchMaxResults || !webSearchSaveButton || !webSearchRefreshButton || !webSearchTestButton ||
@@ -353,6 +362,10 @@ const proactiveCadenceControlsElement = proactiveCadenceControls;
 const proactiveMemorySourceBubblesField = proactiveMemorySourceBubbles;
 const proactiveSearchSourceBubblesField = proactiveSearchSourceBubbles;
 const saveProactiveCompanionSettingsAction = saveProactiveCompanionSettingsButton;
+const environmentActionStatusBox = environmentActionStatus;
+const environmentMusicEnabledField = environmentMusicEnabled;
+const environmentGameEnabledField = environmentGameEnabled;
+const saveEnvironmentActionSettingsAction = saveEnvironmentActionSettingsButton;
 const shortcutListElement = shortcutList;
 const shortcutStatusBox = shortcutStatus;
 const webSearchStatusBox = webSearchStatus;
@@ -653,6 +666,49 @@ async function saveProactiveCompanionSettings(): Promise<void> {
     setSettingsFeedback("主动气泡设置已保存。", "ready");
   } catch {
     setSettingsFeedback("无法保存主动气泡设置，请稍后重试。", "fallback");
+  }
+}
+
+function renderEnvironmentActionSettings(settings: EnvironmentActionSettings): void {
+  environmentMusicEnabledField.checked = settings.musicEnabled;
+  environmentGameEnabledField.checked = settings.gameEnabled;
+  const enabledLabels = [
+    settings.musicEnabled ? "媒体开启" : null,
+    settings.gameEnabled ? "游戏开启" : null
+  ].filter((value): value is string => value !== null);
+  environmentActionStatusBox.textContent = enabledLabels.length > 0
+    ? `环境动作感知：${enabledLabels.join(" · ")}。信号需稳定 30 秒才会触发动作。`
+    : "环境动作感知：关闭。不会轮询本机环境信号。";
+  environmentActionStatusBox.dataset.state = enabledLabels.length > 0 ? "ready" : "fallback";
+}
+
+async function refreshEnvironmentActionSettings(): Promise<void> {
+  if (!window.environmentActionApi) {
+    renderEnvironmentActionSettings(DEFAULT_ENVIRONMENT_ACTION_SETTINGS);
+    environmentActionStatusBox.textContent = "环境动作感知设置不可用。";
+    return;
+  }
+  try {
+    renderEnvironmentActionSettings(await window.environmentActionApi.getSettings());
+  } catch {
+    renderEnvironmentActionSettings(DEFAULT_ENVIRONMENT_ACTION_SETTINGS);
+    environmentActionStatusBox.textContent = "无法读取环境动作感知设置。";
+  }
+}
+
+async function saveEnvironmentActionSettings(): Promise<void> {
+  if (!window.environmentActionApi || chatTurnState.isReplying) {
+    return;
+  }
+  try {
+    const settings = await window.environmentActionApi.setSettings({
+      musicEnabled: environmentMusicEnabledField.checked,
+      gameEnabled: environmentGameEnabledField.checked
+    });
+    renderEnvironmentActionSettings(settings);
+    setSettingsFeedback("环境动作感知设置已保存。", "ready");
+  } catch {
+    setSettingsFeedback("无法保存环境动作感知设置，请稍后重试。", "fallback");
   }
 }
 
@@ -3241,6 +3297,12 @@ saveProactiveCompanionSettingsAction.addEventListener("click", () => {
   }
 });
 
+saveEnvironmentActionSettingsAction.addEventListener("click", () => {
+  if (!chatTurnState.isReplying) {
+    void saveEnvironmentActionSettings();
+  }
+});
+
 chatTabAction.addEventListener("click", () => {
   setActivePage("chat");
 });
@@ -3664,6 +3726,7 @@ setMemorySessionStatus(null);
 void refreshDialogueMode();
 void refreshPresenceMode();
 void refreshProactiveCompanionSettings();
+void refreshEnvironmentActionSettings();
 void refreshUserProfile();
 void refreshProviderStatus();
 void refreshWebSearchSettings();

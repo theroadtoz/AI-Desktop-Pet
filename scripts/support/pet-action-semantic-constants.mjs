@@ -9,7 +9,61 @@ export const PET_INTERACTION_ACTION_CATALOG = {
     safeEchoMessage: "刚刚摸头",
     bodyPoolEligible: false,
     strongAccessory: false,
-    defaultDurationMs: 1_500
+    defaultDurationMs: 6_400
+  },
+  bodyAttentionTurn: {
+    safeEchoMessage: "刚刚认真看向你",
+    bodyPoolEligible: false,
+    strongAccessory: false,
+    defaultDurationMs: 6_200
+  },
+  dialogueOpenWelcome: {
+    safeEchoMessage: "刚刚迎接你打开对话",
+    bodyPoolEligible: false,
+    strongAccessory: false,
+    defaultDurationMs: 6_400
+  },
+  replyWarmSettle: {
+    safeEchoMessage: "刚刚温和地收住了回复",
+    bodyPoolEligible: false,
+    strongAccessory: false,
+    defaultDurationMs: 6_200
+  },
+  musicListenSway: {
+    safeEchoMessage: "刚刚随着音乐轻轻摇摆",
+    bodyPoolEligible: false,
+    strongAccessory: false,
+    defaultDurationMs: 8_400
+  },
+  gamePresenceGlance: {
+    safeEchoMessage: "刚刚陪你看了一眼游戏",
+    bodyPoolEligible: false,
+    strongAccessory: false,
+    defaultDurationMs: 7_200
+  },
+  searchNoteSettle: {
+    safeEchoMessage: "刚刚整理好了找到的资料",
+    bodyPoolEligible: false,
+    strongAccessory: false,
+    defaultDurationMs: 6_400
+  },
+  returnFromIdle: {
+    safeEchoMessage: "刚刚重新注意到你",
+    bodyPoolEligible: false,
+    strongAccessory: false,
+    defaultDurationMs: 6_600
+  },
+  eveningWindowGlance: {
+    safeEchoMessage: "刚刚在夜色里安静远望",
+    bodyPoolEligible: false,
+    strongAccessory: false,
+    defaultDurationMs: 7_800
+  },
+  longWorkRecovery: {
+    safeEchoMessage: "刚刚从长时间工作中缓了缓",
+    bodyPoolEligible: false,
+    strongAccessory: false,
+    defaultDurationMs: 7_600
   },
   greeting: {
     safeEchoMessage: "刚刚打招呼",

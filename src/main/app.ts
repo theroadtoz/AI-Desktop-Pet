@@ -4,6 +4,7 @@ import {
   dialog,
   globalShortcut,
   ipcMain,
+  powerMonitor,
   protocol,
   screen,
   type OpenDialogOptions,
@@ -45,6 +46,10 @@ import {
   shouldQueueProactiveCompanionSourceBubble,
   type ProactiveCompanionSettings
 } from "../shared/proactive-companion-settings";
+import {
+  DEFAULT_ENVIRONMENT_ACTION_SETTINGS,
+  type EnvironmentActionSettings
+} from "../shared/environment-action-settings";
 import {
   selectLowFrequencyCompanionEvent,
   type LowFrequencyCompanionEventId,
@@ -116,6 +121,10 @@ import {
 import { ChatEngineBusyError, createChatEngine, type ChatEngine } from "./services/chat/chat-engine";
 import { budgetChatContext } from "./services/chat/chat-context-budget";
 import { createChatReplySustainTriggerController } from "./services/chat/chat-reply-sustain-trigger";
+import {
+  createPetActionRuntimePolicy,
+  shouldTriggerReplyWarmSettle
+} from "./services/pet-action-runtime-policy";
 import { createHistoryStore, type HistoryStore } from "./services/chat/history-store";
 import { createMemoryStore, type AutoMemoryCaptureSummary, type MemoryStore } from "./services/chat/memory-store";
 import { createChatProviderFromConfig } from "./services/chat/provider-factory";
@@ -134,6 +143,12 @@ import {
   createProactiveCompanionSettingsStore,
   type ProactiveCompanionSettingsStore
 } from "./services/config/proactive-companion-settings-store";
+import {
+  createEnvironmentActionSettingsStore,
+  type EnvironmentActionSettingsStore
+} from "./services/config/environment-action-settings-store";
+import { createDesktopContextMonitor } from "./services/desktop-context/desktop-context-monitor";
+import { createWindowsDesktopContextProvider } from "./services/desktop-context/windows-desktop-context-provider";
 import {
   createWebSearchSettingsStore,
   normalizeWebSearchSettings,
@@ -208,6 +223,7 @@ let webSearchSettingsStore: WebSearchSettingsStore | null = null;
 let dialogueModeStore: DialogueModeStore | null = null;
 let presenceModeStore: PresenceModeStore | null = null;
 let proactiveCompanionSettingsStore: ProactiveCompanionSettingsStore | null = null;
+let environmentActionSettingsStore: EnvironmentActionSettingsStore | null = null;
 let shortcutPreferencesStore: ShortcutPreferencesStore | null = null;
 let userProfileStore: UserProfileStore | null = null;
 let shortcutRegistry: ShortcutRegistry | null = null;
@@ -226,6 +242,7 @@ let activeChatRequestVersion: number | null = null;
 let currentDialogueModeId: DialogueModeId = "default";
 let currentPresenceModeId: PresenceModeId = "default";
 let currentProactiveCompanionSettings: ProactiveCompanionSettings = DEFAULT_PROACTIVE_COMPANION_SETTINGS;
+let currentEnvironmentActionSettings: EnvironmentActionSettings = DEFAULT_ENVIRONMENT_ACTION_SETTINGS;
 let performanceHeartbeat: NodeJS.Timeout | null = null;
 let isPetLocked = false;
 let initialEdgeGlanceTimer: NodeJS.Timeout | null = null;
@@ -289,6 +306,20 @@ const chatReplySustainTrigger = createChatReplySustainTriggerController({
     sendPetActionTrigger(reason);
   }
 });
+const petActionRuntimePolicy = createPetActionRuntimePolicy({
+  persistEveningDateKey(dateKey) {
+    environmentActionSettingsStore?.saveEveningDateKey(dateKey);
+  }
+});
+const desktopContextMonitor = createDesktopContextMonitor({
+  provider: createWindowsDesktopContextProvider(),
+  sendReason(reason) {
+    sendPetActionTrigger(reason);
+  }
+});
+const handleSystemResume = (): void => {
+  desktopContextMonitor.resetStability();
+};
 
 const shutdownCoordinator = createAppShutdownCoordinator({
   quiesce: quiesceApp,
@@ -1552,6 +1583,14 @@ function startPerformanceHeartbeat(): void {
   }
 
   performanceHeartbeat = setInterval(() => {
+    const companionReason = petActionRuntimePolicy.onCompanionTick({
+      presenceModeId: currentPresenceModeId,
+      timeBand: getRuntimeProactiveSpeechBubbleTimeBand()
+    });
+    if (companionReason) {
+      sendPetActionTrigger(companionReason);
+    }
+
     logTelemetry("performance_heartbeat", {
       processMetrics: app.getAppMetrics().map((metric) => ({
         pid: metric.pid,
@@ -2066,11 +2105,18 @@ app.whenReady().then(async () => {
   });
   dialogueModeStore = createDialogueModeStore();
   currentDialogueModeId = dialogueModeStore.getMode();
+  petActionRuntimePolicy.syncDialogueMode(currentDialogueModeId);
   currentPetPresentationIntent = withCurrentAccessorySelection(currentPetPresentationIntent);
   presenceModeStore = createPresenceModeStore();
   currentPresenceModeId = presenceModeStore.getMode();
+  petActionRuntimePolicy.syncPresenceMode(currentPresenceModeId);
   proactiveCompanionSettingsStore = createProactiveCompanionSettingsStore();
   currentProactiveCompanionSettings = proactiveCompanionSettingsStore.getSettings();
+  environmentActionSettingsStore = createEnvironmentActionSettingsStore();
+  currentEnvironmentActionSettings = environmentActionSettingsStore.getSettings();
+  petActionRuntimePolicy.syncEveningDateKey(environmentActionSettingsStore.getEveningDateKey());
+  desktopContextMonitor.updateSettings(currentEnvironmentActionSettings);
+  powerMonitor.on("resume", handleSystemResume);
   shortcutPreferencesStore = createShortcutPreferencesStore();
   userProfileStore = createUserProfileStore({ logTelemetry });
   shortcutRegistry = createUserShortcutRegistry();
@@ -2153,6 +2199,9 @@ app.whenReady().then(async () => {
   });
 
   function openChatWindow(): void {
+    const wasVisible = Boolean(
+      chatWindow && !chatWindow.isDestroyed() && chatWindow.isVisible()
+    );
     if (!chatWindow) {
       chatWindow = createChatWindow({
         shouldClose: () => shutdownCoordinator.isQuiescing()
@@ -2165,9 +2214,11 @@ app.whenReady().then(async () => {
     markProactiveSpeechBubbleHidden();
     showChatWindow(chatWindow);
     focusChatInput(chatWindow);
-    transitionPetRole({ type: "chat:opened" });
-    sendPetActionTrigger("chat_opened");
-    logWindowSnapshot("chat_opened");
+    if (!wasVisible) {
+      transitionPetRole({ type: "chat:opened" });
+      sendPetActionTrigger("chat_opened");
+      logWindowSnapshot("chat_opened");
+    }
   }
 
   function isPetSender(event: IpcMainEvent | IpcMainInvokeEvent): boolean {
@@ -3002,6 +3053,14 @@ app.whenReady().then(async () => {
         return;
       }
 
+      if (shouldTriggerReplyWarmSettle({
+        completed: true,
+        hasSearchCitation: Boolean(webSearchCitation?.citations.length),
+        intensity: result.intensity
+      })) {
+        sendPetActionTrigger("chat_reply_completed");
+      }
+
       logTelemetry("chat_stream_completed", {
         providerId,
         conversationId: request.conversationId,
@@ -3382,6 +3441,10 @@ app.whenReady().then(async () => {
     currentDialogueModeId = dialogueModeStore.saveMode(modeId);
 
     if (previousModeId !== currentDialogueModeId) {
+      const runtimeActionReason = petActionRuntimePolicy.onDialogueModeChanged(
+        currentDialogueModeId,
+        currentPresenceModeId
+      );
       currentPetPresentationIntent = withCurrentAccessorySelection(currentPetPresentationIntent);
       publishPetPresentation(currentPetPresentationIntent);
       logTelemetry("dialogue_mode_changed", {
@@ -3397,6 +3460,9 @@ app.whenReady().then(async () => {
       });
       if (dialogueActionState && dialogueActionState.stateId !== "idle") {
         schedulePetModeActionStateTrigger(dialogueActionState.triggerReason);
+      }
+      if (runtimeActionReason) {
+        sendPetActionTrigger(runtimeActionReason);
       }
       nextIdleProactiveSpeechBubbleReason = "mode_presence";
       scheduleIdleProactiveSpeechBubble();
@@ -3430,6 +3496,7 @@ app.whenReady().then(async () => {
     currentPresenceModeId = presenceModeStore.saveMode(modeId);
 
     if (previousModeId !== currentPresenceModeId) {
+      petActionRuntimePolicy.onPresenceModeChanged(currentPresenceModeId);
       if (currentPresenceModeId === "sleep") {
         cancelStartupProactiveSpeechBubbleTimer();
         cancelIdleProactiveSpeechBubbleTimer();
@@ -3449,7 +3516,10 @@ app.whenReady().then(async () => {
         dialogueModeId: currentDialogueModeId,
         presenceModeId: currentPresenceModeId
       });
-      if (presenceActionState && presenceActionState.stateId !== "idle") {
+      if (presenceActionState && (
+        presenceActionState.stateId !== "idle" ||
+        previousModeId === "sleep" && currentPresenceModeId === "default"
+      )) {
         schedulePetModeActionStateTrigger(presenceActionState.triggerReason);
       }
       if (currentPresenceModeId !== "sleep") {
@@ -3475,6 +3545,22 @@ app.whenReady().then(async () => {
     }
 
     return applyProactiveCompanionSettings(update);
+  });
+
+  ipcMain.handle("environmentActions:get-settings", (event) => {
+    if (!isChatSender(event)) {
+      throw new Error("Unauthorized environment action settings request");
+    }
+    return currentEnvironmentActionSettings;
+  });
+
+  ipcMain.handle("environmentActions:set-settings", (event, update: unknown) => {
+    if (!isChatSender(event) || !environmentActionSettingsStore) {
+      throw new Error("Unauthorized environment action settings request");
+    }
+    currentEnvironmentActionSettings = environmentActionSettingsStore.saveSettings(update);
+    desktopContextMonitor.updateSettings(currentEnvironmentActionSettings);
+    return currentEnvironmentActionSettings;
   });
 
   ipcMain.handle("userProfile:get", (event) => {
@@ -3703,6 +3789,8 @@ function quiesceApp(): void {
   cancelStartupProactiveSpeechBubbleTimer();
   cancelIdleProactiveSpeechBubbleTimer();
   clearChatReplySustainTimer();
+  powerMonitor.removeListener("resume", handleSystemResume);
+  desktopContextMonitor.dispose();
   if (initialEdgeGlanceTimer) {
     clearTimeout(initialEdgeGlanceTimer);
     initialEdgeGlanceTimer = null;

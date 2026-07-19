@@ -31,6 +31,116 @@
       "userVisualReview": "passed",
       "cubismRefined": false,
       "runtimeEnabled": true
+    },
+    {
+      "presetId": "head-pat-linger",
+      "targetPath": "motions/head-pat-linger.motion3.json",
+      "sourceBasename": "head-pat-linger.motion3.json",
+      "sourceHashPrefix": "a99a9e1b9436",
+      "intakeStatus": "user-authorized-vts-draft",
+      "userVisualReview": "passed",
+      "technicalReadback": "passed",
+      "cubismRefined": false,
+      "runtimeEnabled": true
+    },
+    {
+      "presetId": "body-attention-turn",
+      "targetPath": "motions/body-attention-turn.motion3.json",
+      "sourceBasename": "body-attention-turn.motion3.json",
+      "sourceHashPrefix": "7081bc2adfac",
+      "intakeStatus": "user-authorized-vts-draft",
+      "userVisualReview": "passed",
+      "technicalReadback": "passed",
+      "cubismRefined": false,
+      "runtimeEnabled": true
+    },
+    {
+      "presetId": "dialogue-open-welcome",
+      "targetPath": "motions/dialogue-open-welcome.motion3.json",
+      "sourceBasename": "dialogue-open-welcome.motion3.json",
+      "sourceHashPrefix": "61633dcc1be9",
+      "intakeStatus": "user-authorized-vts-draft",
+      "userVisualReview": "passed",
+      "technicalReadback": "passed",
+      "cubismRefined": false,
+      "runtimeEnabled": true
+    },
+    {
+      "presetId": "reply-warm-settle",
+      "targetPath": "motions/reply-warm-settle.motion3.json",
+      "sourceBasename": "reply-warm-settle.motion3.json",
+      "sourceHashPrefix": "548c3f2b1bfe",
+      "intakeStatus": "user-authorized-vts-draft",
+      "userVisualReview": "passed",
+      "technicalReadback": "passed",
+      "cubismRefined": false,
+      "runtimeEnabled": true
+    },
+    {
+      "presetId": "music-listen-sway",
+      "targetPath": "motions/music-listen-sway.motion3.json",
+      "sourceBasename": "music-listen-sway.motion3.json",
+      "sourceHashPrefix": "6ed6a61530e6",
+      "intakeStatus": "user-authorized-vts-draft",
+      "userVisualReview": "passed",
+      "technicalReadback": "passed",
+      "cubismRefined": false,
+      "runtimeEnabled": true
+    },
+    {
+      "presetId": "game-presence-glance",
+      "targetPath": "motions/game-presence-glance.motion3.json",
+      "sourceBasename": "game-presence-glance.motion3.json",
+      "sourceHashPrefix": "cc14092a2bc9",
+      "intakeStatus": "user-authorized-vts-draft",
+      "userVisualReview": "passed",
+      "technicalReadback": "passed",
+      "cubismRefined": false,
+      "runtimeEnabled": true
+    },
+    {
+      "presetId": "search-note-settle",
+      "targetPath": "motions/search-note-settle.motion3.json",
+      "sourceBasename": "search-note-settle.motion3.json",
+      "sourceHashPrefix": "5d2ab761f9d0",
+      "intakeStatus": "user-authorized-vts-draft",
+      "userVisualReview": "passed",
+      "technicalReadback": "passed",
+      "cubismRefined": false,
+      "runtimeEnabled": true
+    },
+    {
+      "presetId": "return-from-idle",
+      "targetPath": "motions/return-from-idle.motion3.json",
+      "sourceBasename": "return-from-idle.motion3.json",
+      "sourceHashPrefix": "e197e7f4fb2e",
+      "intakeStatus": "user-authorized-vts-draft",
+      "userVisualReview": "passed",
+      "technicalReadback": "passed",
+      "cubismRefined": false,
+      "runtimeEnabled": true
+    },
+    {
+      "presetId": "evening-window-glance",
+      "targetPath": "motions/evening-window-glance.motion3.json",
+      "sourceBasename": "evening-window-glance.motion3.json",
+      "sourceHashPrefix": "3afa6027b072",
+      "intakeStatus": "user-authorized-vts-draft",
+      "userVisualReview": "passed",
+      "technicalReadback": "passed",
+      "cubismRefined": false,
+      "runtimeEnabled": true
+    },
+    {
+      "presetId": "long-work-recovery",
+      "targetPath": "motions/long-work-recovery.motion3.json",
+      "sourceBasename": "long-work-recovery.motion3.json",
+      "sourceHashPrefix": "559022f1808b",
+      "intakeStatus": "user-authorized-vts-draft",
+      "userVisualReview": "passed",
+      "technicalReadback": "passed",
+      "cubismRefined": false,
+      "runtimeEnabled": true
     }
   ]
 }

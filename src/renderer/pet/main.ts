@@ -10,13 +10,11 @@ import { createScaleWheelNormalizer, hasScaleWheelModifiers } from "./scale-whee
 import {
   createClickActionScheduler,
   createRapidTouchComboDetector,
+  createReturnFromIdleController,
   getInteractionActionCooldownSkipReason,
-  getPresenceFilteredPetInteractionActions,
-  getRandomPetInteractionActionsForMode,
   getPetInteractionAction,
   getWindowShakeLightFeedbackSkipReason,
   isStrongInteractionAction,
-  selectRandomPetInteractionAction,
   type PetInteractionAction
 } from "./interaction-actions";
 import {
@@ -35,6 +33,7 @@ import {
   getPetActionStateActionType,
   getPetActionStateForReason
 } from "../../shared/pet-action-state-machine";
+import { getPetActionTriggerActionType } from "../../shared/pet-action-trigger";
 import { resolvePetExpressionStateLinkage } from "../../shared/pet-expression-state-linkage";
 import {
   resolvePetAccessorySelection,
@@ -689,6 +688,10 @@ const removeDialogueModeChangedListener = window.petApi?.onDialogueModeChanged((
   currentDialogueModeId = modeId;
 }) ?? null;
 const removePresenceModeChangedListener = window.petApi?.onPresenceModeChanged((modeId) => {
+  if (modeId === "sleep") {
+    interactionActionPlayer.interruptActiveMotionAction();
+  }
+
   if (currentPresenceModeId === "sleep" && modeId !== "sleep") {
     interactionActionPlayer.interruptActiveMotionAction();
   }
@@ -699,13 +702,23 @@ const removePresenceModeChangedListener = window.petApi?.onPresenceModeChanged((
     clearProactiveSpeechBubble();
   }
 }) ?? null;
+const returnFromIdleController = createReturnFromIdleController();
 const removeActionTriggerListener = window.petApi?.onActionTrigger((trigger) => {
   if (trigger.reason === "chat_opened" || trigger.reason === "chat_input_focus") {
     clearProactiveSpeechBubble();
   }
+  if (
+    trigger.reason === "chat_opened" ||
+    trigger.reason === "chat_input_focus" ||
+    trigger.reason === "chat_reply_waiting" ||
+    trigger.reason === "state_local_model_busy" ||
+    trigger.reason === "chat_reply_completed"
+  ) {
+    returnFromIdleController.markActivity();
+  }
 
   const state = getPetActionStateForReason(trigger.reason);
-  const actionType = getPetActionStateActionType(state.stateId);
+  const actionType = getPetActionTriggerActionType(trigger.reason);
   const expressionLinkage = resolvePetExpressionStateLinkage({
     stateId: state.stateId,
     dialogueModeId: currentDialogueModeId,
@@ -931,18 +944,13 @@ type PendingClickAction = {
 };
 
 function createBodyClickAction(): PendingClickAction {
-  const modeActions = getPresenceFilteredPetInteractionActions(
-    getRandomPetInteractionActionsForMode(currentDialogueModeId),
-    currentPresenceModeId
-  );
-
   return {
-    action: selectRandomPetInteractionAction(Math.random, modeActions),
+    action: getPetInteractionAction("bodyAttentionTurn"),
     reason: "click_body",
     strategy: {
       modeId: currentDialogueModeId,
       presenceModeId: currentPresenceModeId,
-      candidateActionTypes: modeActions.map((action) => action.type)
+      candidateActionTypes: ["bodyAttentionTurn"]
     }
   };
 }
@@ -1076,6 +1084,22 @@ canvas.addEventListener("pointerup", (event) => {
   tryReleasePointerCapture(event.pointerId);
 
   if (isHit && !wasDragging && hitArea) {
+    if (returnFromIdleController.consumeClick(currentPresenceModeId)) {
+      const returnState = getPetActionStateForReason("return_from_idle");
+      cancelClickInteractionAction();
+      interactionActionPlayer.playAction(
+        getPetInteractionAction(getPetActionTriggerActionType("return_from_idle")),
+        "return_from_idle",
+        {
+          stateId: returnState.stateId,
+          modeId: currentDialogueModeId,
+          presenceModeId: currentPresenceModeId,
+          candidateActionTypes: [getPetActionTriggerActionType("return_from_idle")]
+        }
+      );
+      return;
+    }
+
     if (currentPresenceModeId !== "sleep" && rapidTouchComboDetector.record(event.timeStamp)) {
       const rapidTouchState = getPetActionStateForReason("rapid_touch_combo");
       const expressionLinkage = resolvePetExpressionStateLinkage({

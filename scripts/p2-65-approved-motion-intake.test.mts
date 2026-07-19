@@ -64,13 +64,25 @@ function preset(id: string, path: string): Record<string, unknown> {
   };
 }
 
-function createFixture(): Fixture {
+const P2_77_FIXTURE_PRESET_IDS = [
+  "head-pat-linger",
+  "body-attention-turn",
+  "dialogue-open-welcome",
+  "reply-warm-settle",
+  "music-listen-sway",
+  "game-presence-glance",
+  "search-note-settle",
+  "return-from-idle",
+  "evening-window-glance",
+  "long-work-recovery"
+] as const;
+
+function createFixture(definitions: readonly string[] = P2_77_FIXTURE_PRESET_IDS): Fixture {
   const candidateRoot = fixtureRoot("candidate");
   const repositoryRoot = fixtureRoot("product");
   const manifestPath = join(repositoryRoot, "resources", "models", "witch", "model-manifest.json");
   const registryPath = join(repositoryRoot, "resources", "models", "witch", "motion-intake-metadata.json");
   const runtimeCatalogPath = join(repositoryRoot, "src", "shared", "approved-motion-presets.ts");
-  const definitions = ["happy-small", "surprised-small", "flustered-small"];
   const entries: FixtureEntry[] = [];
 
   mkdirSync(join(repositoryRoot, "resources", "models", "witch", "motions"), { recursive: true });
@@ -132,7 +144,7 @@ function readRuntimeCatalog(path: string): Array<{ id: string; path: string }> {
   return JSON.parse(match[1]) as Array<{ id: string; path: string }>;
 }
 
-test("approved intake commits a three-entry asset, manifest, metadata, and runtime-catalog batch", () => {
+test("approved intake commits a parameterized ten-entry asset, manifest, metadata, and runtime-catalog batch", () => {
   const fixture = createFixture();
   try {
     const result = approvedMotionResourceIntake({ candidateRoot: fixture.candidateRoot, repositoryRoot: fixture.repositoryRoot, apply: true });
@@ -156,7 +168,7 @@ test("approved intake commits a three-entry asset, manifest, metadata, and runti
   }
 });
 
-test("approved intake rejects an invalid three-entry batch without changing product files", () => {
+test("approved intake rejects an invalid parameterized ten-entry batch without changing product files", () => {
   const fixture = createFixture();
   try {
     const approvedPath = join(fixture.candidateRoot, "approved-motion-intake.json");

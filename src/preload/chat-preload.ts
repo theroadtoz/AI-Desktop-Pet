@@ -12,6 +12,7 @@ import type {
   ConfigApiKeyRequest,
   ConfigSetApiKeyRequest,
   DialogueModeApi,
+  EnvironmentActionApi,
   HistoryApi,
   LocalRuntimeApi,
   MemoryApi,
@@ -24,6 +25,10 @@ import type {
   UserProfileApi,
   WebSearchApi
 } from "../shared/ipc-contract";
+import type {
+  EnvironmentActionSettings,
+  EnvironmentActionSettingsUpdate
+} from "../shared/environment-action-settings";
 import type { Conversation, ConversationSummary, HistoryMessage } from "../shared/chat-history";
 import type { MemoryCard, MemoryCardDraft, MemoryCardUpdate, MemorySummary } from "../shared/chat-memory";
 import type { DialogueModeId, DialogueModeView } from "../shared/dialogue-style";
@@ -65,6 +70,10 @@ const defaultProactiveCompanionSettings: ProactiveCompanionSettings = {
   cadence: "normal",
   memorySourceBubbles: true,
   searchSourceBubbles: true
+};
+const defaultEnvironmentActionSettings: EnvironmentActionSettings = {
+  musicEnabled: false,
+  gameEnabled: false
 };
 const dialogueModeViews: readonly DialogueModeView[] = [
   { id: "default", label: "默认陪伴" },
@@ -306,6 +315,34 @@ function parseProactiveCompanionSettingsUpdate(value: unknown): ProactiveCompani
     parsed.searchSourceBubbles = update.searchSourceBubbles;
   }
 
+  return parsed;
+}
+
+function parseEnvironmentActionSettings(value: unknown): EnvironmentActionSettings {
+  const settings = value as Partial<EnvironmentActionSettings> | null;
+  if (!settings || typeof settings !== "object") {
+    return { ...defaultEnvironmentActionSettings };
+  }
+  return {
+    musicEnabled: typeof settings.musicEnabled === "boolean" ? settings.musicEnabled : false,
+    gameEnabled: typeof settings.gameEnabled === "boolean" ? settings.gameEnabled : false
+  };
+}
+
+function parseEnvironmentActionSettingsUpdate(value: unknown): EnvironmentActionSettingsUpdate | null {
+  const update = value as Partial<EnvironmentActionSettingsUpdate> | null;
+  if (!update || typeof update !== "object") {
+    return null;
+  }
+  const parsed: EnvironmentActionSettingsUpdate = {};
+  if ("musicEnabled" in update) {
+    if (typeof update.musicEnabled !== "boolean") return null;
+    parsed.musicEnabled = update.musicEnabled;
+  }
+  if ("gameEnabled" in update) {
+    if (typeof update.gameEnabled !== "boolean") return null;
+    parsed.gameEnabled = update.gameEnabled;
+  }
   return parsed;
 }
 
@@ -2194,6 +2231,21 @@ const proactiveCompanionApi: ProactiveCompanionApi = {
   }
 };
 
+const environmentActionApi: EnvironmentActionApi = {
+  async getSettings() {
+    return parseEnvironmentActionSettings(await ipcRenderer.invoke("environmentActions:get-settings"));
+  },
+  async setSettings(update) {
+    const parsedUpdate = parseEnvironmentActionSettingsUpdate(update);
+    if (!parsedUpdate) {
+      throw new Error("Invalid environment action settings");
+    }
+    return parseEnvironmentActionSettings(
+      await ipcRenderer.invoke("environmentActions:set-settings", parsedUpdate)
+    );
+  }
+};
+
 const userProfileApi: UserProfileApi = {
   async getUserProfile() {
     const profile = await ipcRenderer.invoke("userProfile:get");
@@ -2291,5 +2343,6 @@ contextBridge.exposeInMainWorld("shortcutApi", shortcutApi);
 contextBridge.exposeInMainWorld("dialogueModeApi", dialogueModeApi);
 contextBridge.exposeInMainWorld("presenceModeApi", presenceModeApi);
 contextBridge.exposeInMainWorld("proactiveCompanionApi", proactiveCompanionApi);
+contextBridge.exposeInMainWorld("environmentActionApi", environmentActionApi);
 contextBridge.exposeInMainWorld("userProfileApi", userProfileApi);
 contextBridge.exposeInMainWorld("webSearchApi", webSearchApi);

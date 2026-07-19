@@ -342,12 +342,18 @@ test("safe echo helpers reject unknown actions and strip window shake payload de
 
 test("action trigger reasons map to fixed actions and emit safe started telemetry", async () => {
   const expected = {
-    chat_opened: "listen",
+    chat_opened: "dialogueOpenWelcome",
     chat_input_focus: "listen",
     chat_reply_waiting: "replyThinking",
     pet_edge_settled: "edgeGlance",
     rapid_touch_combo: "flusteredGlance",
     chat_reply_sustain: "replySustain",
+    chat_reply_completed: "replyWarmSettle",
+    state_music_playing_stable: "musicListenSway",
+    state_game_presence_stable: "gamePresenceGlance",
+    return_from_idle: "returnFromIdle",
+    evening_companion_tick: "eveningWindowGlance",
+    long_work_session_complete: "longWorkRecovery",
     state_idle: "softSmile",
     state_greet: "greeting",
     state_listen: "listen",
@@ -362,7 +368,7 @@ test("action trigger reasons map to fixed actions and emit safe started telemetr
     state_local_model_busy: "replyThinking",
     state_memory_injected: "quietNod",
     state_memory_skipped: "quietNod",
-    state_search_cited: "readingIdle",
+    state_search_cited: "searchNoteSettle",
     state_proactive_bubble_visible: "softSmile"
   } as const;
 
@@ -580,7 +586,7 @@ test("memory safe states use quiet nod without exposing memory payloads", () => 
   assert.deepEqual(parsePetRendererTelemetryEvent(skippedHarness.telemetry[0]), skippedHarness.telemetry[0]);
 });
 
-test("search and proactive safe states expose only fixed action and expression summaries", () => {
+test("search and proactive safe states expose only fixed action and expression summaries", async () => {
   const searchHarness = createFakeInteractionActionPlayer();
   const searchState = getPetActionStateForReason("state_search_cited");
   const searchAction = getPetInteractionAction(searchState.actionType);
@@ -621,9 +627,17 @@ test("search and proactive safe states expose only fixed action and expression s
   assert.equal("snippet" in searchHarness.telemetry[0]?.payload, false);
   assert.deepEqual(parsePetRendererTelemetryEvent(searchHarness.telemetry[0]), searchHarness.telemetry[0]);
 
-  const proactiveHarness = createFakeInteractionActionPlayer();
   const proactiveState = getPetActionStateForReason("state_proactive_bubble_visible");
   const proactiveAction = getPetInteractionAction(proactiveState.actionType);
+  const proactiveMotion = createFakeMotionPlayback(proactiveAction.motionPresetId);
+  const proactiveHarness = createFakeInteractionActionPlayer({
+    playMotionPreset: async () => ({
+      status: "started",
+      motionPresetId: proactiveAction.motionPresetId!,
+      durationMs: proactiveAction.durationMs,
+      playback: proactiveMotion.playback
+    })
+  });
   const proactiveExpression = resolvePetExpressionStateLinkage({
     stateId: proactiveState.stateId,
     dialogueModeId: "default",
@@ -640,6 +654,8 @@ test("search and proactive safe states expose only fixed action and expression s
     expressionPresetId: proactiveExpression.expressionPresetId,
     candidateActionTypes: [proactiveState.actionType]
   }), true);
+  await Promise.resolve();
+  proactiveMotion.transition("started");
 
   assert.deepEqual(proactiveHarness.telemetry[0], {
     type: "pet_interaction_action_started",
@@ -652,7 +668,8 @@ test("search and proactive safe states expose only fixed action and expression s
       presenceModeId: "default",
       expressionPresetId: "happy",
       candidateActionTypes: ["softSmile"],
-      selectedActionType: "softSmile"
+      selectedActionType: "softSmile",
+      motionPresetId: "happy-small"
     }
   });
   assert.equal("text" in proactiveHarness.telemetry[0]?.payload, false);
@@ -762,7 +779,7 @@ test("pet interaction action manifest includes audited expression and accessory 
   assert.deepEqual(byType.get("workFocus")?.lookTarget, { x: 0.05, y: 0.1 });
   assert.equal(byType.get("appearance")?.motionPresetId, "surprised-small");
   assert.equal(byType.get("appearance")?.temporaryAccessoryId, "staff");
-  assert.equal(byType.get("headPat")?.motionPresetId, "happy-small");
+  assert.equal(byType.get("headPat")?.motionPresetId, "head-pat-linger");
   assert.equal(byType.get("doze")?.motionPresetId, "yawn-once");
   assert.deepEqual(
     PET_INTERACTION_ACTIONS
@@ -1738,9 +1755,75 @@ test("interaction action player prevents stacking and reports active action skip
         reason: "click_head",
         skipReason: "active_action",
         activeType: "thinking",
-        motionPresetId: "happy-small"
+        motionPresetId: "head-pat-linger"
       }
   });
+});
+
+test("P2-77 input focus keeps welcome active while dialogue thinking interrupts welcome", async () => {
+  const welcome = getPetInteractionAction("dialogueOpenWelcome");
+  const listenMotion = createFakeMotionPlayback(welcome.motionPresetId);
+  const listenHarness = createFakeInteractionActionPlayer({
+    playMotionPreset: async () => ({
+      status: "started",
+      motionPresetId: welcome.motionPresetId!,
+      durationMs: welcome.durationMs,
+      playback: listenMotion.playback
+    })
+  });
+
+  assert.equal(listenHarness.player.playAction(welcome, "chat_opened"), true);
+  await Promise.resolve();
+  listenMotion.transition("started");
+  assert.equal(listenHarness.player.playAction(getPetInteractionAction("listen"), "chat_input_focus"), false);
+  assert.equal(listenHarness.calls.includes("stopMotion:interrupted"), false);
+
+  const thinkingMotion = createFakeMotionPlayback(welcome.motionPresetId);
+  const thinkingHarness = createFakeInteractionActionPlayer({
+    playMotionPreset: async () => ({
+      status: "started",
+      motionPresetId: welcome.motionPresetId!,
+      durationMs: welcome.durationMs,
+      playback: thinkingMotion.playback
+    })
+  });
+
+  assert.equal(thinkingHarness.player.playAction(welcome, "chat_opened"), true);
+  await Promise.resolve();
+  thinkingMotion.transition("started");
+  assert.equal(thinkingHarness.player.playAction(getPetInteractionAction("replyThinking"), "chat_reply_waiting"), true);
+  assert.equal(thinkingHarness.calls.includes("stopMotion:interrupted"), true);
+  assert.equal(thinkingHarness.telemetry.some((event) => event.payload.terminalStatus === "interrupted"), true);
+});
+
+test("P2-77 search result interrupts reply thinking", () => {
+  const harness = createFakeInteractionActionPlayer();
+  assert.equal(
+    harness.player.playAction(getPetInteractionAction("replyThinking"), "chat_reply_waiting"),
+    true
+  );
+  assert.equal(
+    harness.player.playAction(getPetInteractionAction("searchNoteSettle"), "state_search_cited"),
+    true
+  );
+  assert.equal(harness.player.getActiveActionType(), "searchNoteSettle");
+  assert.equal(
+    harness.telemetry.some((event) => (
+      event.type === "pet_interaction_action_finished" &&
+      event.payload.type === "replyThinking"
+    )),
+    true
+  );
+});
+
+test("P2-77 long actions enforce their declared same-action cooldowns", () => {
+  const action = getPetInteractionAction("searchNoteSettle");
+  assert.equal(getInteractionActionCooldownSkipReason(action, 10_000, {
+    actionFinishedAtMsByType: { searchNoteSettle: 9_999 }
+  }), "same_action_cooldown");
+  assert.equal(getInteractionActionCooldownSkipReason(action, 10_000 + action.cooldownMs!, {
+    actionFinishedAtMsByType: { searchNoteSettle: 10_000 }
+  }), null);
 });
 
 test("interaction action player keeps global, headPat, and strong accessory cooldowns", () => {
@@ -1941,7 +2024,7 @@ test("pet pointer clicks route head and body actions without changing drag or do
   assert.match(source, /name: "head"/);
   assert.match(source, /name: "body"/);
   assert.match(source, /getPetInteractionAction\("headPat"\)/);
-  assert.match(source, /getRandomPetInteractionActionsForMode\(currentDialogueModeId\)/);
+  assert.match(source, /getPetInteractionAction\("bodyAttentionTurn"\)/);
   assert.match(source, /createInteractionActionPlayer/);
   assert.match(source, /interactionActionPlayer\.playAction/);
   assert.match(source, /getCooldownSkipReason: getInteractionActionCooldownSkipReason/);
@@ -2005,7 +2088,7 @@ test("pet renderer reads presence mode without owning mode writes", async () => 
   assert.doesNotMatch(petPreload, /presenceMode:set/);
   assert.match(appSource, /!isChatSender\(event\) && !isPetSender\(event\)/);
   assert.match(appSource, /notifyPetPresenceModeChanged\(currentPresenceModeId\)/);
-  assert.match(rendererSource, /getPresenceFilteredPetInteractionActions/);
+  assert.match(rendererSource, /createReturnFromIdleController/);
   assert.match(rendererSource, /presenceModeId: currentPresenceModeId/);
 });
 
@@ -2028,7 +2111,32 @@ test("pet renderer interrupts an active sleep motion before applying a non-sleep
   );
 });
 
-test("main schedules the current dialogue state action after leaving sleep", async () => {
+test("pet renderer interrupts active Motion3 when entering sleep", async () => {
+  const rendererSource = await readFile(new URL("../src/renderer/pet/main.ts", import.meta.url), "utf8");
+  const listenerStart = rendererSource.indexOf("const removePresenceModeChangedListener");
+  const listenerEnd = rendererSource.indexOf("const removeActionTriggerListener", listenerStart);
+  const listenerSource = rendererSource.slice(listenerStart, listenerEnd);
+
+  assert.match(
+    listenerSource,
+    /if \(modeId === "sleep"\) \{\s*interactionActionPlayer\.interruptActiveMotionAction\(\);/
+  );
+});
+
+test("main emits chat_opened only for a hidden-to-visible transition", async () => {
+  const appSource = await readFile(new URL("../src/main/app.ts", import.meta.url), "utf8");
+  const functionStart = appSource.indexOf("function openChatWindow(): void");
+  const functionEnd = appSource.indexOf("function isPetSender", functionStart);
+  const functionSource = appSource.slice(functionStart, functionEnd);
+
+  assert.match(functionSource, /const wasVisible = Boolean\(/);
+  assert.match(
+    functionSource,
+    /if \(!wasVisible\) \{[\s\S]*sendPetActionTrigger\("chat_opened"\);[\s\S]*\}/
+  );
+});
+
+test("main schedules state_idle for the real sleep-to-default presence transition", async () => {
   const appSource = await readFile(new URL("../src/main/app.ts", import.meta.url), "utf8");
   const handlerStart = appSource.indexOf('ipcMain.handle("presenceMode:set"');
   const handlerEnd = appSource.indexOf('ipcMain.handle("proactiveCompanion:get-settings"', handlerStart);
@@ -2040,7 +2148,7 @@ test("main schedules the current dialogue state action after leaving sleep", asy
   );
   assert.match(
     handlerSource,
-    /if \(presenceActionState && presenceActionState\.stateId !== "idle"\) \{\s*schedulePetModeActionStateTrigger\(presenceActionState\.triggerReason\);\s*\}/
+    /presenceActionState\.stateId !== "idle"[\s\S]*previousModeId === "sleep"[\s\S]*currentPresenceModeId === "default"[\s\S]*schedulePetModeActionStateTrigger\(presenceActionState\.triggerReason\)/
   );
 });
 
