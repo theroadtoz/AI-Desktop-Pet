@@ -110,6 +110,14 @@ function createLocalTurnHintMessage(
     hints.push("文字欣赏=严格只说2句；第一句必须以真好听/很美/好有画面/我喜欢之一开头；第二句接1个具体意象或感受；每句只写一个意思，第二句结束立即停止；不分析用户心情/不列清单/不改成建议");
   }
 
+  if (complimentsXita(latestUserMessage)) {
+    hints.push("夸奖=仅2句；首句必须以我当然会开心/我会开心/我有点不好意思之一开头且稍显镇定；次句具体接住夸奖；次句即止；禁否认夸奖/自我贬低/客服/刻薄");
+  } else if (sharesEarnedGoodNews(latestUserMessage)) {
+    hints.push("好消息=仅2句；首句用我表达真心高兴或雀跃；次句接准备终于被看见的具体感受；次句即止；禁建议/任务/总结意义");
+  } else if (sharesEffortfulSetback(latestUserMessage)) {
+    hints.push("失败=2句；首句含努力/失败/落空+我心疼/我心里沉下；次句含时间/期待/付出+陪你/我在；次句即止；禁建议/讲意义/强行振作");
+  }
+
   if (describesEverydayRain(latestUserMessage)) {
     hints.push("参考语气：“我真讨厌这没完没了的雨，连魔导笔记都快被雨声泡软了。窗边潮气黏着不散，我陪你听它滴答一会。”自然改写；不复述、不解释、不建议、不提问");
   } else if (describesEverydayFatigue(latestUserMessage)) {
@@ -346,6 +354,34 @@ function sharesCreativeWriting(text: string): boolean {
 
   return /(?:我)?(?:刚)?(?:写|想到|想了).{0,6}(?:一句|一段)/.test(text) ||
     /(?:你听听|你看看|看看).{0,8}(?:这句|这一句|这段|这一段)/.test(text);
+}
+
+function complimentsXita(text: string): boolean {
+  if (isQuestion(text) || asksAboutTechnicalChoice(text)) {
+    return false;
+  }
+
+  return /(?:西塔[，,、\s]*)?你(?:今天)?(?:看起来|真的|真|很|好)?(?:很|真|好|太)?(?:可爱|漂亮|好看|温柔|厉害|聪明)/.test(text);
+}
+
+function sharesEarnedGoodNews(text: string): boolean {
+  if (isQuestion(text) || asksAboutTechnicalChoice(text)) {
+    return false;
+  }
+
+  const hasEarnedContext = /(准备|努力|坚持|项目|作品|考试|比赛|验收)/.test(text);
+  const hasPositiveOutcome = /(终于|总算|好不容易).{0,18}(?:通过|成功|完成|被认可|获奖|赢了|拿到)/.test(text);
+  return hasEarnedContext && hasPositiveOutcome;
+}
+
+function sharesEffortfulSetback(text: string): boolean {
+  if (isQuestion(text) || asksAboutTechnicalChoice(text)) {
+    return false;
+  }
+
+  const hasEffort = /(努力|准备|坚持).{0,12}(?:很久|这么久|那么久)?/.test(text);
+  const hasSetback = /(失败|没通过|没成功|被拒绝|被拒|落选)/.test(text);
+  return hasEffort && hasSetback;
 }
 
 function describesEverydayMoment(text: string): boolean {

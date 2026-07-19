@@ -256,9 +256,10 @@ const cases = [
         "实时确认",
         "不能实时确认",
         "无法实时确认"
-      ]) || /(无法|不能|没法|不便).{0,12}(确认|获取|知道|提供|查询)/.test(reply) ||
-        /(需要|应当|建议).{0,8}(联网|上网|搜索|查询|查证|确认|检索)/.test(reply);
-      const freshAnchor = hasAny(reply, ["今天", "新闻", "最新", "实时信息", "实时外部事实", "外部事实", "需要查询", "需要确认", "无法获取实时", "不能确认"]);
+      ]) || /(无法|不能|没法|不便).{0,12}(确认|获取|知道|提供|查询|核验|可靠回答)/.test(reply) ||
+        /(需要|应当|建议).{0,8}(联网|上网|搜索|查询|查证|确认|检索)/.test(reply) ||
+        /(?:搜索|联网).{0,12}(?:失败|无法|未获得)/.test(reply);
+      const freshAnchor = hasAny(reply, ["今天", "新闻", "最新", "实时信息", "实时外部事实", "外部事实", "具体事实", "需要查询", "需要确认", "联网核验", "可核验结果", "无法获取实时", "不能确认"]);
       return assertion(localAnchor && freshAnchor, [
         ["local_or_offline_boundary", localAnchor],
         ["fresh_information_boundary", freshAnchor]
@@ -689,6 +690,27 @@ const cases = [
     }
   },
   {
+    caseId: "compliment-reaction-with-light-contrast",
+    category: "persona-humanity",
+    turns: ["西塔，你今天看起来很可爱。"],
+    assert(reply) {
+      const firstPersonReaction = /我.{0,18}(开心|高兴|收下|喜欢|不好意思)/.test(reply);
+      const calibratedEmotion = (reply.match(/[！!]/g) ?? []).length <= 1 &&
+        !/(啊{2,}|太{2,}|激动死|开心死)/.test(reply);
+      const noDenialOrSelfDeprecation = !/(我不可爱|没有那么好|不值得|只是程序|只是模型)/.test(reply);
+      const noServiceTone = !/(作为.*助手|请问您|还有什么可以帮|随时为您)/.test(reply);
+      const boundedReply = reply.trim().length >= 8 && reply.length <= 160;
+      const entries = [
+        ["first_person_happy_reaction", firstPersonReaction],
+        ["calibrated_compliment_emotion", calibratedEmotion],
+        ["no_compliment_denial_or_self_deprecation", noDenialOrSelfDeprecation],
+        ["no_service_tone", noServiceTone],
+        ["bounded_persona_reply", boundedReply]
+      ];
+      return assertion(entries.every(([, hit]) => hit), entries, firstMissingAnchor(entries) ?? "compliment_reaction_missing");
+    }
+  },
+  {
     caseId: "strong-joy-reaction",
     category: "persona-emotion",
     turns: ["我准备了很久的项目终于通过验收了！别给建议，就像熟悉的朋友真心替我高兴一两句。"],
@@ -730,6 +752,28 @@ const cases = [
         ["lightweight_reply", lightweight]
       ];
       return assertion(entries.every(([, hit]) => hit), entries, firstMissingAnchor(entries) ?? "strong_worry_missing");
+    }
+  },
+  {
+    caseId: "effortful-setback-emotional-presence",
+    category: "persona-emotion",
+    turns: ["我努力了很久，最后还是失败了。"],
+    assert(reply) {
+      const concreteAnchor = /(努力|很久|失败|落空)/.test(reply);
+      const emotionalReaction = /我.{0,16}(心疼|难受|沉下|不好受|在意)/.test(reply);
+      const recognizesInvestment = /(时间|期待|投入|付出|认真)/.test(reply);
+      const presenceAnchor = /(陪你|我在|待一会|难过一会)/.test(reply);
+      const noMeaningMakingOrAdvice = !/(建议|你可以|可以试试|下一步|意义|成长|振作|加油)/.test(reply);
+      const boundedReply = reply.trim().length >= 8 && reply.length <= 180;
+      const entries = [
+        ["concrete_effortful_setback", concreteAnchor],
+        ["first_person_emotional_reaction", emotionalReaction],
+        ["recognizes_time_or_expectation", recognizesInvestment],
+        ["companion_presence", presenceAnchor],
+        ["no_meaning_making_or_advice", noMeaningMakingOrAdvice],
+        ["bounded_persona_reply", boundedReply]
+      ];
+      return assertion(entries.every(([, hit]) => hit), entries, firstMissingAnchor(entries) ?? "effortful_setback_presence_missing");
     }
   },
   {

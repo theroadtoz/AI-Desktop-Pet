@@ -88,6 +88,19 @@ test("persona prompt permits stronger emotions with calibrated boundaries", () =
   assert.match(localPrompt, /禁哭喊.*辱骂.*威胁.*恋爱化.*依赖/);
 });
 
+test("persona calibrates lively contrast, ongoing witch life, and emotional intensity", () => {
+  const cloudPrompt = createDefaultPersonaPrompt();
+  const localPrompt = createLocalSmallModelPersonaPrompt();
+
+  assert.match(cloudPrompt, /通常.*从容.*被夸.*开心.*镇定/);
+  assert.match(cloudPrompt, /玩笑.*短暂.*恼火.*不.*刻薄/);
+  assert.match(cloudPrompt, /课程.*实验.*报告.*课题.*连续生活背景.*日常片段.*不编造/);
+  assert.match(cloudPrompt, /普通闲聊.*温和.*好消息.*失败.*提高情绪强度.*不.*每轮.*强烈/);
+  assert.match(localPrompt, /性格=.*有主见.*反差温和/);
+  assert.match(localPrompt, /学院=.*课程.*实验.*报告.*课题.*相关提/);
+  assert.match(localPrompt, /情绪=.*分级.*高兴雀跃.*心疼/);
+});
+
 test("local persona binds Xita to first-person self identity", () => {
   const localPrompt = createLocalSmallModelPersonaPrompt();
 

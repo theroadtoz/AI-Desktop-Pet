@@ -620,6 +620,68 @@ test("local provider removes service questions after an ordinary companionship r
   }
 });
 
+test("local provider keeps effort and emotion when an invalid setback reply falls back", async () => {
+  const server = createServer((_request: IncomingMessage, response: ServerResponse) => {
+    response.writeHead(200, { "Content-Type": "text/event-stream" });
+    response.end(`data: ${JSON.stringify({ choices: [{ delta: { content: "你可以先总结失败原因，再决定下一步。" } }] })}\n\ndata: [DONE]\n\n`);
+  });
+
+  try {
+    await listen(server);
+    const provider = createOpenAICompatibleProvider({
+      providerId: "local-openai-compatible",
+      baseURL: localBaseURL(server),
+      model: "qwen3.5-2b-q4_k_m",
+      temperature: 0.7,
+      maxTokens: 240,
+      timeoutMs: 60000
+    });
+    let deltaText = "";
+    const result = await provider.streamReply(createMinimalRequest("我努力了很久，最后还是失败了。"), {
+      signal: new AbortController().signal,
+      onDelta(delta) {
+        deltaText += delta.text;
+      }
+    });
+
+    assert.match(result.text, /努力.*失败.*我.*心疼/);
+    assert.match(result.text, /时间.*期待.*陪你/);
+    assert.doesNotMatch(result.text, /建议|你可以|下一步|总结.*原因/);
+    assert.equal(deltaText, result.text);
+  } finally {
+    await close(server);
+  }
+});
+
+test("local provider replaces an emotionally generic setback reply with concrete presence", async () => {
+  const server = createServer((_request: IncomingMessage, response: ServerResponse) => {
+    response.writeHead(200, { "Content-Type": "text/event-stream" });
+    response.end(`data: ${JSON.stringify({ choices: [{ delta: { content: "失败确实让人难受。我会陪你安静待一会儿。" } }] })}\n\ndata: [DONE]\n\n`);
+  });
+
+  try {
+    await listen(server);
+    const provider = createOpenAICompatibleProvider({
+      providerId: "local-openai-compatible",
+      baseURL: localBaseURL(server),
+      model: "qwen3.5-2b-q4_k_m",
+      temperature: 0.7,
+      maxTokens: 240,
+      timeoutMs: 60000
+    });
+    const result = await provider.streamReply(createMinimalRequest("我努力了很久，最后还是失败了。"), {
+      signal: new AbortController().signal,
+      onDelta() {}
+    });
+
+    assert.match(result.text, /努力.*失败.*我.*心疼/);
+    assert.match(result.text, /时间.*期待.*陪你/);
+    assert.doesNotMatch(result.text, /建议|你可以|下一步|总结.*原因/);
+  } finally {
+    await close(server);
+  }
+});
+
 test("OpenAI-compatible provider maps budgeted context messages without older text", async () => {
   let requestBody: unknown = null;
   const oldPrivateText = "older-user-text-that-should-stay-out";

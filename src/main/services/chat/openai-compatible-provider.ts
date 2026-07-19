@@ -180,6 +180,9 @@ function constrainOrdinaryCompanionReply(reply: string, latestUserMessage: strin
   if (!constrained) {
     constrained = createCompanionFallback(latestUserMessage);
   }
+  if (isEffortfulSetbackStatement(latestUserMessage) && !hasConcreteEffortfulSetbackEmotion(constrained)) {
+    constrained = createCompanionFallback(latestUserMessage);
+  }
   if (!/[。！!]$/.test(constrained)) {
     constrained += "。";
   }
@@ -187,6 +190,9 @@ function constrainOrdinaryCompanionReply(reply: string, latestUserMessage: strin
 }
 
 function createCompanionFallback(latestUserMessage: string): string {
+  if (isEffortfulSetbackStatement(latestUserMessage)) {
+    return "努力了这么久却还是失败，我听着都心疼。那些花进去的时间和期待一下子落空了，我先陪你在这里待一会儿";
+  }
   if (/茶|咖啡|热饮/.test(latestUserMessage)) {
     return "我也喜欢热气慢慢散开的安静劲儿，就这样陪你坐一会儿";
   }
@@ -204,6 +210,16 @@ function createCompanionFallback(latestUserMessage: string): string {
   }
 
   return "我听见了，也愿意陪你安静待一会儿";
+}
+
+function isEffortfulSetbackStatement(message: string): boolean {
+  return /(?:努力|准备|坚持).{0,24}(?:失败|没通过|没成功|落选|被拒)/.test(message);
+}
+
+function hasConcreteEffortfulSetbackEmotion(reply: string): boolean {
+  return /(努力|很久|失败|落空)/.test(reply) &&
+    /我.{0,18}(?:心疼|难受|不好受|沉下|一沉)/.test(reply) &&
+    /(时间|期待|付出|投入)/.test(reply);
 }
 
 async function streamChatCompletions(input: {
