@@ -1,8 +1,6 @@
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { PET_BODY_POOL_ACTION_TYPES } from "./support/pet-action-semantic-constants.mjs";
-
 const root = resolve(new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"));
 const stamp = new Date().toISOString().replace(/[:.]/g, "-");
 const runDir = join(root, ".tmp", "p2-10c-chat-mode-switching-real-ui", stamp);
@@ -21,6 +19,11 @@ const forbiddenTelemetryTexts = [
   "表达风格：低打扰桌面伙伴"
 ];
 const actionDiagnostics = {};
+const MODE_REPLY_PREFIXES = {
+  work: ["我安静陪你。", "忙你的吧，我在旁边陪着。"],
+  game: ["好，来点轻快的。", "可以，先轻松一下。"],
+  reading: ["慢慢看。", "我安静听着。"]
+};
 
 function log(message) {
   const line = `${new Date().toISOString()} ${message}`;
@@ -401,6 +404,11 @@ function hasCompletedMatchingAction(bodyAction) {
   );
 }
 
+export function isExpectedModeReply(modeId, reply) {
+  return typeof reply === "string" &&
+    (MODE_REPLY_PREFIXES[modeId] ?? []).some((prefix) => reply.startsWith(prefix));
+}
+
 export async function runHeadCheckAfterBodyAction({
   runBodyAction,
   sleep: sleepForCooldown,
@@ -434,13 +442,32 @@ export async function runHeadCheckAfterBodyAction({
   };
 }
 
-function isModeActionStarted(event, { modeId, actionTypes, reasons = ["click_body"] }) {
+export function isModeActionStarted(event, { modeId, actionTypes, reasons }) {
   return (
     event.type === "pet_interaction_action_started" &&
     event.payload?.modeId === modeId &&
     actionTypes.includes(event.payload?.selectedActionType) &&
     reasons.includes(event.payload?.reason)
   );
+}
+
+async function switchModeAndWaitForStateAction(chat, modeId, actionType, reason) {
+  const afterIndex = lastTelemetryIndex();
+  await setMode(chat, modeId);
+  const started = await waitForTelemetryEvent((event) => (
+    isModeActionStarted(event, {
+      modeId,
+      actionTypes: [actionType],
+      reasons: [reason]
+    })
+  ), 5_000, afterIndex);
+
+  if (!started) {
+    return null;
+  }
+
+  const finished = await waitForActionFinished(started, 8_000);
+  return finished ? { started, finished } : null;
 }
 
 async function clickPet(cdp, randomValue, hitArea = "body") {
@@ -585,54 +612,30 @@ async function main() {
     const chat = handles.chat.cdp;
     await saveWelcomeProfile(chat);
 
+    // P2-77 startup and welcome motions are long enough to overlap the first
+    // mode switch. Let them settle so this runner measures mode scheduling.
+    await sleep(6_500);
+
     checks.initialDefaultMode = await evaluate(chat, "document.querySelector('#partner-status')?.textContent.includes('默认陪伴')");
     checks.modeButtonsVisible = await evaluate(chat, "document.querySelectorAll('#dialogue-mode-controls .mode-button').length === 4");
 
-    await setMode(chat, "work");
+    const workAction = await switchModeAndWaitForStateAction(chat, "work", "workFocus", "state_work");
     checks.workModeVisible = await evaluate(chat, "document.querySelector('#partner-status')?.textContent.includes('工作')");
-    const workAction = await clickPetUntilTelemetry(handles.pet.cdp, 0.8, (event) => (
-      isModeActionStarted(event, {
-        modeId: "work",
-        actionTypes: ["workFocus"],
-        reasons: ["click_body", "state_work"]
-      }) &&
-      (
-        event.payload?.reason === "state_work" ||
-        (
-          Array.isArray(event.payload?.candidateActionTypes) &&
-          event.payload.candidateActionTypes.includes("workFocus")
-        )
-      )
-    ), { attempts: 4 });
     checks.workModePetActionCanTriggerFocus = Boolean(workAction);
     const workReply = await sendMessage(chat, `${userSentinel} 工作模式回复`);
-    checks.workReplyDiffers = workReply.at(-1)?.startsWith("先抓下一步。") || workReply.at(-1)?.startsWith("我们直接拆任务。");
+    checks.workReplyDiffers = isExpectedModeReply("work", workReply.at(-1));
 
-    await setMode(chat, "game");
+    const gameAction = await switchModeAndWaitForStateAction(chat, "game", "gameReady", "state_game");
     checks.gameModeVisible = await evaluate(chat, "document.querySelector('#partner-status')?.textContent.includes('游戏')");
-    const gameAction = await clickPetUntilTelemetry(handles.pet.cdp, 0.6, (event) => (
-      isModeActionStarted(event, {
-        modeId: "game",
-        actionTypes: ["playGame", "gameReady"],
-        reasons: ["click_body", "state_game"]
-      })
-    ), { attempts: 3 });
     checks.gameModePetActionPrefersPlayGame = Boolean(gameAction);
     const gameReply = await sendMessage(chat, "游戏模式回复");
-    checks.gameReplyDiffers = gameReply.at(-1)?.startsWith("好，来点轻快的。") || gameReply.at(-1)?.startsWith("可以，先轻松一下。");
+    checks.gameReplyDiffers = isExpectedModeReply("game", gameReply.at(-1));
 
-    await setMode(chat, "reading");
+    const readingAction = await switchModeAndWaitForStateAction(chat, "reading", "readingIdle", "state_read");
     checks.readingModeVisible = await evaluate(chat, "document.querySelector('#partner-status')?.textContent.includes('读书')");
-    const readingAction = await clickPetUntilTelemetry(handles.pet.cdp, 0.7, (event) => (
-      isModeActionStarted(event, {
-        modeId: "reading",
-        actionTypes: ["reading", "readingIdle"],
-        reasons: ["click_body", "state_read"]
-      })
-    ), { attempts: 3 });
     checks.readingModePetActionPrefersReading = Boolean(readingAction);
     const readingReply = await sendMessage(chat, "读书模式回复");
-    checks.readingReplyDiffers = readingReply.at(-1)?.startsWith("慢慢看。") || readingReply.at(-1)?.startsWith("我们安静地理一遍。");
+    checks.readingReplyDiffers = isExpectedModeReply("reading", readingReply.at(-1));
 
     checks.memoryBoundary = await evaluate(chat, `
       (async () => {
@@ -679,10 +682,10 @@ async function main() {
         event.type === "pet_interaction_action_started" &&
         event.payload?.reason === "click_body" &&
         event.payload?.modeId === "default" &&
+        event.payload?.selectedActionType === "bodyAttentionTurn" &&
         Array.isArray(event.payload?.candidateActionTypes) &&
-        PET_BODY_POOL_ACTION_TYPES.every((type) => event.payload.candidateActionTypes.includes(type)) &&
-        !event.payload.candidateActionTypes.includes("appearance") &&
-        !event.payload.candidateActionTypes.includes("headPat")
+        event.payload.candidateActionTypes.length === 1 &&
+        event.payload.candidateActionTypes[0] === "bodyAttentionTurn"
       ), { attempts: 4, cooldownMs: 0 }),
       sleep,
       captureBaseline: lastTelemetryIndex,
@@ -690,7 +693,7 @@ async function main() {
       waitForHeadOutcome: (afterIndex) => waitForHeadActionOutcome(afterIndex, 6_000)
     });
     const { bodyAction: defaultAction, headAction } = defaultHeadCheck;
-    checks.defaultModePetActionPoolSummary = defaultHeadCheck.bodyActionCompleted;
+    checks.defaultModeFixedBodyAttentionTurn = defaultHeadCheck.bodyActionCompleted;
     actionDiagnostics.headClick = defaultHeadCheck.diagnostic;
     checks.headClickStillTriggersHeadPat = headAction?.type === "pet_interaction_action_started";
     await setMode(chat, "reading");

@@ -5,6 +5,8 @@ import {
   findActionFinishedAfter,
   findHeadActionOutcomeAfter,
   findTelemetryEventAfter,
+  isExpectedModeReply,
+  isModeActionStarted,
   runHeadCheckAfterBodyAction,
   summarizeHeadActionOutcome
 } from "./p2-10c-chat-mode-switching-real-ui.mjs";
@@ -45,6 +47,38 @@ test("P2-10C finished lookup follows the matching started event in causal order"
   const finished = findActionFinishedAfter(events, started);
 
   assert.equal(finished?.__index, 5);
+});
+
+test("P2-10C mode checks use scheduled state actions instead of the P2-77 fixed body click", () => {
+  const stateWork = event(4, "pet_interaction_action_started", {
+    modeId: "work",
+    selectedActionType: "workFocus",
+    reason: "state_work"
+  });
+  const fixedBodyClick = event(5, "pet_interaction_action_started", {
+    modeId: "work",
+    selectedActionType: "bodyAttentionTurn",
+    reason: "click_body"
+  });
+
+  assert.equal(isModeActionStarted(stateWork, {
+    modeId: "work",
+    actionTypes: ["workFocus"],
+    reasons: ["state_work"]
+  }), true);
+  assert.equal(isModeActionStarted(fixedBodyClick, {
+    modeId: "work",
+    actionTypes: ["workFocus"],
+    reasons: ["state_work"]
+  }), false);
+});
+
+test("P2-10C mode reply checks follow the current companion-style FakeProvider prefixes", () => {
+  assert.equal(isExpectedModeReply("work", "我安静陪你。我愿意陪你在这里多待一会儿。"), true);
+  assert.equal(isExpectedModeReply("game", "好，来点轻快的。嗯，我在。"), true);
+  assert.equal(isExpectedModeReply("reading", "我安静听着。我愿意陪你在这里多待一会儿。"), true);
+  assert.equal(isExpectedModeReply("work", "先抓下一步。"), false);
+  assert.equal(isExpectedModeReply("default", "我听到了。"), false);
 });
 
 test("P2-10C head orchestration never clicks when the body action is missing, unfinished, or mismatched", async () => {
