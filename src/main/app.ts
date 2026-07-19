@@ -2197,6 +2197,34 @@ function rebuildPetWindow(recoverySource?: string): void {
 }
 
 app.whenReady().then(async () => {
+  if (process.env.P2_82A_1_GSMTC_PROTOTYPE === "1") {
+    const {
+      createGsmtcCapabilityPrototypeResult,
+      isGsmtcCapabilityPrototypeTarget,
+      runGsmtcCapabilityPrototype,
+      writeGsmtcCapabilityPrototypeResult
+    } = await import("./services/desktop-context/gsmtc-capability-prototype");
+    const requestedTarget = process.env.P2_82A_1_TARGET;
+    const target = isGsmtcCapabilityPrototypeTarget(requestedTarget) ? requestedTarget : "dev";
+    const prototypeSettings = createEnvironmentActionSettingsStore({
+      userDataPath: app.getPath("userData")
+    }).getSettings();
+    const result = isGsmtcCapabilityPrototypeTarget(requestedTarget)
+      ? await runGsmtcCapabilityPrototype({
+        target,
+        musicEnabled: prototypeSettings.musicEnabled
+      })
+      : createGsmtcCapabilityPrototypeResult(target, {
+        capability: "unknown",
+        status: "unknown",
+        health: "error",
+        failureCode: "invalid-output"
+      });
+    writeGsmtcCapabilityPrototypeResult(process.cwd(), result);
+    app.exit(result.health === "ready" || result.health === "stopped" ? 0 : 2);
+    return;
+  }
+
   telemetry = createTelemetryService();
   providerConfigStore = createProviderConfigStore({ logTelemetry });
   petPresentationStore = createPetPresentationStore();
