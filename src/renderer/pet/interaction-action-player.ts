@@ -319,10 +319,24 @@ export function createInteractionActionPlayer({
   ): boolean {
     const welcomeFollowupListen =
       activeInteractionAction?.action.type === "dialogueOpenWelcome" && action.type === "listen";
+    const modeTransitionInterruptsReplySettle =
+      activeInteractionAction?.action.type === "replyWarmSettle" &&
+      (
+        reason === "state_idle" ||
+        reason === "state_work" ||
+        reason === "state_game" ||
+        reason === "state_read" ||
+        reason === "state_sleep"
+      );
     const interruptedActiveAction = Boolean(
       !welcomeFollowupListen &&
-      activeInteractionAction?.action.interruptible &&
-      (action.runtimePriority ?? 30) > (activeInteractionAction.action.runtimePriority ?? 30)
+      (
+        modeTransitionInterruptsReplySettle ||
+        (
+          activeInteractionAction?.action.interruptible &&
+          (action.runtimePriority ?? 30) > (activeInteractionAction.action.runtimePriority ?? 30)
+        )
+      )
     );
 
     if (interruptedActiveAction && activeInteractionAction) {
