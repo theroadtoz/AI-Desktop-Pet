@@ -2093,43 +2093,45 @@ test("window shake feedback IPC uses a fixed safe enum and dedicated reason", as
   assert.doesNotMatch(rendererSource, /feedback\.(expression|motion|part|duration|resource)/);
 });
 
-test("pet renderer reads dialogue mode without owning mode writes", async () => {
+test("pet renderer reads automatic dialogue context without owning mode writes", async () => {
   const petPreload = await readFile(new URL("../src/preload/pet-preload.ts", import.meta.url), "utf8");
   const appSource = await readFile(new URL("../src/main/app.ts", import.meta.url), "utf8");
 
-  assert.match(petPreload, /getDialogueMode/);
-  assert.match(petPreload, /onDialogueModeChanged/);
+  assert.match(petPreload, /getAutomaticSituation/);
+  assert.match(petPreload, /onAutomaticSituationChanged/);
+  assert.doesNotMatch(petPreload, /getDialogueMode|onDialogueModeChanged/);
   assert.doesNotMatch(petPreload, /dialogueMode:set/);
-  assert.match(appSource, /!isChatSender\(event\) && !isPetSender\(event\)/);
-  assert.match(appSource, /notifyPetDialogueModeChanged\(currentDialogueModeId\)/);
+  assert.match(petPreload, /automaticSituation:get/);
+  assert.match(petPreload, /automaticSituation:changed/);
+  assert.match(appSource, /ipcMain\.handle\("automaticSituation:get", \(event\) => \{\s*if \(!isPetSender\(event\)/);
 });
 
-test("pet renderer reads presence mode without owning mode writes", async () => {
+test("pet renderer reads deterministic presence state without owning mode writes", async () => {
   const petPreload = await readFile(new URL("../src/preload/pet-preload.ts", import.meta.url), "utf8");
   const appSource = await readFile(new URL("../src/main/app.ts", import.meta.url), "utf8");
   const rendererSource = await readFile(new URL("../src/renderer/pet/main.ts", import.meta.url), "utf8");
 
-  assert.match(petPreload, /getPresenceMode/);
-  assert.match(petPreload, /onPresenceModeChanged/);
+  assert.match(petPreload, /getAutomaticSituation/);
+  assert.match(petPreload, /onAutomaticSituationChanged/);
+  assert.doesNotMatch(petPreload, /getPresenceMode|onPresenceModeChanged/);
   assert.doesNotMatch(petPreload, /presenceMode:set/);
-  assert.match(appSource, /!isChatSender\(event\) && !isPetSender\(event\)/);
-  assert.match(appSource, /notifyPetPresenceModeChanged\(currentPresenceModeId\)/);
+  assert.match(appSource, /petWindow\.webContents\.send\("automaticSituation:changed", snapshot\)/);
   assert.match(rendererSource, /createReturnFromIdleController/);
   assert.match(rendererSource, /presenceModeId: currentPresenceModeId/);
 });
 
 test("pet renderer interrupts an active sleep motion before applying a non-sleep presence mode", async () => {
   const rendererSource = await readFile(new URL("../src/renderer/pet/main.ts", import.meta.url), "utf8");
-  const listenerStart = rendererSource.indexOf("const removePresenceModeChangedListener");
+  const listenerStart = rendererSource.indexOf("function applyAutomaticSituation");
   const listenerEnd = rendererSource.indexOf("const removeActionTriggerListener", listenerStart);
   const listenerSource = rendererSource.slice(listenerStart, listenerEnd);
 
   assert.match(
     listenerSource,
-    /if \(currentPresenceModeId === "sleep" && modeId !== "sleep"\) \{\s*interactionActionPlayer\.interruptActiveMotionAction\(\);\s*\}/
+    /if \(currentPresenceModeId === "sleep" && snapshot\.presenceStateId !== "sleep"\) \{\s*interactionActionPlayer\.interruptActiveMotionAction\(\);\s*\}/
   );
   const interruptIndex = listenerSource.indexOf("interruptActiveMotionAction");
-  const updateIndex = listenerSource.indexOf("currentPresenceModeId = modeId");
+  const updateIndex = listenerSource.indexOf("currentPresenceModeId = snapshot.presenceStateId");
   assert.equal(
     interruptIndex >= 0 && interruptIndex < updateIndex,
     true,
@@ -2139,13 +2141,13 @@ test("pet renderer interrupts an active sleep motion before applying a non-sleep
 
 test("pet renderer interrupts active Motion3 when entering sleep", async () => {
   const rendererSource = await readFile(new URL("../src/renderer/pet/main.ts", import.meta.url), "utf8");
-  const listenerStart = rendererSource.indexOf("const removePresenceModeChangedListener");
+  const listenerStart = rendererSource.indexOf("function applyAutomaticSituation");
   const listenerEnd = rendererSource.indexOf("const removeActionTriggerListener", listenerStart);
   const listenerSource = rendererSource.slice(listenerStart, listenerEnd);
 
   assert.match(
     listenerSource,
-    /if \(modeId === "sleep"\) \{\s*interactionActionPlayer\.interruptActiveMotionAction\(\);/
+    /if \(snapshot\.presenceStateId === "sleep"\) \{\s*interactionActionPlayer\.interruptActiveMotionAction\(\);/
   );
 });
 
@@ -2164,8 +2166,8 @@ test("main emits chat_opened only for a hidden-to-visible transition", async () 
 
 test("main schedules state_idle for the real sleep-to-default presence transition", async () => {
   const appSource = await readFile(new URL("../src/main/app.ts", import.meta.url), "utf8");
-  const handlerStart = appSource.indexOf('ipcMain.handle("presenceMode:set"');
-  const handlerEnd = appSource.indexOf('ipcMain.handle("proactiveCompanion:get-settings"', handlerStart);
+  const handlerStart = appSource.indexOf("function applyAutomaticSituationSnapshot");
+  const handlerEnd = appSource.indexOf("function cancelPendingModeActionStateTrigger", handlerStart);
   const handlerSource = appSource.slice(handlerStart, handlerEnd);
 
   assert.match(
@@ -2174,7 +2176,7 @@ test("main schedules state_idle for the real sleep-to-default presence transitio
   );
   assert.match(
     handlerSource,
-    /presenceActionState\.stateId !== "idle"[\s\S]*previousModeId === "sleep"[\s\S]*currentPresenceModeId === "default"[\s\S]*schedulePetModeActionStateTrigger\(presenceActionState\.triggerReason\)/
+    /actionState\.stateId !== "idle"[\s\S]*previousPresenceStateId === "sleep" && currentPresenceModeId === "default"[\s\S]*schedulePetModeActionStateTrigger\(actionState\.triggerReason\)/
   );
 });
 

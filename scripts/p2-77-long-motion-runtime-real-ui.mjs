@@ -9,7 +9,6 @@ import {
   createRealUiRunContext,
   evaluate,
   findScreenshotResidue,
-  setPresenceMode,
   sleep,
   startElectron,
   stopElectron,
@@ -59,9 +58,7 @@ export const P2_77_PRODUCTION_MOTION_CASES = [
 
 export const P2_77_REAL_UI_CASES = P2_77_PRODUCTION_MOTION_CASES.filter((item) => [
   "appearance",
-  "softSmile",
   "flusteredGlance",
-  "doze",
   "headPat",
   "bodyAttentionTurn",
   "dialogueOpenWelcome",
@@ -70,6 +67,8 @@ export const P2_77_REAL_UI_CASES = P2_77_PRODUCTION_MOTION_CASES.filter((item) =
 ].includes(item.actionType));
 
 export const P2_77_POLICY_ONLY_CASES = P2_77_PRODUCTION_MOTION_CASES.filter((item) => [
+  "softSmile",
+  "doze",
   "musicListenSway",
   "gamePresenceGlance",
   "returnFromIdle",
@@ -137,6 +136,11 @@ async function main() {
     },
     tmpResiduePatterns: [/^p2-77-long-motion-runtime-real-ui$/i]
   });
+  context.electronArgs = [
+    "--disable-background-timer-throttling",
+    "--disable-backgrounding-occluded-windows",
+    "--disable-renderer-backgrounding"
+  ];
   const startedAt = Date.now();
   const screenshotBaseline = findExternalScreenshotResidue(context);
   const realUiCases = [];
@@ -185,12 +189,19 @@ async function main() {
     await connectToElectron(context, 40_000);
     const pet = await waitForWindow(context, "renderer/pet/index.html", 30_000);
     await waitFor(pet, "Boolean(window.petApi && document.querySelector('#pet-canvas'))", { timeoutMs: 20_000 });
+    await bringPageToFront(pet);
 
     realUiCases.push(await observeExistingLifecycle(context, P2_77_REAL_UI_CASES[0], -1));
     await settleGlobalActionCooldown();
-    realUiCases.push(await observeTriggeredLifecycle(context, P2_77_REAL_UI_CASES.find((item) => item.actionType === "headPat"), () => clickPet(pet, "head")));
+    realUiCases.push(await observeTriggeredLifecycle(context, P2_77_REAL_UI_CASES.find((item) => item.actionType === "headPat"), async () => {
+      await bringPageToFront(pet);
+      await clickPet(pet, "head");
+    }));
     await settleGlobalActionCooldown();
-    realUiCases.push(await observeTriggeredLifecycle(context, P2_77_REAL_UI_CASES.find((item) => item.actionType === "bodyAttentionTurn"), () => clickPet(pet, "body")));
+    realUiCases.push(await observeTriggeredLifecycle(context, P2_77_REAL_UI_CASES.find((item) => item.actionType === "bodyAttentionTurn"), async () => {
+      await bringPageToFront(pet);
+      await clickPet(pet, "body");
+    }));
 
     await settleGlobalActionCooldown();
     const welcomeCase = P2_77_REAL_UI_CASES.find((item) => item.actionType === "dialogueOpenWelcome");
@@ -198,25 +209,25 @@ async function main() {
     await evaluate(pet, "window.petApi?.openChat()");
     const chat = await waitForWindow(context, "renderer/chat/index.html", 20_000);
     await waitFor(chat, "Boolean(document.querySelector('#chat-page') && document.querySelector('#chat-input'))", { timeoutMs: 15_000 });
+    await bringPageToFront(pet);
     await waitFor(chat, "window.webSearchApi.getStatus().then((status) => status.enabled === true && status.commandName === 'bundled-baidu-search' && status.toolName === 'search')", {
       timeoutMs: 5_000
     });
     realUiCases.push(await captureLifecycle(context, welcomeCase, welcomeStartIndex));
 
     await sleep(550);
-    await observeNonMotionAction(context, "listen", "chat_input_focus", () => evaluate(chat, `
-      (() => {
-        const input = document.querySelector("#chat-input");
-        if (!input) throw new Error("missing-chat-input");
-        input.blur();
-        input.focus();
-        return true;
-      })()
-    `));
+    await observeNonMotionAction(context, "listen", "chat_input_focus", async () => {
+      await evaluate(chat, "document.querySelector('#chat-input')?.blur()");
+      await sleep(250);
+      await evaluate(chat, "document.querySelector('#chat-input')?.focus()");
+    });
     realUiCases.push(await observeTriggeredLifecycle(
       context,
       P2_77_REAL_UI_CASES.find((item) => item.actionType === "replyWarmSettle"),
-      () => submitChatTurn(chat, "请说明你的身份和人设，并用完整的一段话回答。")
+      async () => {
+        await submitChatTurn(chat, "请说明你的身份和人设，并用完整的一段话回答。");
+        await bringPageToFront(pet);
+      }
     ));
     await waitForChatSettled(chat);
 
@@ -227,7 +238,10 @@ async function main() {
       const searchLifecycle = await observeTriggeredLifecycle(
         context,
         searchCase,
-        () => submitChatTurn(chat, "请联网搜索一条用于动作验收的公开资料。")
+        async () => {
+          await submitChatTurn(chat, "请联网搜索一条用于动作验收的公开资料。");
+          await bringPageToFront(pet);
+        }
       );
       await waitForChatSettled(chat);
       await waitFor(chat, `document.querySelectorAll('.message-pet .message-citations').length > ${beforeCitationCount}`, {
@@ -275,24 +289,14 @@ async function main() {
       });
     }
 
-    await settleGlobalActionCooldown();
-    realUiCases.push(await observeTriggeredLifecycle(
-      context,
-      P2_77_REAL_UI_CASES.find((item) => item.actionType === "doze"),
-      () => setPresenceMode(chat, "sleep")
-    ));
-    await settleGlobalActionCooldown();
-    realUiCases.push(await observeTriggeredLifecycle(
-      context,
-      P2_77_REAL_UI_CASES.find((item) => item.actionType === "softSmile"),
-      () => setPresenceMode(chat, "default")
-    ));
-
     await sleep(550);
     realUiCases.push(await observeTriggeredLifecycle(
       context,
       P2_77_REAL_UI_CASES.find((item) => item.actionType === "flusteredGlance"),
-      () => clickPetRapidly(pet)
+      async () => {
+        await bringPageToFront(pet);
+        await clickPetRapidly(pet);
+      }
     ));
 
     telemetrySafety = evaluateTelemetrySafety(readTelemetryEvents(context));
@@ -594,6 +598,10 @@ function createPointerSequenceExpression(yRatio, firstPointerId, count) {
       return true;
     })()
   `;
+}
+
+function bringPageToFront(page) {
+  return page.cdp.send("Page.bringToFront");
 }
 
 async function submitChatTurn(chat, prompt) {

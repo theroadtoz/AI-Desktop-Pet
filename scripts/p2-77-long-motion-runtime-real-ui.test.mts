@@ -19,9 +19,11 @@ function event(index: number, type: string, payload: Record<string, unknown>) {
 test("P2-77 runner partitions all 14 production motions into real-UI and policy-only evidence", () => {
   assert.equal(P2_77_PRODUCTION_MOTION_CASES.length, 14);
   assert.equal(new Set(P2_77_PRODUCTION_MOTION_CASES.map((item) => item.motionPresetId)).size, 14);
-  assert.equal(P2_77_REAL_UI_CASES.length, 9);
-  assert.equal(P2_77_POLICY_ONLY_CASES.length, 5);
+  assert.equal(P2_77_REAL_UI_CASES.length, 7);
+  assert.equal(P2_77_POLICY_ONLY_CASES.length, 7);
   assert.deepEqual(P2_77_POLICY_ONLY_CASES.map((item) => item.actionType), [
+    "softSmile",
+    "doze",
     "musicListenSway",
     "gamePresenceGlance",
     "returnFromIdle",
@@ -123,6 +125,10 @@ test("telemetry safety rejects renderer failures, unsafe motion terminals, and r
 test("runner uses production Electron and fixed production surfaces without an arbitrary action payload entry", () => {
   assert.match(runnerSource, /from "\.\/support\/real-ui-harness\.mjs"/u);
   assert.match(runnerSource, /startElectron\(context\)/u);
+  assert.match(runnerSource, /--disable-background-timer-throttling/u);
+  assert.match(runnerSource, /--disable-backgrounding-occluded-windows/u);
+  assert.match(runnerSource, /--disable-renderer-backgrounding/u);
+  assert.match(runnerSource, /Page\.bringToFront/u);
   assert.match(runnerSource, /clickPet\(pet, "head"\)/u);
   assert.match(runnerSource, /clickPet\(pet, "body"\)/u);
   assert.match(runnerSource, /settleGlobalActionCooldown\(\)/u);
@@ -135,11 +141,14 @@ test("runner uses production Electron and fixed production surfaces without an a
   assert.match(runnerSource, /toolCallCount/u);
   assert.match(runnerSource, /bundledFixtureRestored/u);
   assert.match(runnerSource, /simulatedPolicyOnly: true/u);
+  assert.match(runnerSource, /"softSmile"/u);
+  assert.match(runnerSource, /"doze"/u);
   assert.match(runnerSource, /realOsStateClaimed: false/u);
   assert.match(runnerSource, /realLongWaitClaimed: false/u);
   assert.match(runnerSource, /coverageGaps/u);
   assert.match(runnerSource, /fakeMcpEvidence/u);
   assert.doesNotMatch(runnerSource, /webSearchApi\.setSettings/u);
+  assert.doesNotMatch(runnerSource, /set(?:Dialogue|Presence)Mode\(/u);
   assert.doesNotMatch(runnerSource, /ipcRenderer|pet:action-trigger|playAction\(|dispatchAction|actionPayload/u);
   assert.doesNotMatch(runnerSource, /npm(?:\.cmd)?\s+run\s+verify|p2-11g-real-ui-regression-runner/u);
 });

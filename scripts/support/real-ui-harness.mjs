@@ -176,7 +176,11 @@ function asCdp(page) {
 export function startElectron(context) {
   const electronExe = join(root, "node_modules", "electron", "dist", "electron.exe");
   const electronCmd = existsSync(electronExe) ? electronExe : join(root, "node_modules", ".bin", "electron.cmd");
-  const child = spawn(electronCmd, [".", `--remote-debugging-port=${context.port}`], {
+  const child = spawn(electronCmd, [
+    ".",
+    `--remote-debugging-port=${context.port}`,
+    ...(context.electronArgs ?? [])
+  ], {
     cwd: root,
     env: {
       ...process.env,
@@ -313,10 +317,6 @@ export const chatUiSelectors = {
     save: "#save-user-profile-button",
     summary: "#user-profile-summary"
   },
-  modes: {
-    dialogueControls: "#dialogue-mode-controls",
-    presenceControls: "#presence-mode-controls"
-  },
   model: {
     providerId: "#provider-id",
     localPreset: "#local-provider-preset",
@@ -414,15 +414,27 @@ export async function openChatPage(page) {
 }
 
 export async function setDialogueMode(page, modeId) {
-  await openSettingsPage(page, "basic");
-  await click(page, `${chatUiSelectors.modes.dialogueControls} .mode-button[data-mode-id="${modeId}"]`);
-  await waitFor(page, `document.querySelector('${chatUiSelectors.modes.dialogueControls} .mode-button.is-active')?.dataset.modeId === ${JSON.stringify(modeId)}`);
+  const changed = await evaluate(page, `(async () => {
+    const api = window.dialogueModeApi;
+    if (!api?.setMode) return false;
+    await api.setMode(${JSON.stringify(modeId)});
+    return true;
+  })()`);
+  if (!changed && modeId !== "default") {
+    throw new Error(`legacy dialogue mode override unavailable: ${modeId}`);
+  }
 }
 
 export async function setPresenceMode(page, modeId) {
-  await openSettingsPage(page, "basic");
-  await click(page, `${chatUiSelectors.modes.presenceControls} .mode-button[data-mode-id="${modeId}"]`);
-  await waitFor(page, `document.querySelector('${chatUiSelectors.modes.presenceControls} .mode-button.is-active')?.dataset.modeId === ${JSON.stringify(modeId)}`);
+  const changed = await evaluate(page, `(async () => {
+    const api = window.presenceModeApi;
+    if (!api?.setMode) return false;
+    await api.setMode(${JSON.stringify(modeId)});
+    return true;
+  })()`);
+  if (!changed && modeId !== "default") {
+    throw new Error(`legacy presence mode override unavailable: ${modeId}`);
+  }
 }
 
 export async function saveWelcomeProfile(page, profile) {

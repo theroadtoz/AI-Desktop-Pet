@@ -188,7 +188,7 @@ async function openChat() {
   await sleep(800);
   await evaluate(pet.cdp, "window.petApi?.openChat()");
   const chat = await connectTarget("renderer/chat/index.html");
-  await waitFor(chat.cdp, "document.querySelector('#provider-status')?.textContent.includes('Fake Provider')");
+  await waitFor(chat.cdp, "(document.querySelector('#provider-status')?.textContent ?? '') !== '正在读取模型状态...'");
   return { pet, chat };
 }
 
@@ -219,11 +219,6 @@ async function saveWelcomeProfile(cdp) {
     })()
   `);
   await waitFor(cdp, "document.querySelector('#user-welcome-panel')?.hidden === true");
-}
-
-async function setMode(cdp, modeId) {
-  await click(cdp, `.mode-button[data-mode-id="${modeId}"]`);
-  await waitFor(cdp, `document.querySelector('#dialogue-mode-controls .mode-button.is-active')?.dataset.modeId === ${JSON.stringify(modeId)}`);
 }
 
 async function sendMessage(cdp, message, abort = false) {
@@ -269,7 +264,6 @@ async function checkLayout(cdp, width, height) {
         ".chat-shell",
         ".subpage-nav",
         ".partner-status-band",
-        "#dialogue-mode-controls",
         "#chat-session-note",
         "#messages",
         "#chat-form",
@@ -385,12 +379,9 @@ async function main() {
         document.querySelector("#partner-status")?.textContent.includes("馆长"))()
     `);
 
-    for (const modeId of ["work", "game", "reading", "default"]) {
-      await setMode(chat, modeId);
-    }
-    checks.modeSwitchSyncsRibbon = await evaluate(chat, `
-      (() => document.querySelector("#partner-status")?.textContent.includes("默认陪伴") &&
-        document.querySelector("#dialogue-mode-controls .mode-button.is-active")?.dataset.modeId === "default")()
+    checks.manualModeControlsAbsent = await evaluate(chat, `
+      !document.body.textContent.includes("对话模式") &&
+        !document.body.textContent.includes("存在模式")
     `);
 
     await click(chat, "#settings-button");

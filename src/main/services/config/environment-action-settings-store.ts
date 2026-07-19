@@ -3,9 +3,10 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
   cloneEnvironmentActionSettings,
-  DEFAULT_ENVIRONMENT_ACTION_SETTINGS,
-  normalizeEnvironmentActionSettings,
-  type EnvironmentActionSettings
+  createEnvironmentActionSettingsRecord,
+  resolveEnvironmentActionSettingsRecord,
+  type EnvironmentActionSettings,
+  type EnvironmentActionSettingsSelection
 } from "../../../shared/environment-action-settings";
 
 export type EnvironmentActionSettingsStore = {
@@ -23,12 +24,18 @@ export function createEnvironmentActionSettingsStore(
   const userDataPath = options.userDataPath ?? app.getPath("userData");
   const settingsPath = join(userDataPath, "config", "environment-action-settings.json");
   const runtimeStatePath = join(userDataPath, "config", "environment-action-runtime-state.json");
-  let settings = normalizeEnvironmentActionSettings(readSettingsFile(settingsPath));
+  const loadedSettings = resolveEnvironmentActionSettingsRecord(readSettingsFile(settingsPath));
+  let settings = loadedSettings.settings;
+  let userSelected = loadedSettings.userSelected;
   let eveningDateKey = readEveningDateKey(runtimeStatePath);
 
   function save(): void {
     mkdirSync(dirname(settingsPath), { recursive: true });
-    writeFileSync(settingsPath, `${JSON.stringify(settings, null, 2)}\n`, "utf8");
+    writeFileSync(
+      settingsPath,
+      `${JSON.stringify(createEnvironmentActionSettingsRecord(settings, userSelected), null, 2)}\n`,
+      "utf8"
+    );
   }
 
   return {
@@ -36,7 +43,9 @@ export function createEnvironmentActionSettingsStore(
       return cloneEnvironmentActionSettings(settings);
     },
     saveSettings(update) {
-      settings = mergeSettingsUpdate(settings, update);
+      const merged = mergeSettingsUpdate(settings, userSelected, update);
+      settings = merged.settings;
+      userSelected = merged.userSelected;
       save();
       return cloneEnvironmentActionSettings(settings);
     },
@@ -83,31 +92,45 @@ function isLocalDateKey(value: string): boolean {
 
 function readSettingsFile(settingsPath: string): unknown {
   if (!existsSync(settingsPath)) {
-    return DEFAULT_ENVIRONMENT_ACTION_SETTINGS;
+    return null;
   }
 
   try {
     return JSON.parse(readFileSync(settingsPath, "utf8")) as unknown;
   } catch {
-    return DEFAULT_ENVIRONMENT_ACTION_SETTINGS;
+    return null;
   }
 }
 
 function mergeSettingsUpdate(
   current: EnvironmentActionSettings,
+  currentUserSelected: EnvironmentActionSettingsSelection,
   update: unknown
-): EnvironmentActionSettings {
+): { settings: EnvironmentActionSettings; userSelected: EnvironmentActionSettingsSelection } {
   if (!update || typeof update !== "object") {
-    return cloneEnvironmentActionSettings(current);
+    return {
+      settings: cloneEnvironmentActionSettings(current),
+      userSelected: { ...currentUserSelected }
+    };
   }
 
   const input = update as Partial<EnvironmentActionSettings>;
   return {
-    musicEnabled: typeof input.musicEnabled === "boolean"
-      ? input.musicEnabled
-      : current.musicEnabled,
-    gameEnabled: typeof input.gameEnabled === "boolean"
-      ? input.gameEnabled
-      : current.gameEnabled
+    settings: {
+      musicEnabled: typeof input.musicEnabled === "boolean"
+        ? input.musicEnabled
+        : current.musicEnabled,
+      gameEnabled: typeof input.gameEnabled === "boolean"
+        ? input.gameEnabled
+        : current.gameEnabled
+    },
+    userSelected: {
+      musicEnabled: typeof input.musicEnabled === "boolean"
+        ? true
+        : currentUserSelected.musicEnabled,
+      gameEnabled: typeof input.gameEnabled === "boolean"
+        ? true
+        : currentUserSelected.gameEnabled
+    }
   };
 }

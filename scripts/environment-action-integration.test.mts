@@ -9,11 +9,15 @@ test("environment action IPC and basic-page controls use closed settings only", 
     readFile("src/renderer/chat/index.html", "utf8")
   ]);
   assert.match(appSource, /environmentActions:get-settings/);
+  assert.match(appSource, /environmentActions:get-status/);
   assert.match(appSource, /environmentActions:set-settings/);
   assert.match(appSource, /powerMonitor\.on\("resume", handleSystemResume\)/);
   assert.match(appSource, /desktopContextMonitor\.resetStability\(\)/);
   assert.match(appSource, /powerMonitor\.removeListener\("resume", handleSystemResume\)/);
   assert.match(preloadSource, /environmentActionApi/);
+  assert.match(preloadSource, /DEFAULT_ENVIRONMENT_ACTION_SETTINGS/);
+  assert.match(preloadSource, /environmentActions:get-status/);
+  assert.doesNotMatch(preloadSource, /mediaPlaying|gamePresence/);
   assert.match(html, /id="settings-basic-page"[\s\S]*id="environment-action-settings-title"/);
   assert.match(html, /id="environment-music-enabled"/);
   assert.match(html, /id="environment-game-enabled"/);

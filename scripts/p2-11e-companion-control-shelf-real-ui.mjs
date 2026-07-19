@@ -14,7 +14,6 @@ import {
   openAppearanceSettings,
   readPrivacyCheckText,
   saveWelcomeProfile as saveWelcomeProfileWithHarness,
-  setDialogueMode,
   sleep,
   startElectron,
   stopElectron,
@@ -63,7 +62,7 @@ async function openChat() {
   await sleep(800);
   await evaluate(pet, "window.petApi?.openChat()");
   const chat = await getPageByUrlPart(context, "renderer/chat/index.html");
-  await waitFor(chat, "document.querySelector('#provider-status')?.textContent.includes('Fake Provider')");
+  await waitFor(chat, "(document.querySelector('#provider-status')?.textContent ?? '') !== '正在读取模型状态...'");
   return { pet, chat };
 }
 
@@ -72,10 +71,6 @@ async function saveWelcomeProfile(page) {
     displayName: "P2-11E 验收用户",
     preferredName: "领长"
   });
-}
-
-async function setMode(cdp, modeId) {
-  await setDialogueMode(cdp, modeId);
 }
 
 async function readAccessoryEntryState(page) {
@@ -200,10 +195,9 @@ async function runFirstSession(checks) {
       )
     `);
 
-    await setMode(chat, "reading");
-    checks.modeSyncsShelfAndRibbon = await evaluate(chat, `
-      document.querySelector("#partner-status")?.textContent.includes("读书模式") &&
-        document.querySelector("#dialogue-mode-controls .mode-button.is-active")?.dataset.modeId === "reading"
+    checks.manualModeControlsAbsent = await evaluate(chat, `
+      !document.body.textContent.includes("对话模式") &&
+        !document.body.textContent.includes("存在模式")
     `);
 
     await openAppearanceSettings(chat);

@@ -10,8 +10,21 @@ export type DesktopContextSnapshot = {
   gamePresence: GamePresence;
 };
 
+export type DesktopContextCapability = "available" | "unavailable";
+
+export type DesktopContextProbeStatus = "available" | "unavailable" | "failed";
+
+export type DesktopContextProbeResult = {
+  status: DesktopContextProbeStatus;
+  snapshot: DesktopContextSnapshot;
+  capabilities: {
+    media: DesktopContextCapability;
+    game: DesktopContextCapability;
+  };
+};
+
 export type DesktopContextProvider = {
-  sample(): Promise<DesktopContextSnapshot>;
+  sample(): Promise<DesktopContextProbeResult>;
   cancelPending(): void;
   dispose(): void;
 };
@@ -27,11 +40,17 @@ export const UNKNOWN_DESKTOP_CONTEXT_SNAPSHOT: DesktopContextSnapshot = Object.f
   gamePresence: "unknown"
 });
 
+export const UNAVAILABLE_DESKTOP_CONTEXT_PROBE: DesktopContextProbeResult = Object.freeze({
+  status: "unavailable",
+  snapshot: UNKNOWN_DESKTOP_CONTEXT_SNAPSHOT,
+  capabilities: Object.freeze({ media: "unavailable", game: "unavailable" })
+});
+
 const WINDOWS_DESKTOP_CONTEXT_SCRIPT = String.raw`
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 $mediaPlaying = $false
-$gamePresence = 'unknown'
+$mediaCapability = 'unavailable'
 
 try {
   Add-Type -AssemblyName System.Runtime.WindowsRuntime
@@ -43,6 +62,7 @@ try {
   $closedMethod = $asTaskMethod.MakeGenericMethod([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager])
   $task = $closedMethod.Invoke($null, @($operation))
   if ($task.Wait(3000)) {
+    $mediaCapability = 'available'
     foreach ($session in $task.Result.GetSessions()) {
       if ($session.GetPlaybackInfo().PlaybackStatus.ToString() -eq 'Playing') {
         $mediaPlaying = $true
@@ -54,32 +74,11 @@ try {
   $mediaPlaying = $false
 }
 
-try {
-  $registeredGamePaths = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-  foreach ($entry in Get-ChildItem 'HKCU:\System\GameConfigStore\Children' -ErrorAction Stop) {
-    $item = Get-ItemProperty $entry.PSPath -ErrorAction SilentlyContinue
-    if ($null -ne $item -and $item.Type -eq 1 -and -not [string]::IsNullOrWhiteSpace($item.MatchedExeFullPath)) {
-      [void]$registeredGamePaths.Add($item.MatchedExeFullPath)
-    }
-  }
-
-  $gamePresence = 'non-game'
-  foreach ($process in Get-Process -ErrorAction Stop) {
-    try {
-      if ($registeredGamePaths.Contains($process.Path)) {
-        $gamePresence = 'game'
-        break
-      }
-    } catch {
-    }
-  }
-} catch {
-  $gamePresence = 'unknown'
-}
-
 [Console]::Out.Write((ConvertTo-Json @{
   mediaPlaying = $mediaPlaying
-  gamePresence = $gamePresence
+  gamePresence = 'unknown'
+  mediaCapability = $mediaCapability
+  gameCapability = 'unavailable'
 } -Compress))
 `;
 
@@ -91,12 +90,12 @@ export function createWindowsDesktopContextProvider({
   commandRunner?: DesktopContextCommandRunner;
 } = {}): DesktopContextProvider {
   let disposed = false;
-  let inFlight: Promise<DesktopContextSnapshot> | null = null;
+  let inFlight: Promise<DesktopContextProbeResult> | null = null;
 
   return {
     sample() {
       if (disposed || platform !== "win32") {
-        return Promise.resolve({ ...UNKNOWN_DESKTOP_CONTEXT_SNAPSHOT });
+        return Promise.resolve({ ...UNAVAILABLE_DESKTOP_CONTEXT_PROBE });
       }
 
       if (inFlight) {
@@ -104,8 +103,8 @@ export function createWindowsDesktopContextProvider({
       }
 
       const request = commandRunner.execute()
-        .then(parseDesktopContextSnapshot)
-        .catch(() => ({ ...UNKNOWN_DESKTOP_CONTEXT_SNAPSHOT }))
+        .then(parseDesktopContextProbeResult)
+        .catch(() => createFailedDesktopContextProbe())
         .finally(() => {
           if (inFlight === request) {
             inFlight = null;
@@ -187,23 +186,54 @@ export function resolvePowerShellExecutablePath(systemRoot = process.env.SystemR
   return win32.join(root, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
 }
 
-export function parseDesktopContextSnapshot(value: string): DesktopContextSnapshot {
+export function parseDesktopContextProbeResult(value: string): DesktopContextProbeResult {
   try {
-    const parsed = JSON.parse(value.trim()) as Partial<DesktopContextSnapshot> | null;
+    const parsed = JSON.parse(value.trim()) as (Partial<DesktopContextSnapshot> & {
+      mediaCapability?: unknown;
+      gameCapability?: unknown;
+    }) | null;
     if (
       !parsed ||
-      Object.keys(parsed).some((key) => key !== "mediaPlaying" && key !== "gamePresence") ||
+      Object.keys(parsed).some((key) => (
+        key !== "mediaPlaying" &&
+        key !== "gamePresence" &&
+        key !== "mediaCapability" &&
+        key !== "gameCapability"
+      )) ||
       typeof parsed.mediaPlaying !== "boolean" ||
-      !GAME_PRESENCE_VALUES.includes(parsed.gamePresence as GamePresence)
+      !GAME_PRESENCE_VALUES.includes(parsed.gamePresence as GamePresence) ||
+      !isDesktopContextCapability(parsed.mediaCapability) ||
+      !isDesktopContextCapability(parsed.gameCapability) ||
+      parsed.gamePresence !== "unknown" ||
+      parsed.gameCapability !== "unavailable"
     ) {
-      return { ...UNKNOWN_DESKTOP_CONTEXT_SNAPSHOT };
+      return createFailedDesktopContextProbe();
     }
 
     return {
-      mediaPlaying: parsed.mediaPlaying,
-      gamePresence: parsed.gamePresence as GamePresence
+      status: "available",
+      snapshot: {
+        mediaPlaying: parsed.mediaPlaying,
+        gamePresence: parsed.gamePresence as GamePresence
+      },
+      capabilities: {
+        media: parsed.mediaCapability,
+        game: parsed.gameCapability
+      }
     };
   } catch {
-    return { ...UNKNOWN_DESKTOP_CONTEXT_SNAPSHOT };
+    return createFailedDesktopContextProbe();
   }
+}
+
+function isDesktopContextCapability(value: unknown): value is DesktopContextCapability {
+  return value === "available" || value === "unavailable";
+}
+
+function createFailedDesktopContextProbe(): DesktopContextProbeResult {
+  return {
+    status: "failed",
+    snapshot: { ...UNKNOWN_DESKTOP_CONTEXT_SNAPSHOT },
+    capabilities: { media: "unavailable", game: "unavailable" }
+  };
 }

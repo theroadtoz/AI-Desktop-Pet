@@ -190,7 +190,7 @@ async function openChat() {
   await sleep(800);
   await evaluate(pet.cdp, "window.petApi?.openChat()");
   const chat = await connectTarget("renderer/chat/index.html");
-  await waitFor(chat.cdp, "document.querySelector('#provider-status')?.textContent.includes('Fake Provider')");
+  await waitFor(chat.cdp, "(document.querySelector('#provider-status')?.textContent ?? '') !== '正在读取模型状态...'");
   return { pet, chat };
 }
 
@@ -223,11 +223,6 @@ async function saveWelcomeProfile(cdp) {
   await waitFor(cdp, "document.querySelector('#user-welcome-panel')?.hidden === true");
 }
 
-async function setMode(cdp, modeId) {
-  await click(cdp, `#dialogue-mode-controls .mode-button[data-mode-id="${modeId}"]`);
-  await waitFor(cdp, `document.querySelector('#dialogue-mode-controls .mode-button.is-active')?.dataset.modeId === ${JSON.stringify(modeId)}`);
-}
-
 async function sendMessage(cdp, message) {
   const before = await evaluate(cdp, "document.querySelectorAll('.message-pet').length");
   await evaluate(cdp, `
@@ -248,7 +243,7 @@ async function sendMessage(cdp, message) {
   `);
 }
 
-async function checkNarrowModeLayout(cdp) {
+async function checkNarrowChatLayout(cdp) {
   await cdp.send("Emulation.setDeviceMetricsOverride", {
     width: 360,
     height: 720,
@@ -268,20 +263,15 @@ async function checkNarrowModeLayout(cdp) {
         const rect = node.getBoundingClientRect();
         return rect.left >= -1 && rect.right <= window.innerWidth + 1 && rect.width > 0 && rect.height > 0;
       };
-      document.querySelector("#settings-button").click();
-      document.querySelector("#settings-basic-tab").click();
-      const controls = document.querySelector("#dialogue-mode-controls");
-      const buttons = [...document.querySelectorAll("#dialogue-mode-controls .mode-button")];
-      const checkedNodes = [
-        controls,
-        ...buttons
-      ];
-      return buttons.length === 4 &&
-        checkedNodes.every(withinViewport);
+      return [
+        document.querySelector(".chat-shell"),
+        document.querySelector("#messages"),
+        document.querySelector("#chat-form"),
+        document.querySelector("#chat-input"),
+        document.querySelector("#send-button")
+      ].every(withinViewport);
     })()
   `);
-  await evaluate(cdp, "document.querySelector('#settings-close-button')?.click()");
-  await waitFor(cdp, "document.querySelector('#chat-page')?.hidden === false", 5_000);
   await cdp.send("Emulation.clearDeviceMetricsOverride");
   await sleep(150);
   return ok;
@@ -451,25 +441,6 @@ export function isModeActionStarted(event, { modeId, actionTypes, reasons }) {
   );
 }
 
-async function switchModeAndWaitForStateAction(chat, modeId, actionType, reason) {
-  const afterIndex = lastTelemetryIndex();
-  await setMode(chat, modeId);
-  const started = await waitForTelemetryEvent((event) => (
-    isModeActionStarted(event, {
-      modeId,
-      actionTypes: [actionType],
-      reasons: [reason]
-    })
-  ), 5_000, afterIndex);
-
-  if (!started) {
-    return null;
-  }
-
-  const finished = await waitForActionFinished(started, 8_000);
-  return finished ? { started, finished } : null;
-}
-
 async function clickPet(cdp, randomValue, hitArea = "body") {
   await evaluate(cdp, `Math.random = () => ${randomValue}`);
   await evaluate(cdp, `
@@ -612,30 +583,19 @@ async function main() {
     const chat = handles.chat.cdp;
     await saveWelcomeProfile(chat);
 
-    // P2-77 startup and welcome motions are long enough to overlap the first
-    // mode switch. Let them settle so this runner measures mode scheduling.
+    // P2-77 startup and welcome motions can overlap initial chat readiness.
     await sleep(6_500);
 
-    checks.initialDefaultMode = await evaluate(chat, "document.querySelector('#partner-status')?.textContent.includes('默认陪伴')");
-    checks.modeButtonsVisible = await evaluate(chat, "document.querySelectorAll('#dialogue-mode-controls .mode-button').length === 4");
-
-    const workAction = await switchModeAndWaitForStateAction(chat, "work", "workFocus", "state_work");
-    checks.workModeVisible = await evaluate(chat, "document.querySelector('#partner-status')?.textContent.includes('工作')");
-    checks.workModePetActionCanTriggerFocus = Boolean(workAction);
-    const workReply = await sendMessage(chat, `${userSentinel} 工作模式回复`);
-    checks.workReplyDiffers = isExpectedModeReply("work", workReply.at(-1));
-
-    const gameAction = await switchModeAndWaitForStateAction(chat, "game", "gameReady", "state_game");
-    checks.gameModeVisible = await evaluate(chat, "document.querySelector('#partner-status')?.textContent.includes('游戏')");
-    checks.gameModePetActionPrefersPlayGame = Boolean(gameAction);
-    const gameReply = await sendMessage(chat, "游戏模式回复");
-    checks.gameReplyDiffers = isExpectedModeReply("game", gameReply.at(-1));
-
-    const readingAction = await switchModeAndWaitForStateAction(chat, "reading", "readingIdle", "state_read");
-    checks.readingModeVisible = await evaluate(chat, "document.querySelector('#partner-status')?.textContent.includes('读书')");
-    checks.readingModePetActionPrefersReading = Boolean(readingAction);
-    const readingReply = await sendMessage(chat, "读书模式回复");
-    checks.readingReplyDiffers = isExpectedModeReply("reading", readingReply.at(-1));
+    checks.manualModeControlsAbsent = await evaluate(chat, `
+      ![...document.querySelectorAll("button, input, select")]
+        .some((node) => /对话模式|存在模式/.test(node.textContent ?? ""))
+    `);
+    checks.automaticSituationIsReadOnly = await evaluate(handles.pet.cdp, `
+      typeof window.petApi?.getAutomaticSituation === "function" &&
+        typeof window.petApi?.getAutomaticSituation().then === "function"
+    `);
+    const replies = await sendMessage(chat, `${userSentinel} 请帮我完成今天的开发任务。`);
+    checks.replyDoesNotLeakSituationLabels = !/\b(default|work|game|reading|focus|quiet|sleep)\b/i.test(replies.at(-1) ?? "");
 
     checks.memoryBoundary = await evaluate(chat, `
       (async () => {
@@ -666,7 +626,7 @@ async function main() {
       })()
     `);
 
-    checks.narrowModeLayout = await checkNarrowModeLayout(chat);
+    checks.narrowChatLayout = await checkNarrowChatLayout(chat);
     checks.chatInputStillWorks = await evaluate(chat, `
       (() => {
         const input = document.querySelector("#chat-input");
@@ -675,13 +635,10 @@ async function main() {
       })()
     `);
 
-    await setMode(chat, "default");
-    checks.defaultModeVisibleAfterSwitch = await evaluate(chat, "document.querySelector('#partner-status')?.textContent.includes('默认陪伴')");
     const defaultHeadCheck = await runHeadCheckAfterBodyAction({
       runBodyAction: () => clickPetUntilTelemetry(handles.pet.cdp, 0.05, (event) => (
         event.type === "pet_interaction_action_started" &&
         event.payload?.reason === "click_body" &&
-        event.payload?.modeId === "default" &&
         event.payload?.selectedActionType === "bodyAttentionTurn" &&
         Array.isArray(event.payload?.candidateActionTypes) &&
         event.payload.candidateActionTypes.length === 1 &&
@@ -696,29 +653,17 @@ async function main() {
     checks.defaultModeFixedBodyAttentionTurn = defaultHeadCheck.bodyActionCompleted;
     actionDiagnostics.headClick = defaultHeadCheck.diagnostic;
     checks.headClickStillTriggersHeadPat = headAction?.type === "pet_interaction_action_started";
-    await setMode(chat, "reading");
-
-    await stopElectron(child, handles);
-    handles = {};
-    child = launchElectron();
-    handles = await openChat();
-    const restartedChat = handles.chat.cdp;
-    checks.restartRestoresMode = await waitFor(restartedChat, "document.querySelector('#dialogue-mode-controls .mode-button.is-active')?.dataset.modeId === 'reading'", 10_000);
-
-    finalSnapshot = await evaluate(restartedChat, `
+    finalSnapshot = await evaluate(chat, `
       (() => ({
         partnerStatus: document.querySelector("#partner-status")?.textContent ?? "",
         providerStatus: document.querySelector("#provider-status")?.textContent ?? "",
-        memoryStatus: document.querySelector("#memory-session-status")?.textContent ?? "",
-        activeMode: document.querySelector("#dialogue-mode-controls .mode-button.is-active")?.textContent ?? ""
+        memoryStatus: document.querySelector("#memory-session-status")?.textContent ?? ""
       }))()
     `);
 
     const telemetry = readTelemetrySummary();
     checks.telemetryPrivacy = telemetry.containsForbiddenText === false;
-    checks.telemetryModeSummary = telemetry.changedEvents.some((event) => (
-      event?.previousModeId === "default" && event?.nextModeId === "work" && event?.reason === "chat_ui"
-    ));
+    checks.telemetryDoesNotClaimManualMode = telemetry.changedEvents.every((event) => event?.reason !== "chat_ui");
     checks.noScreenshotResidue = findScreenshotResidue(root).length === 0;
 
     const result = {

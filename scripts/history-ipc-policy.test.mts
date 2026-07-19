@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 
-test("history, memory, mode and user profile IPC are restricted and expose no file access bridge", async () => {
+test("history, memory, automatic situation and user profile IPC are restricted and expose no file access bridge", async () => {
   const appSource = await readFile(join(process.cwd(), "src", "main", "app.ts"), "utf8");
   const preloadSource = await readFile(join(process.cwd(), "dist", "preload", "chat-preload.js"), "utf8");
 
@@ -16,15 +16,14 @@ test("history, memory, mode and user profile IPC are restricted and expose no fi
   assert.match(appSource, /ipcMain\.handle\("userProfile:get", \(event\) => \{\s+if \(!isChatSender\(event\) \|\| !userProfileStore\)/);
   assert.match(appSource, /ipcMain\.handle\("userProfile:save", \(event, profile: unknown\) => \{\s+if \(!isChatSender\(event\) \|\| !userProfileStore\)/);
   assert.match(appSource, /ipcMain\.handle\("userProfile:clear", \(event\) => \{\s+if \(!isChatSender\(event\) \|\| !userProfileStore\)/);
-  assert.match(appSource, /ipcMain\.handle\("presenceMode:list", \(event\) => \{\s+if \(!isChatSender\(event\)\)/);
-  assert.match(appSource, /ipcMain\.handle\("presenceMode:get", \(event\) => \{\s+if \(!isChatSender\(event\) && !isPetSender\(event\)\)/);
-  assert.match(appSource, /ipcMain\.handle\("presenceMode:set", \(event, modeId: unknown\) => \{\s+if \(!isChatSender\(event\) \|\| !presenceModeStore \|\| !isPresenceModeId\(modeId\)\)/);
+  assert.match(appSource, /ipcMain\.handle\("automaticSituation:get", \(event\) => \{\s+if \(!isPetSender\(event\) \|\| !automaticSituationCoordinator\)/);
+  assert.doesNotMatch(appSource, /ipcMain\.handle\("(?:dialogue|presence)Mode:(?:list|get|set)"/);
   assert.match(appSource, /event\.sender\.send\("chat:context-transparency", createChatContextTransparencyPayload\(\{/);
   assert.match(appSource, /event\.sender\.send\("chat:memory-activity", createChatMemoryActivityPayload\(\{/);
   assert.match(preloadSource, /exposeInMainWorld\("historyApi", historyApi\)/);
   assert.match(preloadSource, /exposeInMainWorld\("memoryApi", memoryApi\)/);
   assert.match(preloadSource, /exposeInMainWorld\("userProfileApi", userProfileApi\)/);
-  assert.match(preloadSource, /exposeInMainWorld\("presenceModeApi", presenceModeApi\)/);
+  assert.doesNotMatch(preloadSource, /exposeInMainWorld\("(?:dialogue|presence)ModeApi"/);
   assert.match(preloadSource, /onContextTransparency\(handler\) \{/);
   assert.match(preloadSource, /ipcRenderer\.on\("chat:context-transparency", listener\)/);
   assert.match(preloadSource, /hasExactKeys\(value, \["requestVersion", "contextBudget", "memory", "webSearch"\]\)/);

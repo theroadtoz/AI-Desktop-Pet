@@ -1,9 +1,7 @@
 import "./styles.css";
 import type { ChatMessage, ChatRole } from "../../shared/chat";
 import type { Conversation, ConversationSummary } from "../../shared/chat-history";
-import type { DialogueModeId, DialogueModeView } from "../../shared/dialogue-style";
 import type { ChatContextTransparencyPayload, ChatMemoryActivityPayload } from "../../shared/ipc-contract";
-import type { PresenceModeId, PresenceModeView } from "../../shared/presence-mode";
 import type { MemoryCard, MemorySummary } from "../../shared/chat-memory";
 import {
   LOCAL_PROVIDER_PRESETS,
@@ -50,6 +48,7 @@ import {
 } from "../../shared/proactive-companion-settings";
 import {
   DEFAULT_ENVIRONMENT_ACTION_SETTINGS,
+  type EnvironmentActionRuntimeStatus,
   type EnvironmentActionSettings
 } from "../../shared/environment-action-settings";
 import {
@@ -74,9 +73,6 @@ import {
   formatHistoryContextPreview,
   formatMemoryActivity,
   formatMemoryRibbon,
-  formatModeLabel,
-  formatPartnerStatus,
-  formatPresenceLabel,
   formatProviderHealthResult,
   formatProviderStatus,
   type ActivityEchoState
@@ -170,8 +166,6 @@ const settingsUserDisplayName = document.querySelector<HTMLInputElement>("#setti
 const settingsUserPreferredName = document.querySelector<HTMLInputElement>("#settings-user-preferred-name");
 const saveUserProfileButton = document.querySelector<HTMLButtonElement>("#save-user-profile-button");
 const clearUserProfileButton = document.querySelector<HTMLButtonElement>("#clear-user-profile-button");
-const settingsDialogueModeSummary = document.querySelector<HTMLElement>("#settings-dialogue-mode-summary");
-const settingsPresenceModeSummary = document.querySelector<HTMLElement>("#settings-presence-mode-summary");
 const proactiveCompanionStatus = document.querySelector<HTMLElement>("#proactive-companion-status");
 const proactiveCadenceControls = document.querySelector<HTMLElement>("#proactive-cadence-controls");
 const proactiveMemorySourceBubbles = document.querySelector<HTMLInputElement>("#proactive-memory-source-bubbles");
@@ -197,8 +191,6 @@ const historyTab = document.querySelector<HTMLButtonElement>("#history-tab");
 const memoryTab = document.querySelector<HTMLButtonElement>("#memory-tab");
 const chatPage = document.querySelector<HTMLElement>("#chat-page");
 const companionControlShelf = document.querySelector<HTMLElement>("#companion-control-shelf");
-const dialogueModeControls = document.querySelector<HTMLElement>("#dialogue-mode-controls");
-const presenceModeControls = document.querySelector<HTMLElement>("#presence-mode-controls");
 const shelfAccessoryButton = document.querySelector<HTMLButtonElement>("#shelf-accessory-button");
 const shelfScaleButton = document.querySelector<HTMLButtonElement>("#shelf-scale-button");
 const shelfLockButton = document.querySelector<HTMLButtonElement>("#shelf-lock-button");
@@ -258,13 +250,13 @@ if (
   !petScaleInput || !petScaleValue || !petAccessoryGroups || !petAccessoryStatus || !savePetScaleButton ||
   !savePetAccessoryButton || !petLockStatus || !togglePetLockButton || !userProfileSummary ||
   !settingsUserDisplayName || !settingsUserPreferredName || !saveUserProfileButton || !clearUserProfileButton ||
-  !settingsDialogueModeSummary || !settingsPresenceModeSummary || !proactiveCompanionStatus || !proactiveCadenceControls ||
+  !proactiveCompanionStatus || !proactiveCadenceControls ||
   !proactiveMemorySourceBubbles || !proactiveSearchSourceBubbles || !saveProactiveCompanionSettingsButton ||
   !environmentActionStatus || !environmentMusicEnabled || !environmentGameEnabled || !saveEnvironmentActionSettingsButton ||
   !shortcutList || !shortcutStatus ||
   !webSearchStatus || !webSearchEnabled || !webSearchProfile || !webSearchProfileNote ||
   !webSearchTimeout || !webSearchMaxResults || !webSearchSaveButton || !webSearchRefreshButton || !webSearchTestButton ||
-  !chatTab || !historyTab || !memoryTab || !chatPage || !companionControlShelf || !dialogueModeControls || !presenceModeControls ||
+  !chatTab || !historyTab || !memoryTab || !chatPage || !companionControlShelf ||
   !shelfAccessoryButton || !shelfScaleButton || !shelfLockButton || !shelfActionEcho || !historyPage ||
   !memoryPage || !chatSessionNote || !memoryDraftPanel || !memoryDraftTitle || !memoryDraftContent || !memoryDraftTags ||
   !cancelMemoryDraftButton || !saveMemoryDraftButton || !newConversationButton || !clearHistoryButton || !clearHistoryConfirmation ||
@@ -355,8 +347,6 @@ const settingsUserDisplayNameField = settingsUserDisplayName;
 const settingsUserPreferredNameField = settingsUserPreferredName;
 const saveUserProfileAction = saveUserProfileButton;
 const clearUserProfileAction = clearUserProfileButton;
-const settingsDialogueModeSummaryBox = settingsDialogueModeSummary;
-const settingsPresenceModeSummaryBox = settingsPresenceModeSummary;
 const proactiveCompanionStatusBox = proactiveCompanionStatus;
 const proactiveCadenceControlsElement = proactiveCadenceControls;
 const proactiveMemorySourceBubblesField = proactiveMemorySourceBubbles;
@@ -382,8 +372,6 @@ const historyTabAction = historyTab;
 const memoryTabAction = memoryTab;
 const chatPageContainer = chatPage;
 const companionControlShelfBox = companionControlShelf;
-const dialogueModeControlsElement = dialogueModeControls;
-const presenceModeControlsElement = presenceModeControls;
 const shelfAccessoryAction = shelfAccessoryButton;
 const shelfScaleAction = shelfScaleButton;
 const shelfLockAction = shelfLockButton;
@@ -514,10 +502,6 @@ let isPetLocked = false;
 let currentPetScale = DEFAULT_PET_PRESENTATION_PREFERENCES.petScale;
 let currentPetAccessoryIds: PetAccessoryId[] = [...DEFAULT_PET_PRESENTATION_PREFERENCES.accessoryIds];
 let shortcutViews: ShortcutPreferenceView[] = [];
-let dialogueModes: DialogueModeView[] = [];
-let currentDialogueModeId: DialogueModeId = "default";
-let presenceModes: PresenceModeView[] = [];
-let currentPresenceModeId: PresenceModeId = "default";
 let currentProactiveCompanionSettings: ProactiveCompanionSettings = DEFAULT_PROACTIVE_COMPANION_SETTINGS;
 let currentUserProfile: UserProfile | null = null;
 let currentMemoryInjectionCount: number | null = null;
@@ -669,17 +653,39 @@ async function saveProactiveCompanionSettings(): Promise<void> {
   }
 }
 
-function renderEnvironmentActionSettings(settings: EnvironmentActionSettings): void {
+function renderEnvironmentActionSettings(
+  settings: EnvironmentActionSettings,
+  runtimeStatus?: EnvironmentActionRuntimeStatus
+): void {
   environmentMusicEnabledField.checked = settings.musicEnabled;
   environmentGameEnabledField.checked = settings.gameEnabled;
   const enabledLabels = [
     settings.musicEnabled ? "媒体开启" : null,
     settings.gameEnabled ? "游戏开启" : null
   ].filter((value): value is string => value !== null);
-  environmentActionStatusBox.textContent = enabledLabels.length > 0
-    ? `环境动作感知：${enabledLabels.join(" · ")}。信号需稳定 30 秒才会触发动作。`
-    : "环境动作感知：关闭。不会轮询本机环境信号。";
-  environmentActionStatusBox.dataset.state = enabledLabels.length > 0 ? "ready" : "fallback";
+  if (enabledLabels.length === 0) {
+    environmentActionStatusBox.textContent = "环境动作感知：关闭。";
+    environmentActionStatusBox.dataset.state = "fallback";
+    return;
+  }
+
+  const monitorLabel = runtimeStatus?.monitorStatus === "backoff"
+    ? "探测退避中"
+    : runtimeStatus?.monitorStatus === "waiting-for-renderer"
+      ? "等待桌宠就绪"
+      : runtimeStatus?.monitorStatus === "polling"
+        ? "探测运行中"
+        : "状态待确认";
+  const capabilityLabels = runtimeStatus
+    ? [
+        `媒体${runtimeStatus.mediaCapability === "available" ? "可用" : "不可用"}`,
+        `游戏${runtimeStatus.gameCapability === "available" ? "可用" : "不可用"}`
+      ]
+    : [];
+  environmentActionStatusBox.textContent = `环境动作感知：${enabledLabels.join(" · ")}。${monitorLabel}${
+    capabilityLabels.length > 0 ? `，${capabilityLabels.join(" · ")}` : ""
+  }。`;
+  environmentActionStatusBox.dataset.state = runtimeStatus?.monitorStatus === "backoff" ? "fallback" : "ready";
 }
 
 async function refreshEnvironmentActionSettings(): Promise<void> {
@@ -689,7 +695,11 @@ async function refreshEnvironmentActionSettings(): Promise<void> {
     return;
   }
   try {
-    renderEnvironmentActionSettings(await window.environmentActionApi.getSettings());
+    const [settings, runtimeStatus] = await Promise.all([
+      window.environmentActionApi.getSettings(),
+      window.environmentActionApi.getStatus()
+    ]);
+    renderEnvironmentActionSettings(settings, runtimeStatus);
   } catch {
     renderEnvironmentActionSettings(DEFAULT_ENVIRONMENT_ACTION_SETTINGS);
     environmentActionStatusBox.textContent = "无法读取环境动作感知设置。";
@@ -705,7 +715,7 @@ async function saveEnvironmentActionSettings(): Promise<void> {
       musicEnabled: environmentMusicEnabledField.checked,
       gameEnabled: environmentGameEnabledField.checked
     });
-    renderEnvironmentActionSettings(settings);
+    renderEnvironmentActionSettings(settings, await window.environmentActionApi.getStatus());
     setSettingsFeedback("环境动作感知设置已保存。", "ready");
   } catch {
     setSettingsFeedback("无法保存环境动作感知设置，请稍后重试。", "fallback");
@@ -1091,21 +1101,11 @@ function setPartnerStatus(message: string): void {
 }
 
 function renderPartnerStatus(): void {
-  const modeLabel = formatModeLabel(currentDialogueModeId);
-  const presenceLabel = formatPresenceLabel(currentPresenceModeId);
   const userProfileLabel = currentUserProfile
     ? currentUserProfile.preferredName ?? currentUserProfile.displayName
-    : null;
+    : "等待本地身份";
 
-  setPartnerStatus(formatPartnerStatus({
-    userProfileLabel,
-    dialogueModeId: currentDialogueModeId,
-    presenceModeId: currentPresenceModeId
-  }));
-  settingsDialogueModeSummaryBox.textContent = `当前模式：${modeLabel}`;
-  settingsDialogueModeSummaryBox.dataset.state = "ready";
-  settingsPresenceModeSummaryBox.textContent = `当前存在：${presenceLabel}`;
-  settingsPresenceModeSummaryBox.dataset.state = "ready";
+  setPartnerStatus(`桌面伙伴：${userProfileLabel} · 自动陪伴`);
 }
 
 function renderRibbonEcho(): void {
@@ -1253,8 +1253,6 @@ function renderUserProfile(profile: UserProfile | null): void {
   const hasProfile = Boolean(profile);
 
   userWelcomePanelBox.hidden = true;
-  dialogueModeControlsElement.hidden = false;
-  presenceModeControlsElement.hidden = false;
   chatSessionNoteBox.hidden = true;
   messageList.hidden = false;
   chatForm.hidden = false;
@@ -1317,122 +1315,6 @@ async function saveUserProfileFromFields(
     } else {
       setSettingsFeedback("无法保存本地身份，请稍后重试。", "fallback");
     }
-  }
-}
-
-function setDialogueMode(modeId: DialogueModeId): void {
-  currentDialogueModeId = modeId;
-  renderPartnerStatus();
-  renderCompanionControlShelf();
-
-  for (const button of dialogueModeControlsElement.querySelectorAll<HTMLButtonElement>(".mode-button")) {
-    const isActive = button.dataset.modeId === modeId;
-    button.classList.toggle("is-active", isActive);
-    button.setAttribute("aria-pressed", String(isActive));
-  }
-}
-
-function setPresenceMode(modeId: PresenceModeId): void {
-  currentPresenceModeId = modeId;
-  renderPartnerStatus();
-  renderCompanionControlShelf();
-
-  for (const button of presenceModeControlsElement.querySelectorAll<HTMLButtonElement>(".mode-button")) {
-    const isActive = button.dataset.modeId === modeId;
-    button.classList.toggle("is-active", isActive);
-    button.setAttribute("aria-pressed", String(isActive));
-  }
-}
-
-function renderDialogueModes(modes: DialogueModeView[]): void {
-  dialogueModeControlsElement.replaceChildren();
-
-  for (const mode of modes) {
-    const button = document.createElement("button");
-    button.className = "button-light mode-button";
-    button.type = "button";
-    button.dataset.modeId = mode.id;
-    button.textContent = mode.label;
-    button.disabled = chatTurnState.isReplying;
-    button.setAttribute("aria-pressed", String(mode.id === currentDialogueModeId));
-    button.addEventListener("click", () => {
-      void setDialogueModeFromUi(mode.id);
-    });
-    dialogueModeControlsElement.append(button);
-  }
-}
-
-async function refreshDialogueMode(): Promise<void> {
-  if (!window.dialogueModeApi) {
-    return;
-  }
-
-  dialogueModes = window.dialogueModeApi.listModes();
-  renderDialogueModes(dialogueModes);
-
-  try {
-    setDialogueMode(await window.dialogueModeApi.getMode());
-  } catch {
-    setDialogueMode("default");
-  }
-}
-
-async function setDialogueModeFromUi(modeId: DialogueModeId): Promise<void> {
-  if (!window.dialogueModeApi || chatTurnState.isReplying || modeId === currentDialogueModeId) {
-    return;
-  }
-
-  try {
-    setDialogueMode(await window.dialogueModeApi.setMode(modeId));
-  } catch {
-    setChatSessionNote("无法切换对话模式，请稍后重试。", "error");
-  }
-}
-
-function renderPresenceModes(modes: PresenceModeView[]): void {
-  presenceModeControlsElement.replaceChildren();
-
-  for (const mode of modes) {
-    const button = document.createElement("button");
-    button.className = "button-light mode-button";
-    button.type = "button";
-    button.dataset.modeId = mode.id;
-    button.textContent = mode.label;
-    button.title = mode.description;
-    button.disabled = chatTurnState.isReplying;
-    button.setAttribute("aria-pressed", String(mode.id === currentPresenceModeId));
-    button.addEventListener("click", () => {
-      void setPresenceModeFromUi(mode.id);
-    });
-    presenceModeControlsElement.append(button);
-  }
-}
-
-async function refreshPresenceMode(): Promise<void> {
-  if (!window.presenceModeApi) {
-    return;
-  }
-
-  presenceModes = window.presenceModeApi.listModes();
-  renderPresenceModes(presenceModes);
-
-  try {
-    setPresenceMode(await window.presenceModeApi.getMode());
-  } catch {
-    setPresenceMode("default");
-  }
-}
-
-async function setPresenceModeFromUi(modeId: PresenceModeId): Promise<void> {
-  if (!window.presenceModeApi || chatTurnState.isReplying || modeId === currentPresenceModeId) {
-    return;
-  }
-
-  try {
-    setPresenceMode(await window.presenceModeApi.setMode(modeId));
-    setChatSessionNote(`存在模式已切换为${formatPresenceLabel(modeId)}。`, "ready");
-  } catch {
-    setChatSessionNote("无法切换存在模式，请稍后重试。", "error");
   }
 }
 
@@ -2286,12 +2168,6 @@ function setReplying(isReplying: boolean): void {
   sendAction.disabled = false;
   abortAction.hidden = true;
 
-  dialogueModeControlsElement.querySelectorAll<HTMLButtonElement>(".mode-button").forEach((control) => {
-    control.disabled = lockState.groupsDisabled;
-  });
-  presenceModeControlsElement.querySelectorAll<HTMLButtonElement>(".mode-button").forEach((control) => {
-    control.disabled = lockState.groupsDisabled;
-  });
   historyDetailElement.querySelectorAll<HTMLButtonElement>("button").forEach((control) => {
     control.disabled = lockState.groupsDisabled;
   });
@@ -3058,14 +2934,6 @@ window.petPresentationApi?.onPetLockChanged((state) => {
   setPetLockState(state.isLocked);
 });
 
-window.dialogueModeApi?.onModeChanged((modeId) => {
-  setDialogueMode(modeId);
-});
-
-window.presenceModeApi?.onModeChanged((modeId) => {
-  setPresenceMode(modeId);
-});
-
 window.proactiveCompanionApi?.onSettingsChanged((settings) => {
   renderProactiveCompanionSettings(settings);
 });
@@ -3720,11 +3588,7 @@ window.addEventListener("chat:focus-input", () => {
 });
 
 window.chatApi?.focusInput();
-setDialogueMode("default");
-setPresenceMode("default");
 setMemorySessionStatus(null);
-void refreshDialogueMode();
-void refreshPresenceMode();
 void refreshProactiveCompanionSettings();
 void refreshEnvironmentActionSettings();
 void refreshUserProfile();

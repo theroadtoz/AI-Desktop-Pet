@@ -326,9 +326,8 @@ test("main mode changes trigger only fixed state reasons and preserve bubble sup
   assert.match(source, /cancelPendingModeActionStateTrigger\(\);[\s\S]*sendPetActionTrigger\(reason\);/);
   assert.match(source, /function markProactiveSpeechBubbleHidden\(\): void \{\s*proactiveSpeechBubbleVisibleUntil = 0;\s*\}/);
   assert.match(source, /selectPetActionStateForModeChange\(\{\s*dialogueModeId: currentDialogueModeId,\s*presenceModeId: currentPresenceModeId\s*\}\)/);
-  assert.match(source, /dialogueActionState\.stateId !== "idle"/);
-  assert.match(source, /schedulePetModeActionStateTrigger\(dialogueActionState\.triggerReason\)/);
-  assert.match(source, /schedulePetModeActionStateTrigger\(presenceActionState\.triggerReason\)/);
+  assert.equal(source.match(/const actionState = selectPetActionStateForModeChange/g)?.length, 2);
+  assert.equal(source.match(/schedulePetModeActionStateTrigger\(actionState\.triggerReason\)/g)?.length, 2);
   assert.match(source, /createAppShutdownCoordinator\(\{\s*quiesce: quiesceApp,/);
   assert.match(quiesceSource, /cancelPendingModeActionStateTrigger\(\);/);
   assert.match(beforeQuitSource, /event\.preventDefault\(\);/);
@@ -380,7 +379,7 @@ test("completed chat streams clear the sustain trigger timer before done is sent
 
   assert.notEqual(completedIndex, -1);
   assert.notEqual(doneIndex, -1);
-  assert.match(source.slice(completedIndex, doneIndex), /if \(activeChatRequestVersion === request\.requestVersion\) \{\s*activeChatRequestVersion = null;\s*clearChatReplySustainTimer\(\);\s*\}/);
+  assert.match(source.slice(completedIndex, doneIndex), /if \(activeChatRequestVersion === request\.requestVersion\) \{\s*activeChatRequestVersion = null;\s*syncAutomaticPresenceLifecycle\(\);\s*clearChatReplySustainTimer\(\);\s*\}/);
 });
 
 test("slow chat streams trigger the fixed reply sustain reason while still streaming", async (t) => {

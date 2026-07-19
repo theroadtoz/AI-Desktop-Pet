@@ -14,12 +14,12 @@ const smokeScripts = [
   {
     id: "P2-10C",
     script: "scripts/p2-10c-chat-mode-switching-real-ui.mjs",
-    reason: "chat mode switching and memory privacy"
+    reason: "automatic situation read-only UI, action chain, and memory privacy"
   },
   {
     id: "P2-11D",
     script: "scripts/p2-11d-chat-ui-polish-real-ui.mjs",
-    reason: "chat UI polish and density checks"
+    reason: "chat UI polish, density, and retired manual-mode controls"
   },
   {
     id: "P2-11E",

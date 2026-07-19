@@ -24,6 +24,7 @@ import {
 } from "./interaction-action-player";
 import { DEFAULT_DIALOGUE_MODE_ID, type DialogueModeId } from "../../shared/dialogue-style";
 import { DEFAULT_PRESENCE_MODE_ID, type PresenceModeId } from "../../shared/presence-mode";
+import type { AutomaticSituationSnapshot } from "../../shared/automatic-situation-context";
 import {
   selectEmotionPresentation,
   type EmotionPresentation
@@ -684,24 +685,27 @@ function injectWebGLContextLoss(): void {
 const removeInjectWebGLContextLossListener = window.petApi?.onInjectWebGLContextLoss(() => {
   injectWebGLContextLoss();
 }) ?? null;
-const removeDialogueModeChangedListener = window.petApi?.onDialogueModeChanged((modeId) => {
-  currentDialogueModeId = modeId;
-}) ?? null;
-const removePresenceModeChangedListener = window.petApi?.onPresenceModeChanged((modeId) => {
-  if (modeId === "sleep") {
+
+function applyAutomaticSituation(snapshot: AutomaticSituationSnapshot): void {
+  currentDialogueModeId = snapshot.conversationContextId;
+  if (snapshot.presenceStateId === "sleep") {
     interactionActionPlayer.interruptActiveMotionAction();
   }
 
-  if (currentPresenceModeId === "sleep" && modeId !== "sleep") {
+  if (currentPresenceModeId === "sleep" && snapshot.presenceStateId !== "sleep") {
     interactionActionPlayer.interruptActiveMotionAction();
   }
 
-  currentPresenceModeId = modeId;
-  live2DRenderer?.setPresenceMode(modeId);
-  if (modeId === "sleep") {
+  currentPresenceModeId = snapshot.presenceStateId;
+  live2DRenderer?.setPresenceMode(snapshot.presenceStateId);
+  if (snapshot.presenceStateId === "sleep") {
     clearProactiveSpeechBubble();
   }
-}) ?? null;
+}
+
+const removeAutomaticSituationChangedListener = window.petApi?.onAutomaticSituationChanged(
+  applyAutomaticSituation
+) ?? null;
 const returnFromIdleController = createReturnFromIdleController();
 const removeActionTriggerListener = window.petApi?.onActionTrigger((trigger) => {
   if (trigger.reason === "chat_opened" || trigger.reason === "chat_input_focus") {
@@ -748,17 +752,12 @@ const removeWindowMotionFeedbackListener = window.petApi?.onWindowMotionFeedback
   }
 }) ?? null;
 
-void window.petApi?.getDialogueMode().then((modeId) => {
-  currentDialogueModeId = modeId;
+void window.petApi?.getAutomaticSituation().then((snapshot) => {
+  applyAutomaticSituation(snapshot);
 }).catch(() => {
   currentDialogueModeId = DEFAULT_DIALOGUE_MODE_ID;
-});
-
-void window.petApi?.getPresenceMode().then((modeId) => {
-  currentPresenceModeId = modeId;
-  live2DRenderer?.setPresenceMode(modeId);
-}).catch(() => {
   currentPresenceModeId = DEFAULT_PRESENCE_MODE_ID;
+  live2DRenderer?.setPresenceMode(DEFAULT_PRESENCE_MODE_ID);
 });
 
 window.addEventListener("resize", () => {
@@ -782,8 +781,7 @@ window.addEventListener("beforeunload", () => {
   removeWebGLContextRecovery();
   removePresentationIntentListener?.();
   removeInjectWebGLContextLossListener?.();
-  removeDialogueModeChangedListener?.();
-  removePresenceModeChangedListener?.();
+  removeAutomaticSituationChangedListener?.();
   removeActionTriggerListener?.();
   removeProactiveSpeechBubbleListener?.();
   removeClearProactiveSpeechBubbleListener?.();

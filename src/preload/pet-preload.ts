@@ -8,8 +8,7 @@ import type {
 } from "../shared/ipc-contract";
 import type { ProactiveSpeechBubblePayload, ProactiveSpeechBubbleReason } from "../shared/proactive-speech-bubble";
 import type { PetActionTrigger, PetActionTriggerReason } from "../shared/pet-action-trigger";
-import type { DialogueModeId } from "../shared/dialogue-style";
-import type { PresenceModeId } from "../shared/presence-mode";
+import type { AutomaticSituationSnapshot } from "../shared/automatic-situation-context";
 import type { PetPresentationIntent, PetRoleState } from "../shared/pet-role-state";
 import type { PetScaleAdjustmentIntent } from "../shared/pet-presentation";
 
@@ -23,6 +22,10 @@ const petRoleStates = [
 ] as const;
 const emotionTags = ["neutral", "happy", "sad", "surprised", "confused", "angry"] as const;
 const emotionIntensities = ["low", "medium", "high"] as const;
+const automaticConversationContextIds = ["default", "work", "game", "reading"] as const;
+const automaticConversationSources = ["default", "bundled-local-model", "stable-game-signal", "expired"] as const;
+const automaticPresenceStateIds = ["default", "focus", "quiet", "sleep"] as const;
+const automaticPresenceSources = ["default", "work-activity", "quiet-preference", "deterministic-sleep"] as const;
 const petAccessoryCatalog = [
   { id: "ghost", group: "companion" },
   { id: "bow", group: "attire" },
@@ -34,8 +37,6 @@ const petAccessoryCatalog = [
 ] as const;
 const petAccessoryGroups = ["companion", "attire", "facewear", "headwear", "held-prop"] as const;
 const petAccessorySources = ["user", "mode", "action"] as const;
-const dialogueModeIds = ["default", "work", "game", "reading"] as const;
-const presenceModeIds = ["default", "focus", "quiet", "sleep"] as const;
 const proactiveSpeechBubbleLineIds = [
   "startup_presence_ready",
   "startup_presence_soft",
@@ -97,6 +98,35 @@ const petActionTriggerReasons = [
   "state_proactive_bubble_visible"
 ] as const;
 const scaleWheelModifierPattern = /^(Ctrl|Alt|Shift|Meta)(\+(Ctrl|Alt|Shift|Meta))*$/;
+
+function parseAutomaticSituationSnapshot(value: unknown): AutomaticSituationSnapshot | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const snapshot = value as Partial<AutomaticSituationSnapshot>;
+  if (
+    !automaticConversationContextIds.includes(snapshot.conversationContextId as never) ||
+    !automaticConversationSources.includes(snapshot.conversationSource as never) ||
+    !automaticPresenceStateIds.includes(snapshot.presenceStateId as never) ||
+    !automaticPresenceSources.includes(snapshot.presenceSource as never) ||
+    (snapshot.confidence !== null && (
+      typeof snapshot.confidence !== "number" ||
+      !Number.isFinite(snapshot.confidence) ||
+      snapshot.confidence < 0 ||
+      snapshot.confidence > 1
+    )) ||
+    !Number.isSafeInteger(snapshot.revision) ||
+    typeof snapshot.updatedAtMs !== "number" ||
+    !Number.isFinite(snapshot.updatedAtMs) ||
+    (snapshot.expiresAtMs !== null && (
+      typeof snapshot.expiresAtMs !== "number" ||
+      !Number.isFinite(snapshot.expiresAtMs)
+    ))
+  ) {
+    return null;
+  }
+  return snapshot as AutomaticSituationSnapshot;
+}
 
 function isRequestVersion(value: number): boolean {
   return Number.isSafeInteger(value) && value > 0;
@@ -165,18 +195,6 @@ function isPetAccessoryResolution(value: unknown): boolean {
       )
     )
   );
-}
-
-function parseDialogueModeId(value: unknown): DialogueModeId | null {
-  return typeof value === "string" && dialogueModeIds.includes(value as DialogueModeId)
-    ? value as DialogueModeId
-    : null;
-}
-
-function parsePresenceModeId(value: unknown): PresenceModeId | null {
-  return typeof value === "string" && presenceModeIds.includes(value as PresenceModeId)
-    ? value as PresenceModeId
-    : null;
 }
 
 function isPetPresentationIntent(value: unknown): value is PetPresentationIntent {
@@ -393,44 +411,24 @@ const api: PetApi = {
       ipcRenderer.removeListener("shortcuts:scale-wheel-modifier-changed", listener);
     };
   },
-  async getDialogueMode() {
-    const modeId = parseDialogueModeId(await ipcRenderer.invoke("dialogueMode:get"));
-    if (!modeId) {
-      throw new Error("Invalid dialogue mode response");
+  async getAutomaticSituation() {
+    const snapshot = parseAutomaticSituationSnapshot(await ipcRenderer.invoke("automaticSituation:get"));
+    if (!snapshot) {
+      throw new Error("Invalid automatic situation response");
     }
-    return modeId;
+    return snapshot;
   },
-  onDialogueModeChanged(handler) {
+  onAutomaticSituationChanged(handler) {
     const listener = (_event: Electron.IpcRendererEvent, value: unknown): void => {
-      const modeId = parseDialogueModeId(value);
-      if (modeId) {
-        handler(modeId);
+      const snapshot = parseAutomaticSituationSnapshot(value);
+      if (snapshot) {
+        handler(snapshot);
       }
     };
 
-    ipcRenderer.on("dialogueMode:changed", listener);
+    ipcRenderer.on("automaticSituation:changed", listener);
     return () => {
-      ipcRenderer.removeListener("dialogueMode:changed", listener);
-    };
-  },
-  async getPresenceMode() {
-    const modeId = parsePresenceModeId(await ipcRenderer.invoke("presenceMode:get"));
-    if (!modeId) {
-      throw new Error("Invalid presence mode response");
-    }
-    return modeId;
-  },
-  onPresenceModeChanged(handler) {
-    const listener = (_event: Electron.IpcRendererEvent, value: unknown): void => {
-      const modeId = parsePresenceModeId(value);
-      if (modeId) {
-        handler(modeId);
-      }
-    };
-
-    ipcRenderer.on("presenceMode:changed", listener);
-    return () => {
-      ipcRenderer.removeListener("presenceMode:changed", listener);
+      ipcRenderer.removeListener("automaticSituation:changed", listener);
     };
   }
 };

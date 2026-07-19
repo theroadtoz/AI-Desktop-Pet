@@ -11,7 +11,6 @@ import type {
   ConfigApi,
   ConfigApiKeyRequest,
   ConfigSetApiKeyRequest,
-  DialogueModeApi,
   EnvironmentActionApi,
   HistoryApi,
   LocalRuntimeApi,
@@ -19,20 +18,18 @@ import type {
   PetActivityEcho,
   PetLockState,
   PetPresentationApi,
-  PresenceModeApi,
   ProactiveCompanionApi,
   ShortcutApi,
   UserProfileApi,
   WebSearchApi
 } from "../shared/ipc-contract";
 import type {
+  EnvironmentActionRuntimeStatus,
   EnvironmentActionSettings,
   EnvironmentActionSettingsUpdate
 } from "../shared/environment-action-settings";
 import type { Conversation, ConversationSummary, HistoryMessage } from "../shared/chat-history";
 import type { MemoryCard, MemoryCardDraft, MemoryCardUpdate, MemorySummary } from "../shared/chat-memory";
-import type { DialogueModeId, DialogueModeView } from "../shared/dialogue-style";
-import type { PresenceModeId, PresenceModeView } from "../shared/presence-mode";
 import type { ProviderConfig, ProviderStatus } from "../shared/provider-config";
 import type { ProviderHealthCheckRequest, ProviderHealthResult, ProviderHealthStatus } from "../shared/provider-health";
 import type { PetAccessoryId } from "../shared/pet-accessory";
@@ -63,8 +60,6 @@ const petAccessoryCatalog = [
 ] as const;
 const maxPetAccessorySelection = 5;
 const shortcutActionIds = ["togglePetLock", "adjustPetScaleWithWheel"] as const;
-const dialogueModeIds = ["default", "work", "game", "reading"] as const;
-const presenceModeIds = ["default", "focus", "quiet", "sleep"] as const;
 const proactiveCompanionCadences = ["normal", "quiet", "off"] as const;
 const defaultProactiveCompanionSettings: ProactiveCompanionSettings = {
   cadence: "normal",
@@ -72,21 +67,9 @@ const defaultProactiveCompanionSettings: ProactiveCompanionSettings = {
   searchSourceBubbles: true
 };
 const defaultEnvironmentActionSettings: EnvironmentActionSettings = {
-  musicEnabled: false,
-  gameEnabled: false
+  musicEnabled: true,
+  gameEnabled: true
 };
-const dialogueModeViews: readonly DialogueModeView[] = [
-  { id: "default", label: "默认陪伴" },
-  { id: "work", label: "工作" },
-  { id: "game", label: "游戏" },
-  { id: "reading", label: "读书" }
-];
-const presenceModeViews: readonly PresenceModeView[] = [
-  { id: "default", label: "默认陪伴", description: "保留日常呼吸与动作节奏。" },
-  { id: "focus", label: "专注陪伴", description: "降低待机打扰，保留清晰回应。" },
-  { id: "quiet", label: "安静陪伴", description: "减少强动作与空闲渲染。" },
-  { id: "sleep", label: "睡眠待机", description: "低频待机，保留微弱生命感。" }
-];
 const chatStreamErrorTypes = [
   "aborted",
   "busy",
@@ -248,18 +231,6 @@ function parsePetAccessorySelection(value: unknown): PetAccessoryId[] | null {
   return petAccessoryCatalog.flatMap((item) => ids.has(item.id) ? [item.id] : []);
 }
 
-function parseDialogueModeId(value: unknown): DialogueModeId | null {
-  return typeof value === "string" && dialogueModeIds.includes(value as DialogueModeId)
-    ? value as DialogueModeId
-    : null;
-}
-
-function parsePresenceModeId(value: unknown): PresenceModeId | null {
-  return typeof value === "string" && presenceModeIds.includes(value as PresenceModeId)
-    ? value as PresenceModeId
-    : null;
-}
-
 function parseProactiveCompanionCadence(value: unknown): ProactiveCompanionCadence | null {
   return typeof value === "string" && proactiveCompanionCadences.includes(value as ProactiveCompanionCadence)
     ? value as ProactiveCompanionCadence
@@ -324,9 +295,36 @@ function parseEnvironmentActionSettings(value: unknown): EnvironmentActionSettin
     return { ...defaultEnvironmentActionSettings };
   }
   return {
-    musicEnabled: typeof settings.musicEnabled === "boolean" ? settings.musicEnabled : false,
-    gameEnabled: typeof settings.gameEnabled === "boolean" ? settings.gameEnabled : false
+    musicEnabled: typeof settings.musicEnabled === "boolean"
+      ? settings.musicEnabled
+      : defaultEnvironmentActionSettings.musicEnabled,
+    gameEnabled: typeof settings.gameEnabled === "boolean"
+      ? settings.gameEnabled
+      : defaultEnvironmentActionSettings.gameEnabled
   };
+}
+
+function parseEnvironmentActionRuntimeStatus(value: unknown): EnvironmentActionRuntimeStatus {
+  const status = value as Partial<EnvironmentActionRuntimeStatus> | null;
+  const providerStatuses = ["unknown", "available", "unavailable", "failed"] as const;
+  const monitorStatuses = ["stopped", "waiting-for-renderer", "polling", "backoff"] as const;
+  const capabilities = ["unknown", "available", "unavailable"] as const;
+  if (
+    !status ||
+    typeof status !== "object" ||
+    !providerStatuses.includes(status.providerStatus as never) ||
+    !monitorStatuses.includes(status.monitorStatus as never) ||
+    !capabilities.includes(status.mediaCapability as never) ||
+    !capabilities.includes(status.gameCapability as never)
+  ) {
+    return {
+      providerStatus: "unknown",
+      monitorStatus: "stopped",
+      mediaCapability: "unknown",
+      gameCapability: "unknown"
+    };
+  }
+  return status as EnvironmentActionRuntimeStatus;
 }
 
 function parseEnvironmentActionSettingsUpdate(value: unknown): EnvironmentActionSettingsUpdate | null {
@@ -2120,90 +2118,6 @@ const shortcutApi: ShortcutApi = {
   }
 };
 
-const dialogueModeApi: DialogueModeApi = {
-  listModes() {
-    return dialogueModeViews.map((mode) => ({ ...mode }));
-  },
-  async getMode() {
-    const modeId = parseDialogueModeId(await ipcRenderer.invoke("dialogueMode:get"));
-
-    if (!modeId) {
-      throw new Error("Invalid dialogue mode response");
-    }
-
-    return modeId;
-  },
-  async setMode(modeId) {
-    if (!dialogueModeIds.includes(modeId)) {
-      throw new Error("Invalid dialogue mode");
-    }
-
-    const nextModeId = parseDialogueModeId(await ipcRenderer.invoke("dialogueMode:set", modeId));
-
-    if (!nextModeId) {
-      throw new Error("Invalid dialogue mode response");
-    }
-
-    return nextModeId;
-  },
-  onModeChanged(handler) {
-    const listener = (_event: Electron.IpcRendererEvent, value: unknown): void => {
-      const modeId = parseDialogueModeId(value);
-
-      if (modeId) {
-        handler(modeId);
-      }
-    };
-
-    ipcRenderer.on("dialogueMode:changed", listener);
-    return () => {
-      ipcRenderer.removeListener("dialogueMode:changed", listener);
-    };
-  }
-};
-
-const presenceModeApi: PresenceModeApi = {
-  listModes() {
-    return presenceModeViews.map((mode) => ({ ...mode }));
-  },
-  async getMode() {
-    const modeId = parsePresenceModeId(await ipcRenderer.invoke("presenceMode:get"));
-
-    if (!modeId) {
-      throw new Error("Invalid presence mode response");
-    }
-
-    return modeId;
-  },
-  async setMode(modeId) {
-    if (!presenceModeIds.includes(modeId)) {
-      throw new Error("Invalid presence mode");
-    }
-
-    const nextModeId = parsePresenceModeId(await ipcRenderer.invoke("presenceMode:set", modeId));
-
-    if (!nextModeId) {
-      throw new Error("Invalid presence mode response");
-    }
-
-    return nextModeId;
-  },
-  onModeChanged(handler) {
-    const listener = (_event: Electron.IpcRendererEvent, value: unknown): void => {
-      const modeId = parsePresenceModeId(value);
-
-      if (modeId) {
-        handler(modeId);
-      }
-    };
-
-    ipcRenderer.on("presenceMode:changed", listener);
-    return () => {
-      ipcRenderer.removeListener("presenceMode:changed", listener);
-    };
-  }
-};
-
 const proactiveCompanionApi: ProactiveCompanionApi = {
   async getSettings() {
     return parseProactiveCompanionSettings(await ipcRenderer.invoke("proactiveCompanion:get-settings"));
@@ -2234,6 +2148,9 @@ const proactiveCompanionApi: ProactiveCompanionApi = {
 const environmentActionApi: EnvironmentActionApi = {
   async getSettings() {
     return parseEnvironmentActionSettings(await ipcRenderer.invoke("environmentActions:get-settings"));
+  },
+  async getStatus() {
+    return parseEnvironmentActionRuntimeStatus(await ipcRenderer.invoke("environmentActions:get-status"));
   },
   async setSettings(update) {
     const parsedUpdate = parseEnvironmentActionSettingsUpdate(update);
@@ -2340,8 +2257,6 @@ contextBridge.exposeInMainWorld("historyApi", historyApi);
 contextBridge.exposeInMainWorld("memoryApi", memoryApi);
 contextBridge.exposeInMainWorld("petPresentationApi", petPresentationApi);
 contextBridge.exposeInMainWorld("shortcutApi", shortcutApi);
-contextBridge.exposeInMainWorld("dialogueModeApi", dialogueModeApi);
-contextBridge.exposeInMainWorld("presenceModeApi", presenceModeApi);
 contextBridge.exposeInMainWorld("proactiveCompanionApi", proactiveCompanionApi);
 contextBridge.exposeInMainWorld("environmentActionApi", environmentActionApi);
 contextBridge.exposeInMainWorld("userProfileApi", userProfileApi);

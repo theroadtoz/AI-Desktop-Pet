@@ -1,4 +1,7 @@
-export type PresenceModeId = "default" | "focus" | "quiet" | "sleep";
+import type { AutomaticPresenceStateId } from "./automatic-situation-context";
+
+/** @deprecated Internal compatibility alias. Automatic situation owns this value. */
+export type PresenceModeId = AutomaticPresenceStateId;
 
 export type PresenceModeView = {
   id: PresenceModeId;

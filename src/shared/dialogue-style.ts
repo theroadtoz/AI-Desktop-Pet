@@ -1,4 +1,7 @@
-export type DialogueModeId = "default" | "work" | "game" | "reading";
+import type { AutomaticConversationContextId } from "./automatic-situation-context";
+
+/** @deprecated Internal compatibility alias. Automatic situation owns this value. */
+export type DialogueModeId = AutomaticConversationContextId;
 
 export type DialogueStyleContext = {
   modeId: DialogueModeId;
