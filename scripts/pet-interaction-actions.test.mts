@@ -1816,6 +1816,32 @@ test("P2-77 search result interrupts reply thinking", () => {
   );
 });
 
+test("P2-77 explicit mode transitions interrupt the long reply settle motion", async () => {
+  const replySettle = getPetInteractionAction("replyWarmSettle");
+  const motion = createFakeMotionPlayback(replySettle.motionPresetId);
+  const harness = createFakeInteractionActionPlayer({
+    playMotionPreset: async () => ({
+      status: "started",
+      motionPresetId: replySettle.motionPresetId!,
+      durationMs: replySettle.durationMs,
+      playback: motion.playback
+    })
+  });
+
+  assert.equal(harness.player.playAction(replySettle, "chat_reply_completed"), true);
+  await Promise.resolve();
+  motion.transition("started");
+
+  assert.equal(harness.player.playAction(getPetInteractionAction("gameReady"), "state_game"), true);
+  assert.equal(harness.player.getActiveActionType(), "gameReady");
+  assert.equal(harness.calls.includes("stopMotion:interrupted"), true);
+  assert.equal(harness.telemetry.some((event) => (
+    event.type === "pet_interaction_action_finished" &&
+    event.payload.type === "replyWarmSettle" &&
+    event.payload.terminalStatus === "interrupted"
+  )), true);
+});
+
 test("P2-77 long actions enforce their declared same-action cooldowns", () => {
   const action = getPetInteractionAction("searchNoteSettle");
   assert.equal(getInteractionActionCooldownSkipReason(action, 10_000, {
