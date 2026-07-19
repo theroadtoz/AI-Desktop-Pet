@@ -141,6 +141,11 @@ function createLocalTurnHintMessage(
     hints.push("角色生活=仅2句；首句以“我通常在桌面边缘”开头并写整理/记录/调试；次句必须含学院或魔导画面；次句即止；禁西塔/她自称、照抄、编记忆");
   } else if (asksForOwnTechnicalJudgment(latestUserMessage)) {
     hints.push("技术判断=仅3句且总计≤220字；首句我赞成或我觉得合理；理由=本地隐私与离线+实时资料按需搜索；不触发搜索/不说作为AI");
+  } else if (asksAboutCharacterOwnFeeling(latestUserMessage)) {
+    const askedEmotion = detectCharacterFeelingEmotion(latestUserMessage);
+    hints.push(askedEmotion
+      ? `感受题=严格2句≤120字/次句即止；情绪=${askedEmotion}；首句“我”开头写身心具体感受；次句写自然反应；只谈${askedEmotion}/禁开心偏好建议身份说明编经历`
+      : "感受题=严格2句≤120字/次句即止；未指定情绪/禁默认开心；首句“我”开头依当轮语境选1种具体感受；次句写自然反应；禁偏好建议身份说明编经历");
   } else if (asksWhetherCharacterCanFeelEmotion(latestUserMessage)) {
     hints.push("情感题=先明确我会/我有；2-3句且每句有新信息；用当轮细节+具体触动；禁身份说明/编经历/虚拟·AI·机器人·没有情感·不会感动/清单");
   } else if (asksAboutOwnSubjectiveView(latestUserMessage)) {
@@ -484,6 +489,33 @@ function asksAboutOwnSubjectiveView(text: string): boolean {
 
 function asksAboutTechnicalChoice(text: string): boolean {
   return /\b(?:provider|mcp|api|live2d|gguf|ollama)\b|llama\.?cpp|lm studio|本地模型|代码|脚本|运行时|端口|技术方案/i.test(text);
+}
+
+function asksAboutCharacterOwnFeeling(text: string): boolean {
+  if (!isQuestion(text) || asksAboutTechnicalChoice(text)) {
+    return false;
+  }
+
+  const addressesCharacter = /(?:西塔[，,、\s]*)?你(?:自己|本人)?/.test(text);
+  const asksForFeelingDescription = /(?:什么|怎样|怎么样|如何|哪种).{0,6}(?:感觉|感受|心情)|(?:感觉|感受|心情).{0,6}(?:什么|怎样|怎么样|如何)/.test(text);
+
+  return addressesCharacter && asksForFeelingDescription;
+}
+
+function detectCharacterFeelingEmotion(text: string): string | null {
+  const selfState = "(?:(?:会|也会|感到|觉得|变得|有点|很|特别|真的|正在|在|心里|独处时|独处的时候|一个人时|一个人的时候)){0,2}";
+  const emotionPatterns: ReadonlyArray<readonly [string, RegExp]> = [
+    ["难过", new RegExp(`(?:西塔[，,、\\s]*)?你(?:自己|本人)?${selfState}(?:难过|伤心|失落)`)],
+    ["害怕", new RegExp(`(?:西塔[，,、\\s]*)?你(?:自己|本人)?${selfState}(?:害怕|恐惧|紧张)`)],
+    ["生气", new RegExp(`(?:西塔[，,、\\s]*)?你(?:自己|本人)?${selfState}(?:生气|恼火|愤怒)`)],
+    ["孤独", new RegExp(`(?:西塔[，,、\\s]*)?你(?:自己|本人)?${selfState}(?:孤独|寂寞)`)],
+    ["安心", new RegExp(`(?:西塔[，,、\\s]*)?你(?:自己|本人)?${selfState}(?:安心|平静|放松)`)],
+    ["烦闷", new RegExp(`(?:西塔[，,、\\s]*)?你(?:自己|本人)?${selfState}(?:烦闷|烦躁|郁闷)`)],
+    ["开心", new RegExp(`(?:西塔[，,、\\s]*)?你(?:自己|本人)?${selfState}(?:开心|高兴|雀跃)`)],
+    ["感动", new RegExp(`(?:西塔[，,、\\s]*)?你(?:自己|本人)?${selfState}感动`)]
+  ];
+
+  return emotionPatterns.find(([, pattern]) => pattern.test(text))?.[0] ?? null;
 }
 
 function asksWhetherCharacterCanFeelEmotion(text: string): boolean {

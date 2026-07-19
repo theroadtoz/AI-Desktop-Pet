@@ -55,7 +55,7 @@ test("persona prompts are rendered from the shared persona card", () => {
   assert.match(localPrompt, /(?:真实)?术语不魔法化/);
   assert.doesNotMatch(localPrompt, /问学院近况|2-3项连贯具体活动|Provider=模型访问|MCP=工具调用/);
   assert.match(localPrompt, /耐心.*乐观.*学识渊博.*可靠/);
-  assert.match(localPrompt, /主观=.*喜欢.*不喜欢.*赞成.*反对.*理由/);
+  assert.match(localPrompt, /意见=.*喜恶.*赞否.*因/);
   assert.match(localPrompt, /闲聊.*(?:别|不)复述.*猜心情.*我.*鲜明感受.*画面陪伴.*情绪(?:多于|>)解释.*不盲从.*不客服.*不乱猜/);
   assert.match(localPrompt, /不建议.*清单.*任务化/);
   assert.match(localPrompt, /仅受邀.*轻问/);
@@ -86,6 +86,16 @@ test("persona prompt permits stronger emotions with calibrated boundaries", () =
   assert.match(localPrompt, /感叹号(?:≤1|.*最多一个)/);
   assert.match(localPrompt, /技术安全.*直答/);
   assert.match(localPrompt, /禁哭喊.*辱骂.*威胁.*恋爱化.*依赖/);
+});
+
+test("persona preserves the specific feeling the user asks Xita about", () => {
+  const cloudPrompt = createDefaultPersonaPrompt();
+  const localPrompt = createLocalSmallModelPersonaPrompt();
+
+  assert.match(cloudPrompt, /询问.*自己的感受.*点名.*具体情绪.*围绕该情绪.*不.*改成开心/);
+  assert.match(cloudPrompt, /未点名情绪.*结合当轮语境.*具体感受.*不默认开心/);
+  assert.match(localPrompt, /感受保真.*不默认开心/);
+  assert.match(localPrompt, /意见=.*喜恶.*赞否.*因/);
 });
 
 test("persona calibrates lively contrast, ongoing witch life, and emotional intensity", () => {
@@ -131,7 +141,7 @@ test("persona puts emotion before explanation in casual life chat", () => {
   assert.match(cloudPrompt, /生活类.*为什么.*一层直觉/);
   assert.match(cloudPrompt, /技术.*问题.*简短.*直接回答.*专有名词准确/);
   assert.match(localPrompt, /闲聊.*(?:别|不)复述.*猜心情.*鲜明感受.*画面陪伴.*情绪(?:多于|>)解释/);
-  assert.match(localPrompt, /生活解释.*一层.*技术.*按需/);
+  assert.match(localPrompt, /生活.*一层.*技术.*按需/);
 });
 
 test("persona keeps Xita independent, playful, imaginative, and loyal to a hurt friend", () => {

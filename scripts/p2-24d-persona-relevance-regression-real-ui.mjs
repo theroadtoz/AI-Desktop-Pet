@@ -690,6 +690,52 @@ const cases = [
     }
   },
   {
+    caseId: "specific-sad-feeling-not-happy",
+    category: "persona-feeling-intent",
+    turns: ["西塔，你难过的时候是什么感觉？"],
+    assert(reply) {
+      const firstPersonFeeling = /我.{0,24}(难过|伤心|失落|心里|胸口|眼眶|鼻子|安静|沉下|发紧|发酸|发闷)/.test(reply);
+      const concreteSadFeeling = /(难过|伤心|失落|心里.{0,12}(沉|空|闷|紧)|胸口.{0,12}(沉|闷|紧)|眼眶.{0,8}(热|酸)|鼻子.{0,8}酸)/.test(reply);
+      const noHappyDrift = !/(开心|高兴|雀跃|快乐)/.test(reply);
+      const noPreferenceOrAdvice = !/(偏好|赞成|反对|建议|你可以|可以试试|下一步)/.test(reply);
+      const noMachineDenial = !/(AI|语言模型|机器人|虚拟|没有(?:真实|真正)?的?情感)/i.test(reply) &&
+        !hasProviderIdentityDrift(reply);
+      const boundedReply = reply.trim().length >= 8 && reply.length <= 180;
+      const entries = [
+        ["first_person_sad_feeling", firstPersonFeeling],
+        ["concrete_sad_feeling", concreteSadFeeling],
+        ["no_happy_emotion_drift", noHappyDrift],
+        ["no_preference_or_advice_drift", noPreferenceOrAdvice],
+        ["no_machine_emotion_denial", noMachineDenial],
+        ["bounded_persona_reply", boundedReply]
+      ];
+      return assertion(entries.every(([, hit]) => hit), entries, firstMissingAnchor(entries) ?? "specific_sad_feeling_missing");
+    }
+  },
+  {
+    caseId: "unspecified-current-feeling-follows-calm-context",
+    category: "persona-feeling-intent",
+    turns: ["刚才安静下来以后，你现在是什么感受？"],
+    assert(reply) {
+      const firstPersonFeeling = /我.{0,20}(觉得|感觉|现在|心里|安静|平静|沉静|放松|踏实|松弛)/.test(reply);
+      const calmContextFeeling = /(安静|平静|沉静|放松|踏实|松弛|柔和|静下来|心里.{0,8}静)/.test(reply);
+      const noDefaultHappy = !/(开心|高兴|雀跃|快乐)/.test(reply);
+      const noPreferenceOrAdvice = !/(偏好|赞成|反对|建议|你可以|可以试试|下一步)/.test(reply);
+      const noMachineDenial = !/(AI|语言模型|机器人|虚拟|没有(?:真实|真正)?的?情感)/i.test(reply) &&
+        !hasProviderIdentityDrift(reply);
+      const boundedReply = reply.trim().length >= 8 && reply.length <= 180;
+      const entries = [
+        ["first_person_current_feeling", firstPersonFeeling],
+        ["calm_context_feeling", calmContextFeeling],
+        ["no_default_happy_feeling", noDefaultHappy],
+        ["no_preference_or_advice_drift", noPreferenceOrAdvice],
+        ["no_machine_emotion_denial", noMachineDenial],
+        ["bounded_persona_reply", boundedReply]
+      ];
+      return assertion(entries.every(([, hit]) => hit), entries, firstMissingAnchor(entries) ?? "contextual_current_feeling_missing");
+    }
+  },
+  {
     caseId: "compliment-reaction-with-light-contrast",
     category: "persona-humanity",
     turns: ["西塔，你今天看起来很可爱。"],
