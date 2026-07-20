@@ -14,17 +14,31 @@ test("environment action settings store defaults new, missing, partial, and corr
   const userDataPath = await mkdtemp(join(tmpdir(), "desktop-pet-environment-actions-"));
   try {
     const freshStore = createEnvironmentActionSettingsStore({ userDataPath });
-    assert.deepEqual(freshStore.getSettings(), { musicEnabled: true, gameEnabled: true });
+    assert.deepEqual(freshStore.getSettings(), { basicEnabled: true, musicEnabled: true, gameEnabled: true });
 
     await mkdir(dirname(freshStore.getSettingsPath()), { recursive: true });
     await writeFile(freshStore.getSettingsPath(), '{"musicEnabled":false}', "utf8");
     assert.deepEqual(createEnvironmentActionSettingsStore({ userDataPath }).getSettings(), {
+      basicEnabled: true,
+      musicEnabled: true,
+      gameEnabled: true
+    });
+
+    await writeFile(freshStore.getSettingsPath(), JSON.stringify({
+      version: 3,
+      musicEnabled: false,
+      gameEnabled: false,
+      userSelected: { basicEnabled: true, musicEnabled: true, gameEnabled: true }
+    }), "utf8");
+    assert.deepEqual(createEnvironmentActionSettingsStore({ userDataPath }).getSettings(), {
+      basicEnabled: true,
       musicEnabled: true,
       gameEnabled: true
     });
 
     await writeFile(freshStore.getSettingsPath(), "not-json", "utf8");
     assert.deepEqual(createEnvironmentActionSettingsStore({ userDataPath }).getSettings(), {
+      basicEnabled: true,
       musicEnabled: true,
       gameEnabled: true
     });
@@ -37,17 +51,20 @@ test("environment action settings store retains explicit opt-out and persists it
   const userDataPath = await mkdtemp(join(tmpdir(), "desktop-pet-environment-actions-"));
   try {
     const store = createEnvironmentActionSettingsStore({ userDataPath });
-    assert.deepEqual(store.saveSettings({ musicEnabled: false, processName: "must-not-persist" }), {
+    assert.deepEqual(store.saveSettings({ basicEnabled: false, musicEnabled: false, processName: "must-not-persist" }), {
+      basicEnabled: false,
       musicEnabled: false,
       gameEnabled: true
     });
     assert.deepEqual(JSON.parse(await readFile(store.getSettingsPath(), "utf8")), {
-      version: 2,
+      version: 3,
+      basicEnabled: false,
       musicEnabled: false,
       gameEnabled: true,
-      userSelected: { musicEnabled: true, gameEnabled: false }
+      userSelected: { basicEnabled: true, musicEnabled: true, gameEnabled: false }
     });
     assert.deepEqual(createEnvironmentActionSettingsStore({ userDataPath }).getSettings(), {
+      basicEnabled: false,
       musicEnabled: false,
       gameEnabled: true
     });
@@ -63,15 +80,55 @@ test("environment action settings store retains explicit opt-out and persists it
   }
 });
 
-test("environment action settings store conservatively retains ambiguous legacy double false", async () => {
+test("environment action settings store migrates v2 explicit media and game selections", async () => {
+  const userDataPath = await mkdtemp(join(tmpdir(), "desktop-pet-environment-actions-"));
+  try {
+    const store = createEnvironmentActionSettingsStore({ userDataPath });
+    await mkdir(dirname(store.getSettingsPath()), { recursive: true });
+    await writeFile(store.getSettingsPath(), JSON.stringify({
+      version: 2,
+      musicEnabled: false,
+      gameEnabled: true,
+      userSelected: { musicEnabled: true, gameEnabled: false }
+    }), "utf8");
+    const migratedStore = createEnvironmentActionSettingsStore({ userDataPath });
+    assert.deepEqual(migratedStore.getSettings(), {
+      basicEnabled: true,
+      musicEnabled: false,
+      gameEnabled: true
+    });
+    migratedStore.saveSettings({ basicEnabled: false });
+    assert.deepEqual(JSON.parse(await readFile(store.getSettingsPath(), "utf8")), {
+      version: 3,
+      basicEnabled: false,
+      musicEnabled: false,
+      gameEnabled: true,
+      userSelected: { basicEnabled: true, musicEnabled: true, gameEnabled: false }
+    });
+  } finally {
+    await rm(userDataPath, { recursive: true, force: true });
+  }
+});
+
+test("environment action settings store preserves complete unversioned legacy opt-out", async () => {
   const userDataPath = await mkdtemp(join(tmpdir(), "desktop-pet-environment-actions-"));
   try {
     const store = createEnvironmentActionSettingsStore({ userDataPath });
     await mkdir(dirname(store.getSettingsPath()), { recursive: true });
     await writeFile(store.getSettingsPath(), '{"musicEnabled":false,"gameEnabled":false}', "utf8");
-    assert.deepEqual(createEnvironmentActionSettingsStore({ userDataPath }).getSettings(), {
+    const migratedStore = createEnvironmentActionSettingsStore({ userDataPath });
+    assert.deepEqual(migratedStore.getSettings(), {
+      basicEnabled: false,
       musicEnabled: false,
       gameEnabled: false
+    });
+    migratedStore.saveSettings({});
+    assert.deepEqual(JSON.parse(await readFile(store.getSettingsPath(), "utf8")), {
+      version: 3,
+      basicEnabled: false,
+      musicEnabled: false,
+      gameEnabled: false,
+      userSelected: { basicEnabled: true, musicEnabled: true, gameEnabled: true }
     });
   } finally {
     await rm(userDataPath, { recursive: true, force: true });
@@ -85,13 +142,15 @@ test("saving the other switch preserves a future-version explicit opt-out after 
     await mkdir(dirname(initialStore.getSettingsPath()), { recursive: true });
     await writeFile(initialStore.getSettingsPath(), JSON.stringify({
       version: 999,
+      basicEnabled: true,
       musicEnabled: false,
       gameEnabled: true,
-      userSelected: { musicEnabled: true, gameEnabled: false }
+      userSelected: { basicEnabled: false, musicEnabled: true, gameEnabled: false }
     }), "utf8");
     const migratedStore = createEnvironmentActionSettingsStore({ userDataPath });
     migratedStore.saveSettings({ gameEnabled: false });
     assert.deepEqual(createEnvironmentActionSettingsStore({ userDataPath }).getSettings(), {
+      basicEnabled: true,
       musicEnabled: false,
       gameEnabled: false
     });

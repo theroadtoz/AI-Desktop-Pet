@@ -1,31 +1,30 @@
 import { execFile, type ChildProcess } from "node:child_process";
 import { win32 } from "node:path";
-
-export const GAME_PRESENCE_VALUES = ["game", "non-game", "unknown"] as const;
-
-export type GamePresence = typeof GAME_PRESENCE_VALUES[number];
-
-export type DesktopContextSnapshot = {
-  mediaPlaying: boolean;
-  gamePresence: GamePresence;
-};
-
-export type DesktopContextCapability = "available" | "unavailable";
+import type {
+  CompanionEnvironmentActivity,
+  CompanionEnvironmentInterruptibility,
+  CompanionEnvironmentMedia
+} from "./companion-environment";
 
 export type DesktopContextProbeStatus = "available" | "unavailable" | "failed";
 
-export type DesktopContextProbeResult = {
+export type DesktopContextMediaProbeResult = {
   status: DesktopContextProbeStatus;
-  snapshot: DesktopContextSnapshot;
-  capabilities: {
-    media: DesktopContextCapability;
-    game: DesktopContextCapability;
-  };
+  value: CompanionEnvironmentMedia;
+  capability: "available" | "unavailable" | "unknown";
+};
+
+export type DesktopContextInterruptibilityProbeResult = {
+  status: DesktopContextProbeStatus;
+  value: CompanionEnvironmentInterruptibility;
+  capability: "available" | "unavailable" | "unknown";
 };
 
 export type DesktopContextProvider = {
-  sample(): Promise<DesktopContextProbeResult>;
-  cancelPending(): void;
+  sampleMedia(): Promise<DesktopContextMediaProbeResult>;
+  sampleInterruptibility(): Promise<DesktopContextInterruptibilityProbeResult>;
+  cancelMediaPending(): void;
+  cancelBasicPending(): void;
   dispose(): void;
 };
 
@@ -35,18 +34,21 @@ export type DesktopContextCommandRunner = {
   dispose(): void;
 };
 
-export const UNKNOWN_DESKTOP_CONTEXT_SNAPSHOT: DesktopContextSnapshot = Object.freeze({
-  mediaPlaying: false,
-  gamePresence: "unknown"
-});
+type ExecFileLike = typeof execFile;
 
-export const UNAVAILABLE_DESKTOP_CONTEXT_PROBE: DesktopContextProbeResult = Object.freeze({
+const UNAVAILABLE_MEDIA_PROBE: DesktopContextMediaProbeResult = Object.freeze({
   status: "unavailable",
-  snapshot: UNKNOWN_DESKTOP_CONTEXT_SNAPSHOT,
-  capabilities: Object.freeze({ media: "unavailable", game: "unavailable" })
+  value: "unknown",
+  capability: "unavailable"
 });
 
-const WINDOWS_DESKTOP_CONTEXT_SCRIPT = String.raw`
+const UNAVAILABLE_INTERRUPTIBILITY_PROBE: DesktopContextInterruptibilityProbeResult = Object.freeze({
+  status: "unavailable",
+  value: "unknown",
+  capability: "unavailable"
+});
+
+export const WINDOWS_GSMTC_PLAYBACK_SCRIPT = String.raw`
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 $mediaPlaying = $false
@@ -76,76 +78,218 @@ try {
 
 [Console]::Out.Write((ConvertTo-Json @{
   mediaPlaying = $mediaPlaying
-  gamePresence = 'unknown'
   mediaCapability = $mediaCapability
-  gameCapability = 'unavailable'
 } -Compress))
 `;
 
+export const WINDOWS_QUNS_SCRIPT = String.raw`
+$ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
+$state = 0
+
+try {
+  Add-Type -TypeDefinition @'
+using System.Runtime.InteropServices;
+
+public static class CompanionQunsNative {
+  [DllImport("shell32.dll")]
+  public static extern int SHQueryUserNotificationState(out int state);
+}
+'@
+  [int]$nativeState = 0
+  $callCode = [CompanionQunsNative]::SHQueryUserNotificationState([ref]$nativeState)
+  if ($callCode -eq 0) {
+    $state = $nativeState
+  }
+} catch {
+  $state = 0
+}
+
+[Console]::Out.Write((ConvertTo-Json @{ state = $state } -Compress))
+`;
+
+export function bucketIdleSeconds(value: unknown): CompanionEnvironmentActivity {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+    return "unknown";
+  }
+  if (value < 60) {
+    return "active";
+  }
+  if (value < 300) {
+    return "idle-short";
+  }
+  if (value < 1_800) {
+    return "idle-long";
+  }
+  return "away";
+}
+
 export function createWindowsDesktopContextProvider({
   platform = process.platform,
-  commandRunner = createPowerShellDesktopContextCommandRunner()
+  mediaCommandRunner = createPowerShellDesktopContextCommandRunner(),
+  interruptibilityCommandRunner = createPowerShellQunsCommandRunner()
 }: {
   platform?: NodeJS.Platform;
-  commandRunner?: DesktopContextCommandRunner;
+  mediaCommandRunner?: DesktopContextCommandRunner;
+  interruptibilityCommandRunner?: DesktopContextCommandRunner;
 } = {}): DesktopContextProvider {
   let disposed = false;
-  let inFlight: Promise<DesktopContextProbeResult> | null = null;
+  let mediaGeneration = 0;
+  let interruptibilityGeneration = 0;
+  let mediaInFlight: Promise<DesktopContextMediaProbeResult> | null = null;
+  let interruptibilityInFlight: Promise<DesktopContextInterruptibilityProbeResult> | null = null;
+
+  function sampleMedia(): Promise<DesktopContextMediaProbeResult> {
+    if (disposed || platform !== "win32") {
+      return Promise.resolve({ ...UNAVAILABLE_MEDIA_PROBE });
+    }
+    if (mediaInFlight) {
+      return mediaInFlight;
+    }
+    const generation = mediaGeneration;
+    const request = mediaCommandRunner.execute()
+      .then((output) => generation === mediaGeneration
+        ? parseMediaProbeResult(output)
+        : createFailedMediaProbe())
+      .catch(() => createFailedMediaProbe())
+      .finally(() => {
+        if (mediaInFlight === request) {
+          mediaInFlight = null;
+        }
+      });
+    mediaInFlight = request;
+    return request;
+  }
+
+  function sampleInterruptibility(): Promise<DesktopContextInterruptibilityProbeResult> {
+    if (disposed || platform !== "win32") {
+      return Promise.resolve({ ...UNAVAILABLE_INTERRUPTIBILITY_PROBE });
+    }
+    if (interruptibilityInFlight) {
+      return interruptibilityInFlight;
+    }
+    const generation = interruptibilityGeneration;
+    const request = interruptibilityCommandRunner.execute()
+      .then((output) => generation === interruptibilityGeneration
+        ? parseQunsProbeResult(output)
+        : createFailedInterruptibilityProbe())
+      .catch(() => createFailedInterruptibilityProbe())
+      .finally(() => {
+        if (interruptibilityInFlight === request) {
+          interruptibilityInFlight = null;
+        }
+      });
+    interruptibilityInFlight = request;
+    return request;
+  }
 
   return {
-    sample() {
-      if (disposed || platform !== "win32") {
-        return Promise.resolve({ ...UNAVAILABLE_DESKTOP_CONTEXT_PROBE });
-      }
-
-      if (inFlight) {
-        return inFlight;
-      }
-
-      const request = commandRunner.execute()
-        .then(parseDesktopContextProbeResult)
-        .catch(() => createFailedDesktopContextProbe())
-        .finally(() => {
-          if (inFlight === request) {
-            inFlight = null;
-          }
-        });
-      inFlight = request;
-      return inFlight;
+    sampleMedia,
+    sampleInterruptibility,
+    cancelMediaPending() {
+      mediaGeneration += 1;
+      mediaInFlight = null;
+      mediaCommandRunner.cancel();
     },
-    cancelPending() {
-      commandRunner.cancel();
-      inFlight = null;
+    cancelBasicPending() {
+      interruptibilityGeneration += 1;
+      interruptibilityInFlight = null;
+      interruptibilityCommandRunner.cancel();
     },
     dispose() {
+      if (disposed) {
+        return;
+      }
       disposed = true;
-      commandRunner.cancel();
-      commandRunner.dispose();
-      inFlight = null;
+      mediaGeneration += 1;
+      interruptibilityGeneration += 1;
+      mediaInFlight = null;
+      interruptibilityInFlight = null;
+      mediaCommandRunner.dispose();
+      interruptibilityCommandRunner.dispose();
     }
   };
 }
 
 export function createPowerShellDesktopContextCommandRunner({
   timeoutMs = 5_000,
-  systemRoot = process.env.SystemRoot
+  systemRoot = process.env.SystemRoot,
+  execFileFn = execFile
 }: {
   timeoutMs?: number;
   systemRoot?: string;
+  execFileFn?: ExecFileLike;
 } = {}): DesktopContextCommandRunner {
-  let activeChild: ChildProcess | null = null;
+  return createPowerShellCommandRunner({
+    script: WINDOWS_GSMTC_PLAYBACK_SCRIPT,
+    timeoutMs,
+    systemRoot,
+    execFileFn
+  });
+}
+
+export function createPowerShellQunsCommandRunner({
+  timeoutMs = 2_000,
+  systemRoot = process.env.SystemRoot,
+  execFileFn = execFile
+}: {
+  timeoutMs?: number;
+  systemRoot?: string;
+  execFileFn?: ExecFileLike;
+} = {}): DesktopContextCommandRunner {
+  return createPowerShellCommandRunner({
+    script: WINDOWS_QUNS_SCRIPT,
+    timeoutMs,
+    systemRoot,
+    execFileFn
+  });
+}
+
+function createPowerShellCommandRunner({
+  script,
+  timeoutMs,
+  systemRoot,
+  execFileFn
+}: {
+  script: string;
+  timeoutMs: number;
+  systemRoot?: string | undefined;
+  execFileFn: ExecFileLike;
+}): DesktopContextCommandRunner {
+  let active: {
+    child: ChildProcess;
+    promise: Promise<string>;
+    reject(error: Error): void;
+  } | null = null;
   let disposed = false;
-  const encodedCommand = Buffer.from(WINDOWS_DESKTOP_CONTEXT_SCRIPT, "utf16le").toString("base64");
+  let generation = 0;
+  const encodedCommand = Buffer.from(script, "utf16le").toString("base64");
   const powershellExecutablePath = resolvePowerShellExecutablePath(systemRoot);
+
+  function cancel(): void {
+    generation += 1;
+    const pending = active;
+    active = null;
+    if (pending) {
+      pending.child.kill();
+      pending.reject(new Error("Desktop context command cancelled"));
+    }
+  }
 
   return {
     execute() {
       if (disposed) {
         return Promise.reject(new Error("Desktop context command runner disposed"));
       }
-
-      return new Promise<string>((resolve, reject) => {
-        const child = execFile(
+      if (active) {
+        return active.promise;
+      }
+      const requestGeneration = generation;
+      let rejectRequest: (error: Error) => void = () => undefined;
+      let child: ChildProcess;
+      const promise = new Promise<string>((resolve, reject) => {
+        rejectRequest = reject;
+        child = execFileFn(
           powershellExecutablePath,
           ["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-EncodedCommand", encodedCommand],
           {
@@ -155,26 +299,27 @@ export function createPowerShellDesktopContextCommandRunner({
             encoding: "utf8"
           },
           (error, stdout) => {
-            if (activeChild === child) {
-              activeChild = null;
+            if (active?.promise === promise) {
+              active = null;
             }
-            if (error) {
-              reject(error);
+            if (error || requestGeneration !== generation) {
+              reject(new Error("Desktop context command failed"));
               return;
             }
-            resolve(stdout);
+            resolve(String(stdout));
           }
         );
-        activeChild = child;
       });
+      active = { child: child!, promise, reject: rejectRequest };
+      return promise;
     },
-    cancel() {
-      activeChild?.kill();
-      activeChild = null;
-    },
+    cancel,
     dispose() {
+      if (disposed) {
+        return;
+      }
       disposed = true;
-      this.cancel();
+      cancel();
     }
   };
 }
@@ -186,54 +331,72 @@ export function resolvePowerShellExecutablePath(systemRoot = process.env.SystemR
   return win32.join(root, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
 }
 
-export function parseDesktopContextProbeResult(value: string): DesktopContextProbeResult {
+export function parseMediaProbeResult(value: string): DesktopContextMediaProbeResult {
   try {
-    const parsed = JSON.parse(value.trim()) as (Partial<DesktopContextSnapshot> & {
-      mediaCapability?: unknown;
-      gameCapability?: unknown;
-    }) | null;
-    if (
-      !parsed ||
-      Object.keys(parsed).some((key) => (
-        key !== "mediaPlaying" &&
-        key !== "gamePresence" &&
-        key !== "mediaCapability" &&
-        key !== "gameCapability"
-      )) ||
+    const parsed = JSON.parse(value.trim()) as unknown;
+    if (!hasExactKeys(parsed, ["mediaPlaying", "mediaCapability"]) ||
       typeof parsed.mediaPlaying !== "boolean" ||
-      !GAME_PRESENCE_VALUES.includes(parsed.gamePresence as GamePresence) ||
-      !isDesktopContextCapability(parsed.mediaCapability) ||
-      !isDesktopContextCapability(parsed.gameCapability) ||
-      parsed.gamePresence !== "unknown" ||
-      parsed.gameCapability !== "unavailable"
-    ) {
-      return createFailedDesktopContextProbe();
+      (parsed.mediaCapability !== "available" && parsed.mediaCapability !== "unavailable")) {
+      return createFailedMediaProbe();
     }
-
+    if (parsed.mediaCapability === "unavailable" && parsed.mediaPlaying) {
+      return createFailedMediaProbe();
+    }
     return {
-      status: "available",
-      snapshot: {
-        mediaPlaying: parsed.mediaPlaying,
-        gamePresence: parsed.gamePresence as GamePresence
-      },
-      capabilities: {
-        media: parsed.mediaCapability,
-        game: parsed.gameCapability
-      }
+      status: parsed.mediaCapability === "available" ? "available" : "unavailable",
+      value: parsed.mediaCapability === "available"
+        ? (parsed.mediaPlaying ? "playing" : "stopped")
+        : "unknown",
+      capability: parsed.mediaCapability
     };
   } catch {
-    return createFailedDesktopContextProbe();
+    return createFailedMediaProbe();
   }
 }
 
-function isDesktopContextCapability(value: unknown): value is DesktopContextCapability {
-  return value === "available" || value === "unavailable";
+export function parseQunsProbeResult(value: string): DesktopContextInterruptibilityProbeResult {
+  try {
+    const parsed = JSON.parse(value.trim()) as unknown;
+    if (!hasExactKeys(parsed, ["state"]) || !Number.isSafeInteger(parsed.state)) {
+      return createFailedInterruptibilityProbe();
+    }
+    const mapped = mapQunsState(parsed.state as number);
+    return mapped === "unknown"
+      ? createFailedInterruptibilityProbe()
+      : { status: "available", value: mapped, capability: "available" };
+  } catch {
+    return createFailedInterruptibilityProbe();
+  }
 }
 
-function createFailedDesktopContextProbe(): DesktopContextProbeResult {
-  return {
-    status: "failed",
-    snapshot: { ...UNKNOWN_DESKTOP_CONTEXT_SNAPSHOT },
-    capabilities: { media: "unavailable", game: "unavailable" }
-  };
+export function mapQunsState(state: number): CompanionEnvironmentInterruptibility {
+  if (state === 5) {
+    return "allowed";
+  }
+  if (state === 4) {
+    return "presentation";
+  }
+  if (state === 3) {
+    return "full-screen-activity";
+  }
+  if (state === 1 || state === 2 || state === 6 || state === 7) {
+    return "suppressed";
+  }
+  return "unknown";
+}
+
+function createFailedMediaProbe(): DesktopContextMediaProbeResult {
+  return { status: "failed", value: "unknown", capability: "unknown" };
+}
+
+function createFailedInterruptibilityProbe(): DesktopContextInterruptibilityProbeResult {
+  return { status: "failed", value: "unknown", capability: "unknown" };
+}
+
+function hasExactKeys(value: unknown, keys: readonly string[]): value is Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  const actualKeys = Object.keys(value);
+  return actualKeys.length === keys.length && keys.every((key) => actualKeys.includes(key));
 }

@@ -113,7 +113,13 @@
             </section>
             <section class="content-stack" aria-labelledby="environment-action-settings-title">
               <h3 id="environment-action-settings-title" class="settings-section-title">环境动作感知</h3>
-              <p id="environment-action-status" class="status-box" data-state="fallback" aria-live="polite">环境动作感知：关闭。</p>
+              <p id="environment-action-status" class="status-box" data-state="fallback" aria-live="polite">环境动作感知：默认启用。</p>
+              <label class="field-label">
+                <span>
+                  <input id="environment-basic-enabled" type="checkbox" />
+                  感知基础环境状态
+                </span>
+              </label>
               <label class="field-label">
                 <span>
                   <input id="environment-music-enabled" type="checkbox" />
@@ -123,10 +129,10 @@
               <label class="field-label">
                 <span>
                   <input id="environment-game-enabled" type="checkbox" />
-                  感知正在运行的游戏
+                  保留游戏环境感知偏好
                 </span>
               </label>
-              <p class="selection-note">默认关闭。开启后只在本机判断播放布尔值与游戏闭集状态，不保存或显示媒体标题、窗口标题、进程名、路径或命令行。</p>
+              <p class="selection-note">默认启用。基础状态与媒体仅在本机按安全闭集处理；游戏环境感知当前不可用，也不会扫描正在运行的游戏。不保存或显示环境值、媒体标题、窗口标题、进程名、路径或命令行。</p>
               <div class="settings-actions">
                 <button id="save-environment-action-settings-button" class="button-light" type="button">保存环境感知设置</button>
               </div>

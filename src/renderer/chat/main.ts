@@ -172,6 +172,7 @@ const proactiveMemorySourceBubbles = document.querySelector<HTMLInputElement>("#
 const proactiveSearchSourceBubbles = document.querySelector<HTMLInputElement>("#proactive-search-source-bubbles");
 const saveProactiveCompanionSettingsButton = document.querySelector<HTMLButtonElement>("#save-proactive-companion-settings-button");
 const environmentActionStatus = document.querySelector<HTMLElement>("#environment-action-status");
+const environmentBasicEnabled = document.querySelector<HTMLInputElement>("#environment-basic-enabled");
 const environmentMusicEnabled = document.querySelector<HTMLInputElement>("#environment-music-enabled");
 const environmentGameEnabled = document.querySelector<HTMLInputElement>("#environment-game-enabled");
 const saveEnvironmentActionSettingsButton = document.querySelector<HTMLButtonElement>("#save-environment-action-settings-button");
@@ -252,7 +253,7 @@ if (
   !settingsUserDisplayName || !settingsUserPreferredName || !saveUserProfileButton || !clearUserProfileButton ||
   !proactiveCompanionStatus || !proactiveCadenceControls ||
   !proactiveMemorySourceBubbles || !proactiveSearchSourceBubbles || !saveProactiveCompanionSettingsButton ||
-  !environmentActionStatus || !environmentMusicEnabled || !environmentGameEnabled || !saveEnvironmentActionSettingsButton ||
+  !environmentActionStatus || !environmentBasicEnabled || !environmentMusicEnabled || !environmentGameEnabled || !saveEnvironmentActionSettingsButton ||
   !shortcutList || !shortcutStatus ||
   !webSearchStatus || !webSearchEnabled || !webSearchProfile || !webSearchProfileNote ||
   !webSearchTimeout || !webSearchMaxResults || !webSearchSaveButton || !webSearchRefreshButton || !webSearchTestButton ||
@@ -353,6 +354,7 @@ const proactiveMemorySourceBubblesField = proactiveMemorySourceBubbles;
 const proactiveSearchSourceBubblesField = proactiveSearchSourceBubbles;
 const saveProactiveCompanionSettingsAction = saveProactiveCompanionSettingsButton;
 const environmentActionStatusBox = environmentActionStatus;
+const environmentBasicEnabledField = environmentBasicEnabled;
 const environmentMusicEnabledField = environmentMusicEnabled;
 const environmentGameEnabledField = environmentGameEnabled;
 const saveEnvironmentActionSettingsAction = saveEnvironmentActionSettingsButton;
@@ -657,11 +659,13 @@ function renderEnvironmentActionSettings(
   settings: EnvironmentActionSettings,
   runtimeStatus?: EnvironmentActionRuntimeStatus
 ): void {
+  environmentBasicEnabledField.checked = settings.basicEnabled;
   environmentMusicEnabledField.checked = settings.musicEnabled;
   environmentGameEnabledField.checked = settings.gameEnabled;
   const enabledLabels = [
+    settings.basicEnabled ? "基础开启" : null,
     settings.musicEnabled ? "媒体开启" : null,
-    settings.gameEnabled ? "游戏开启" : null
+    settings.gameEnabled ? "游戏感知偏好开启" : null
   ].filter((value): value is string => value !== null);
   if (enabledLabels.length === 0) {
     environmentActionStatusBox.textContent = "环境动作感知：关闭。";
@@ -671,15 +675,17 @@ function renderEnvironmentActionSettings(
 
   const monitorLabel = runtimeStatus?.monitorStatus === "backoff"
     ? "探测退避中"
-    : runtimeStatus?.monitorStatus === "waiting-for-renderer"
-      ? "等待桌宠就绪"
-      : runtimeStatus?.monitorStatus === "polling"
-        ? "探测运行中"
-        : "状态待确认";
+    : runtimeStatus?.monitorStatus === "polling"
+      ? "探测运行中"
+      : "系统探针已停止";
   const capabilityLabels = runtimeStatus
     ? [
-        `媒体${runtimeStatus.mediaCapability === "available" ? "可用" : "不可用"}`,
-        `游戏${runtimeStatus.gameCapability === "available" ? "可用" : "不可用"}`
+        `媒体${runtimeStatus.mediaCapability === "available"
+          ? "可用"
+          : runtimeStatus.mediaCapability === "unavailable"
+            ? "不可用"
+            : "待确认"}`,
+        "游戏扫描未启用"
       ]
     : [];
   environmentActionStatusBox.textContent = `环境动作感知：${enabledLabels.join(" · ")}。${monitorLabel}${
@@ -712,6 +718,7 @@ async function saveEnvironmentActionSettings(): Promise<void> {
   }
   try {
     const settings = await window.environmentActionApi.setSettings({
+      basicEnabled: environmentBasicEnabledField.checked,
       musicEnabled: environmentMusicEnabledField.checked,
       gameEnabled: environmentGameEnabledField.checked
     });

@@ -318,16 +318,17 @@ const petActionRuntimePolicy = createPetActionRuntimePolicy({
 const windowsDesktopContextProvider = createWindowsDesktopContextProvider();
 const desktopContextMonitor = createDesktopContextMonitor({
   provider: windowsDesktopContextProvider,
-  onStableGamePresence(presence) {
-    automaticSituationCoordinator?.updateStableGamePresence(presence);
+  getSystemIdleTime() {
+    return powerMonitor.getSystemIdleTime();
   },
   sendReason(reason) {
     return sendPetActionTrigger(reason);
   }
 });
-const handleSystemResume = (): void => {
-  desktopContextMonitor.resetStability();
-};
+const handleSystemLock = (): void => desktopContextMonitor.lock();
+const handleSystemUnlock = (): void => desktopContextMonitor.unlock();
+const handleSystemSuspend = (): void => desktopContextMonitor.suspend();
+const handleSystemResume = (): void => desktopContextMonitor.resume();
 
 const shutdownCoordinator = createAppShutdownCoordinator({
   quiesce: quiesceApp,
@@ -2264,6 +2265,9 @@ app.whenReady().then(async () => {
   currentEnvironmentActionSettings = environmentActionSettingsStore.getSettings();
   petActionRuntimePolicy.syncEveningDateKey(environmentActionSettingsStore.getEveningDateKey());
   desktopContextMonitor.updateSettings(currentEnvironmentActionSettings);
+  powerMonitor.on("lock-screen", handleSystemLock);
+  powerMonitor.on("unlock-screen", handleSystemUnlock);
+  powerMonitor.on("suspend", handleSystemSuspend);
   powerMonitor.on("resume", handleSystemResume);
   shortcutPreferencesStore = createShortcutPreferencesStore();
   userProfileStore = createUserProfileStore({ logTelemetry });
@@ -3623,9 +3627,6 @@ app.whenReady().then(async () => {
       throw new Error("Unauthorized environment action settings request");
     }
     currentEnvironmentActionSettings = environmentActionSettingsStore.saveSettings(update);
-    if (!currentEnvironmentActionSettings.gameEnabled) {
-      automaticSituationCoordinator?.updateStableGamePresence("non-game");
-    }
     desktopContextMonitor.updateSettings(currentEnvironmentActionSettings);
     return currentEnvironmentActionSettings;
   });
@@ -3856,6 +3857,9 @@ function quiesceApp(): void {
   cancelStartupProactiveSpeechBubbleTimer();
   cancelIdleProactiveSpeechBubbleTimer();
   clearChatReplySustainTimer();
+  powerMonitor.removeListener("lock-screen", handleSystemLock);
+  powerMonitor.removeListener("unlock-screen", handleSystemUnlock);
+  powerMonitor.removeListener("suspend", handleSystemSuspend);
   powerMonitor.removeListener("resume", handleSystemResume);
   desktopContextMonitor.dispose();
   removeAutomaticSituationListener?.();

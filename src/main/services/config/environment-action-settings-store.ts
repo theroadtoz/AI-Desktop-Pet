@@ -117,6 +117,9 @@ function mergeSettingsUpdate(
   const input = update as Partial<EnvironmentActionSettings>;
   return {
     settings: {
+      basicEnabled: typeof input.basicEnabled === "boolean"
+        ? input.basicEnabled
+        : current.basicEnabled,
       musicEnabled: typeof input.musicEnabled === "boolean"
         ? input.musicEnabled
         : current.musicEnabled,
@@ -125,6 +128,9 @@ function mergeSettingsUpdate(
         : current.gameEnabled
     },
     userSelected: {
+      basicEnabled: typeof input.basicEnabled === "boolean"
+        ? true
+        : currentUserSelected.basicEnabled,
       musicEnabled: typeof input.musicEnabled === "boolean"
         ? true
         : currentUserSelected.musicEnabled,

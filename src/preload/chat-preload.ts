@@ -67,6 +67,7 @@ const defaultProactiveCompanionSettings: ProactiveCompanionSettings = {
   searchSourceBubbles: true
 };
 const defaultEnvironmentActionSettings: EnvironmentActionSettings = {
+  basicEnabled: true,
   musicEnabled: true,
   gameEnabled: true
 };
@@ -295,6 +296,9 @@ function parseEnvironmentActionSettings(value: unknown): EnvironmentActionSettin
     return { ...defaultEnvironmentActionSettings };
   }
   return {
+    basicEnabled: typeof settings.basicEnabled === "boolean"
+      ? settings.basicEnabled
+      : defaultEnvironmentActionSettings.basicEnabled,
     musicEnabled: typeof settings.musicEnabled === "boolean"
       ? settings.musicEnabled
       : defaultEnvironmentActionSettings.musicEnabled,
@@ -307,11 +311,10 @@ function parseEnvironmentActionSettings(value: unknown): EnvironmentActionSettin
 function parseEnvironmentActionRuntimeStatus(value: unknown): EnvironmentActionRuntimeStatus {
   const status = value as Partial<EnvironmentActionRuntimeStatus> | null;
   const providerStatuses = ["unknown", "available", "unavailable", "failed"] as const;
-  const monitorStatuses = ["stopped", "waiting-for-renderer", "polling", "backoff"] as const;
+  const monitorStatuses = ["stopped", "polling", "backoff"] as const;
   const capabilities = ["unknown", "available", "unavailable"] as const;
   if (
-    !status ||
-    typeof status !== "object" ||
+    !hasExactKeys(status, ["providerStatus", "monitorStatus", "mediaCapability", "gameCapability"]) ||
     !providerStatuses.includes(status.providerStatus as never) ||
     !monitorStatuses.includes(status.monitorStatus as never) ||
     !capabilities.includes(status.mediaCapability as never) ||
@@ -333,6 +336,10 @@ function parseEnvironmentActionSettingsUpdate(value: unknown): EnvironmentAction
     return null;
   }
   const parsed: EnvironmentActionSettingsUpdate = {};
+  if ("basicEnabled" in update) {
+    if (typeof update.basicEnabled !== "boolean") return null;
+    parsed.basicEnabled = update.basicEnabled;
+  }
   if ("musicEnabled" in update) {
     if (typeof update.musicEnabled !== "boolean") return null;
     parsed.musicEnabled = update.musicEnabled;
