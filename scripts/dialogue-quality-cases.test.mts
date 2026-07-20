@@ -121,7 +121,8 @@ test("quality case: persona and style prompts preserve modern witch boundaries",
   assert.match(persona, /耐心/);
   assert.match(persona, /乐观/);
   assert.match(persona, /学识渊博/);
-  assert.match(persona, /不要用阅历替代可验证事实/);
+  assert.match(persona, /阅历主要体现为耐心和稳妥判断/);
+  assert.match(persona, /事实、技术和安全问题直接准确/);
   assert.match(style, /用户要求详细时才展开/);
   assert.doesNotMatch(persona + style, /事实卡正文|API Key|Provider 请求正文/);
 });

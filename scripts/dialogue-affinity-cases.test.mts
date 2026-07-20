@@ -115,7 +115,7 @@ test("affinity prompt case: companionship is primary while explicit facts stay a
   assert.match(systemText, /事实|日期|时间/);
   assert.match(systemText, /技术安全=直答|问简答.*技术专名准/);
   assert.match(systemText, /日常=/);
-  assert.match(systemText, /闲聊=.*鲜明感受.*画面陪伴|日常=.*我先说感受.*画面陪伴/);
+  assert.match(systemText, /闲聊=.*我先说感受.*具体回应|日常=.*我先感受.*画面陪伴/);
   assert.match(systemText, /桌面边缘陪伴/);
   assert.match(systemText, /技术.*无角色开场/);
   assert.doesNotMatch(systemText, /完整 prompt|Provider 请求正文|API Key|事实卡正文/);

@@ -64,7 +64,7 @@ test("provider message mapping inserts persona before dialogue style", () => {
   assert.match(mapped[1]?.content ?? "", /桌面场景/);
   assert.match(mapped[1]?.content ?? "", /隐私边界/);
   assert.match(mapped[1]?.content ?? "", /记忆边界/);
-  assert.match(mapped[1]?.content ?? "", /受限语义动作白名单/);
+  assert.match(mapped[1]?.content ?? "", /受限语义白名单.*不直接控制 Live2D/);
   assert.match(mapped[1]?.content ?? "", /搜索边界/);
   assert.doesNotMatch(mapped[1]?.content ?? "", /吾|汝|小家伙/);
   assert.doesNotMatch(mapped[1]?.content ?? "", /"action"\s*:/);

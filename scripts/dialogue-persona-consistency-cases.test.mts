@@ -56,22 +56,23 @@ test("persona consistency: cloud and local prompts share the fixed anchor", () =
     assert.match(text, /桌面魔女同伴.*关系.*场景/);
     assert.match(text, /Windows Live2D\s*桌面魔女同伴/);
     assert.match(text, /不是.*社会身份|非社会身份/);
-    assert.match(text, /课程.*实验.*报告.*(?:长期)?课题.*(?:低频.*连续|相关(?:才)?提)/);
-    assert.match(text, /技术名词准确|准确技术名词|专有名词准确|术语准确/);
     assert.match(text, /(?:长寿|很长)?阅历/);
-    assert.match(text, new RegExp(anchor.temperament.join(".*")));
-    assert.match(text, /普通聊天.*态度.*情绪反应|闲聊=.*鲜明感受.*画面陪伴/);
+    assert.match(text, /有主见/);
+    assert.match(text, /普通闲聊.*(?:感受|态度).*具体(?:画面|回应)|闲聊=.*我先说感受.*具体回应/);
     assert.match(text, /核心职责.*情绪陪伴.*不是任务助手|定位=.*情绪陪伴.*非任务助手/);
     assert.match(text, /普通陈述.*不是.*请求|陈述≠请求/);
-    assert.match(text, /技术.*事实.*安全.*(?:直接回答|直答).*?(?:专有名词准确|术语准确)|技术(?:名词|专名)准确|术语准确/);
+    assert.match(text, /(?:事实、技术和安全|技术安全).*(?:直接准确|直答)|技术(?:名词|专名)准确/);
     assert.match(text, /不编(?:造)?记忆/);
     assert.match(text, /不假装联网|离线不假(?:装)?搜(?:索)?/);
-    assert.match(text, /不假装读取隐私|不读隐私|不声称读隐私/);
     assert.match(text, /不输出.*action(?: payload)?|action(?: payload)?/);
     assert.doesNotMatch(text, /现代老魔女|千年判断力|活了上千年|进修魔女/);
     assert.doesNotMatch(text, /AI助手|语言模型|聊天机器人/);
     assert.doesNotMatch(text, /API Key|Provider 请求正文|事实卡正文/);
   }
+  assert.match(cloudPersona, /课程.*实验.*报告.*(?:长期)?课题/);
+  assert.match(cloudPersona, new RegExp(anchor.temperament.join(".*")));
+  assert.match(cloudPersona, /读取隐私/);
+  assert.match(localPersona, /不读隐私/);
 });
 
 test("persona consistency: local system boundary leaves identity to the shared persona prompt", () => {
@@ -138,16 +139,15 @@ test("persona consistency: local prompt gives roleful warmth without overriding 
   assert.match(systemText, /日常=/);
   assert.match(systemText, /桌面边缘陪伴/);
   assert.match(systemText, /(?:别|不)复述.*猜心情/);
-  assert.match(systemText, /我先说.*感受.*画面陪伴/);
+  assert.match(systemText, /我先说.*感受.*具体回应/);
   assert.match(systemText, /禁解释/);
-  assert.match(systemText, /课程.*实验.*报告.*(?:长期)?课题.*(?:低频.*连续|相关(?:才)?提)/);
   assert.match(systemText, /不使用客服式开场|不客服化|不客服/);
-  assert.match(systemText, /技术(?:\/事实\/安全|事实安全).*(?:直接回答|直答).*(?:专有名词准确|术语准确)|技术(?:名词|专名)准确/);
+  assert.match(systemText, /技术(?:\/事实\/安全|事实安全).*(?:直接准确|直答)|技术(?:名词|专名)准确/);
   assert.match(systemText, /陪伴优先.*非任务助手/);
   assert.match(systemText, /陈述≠请求.*禁拆解总结方案/);
   assert.doesNotMatch(systemText, /问学院近况|2-3项连贯具体活动|Provider=.*推理请求|客户端.*MCP服务端.*工具\/资源.*结果/);
   assert.match(systemText, /技术专名准确|专有名词准确/);
-  assert.match(systemText, /不要每轮自报身份|不固定口癖|无固定口癖|无口癖/);
+  assert.match(systemText, /无角色开场|无助手声明/);
   assert.doesNotMatch(systemText, /AI助手|语言模型|聊天机器人/);
   assert.doesNotMatch(systemText, /水晶球|法阵|本魔女|吾|汝/);
 });

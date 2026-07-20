@@ -152,7 +152,7 @@ test("relevance case: local-small-model prompt keeps companionship-first focus r
   assert.match(systemText, /技术专名准确|专有名词准确/);
   assert.doesNotMatch(systemText, /本轮提示：|Model Context Protocol/);
   assert.match(systemText, /问=?简答/);
-  assert.match(systemText, /禁问=.*有什么问题要解决.*需要我帮你做什么/);
+  assert.match(systemText, /禁主动问解决事项|禁问待办/);
   assert.doesNotMatch(systemText, /API Key|Provider 请求正文|事实卡正文/);
 });
 
