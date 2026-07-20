@@ -11,90 +11,105 @@ const {
   resolveEnvironmentActionSettingsRecord
 } = require("../dist/shared/environment-action-settings.js") as typeof import("../src/shared/environment-action-settings");
 
-test("environment action settings default on for absent and partial values", () => {
-  assert.deepEqual(DEFAULT_ENVIRONMENT_ACTION_SETTINGS, {
-    basicEnabled: true,
-    musicEnabled: true,
-    gameEnabled: true
-  });
-  assert.deepEqual(normalizeEnvironmentActionSettings(null), DEFAULT_ENVIRONMENT_ACTION_SETTINGS);
-  assert.deepEqual(normalizeEnvironmentActionSettings({ musicEnabled: false }), {
-    basicEnabled: true,
-    musicEnabled: true,
-    gameEnabled: true
-  });
-  assert.deepEqual(resolveEnvironmentActionSettingsRecord({}), {
-    settings: DEFAULT_ENVIRONMENT_ACTION_SETTINGS,
-    userSelected: { basicEnabled: false, musicEnabled: false, gameEnabled: false }
-  });
-  assert.deepEqual(resolveEnvironmentActionSettingsRecord({ musicEnabled: false }), {
-    settings: DEFAULT_ENVIRONMENT_ACTION_SETTINGS,
-    userSelected: { basicEnabled: false, musicEnabled: false, gameEnabled: false }
-  });
-  assert.deepEqual(resolveEnvironmentActionSettingsRecord({ version: 1, musicEnabled: false, gameEnabled: false }), {
-    settings: DEFAULT_ENVIRONMENT_ACTION_SETTINGS,
-    userSelected: { basicEnabled: false, musicEnabled: false, gameEnabled: false }
-  });
-  assert.deepEqual(resolveEnvironmentActionSettingsRecord({
-    version: 3,
-    musicEnabled: false,
-    gameEnabled: false,
-    userSelected: { basicEnabled: true, musicEnabled: true, gameEnabled: true }
-  }), {
-    settings: DEFAULT_ENVIRONMENT_ACTION_SETTINGS,
-    userSelected: { basicEnabled: false, musicEnabled: false, gameEnabled: false }
-  });
-});
+const defaults = {
+  basicEnabled: true,
+  musicEnabled: true,
+  explicitGameContextEnabled: true
+};
+const unselected = {
+  basicEnabled: false,
+  musicEnabled: false,
+  explicitGameContextEnabled: false
+};
 
-test("environment action settings persist an explicit selection marker", () => {
+test("v4 environment settings default safely and persist only the explicit-game field", () => {
+  assert.equal(ENVIRONMENT_ACTION_SETTINGS_SCHEMA_VERSION, 4);
+  assert.deepEqual(DEFAULT_ENVIRONMENT_ACTION_SETTINGS, defaults);
+  assert.deepEqual(normalizeEnvironmentActionSettings(null), defaults);
+  assert.deepEqual(resolveEnvironmentActionSettingsRecord({ musicEnabled: false }), {
+    settings: defaults,
+    userSelected: unselected
+  });
+
   const record = createEnvironmentActionSettingsRecord(
-    { basicEnabled: false, musicEnabled: false, gameEnabled: true },
-    { basicEnabled: true, musicEnabled: true, gameEnabled: false }
+    { basicEnabled: false, musicEnabled: false, explicitGameContextEnabled: true },
+    { basicEnabled: true, musicEnabled: true, explicitGameContextEnabled: false }
   );
   assert.deepEqual(record, {
-    version: ENVIRONMENT_ACTION_SETTINGS_SCHEMA_VERSION,
+    version: 4,
     basicEnabled: false,
     musicEnabled: false,
-    gameEnabled: true,
-    userSelected: { basicEnabled: true, musicEnabled: true, gameEnabled: false }
+    explicitGameContextEnabled: true,
+    userSelected: { basicEnabled: true, musicEnabled: true, explicitGameContextEnabled: false }
   });
+  assert.equal("gameEnabled" in record, false);
   assert.deepEqual(resolveEnvironmentActionSettingsRecord(record), {
-    settings: { basicEnabled: false, musicEnabled: false, gameEnabled: true },
-    userSelected: { basicEnabled: true, musicEnabled: true, gameEnabled: false }
+    settings: { basicEnabled: false, musicEnabled: false, explicitGameContextEnabled: true },
+    userSelected: { basicEnabled: true, musicEnabled: true, explicitGameContextEnabled: false }
   });
 });
 
-test("v2 explicit media and game choices migrate with basic enabled", () => {
+test("v3 explicit game choices migrate one-to-one while unselected game uses the v4 default", () => {
+  for (const gameEnabled of [true, false]) {
+    assert.deepEqual(resolveEnvironmentActionSettingsRecord({
+      version: 3,
+      basicEnabled: true,
+      musicEnabled: true,
+      gameEnabled,
+      userSelected: { basicEnabled: false, musicEnabled: false, gameEnabled: true }
+    }), {
+      settings: { basicEnabled: true, musicEnabled: true, explicitGameContextEnabled: gameEnabled },
+      userSelected: { basicEnabled: false, musicEnabled: false, explicitGameContextEnabled: true }
+    });
+  }
+
+  assert.deepEqual(resolveEnvironmentActionSettingsRecord({
+    version: 3,
+    basicEnabled: false,
+    musicEnabled: false,
+    gameEnabled: false,
+    userSelected: { basicEnabled: false, musicEnabled: false, gameEnabled: false }
+  }), {
+    settings: defaults,
+    userSelected: unselected
+  });
+});
+
+test("v2 and complete unversioned privacy choices migrate into the v4 meaning", () => {
   assert.deepEqual(resolveEnvironmentActionSettingsRecord({
     version: 2,
     musicEnabled: false,
-    gameEnabled: true,
-    userSelected: { musicEnabled: true, gameEnabled: false }
+    gameEnabled: false,
+    userSelected: { musicEnabled: true, gameEnabled: true }
   }), {
-    settings: { basicEnabled: true, musicEnabled: false, gameEnabled: true },
-    userSelected: { basicEnabled: false, musicEnabled: true, gameEnabled: false }
+    settings: { basicEnabled: true, musicEnabled: false, explicitGameContextEnabled: false },
+    userSelected: { basicEnabled: false, musicEnabled: true, explicitGameContextEnabled: true }
+  });
+
+  assert.deepEqual(resolveEnvironmentActionSettingsRecord({ musicEnabled: false, gameEnabled: false }), {
+    settings: { basicEnabled: false, musicEnabled: false, explicitGameContextEnabled: false },
+    userSelected: { basicEnabled: true, musicEnabled: true, explicitGameContextEnabled: true }
   });
 });
 
-test("complete unversioned legacy double opt-out remains fully disabled", () => {
-  assert.deepEqual(resolveEnvironmentActionSettingsRecord({
-    musicEnabled: false,
-    gameEnabled: false
-  }), {
-    settings: { basicEnabled: false, musicEnabled: false, gameEnabled: false },
-    userSelected: { basicEnabled: true, musicEnabled: true, gameEnabled: true }
-  });
-});
-
-test("future records preserve false values that carry explicit user selection proof", () => {
+test("future records may preserve proven v4 selections but invalid versioned records default", () => {
   assert.deepEqual(resolveEnvironmentActionSettingsRecord({
     version: 999,
     basicEnabled: true,
     musicEnabled: false,
-    gameEnabled: true,
-    userSelected: { basicEnabled: false, musicEnabled: true, gameEnabled: false }
+    explicitGameContextEnabled: false,
+    userSelected: { basicEnabled: false, musicEnabled: true, explicitGameContextEnabled: true }
   }), {
-    settings: { basicEnabled: true, musicEnabled: false, gameEnabled: true },
-    userSelected: { basicEnabled: false, musicEnabled: true, gameEnabled: false }
+    settings: { basicEnabled: true, musicEnabled: false, explicitGameContextEnabled: false },
+    userSelected: { basicEnabled: false, musicEnabled: true, explicitGameContextEnabled: true }
+  });
+  assert.deepEqual(resolveEnvironmentActionSettingsRecord({
+    version: 4,
+    musicEnabled: false,
+    gameEnabled: false,
+    userSelected: { basicEnabled: true, musicEnabled: true, gameEnabled: true }
+  }), {
+    settings: defaults,
+    userSelected: unselected
   });
 });

@@ -653,8 +653,8 @@ function writeDisabledSettings(userDataPath, runtime) {
   const configRoot = join(userDataPath, "config");
   mkdirSync(configRoot, { recursive: true });
   const record = runtime.createSettingsRecord(
-    { musicEnabled: false, gameEnabled: true },
-    { musicEnabled: true, gameEnabled: false }
+    { musicEnabled: false, explicitGameContextEnabled: true },
+    { musicEnabled: true, explicitGameContextEnabled: false }
   );
   writeFileSync(
     join(configRoot, "environment-action-settings.json"),

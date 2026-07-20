@@ -1,8 +1,8 @@
 import {
+  MODEL_CONVERSATION_CONTEXT_IDS,
   deriveAutomaticPresenceState,
   type AutomaticConversationContextId,
   type AutomaticConversationSource,
-  type AutomaticGamePresence,
   type AutomaticPresenceSource,
   type AutomaticSituationSnapshot,
   type ModelConversationContextId
@@ -39,7 +39,7 @@ export type AutomaticSituationCoordinator = {
     reason: AutomaticSituationClassificationStatus | "late-result" | "disposed";
     snapshot: AutomaticSituationSnapshot;
   }>;
-  updateStableGamePresence(presence: AutomaticGamePresence): AutomaticSituationSnapshot;
+  updateExplicitGameContext(active: boolean): AutomaticSituationSnapshot;
   updatePresenceLifecycle(input: AutomaticPresenceLifecycleInput): AutomaticSituationSnapshot;
   cancelPendingClassification(): void;
   tick(): AutomaticSituationSnapshot;
@@ -71,7 +71,7 @@ export function createAutomaticSituationCoordinator({
   let baseSource: AutomaticConversationSource = "default";
   let baseConfidence: number | null = null;
   let baseExpiresAtMs: number | null = null;
-  let stableGamePresence: AutomaticGamePresence = "unknown";
+  let explicitGameContextActive = false;
   let activeClassificationController: AbortController | null = null;
   let lifecycle: AutomaticPresenceLifecycleInput = {
     appActive: false,
@@ -105,9 +105,8 @@ export function createAutomaticSituationCoordinator({
   }
 
   function recompute(): AutomaticSituationSnapshot {
-    const gameActive = stableGamePresence === "game";
-    const conversationContextId: AutomaticConversationContextId = gameActive ? "game" : baseContextId;
-    const conversationSource: AutomaticConversationSource = gameActive ? "stable-game-signal" : baseSource;
+    const conversationContextId: AutomaticConversationContextId = explicitGameContextActive ? "game" : baseContextId;
+    const conversationSource: AutomaticConversationSource = explicitGameContextActive ? "user-explicit" : baseSource;
     const presence = deriveAutomaticPresenceState({
       conversationContextId,
       ...lifecycle
@@ -118,8 +117,8 @@ export function createAutomaticSituationCoordinator({
       conversationSource,
       presenceStateId: presence.stateId,
       presenceSource: presence.source,
-      confidence: gameActive ? null : baseConfidence,
-      expiresAtMs: gameActive ? null : baseExpiresAtMs
+      confidence: explicitGameContextActive ? null : baseConfidence,
+      expiresAtMs: explicitGameContextActive ? null : baseExpiresAtMs
     });
   }
 
@@ -161,6 +160,13 @@ export function createAutomaticSituationCoordinator({
         return { accepted: false, reason: "late-result", snapshot };
       }
 
+      if (
+        result.status === "classified" &&
+        !MODEL_CONVERSATION_CONTEXT_IDS.includes(result.contextId)
+      ) {
+        result = { contextId: "default", confidence: null, status: "invalid-output" };
+      }
+
       if (result.status === "classified" && result.contextId !== baseContextId && hysteresisMs > 0) {
         await delay(hysteresisMs);
         if (disposed) {
@@ -185,15 +191,11 @@ export function createAutomaticSituationCoordinator({
 
       return { accepted: true, reason: result.status, snapshot: recompute() };
     },
-    updateStableGamePresence(presence) {
+    updateExplicitGameContext(active) {
       if (disposed) {
         return snapshot;
       }
-      if (presence === "game") {
-        stableGamePresence = "game";
-      } else if (presence === "non-game") {
-        stableGamePresence = "non-game";
-      }
+      explicitGameContextActive = active;
       return recompute();
     },
     updatePresenceLifecycle(input) {

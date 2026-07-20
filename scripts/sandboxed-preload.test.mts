@@ -12,7 +12,8 @@ test("sandboxed chat preload has no relative runtime dependencies", async () => 
   assert.match(preload, /exposeInMainWorld\("proactiveCompanionApi", proactiveCompanionApi\)/);
   assert.match(preload, /exposeInMainWorld\("environmentActionApi", environmentActionApi\)/);
   assert.match(preload, /exposeInMainWorld\("userProfileApi", userProfileApi\)/);
-  assert.match(preload, /const defaultEnvironmentActionSettings = \{\s*basicEnabled: true,\s*musicEnabled: true,\s*gameEnabled: true\s*\}/);
+  assert.match(preload, /const defaultEnvironmentActionSettings = \{\s*basicEnabled: true,\s*musicEnabled: true,\s*explicitGameContextEnabled: true\s*\}/);
+  assert.doesNotMatch(preload, /gameEnabled/);
   assert.match(preload, /getStatus\(\) \{\s*return parseEnvironmentActionRuntimeStatus/);
   assert.match(preload, /hasExactKeys\(status, \["providerStatus", "monitorStatus", "mediaCapability", "gameCapability"\]\)/);
   assert.doesNotMatch(preload, /require\(["']\.{1,2}\//);

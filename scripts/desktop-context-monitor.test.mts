@@ -207,7 +207,7 @@ test("media parser rejects metadata and inconsistent capability output", () => {
   ).status, "failed");
 });
 
-test("basic, media, and game settings do not cross-start external probes", async () => {
+test("basic, media, and explicit-game settings do not cross-start external probes", async () => {
   const { counts, provider } = createProviderCounters();
   const monitor = createDesktopContextMonitor({
     provider,
@@ -216,17 +216,17 @@ test("basic, media, and game settings do not cross-start external probes", async
     clearIntervalFn: clearNoTimer
   });
 
-  monitor.updateSettings({ basicEnabled: false, musicEnabled: false, gameEnabled: true });
+  monitor.updateSettings({ basicEnabled: false, musicEnabled: false, explicitGameContextEnabled: true });
   await monitor.pollNow();
   assert.deepEqual({ media: counts.media, quns: counts.quns }, { media: 0, quns: 0 });
 
-  monitor.updateSettings({ basicEnabled: true, musicEnabled: false, gameEnabled: true });
+  monitor.updateSettings({ basicEnabled: true, musicEnabled: false, explicitGameContextEnabled: true });
   await monitor.pollNow();
   assert.equal(counts.media, 0);
   assert.ok(counts.quns >= 1);
 
   const qunsBeforeMediaOnly = counts.quns;
-  monitor.updateSettings({ basicEnabled: false, musicEnabled: true, gameEnabled: true });
+  monitor.updateSettings({ basicEnabled: false, musicEnabled: true, explicitGameContextEnabled: true });
   await monitor.pollNow();
   assert.ok(counts.media >= 1);
   assert.equal(counts.quns, qunsBeforeMediaOnly);
@@ -243,27 +243,48 @@ test("changing one setting does not cancel or restart unrelated probes", async (
     setIntervalFn: noTimer,
     clearIntervalFn: clearNoTimer
   });
-  monitor.updateSettings({ basicEnabled: true, musicEnabled: true, gameEnabled: true });
+  monitor.updateSettings({ basicEnabled: true, musicEnabled: true, explicitGameContextEnabled: true });
   await monitor.pollNow();
 
   const started = { ...counts };
-  monitor.updateSettings({ basicEnabled: true, musicEnabled: true, gameEnabled: false });
-  monitor.updateSettings({ basicEnabled: true, musicEnabled: true, gameEnabled: true });
+  monitor.updateSettings({ basicEnabled: true, musicEnabled: true, explicitGameContextEnabled: false });
+  monitor.updateSettings({ basicEnabled: true, musicEnabled: true, explicitGameContextEnabled: true });
   await Promise.resolve();
   assert.deepEqual(counts, started);
 
-  monitor.updateSettings({ basicEnabled: false, musicEnabled: true, gameEnabled: true });
+  monitor.updateSettings({ basicEnabled: false, musicEnabled: true, explicitGameContextEnabled: true });
   await Promise.resolve();
   assert.equal(counts.cancelBasic, started.cancelBasic + 1);
   assert.equal(counts.cancelMedia, started.cancelMedia);
   assert.equal(counts.media, started.media);
 
   const beforeMusicOff = { ...counts };
-  monitor.updateSettings({ basicEnabled: false, musicEnabled: false, gameEnabled: true });
+  monitor.updateSettings({ basicEnabled: false, musicEnabled: false, explicitGameContextEnabled: true });
   await Promise.resolve();
   assert.equal(counts.cancelBasic, beforeMusicOff.cancelBasic);
   assert.equal(counts.cancelMedia, beforeMusicOff.cancelMedia + 1);
   assert.equal(counts.quns, beforeMusicOff.quns);
+  monitor.dispose();
+});
+
+test("main-only snapshot subscription forwards stable lifecycle changes and supports unsubscribe", () => {
+  const { provider } = createProviderCounters();
+  const monitor = createDesktopContextMonitor({
+    provider,
+    sendReason: () => true,
+    setIntervalFn: noTimer,
+    clearIntervalFn: clearNoTimer
+  });
+  const activityValues: string[] = [];
+  const unsubscribe = monitor.subscribe((snapshot) => {
+    activityValues.push(snapshot.activity.value);
+  });
+
+  monitor.lock();
+  assert.deepEqual(activityValues, ["locked"]);
+  unsubscribe();
+  monitor.unlock();
+  assert.deepEqual(activityValues, ["locked"]);
   monitor.dispose();
 });
 
@@ -288,13 +309,13 @@ test("late media samples from a cancelled generation cannot update public status
     setIntervalFn: noTimer,
     clearIntervalFn: clearNoTimer
   });
-  monitor.updateSettings({ basicEnabled: false, musicEnabled: true, gameEnabled: false });
+  monitor.updateSettings({ basicEnabled: false, musicEnabled: true, explicitGameContextEnabled: false });
   const firstPoll = monitor.pollNow();
   await Promise.resolve();
   assert.equal(mediaCalls, 1);
 
-  monitor.updateSettings({ basicEnabled: false, musicEnabled: false, gameEnabled: false });
-  monitor.updateSettings({ basicEnabled: false, musicEnabled: true, gameEnabled: false });
+  monitor.updateSettings({ basicEnabled: false, musicEnabled: false, explicitGameContextEnabled: false });
+  monitor.updateSettings({ basicEnabled: false, musicEnabled: true, explicitGameContextEnabled: false });
   const secondPoll = monitor.pollNow();
   await Promise.resolve();
   assert.equal(mediaCalls, 2);
@@ -325,7 +346,7 @@ test("collection starts without renderer and renderer only gates retryable actio
     setIntervalFn: noTimer,
     clearIntervalFn: clearNoTimer
   });
-  monitor.updateSettings({ basicEnabled: true, musicEnabled: true, gameEnabled: true });
+  monitor.updateSettings({ basicEnabled: true, musicEnabled: true, explicitGameContextEnabled: true });
   await monitor.pollNow();
   nowMs = 5_000;
   await monitor.pollNow();
@@ -370,15 +391,15 @@ test("a cancelled renderer action confirmation cannot latch a later collection g
     clearIntervalFn: clearNoTimer
   });
   monitor.setRendererReady(true);
-  monitor.updateSettings({ basicEnabled: false, musicEnabled: true, gameEnabled: false });
+  monitor.updateSettings({ basicEnabled: false, musicEnabled: true, explicitGameContextEnabled: false });
   await monitor.pollNow();
   nowMs = 1;
   await monitor.pollNow();
   assert.equal(sendCount, 1);
 
   monitor.setRendererReady(false);
-  monitor.updateSettings({ basicEnabled: false, musicEnabled: false, gameEnabled: false });
-  monitor.updateSettings({ basicEnabled: false, musicEnabled: true, gameEnabled: false });
+  monitor.updateSettings({ basicEnabled: false, musicEnabled: false, explicitGameContextEnabled: false });
+  monitor.updateSettings({ basicEnabled: false, musicEnabled: true, explicitGameContextEnabled: false });
   monitor.setRendererReady(true);
   await monitor.pollNow();
   resolveFirstDelivery?.(true);
@@ -399,7 +420,7 @@ test("lifecycle latches immediate states, cancels probes, and resumes through un
     setIntervalFn: noTimer,
     clearIntervalFn: clearNoTimer
   });
-  monitor.updateSettings({ basicEnabled: true, musicEnabled: true, gameEnabled: false });
+  monitor.updateSettings({ basicEnabled: true, musicEnabled: true, explicitGameContextEnabled: false });
   await monitor.pollNow();
   nowMs = 1;
   monitor.lock();
@@ -459,7 +480,7 @@ test("QUNS retry timing starts at 15 seconds and caps at 60 seconds", async () =
     clearTimeoutFn: (() => undefined) as typeof clearTimeout
   });
 
-  monitor.updateSettings({ basicEnabled: true, musicEnabled: false, gameEnabled: false });
+  monitor.updateSettings({ basicEnabled: true, musicEnabled: false, explicitGameContextEnabled: false });
   await monitor.pollNow();
   assert.deepEqual(retries.map(({ delayMs }) => delayMs), [15_000]);
   retries[0]?.callback();

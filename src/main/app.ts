@@ -154,6 +154,10 @@ import {
 } from "./services/automatic-situation/automatic-situation-coordinator";
 import { createBundledLocalSituationClassifier } from "./services/automatic-situation/bundled-local-situation-classifier";
 import {
+  createCoarseUserStateCoordinator,
+  type CoarseUserStateCoordinator
+} from "./services/automatic-situation/coarse-user-state-coordinator";
+import {
   createWebSearchSettingsStore,
   normalizeWebSearchSettings,
   type WebSearchSettingsStore
@@ -238,6 +242,9 @@ let bundledLlamaCppRuntimeStartupPromise: Promise<BundledLlamaCppRuntimeSafeSumm
 let refreshCurrentProvider: (() => void) | null = null;
 let automaticSituationCoordinator: AutomaticSituationCoordinator | null = null;
 let removeAutomaticSituationListener: (() => void) | null = null;
+let coarseUserStateCoordinator: CoarseUserStateCoordinator | null = null;
+let removeCoarseUserStateListener: (() => void) | null = null;
+let removeDesktopContextSnapshotListener: (() => void) | null = null;
 let currentPetPresentationPreferences: PetPresentationPreferences = DEFAULT_PET_PRESENTATION_PREFERENCES;
 let isChatInteractionActive = false;
 let petRoleSnapshot: PetRoleSnapshot = INITIAL_PET_ROLE_SNAPSHOT;
@@ -2244,6 +2251,8 @@ app.whenReady().then(async () => {
   petActionRuntimePolicy.syncPresenceMode(currentPresenceModeId);
   proactiveCompanionSettingsStore = createProactiveCompanionSettingsStore();
   currentProactiveCompanionSettings = proactiveCompanionSettingsStore.getSettings();
+  environmentActionSettingsStore = createEnvironmentActionSettingsStore();
+  currentEnvironmentActionSettings = environmentActionSettingsStore.getSettings();
   automaticSituationCoordinator = createAutomaticSituationCoordinator({
     classifier: createBundledLocalSituationClassifier({
       getTarget() {
@@ -2260,9 +2269,17 @@ app.whenReady().then(async () => {
     })
   });
   removeAutomaticSituationListener = automaticSituationCoordinator.subscribe(applyAutomaticSituationSnapshot);
+  coarseUserStateCoordinator = createCoarseUserStateCoordinator({
+    explicitGameContextEnabled: currentEnvironmentActionSettings.explicitGameContextEnabled
+  });
+  removeCoarseUserStateListener = coarseUserStateCoordinator.subscribe((state) => {
+    automaticSituationCoordinator?.updateExplicitGameContext(state.explicitGameContext === "active");
+  });
+  removeDesktopContextSnapshotListener = desktopContextMonitor.subscribe((snapshot) => {
+    coarseUserStateCoordinator?.updateEnvironment(snapshot);
+  });
+  coarseUserStateCoordinator.updateEnvironment(desktopContextMonitor.getSnapshot());
   syncAutomaticPresenceLifecycle();
-  environmentActionSettingsStore = createEnvironmentActionSettingsStore();
-  currentEnvironmentActionSettings = environmentActionSettingsStore.getSettings();
   petActionRuntimePolicy.syncEveningDateKey(environmentActionSettingsStore.getEveningDateKey());
   desktopContextMonitor.updateSettings(currentEnvironmentActionSettings);
   powerMonitor.on("lock-screen", handleSystemLock);
@@ -2960,20 +2977,17 @@ app.whenReady().then(async () => {
       return;
     }
 
-    if (!transitionPetRole({ type: "request:started", requestVersion: request.requestVersion })) {
+    const submittedMessage = request.messages.at(-1);
+    if (!submittedMessage || !transitionPetRole({ type: "request:started", requestVersion: request.requestVersion })) {
       return;
     }
 
+    coarseUserStateCoordinator?.handleUserMessage(submittedMessage.content);
     activeChatRequestVersion = request.requestVersion;
     syncAutomaticPresenceLifecycle();
     clearChatReplySustainTimer();
-    const submittedMessage = request.messages.at(-1);
     let autoMemoryCaptureForActivity: ChatMemoryActivityPayload["autoCapture"] =
       createFailedMemoryActivityAutoCapture(memoryStoreForRequest);
-
-    if (!submittedMessage) {
-      return;
-    }
 
     try {
       const historyMessage: HistoryMessage = {
@@ -3627,6 +3641,9 @@ app.whenReady().then(async () => {
       throw new Error("Unauthorized environment action settings request");
     }
     currentEnvironmentActionSettings = environmentActionSettingsStore.saveSettings(update);
+    coarseUserStateCoordinator?.setExplicitGameContextEnabled(
+      currentEnvironmentActionSettings.explicitGameContextEnabled
+    );
     desktopContextMonitor.updateSettings(currentEnvironmentActionSettings);
     return currentEnvironmentActionSettings;
   });
@@ -3861,11 +3878,17 @@ function quiesceApp(): void {
   powerMonitor.removeListener("unlock-screen", handleSystemUnlock);
   powerMonitor.removeListener("suspend", handleSystemSuspend);
   powerMonitor.removeListener("resume", handleSystemResume);
-  desktopContextMonitor.dispose();
+  removeDesktopContextSnapshotListener?.();
+  removeDesktopContextSnapshotListener = null;
+  coarseUserStateCoordinator?.dispose();
+  coarseUserStateCoordinator = null;
+  removeCoarseUserStateListener?.();
+  removeCoarseUserStateListener = null;
   removeAutomaticSituationListener?.();
   removeAutomaticSituationListener = null;
   automaticSituationCoordinator?.dispose();
   automaticSituationCoordinator = null;
+  desktopContextMonitor.dispose();
   if (initialEdgeGlanceTimer) {
     clearTimeout(initialEdgeGlanceTimer);
     initialEdgeGlanceTimer = null;

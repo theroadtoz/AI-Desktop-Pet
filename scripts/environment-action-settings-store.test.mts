@@ -6,83 +6,63 @@ import { dirname, join } from "node:path";
 import test from "node:test";
 
 const require = createRequire(import.meta.url);
-const {
-  createEnvironmentActionSettingsStore
-} = require("../dist/main/services/config/environment-action-settings-store.js") as typeof import("../src/main/services/config/environment-action-settings-store");
+const { createEnvironmentActionSettingsStore } = require(
+  "../dist/main/services/config/environment-action-settings-store.js"
+) as typeof import("../src/main/services/config/environment-action-settings-store");
 
-test("environment action settings store defaults new, missing, partial, and corrupt records to enabled", async () => {
-  const userDataPath = await mkdtemp(join(tmpdir(), "desktop-pet-environment-actions-"));
-  try {
-    const freshStore = createEnvironmentActionSettingsStore({ userDataPath });
-    assert.deepEqual(freshStore.getSettings(), { basicEnabled: true, musicEnabled: true, gameEnabled: true });
+test("environment settings store defaults fresh, partial, and corrupt records to v4 enabled values", async () => {
+  await withStore(async (userDataPath) => {
+    const store = createEnvironmentActionSettingsStore({ userDataPath });
+    const defaults = { basicEnabled: true, musicEnabled: true, explicitGameContextEnabled: true };
+    assert.deepEqual(store.getSettings(), defaults);
+    await mkdir(dirname(store.getSettingsPath()), { recursive: true });
+    await writeFile(store.getSettingsPath(), '{"musicEnabled":false}', "utf8");
+    assert.deepEqual(createEnvironmentActionSettingsStore({ userDataPath }).getSettings(), defaults);
+    await writeFile(store.getSettingsPath(), "not-json", "utf8");
+    assert.deepEqual(createEnvironmentActionSettingsStore({ userDataPath }).getSettings(), defaults);
+  });
+});
 
-    await mkdir(dirname(freshStore.getSettingsPath()), { recursive: true });
-    await writeFile(freshStore.getSettingsPath(), '{"musicEnabled":false}', "utf8");
-    assert.deepEqual(createEnvironmentActionSettingsStore({ userDataPath }).getSettings(), {
-      basicEnabled: true,
-      musicEnabled: true,
-      gameEnabled: true
-    });
-
-    await writeFile(freshStore.getSettingsPath(), JSON.stringify({
+test("v3 migration is lazy and the next save writes v4 without gameEnabled or unknown keys", async () => {
+  await withStore(async (userDataPath) => {
+    const store = createEnvironmentActionSettingsStore({ userDataPath });
+    await mkdir(dirname(store.getSettingsPath()), { recursive: true });
+    const v3 = {
       version: 3,
+      basicEnabled: true,
       musicEnabled: false,
       gameEnabled: false,
-      userSelected: { basicEnabled: true, musicEnabled: true, gameEnabled: true }
-    }), "utf8");
-    assert.deepEqual(createEnvironmentActionSettingsStore({ userDataPath }).getSettings(), {
+      userSelected: { basicEnabled: false, musicEnabled: true, gameEnabled: true }
+    };
+    await writeFile(store.getSettingsPath(), JSON.stringify(v3), "utf8");
+    const migrated = createEnvironmentActionSettingsStore({ userDataPath });
+    assert.deepEqual(migrated.getSettings(), {
       basicEnabled: true,
-      musicEnabled: true,
-      gameEnabled: true
+      musicEnabled: false,
+      explicitGameContextEnabled: false
     });
+    assert.deepEqual(JSON.parse(await readFile(store.getSettingsPath(), "utf8")), v3);
 
-    await writeFile(freshStore.getSettingsPath(), "not-json", "utf8");
-    assert.deepEqual(createEnvironmentActionSettingsStore({ userDataPath }).getSettings(), {
-      basicEnabled: true,
-      musicEnabled: true,
-      gameEnabled: true
+    assert.deepEqual(migrated.saveSettings({ basicEnabled: false, processName: "must-not-persist" }), {
+      basicEnabled: false,
+      musicEnabled: false,
+      explicitGameContextEnabled: false
     });
-  } finally {
-    await rm(userDataPath, { recursive: true, force: true });
-  }
+    const written = JSON.parse(await readFile(store.getSettingsPath(), "utf8")) as Record<string, unknown>;
+    assert.deepEqual(written, {
+      version: 4,
+      basicEnabled: false,
+      musicEnabled: false,
+      explicitGameContextEnabled: false,
+      userSelected: { basicEnabled: true, musicEnabled: true, explicitGameContextEnabled: true }
+    });
+    assert.equal("gameEnabled" in written, false);
+    assert.equal("processName" in written, false);
+  });
 });
 
-test("environment action settings store retains explicit opt-out and persists its proof", async () => {
-  const userDataPath = await mkdtemp(join(tmpdir(), "desktop-pet-environment-actions-"));
-  try {
-    const store = createEnvironmentActionSettingsStore({ userDataPath });
-    assert.deepEqual(store.saveSettings({ basicEnabled: false, musicEnabled: false, processName: "must-not-persist" }), {
-      basicEnabled: false,
-      musicEnabled: false,
-      gameEnabled: true
-    });
-    assert.deepEqual(JSON.parse(await readFile(store.getSettingsPath(), "utf8")), {
-      version: 3,
-      basicEnabled: false,
-      musicEnabled: false,
-      gameEnabled: true,
-      userSelected: { basicEnabled: true, musicEnabled: true, gameEnabled: false }
-    });
-    assert.deepEqual(createEnvironmentActionSettingsStore({ userDataPath }).getSettings(), {
-      basicEnabled: false,
-      musicEnabled: false,
-      gameEnabled: true
-    });
-
-    assert.equal(store.getEveningDateKey(), null);
-    store.saveEveningDateKey("2026-07-19");
-    assert.equal(store.getEveningDateKey(), "2026-07-19");
-    assert.deepEqual(JSON.parse(await readFile(store.getRuntimeStatePath(), "utf8")), {
-      lastEveningDateKey: "2026-07-19"
-    });
-  } finally {
-    await rm(userDataPath, { recursive: true, force: true });
-  }
-});
-
-test("environment action settings store migrates v2 explicit media and game selections", async () => {
-  const userDataPath = await mkdtemp(join(tmpdir(), "desktop-pet-environment-actions-"));
-  try {
+test("v2 and legacy selections survive restart and old update keys have no authority", async () => {
+  await withStore(async (userDataPath) => {
     const store = createEnvironmentActionSettingsStore({ userDataPath });
     await mkdir(dirname(store.getSettingsPath()), { recursive: true });
     await writeFile(store.getSettingsPath(), JSON.stringify({
@@ -91,70 +71,49 @@ test("environment action settings store migrates v2 explicit media and game sele
       gameEnabled: true,
       userSelected: { musicEnabled: true, gameEnabled: false }
     }), "utf8");
-    const migratedStore = createEnvironmentActionSettingsStore({ userDataPath });
-    assert.deepEqual(migratedStore.getSettings(), {
+    const migrated = createEnvironmentActionSettingsStore({ userDataPath });
+    assert.deepEqual(migrated.getSettings(), {
       basicEnabled: true,
       musicEnabled: false,
-      gameEnabled: true
+      explicitGameContextEnabled: true
     });
-    migratedStore.saveSettings({ basicEnabled: false });
-    assert.deepEqual(JSON.parse(await readFile(store.getSettingsPath(), "utf8")), {
-      version: 3,
-      basicEnabled: false,
-      musicEnabled: false,
-      gameEnabled: true,
-      userSelected: { basicEnabled: true, musicEnabled: true, gameEnabled: false }
-    });
-  } finally {
-    await rm(userDataPath, { recursive: true, force: true });
-  }
-});
-
-test("environment action settings store preserves complete unversioned legacy opt-out", async () => {
-  const userDataPath = await mkdtemp(join(tmpdir(), "desktop-pet-environment-actions-"));
-  try {
-    const store = createEnvironmentActionSettingsStore({ userDataPath });
-    await mkdir(dirname(store.getSettingsPath()), { recursive: true });
-    await writeFile(store.getSettingsPath(), '{"musicEnabled":false,"gameEnabled":false}', "utf8");
-    const migratedStore = createEnvironmentActionSettingsStore({ userDataPath });
-    assert.deepEqual(migratedStore.getSettings(), {
-      basicEnabled: false,
-      musicEnabled: false,
-      gameEnabled: false
-    });
-    migratedStore.saveSettings({});
-    assert.deepEqual(JSON.parse(await readFile(store.getSettingsPath(), "utf8")), {
-      version: 3,
-      basicEnabled: false,
-      musicEnabled: false,
-      gameEnabled: false,
-      userSelected: { basicEnabled: true, musicEnabled: true, gameEnabled: true }
-    });
-  } finally {
-    await rm(userDataPath, { recursive: true, force: true });
-  }
-});
-
-test("saving the other switch preserves a future-version explicit opt-out after reload", async () => {
-  const userDataPath = await mkdtemp(join(tmpdir(), "desktop-pet-environment-actions-"));
-  try {
-    const initialStore = createEnvironmentActionSettingsStore({ userDataPath });
-    await mkdir(dirname(initialStore.getSettingsPath()), { recursive: true });
-    await writeFile(initialStore.getSettingsPath(), JSON.stringify({
-      version: 999,
+    assert.deepEqual(migrated.saveSettings({ gameEnabled: false } as unknown), {
       basicEnabled: true,
       musicEnabled: false,
-      gameEnabled: true,
-      userSelected: { basicEnabled: false, musicEnabled: true, gameEnabled: false }
-    }), "utf8");
-    const migratedStore = createEnvironmentActionSettingsStore({ userDataPath });
-    migratedStore.saveSettings({ gameEnabled: false });
+      explicitGameContextEnabled: true
+    });
     assert.deepEqual(createEnvironmentActionSettingsStore({ userDataPath }).getSettings(), {
       basicEnabled: true,
       musicEnabled: false,
-      gameEnabled: false
+      explicitGameContextEnabled: true
     });
+
+    await writeFile(store.getSettingsPath(), '{"musicEnabled":false,"gameEnabled":false}', "utf8");
+    assert.deepEqual(createEnvironmentActionSettingsStore({ userDataPath }).getSettings(), {
+      basicEnabled: false,
+      musicEnabled: false,
+      explicitGameContextEnabled: false
+    });
+  });
+});
+
+test("environment runtime evening date remains separate from v4 settings", async () => {
+  await withStore(async (userDataPath) => {
+    const store = createEnvironmentActionSettingsStore({ userDataPath });
+    assert.equal(store.getEveningDateKey(), null);
+    store.saveEveningDateKey("2026-07-20");
+    assert.equal(store.getEveningDateKey(), "2026-07-20");
+    assert.deepEqual(JSON.parse(await readFile(store.getRuntimeStatePath(), "utf8")), {
+      lastEveningDateKey: "2026-07-20"
+    });
+  });
+});
+
+async function withStore(run: (userDataPath: string) => Promise<void>): Promise<void> {
+  const userDataPath = await mkdtemp(join(tmpdir(), "desktop-pet-environment-actions-"));
+  try {
+    await run(userDataPath);
   } finally {
     await rm(userDataPath, { recursive: true, force: true });
   }
-});
+}

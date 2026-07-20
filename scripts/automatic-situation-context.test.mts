@@ -24,12 +24,8 @@ test("automatic situation parser accepts only the exact local closed-set schema"
     parseAutomaticSituationClassification('{"confidence":0.8,"label":"reading"}'),
     { label: "reading", confidence: 0.8 }
   );
-  assert.deepEqual(
-    parseAutomaticSituationClassification('{"label":"game","confidence":0.93}'),
-    { label: "game", confidence: 0.93 }
-  );
-
   for (const value of [
+    '{"label":"game","confidence":0.93}',
     '{"label":"sleep","confidence":0.99}',
     '{"label":"work","confidence":0.91,"action":"workFocus"}',
     '{"label":"work","confidence":"high"}',
@@ -107,7 +103,7 @@ test("coordinator accepts only the latest classification and expires model conte
   coordinator.dispose();
 });
 
-test("stable game persists until a stable non-game transition while unknown does not clear it", async () => {
+test("user-explicit game temporarily overrides and then restores model context", async () => {
   let nowMs = 5_000;
   const classifier: AutomaticSituationClassifier = {
     async classify() {
@@ -122,44 +118,52 @@ test("stable game persists until a stable non-game transition while unknown does
   });
 
   await coordinator.classifyLatest({ messageId: "work", text: "继续写代码" });
-  coordinator.updateStableGamePresence("game");
+  coordinator.updateExplicitGameContext(true);
   assert.equal(coordinator.getSnapshot().conversationContextId, "game");
-  assert.equal(coordinator.getSnapshot().conversationSource, "stable-game-signal");
-
-  coordinator.updateStableGamePresence("unknown");
-  assert.equal(coordinator.getSnapshot().conversationContextId, "game");
+  assert.equal(coordinator.getSnapshot().conversationSource, "user-explicit");
 
   nowMs += 60_000;
   coordinator.tick();
   assert.equal(coordinator.getSnapshot().conversationContextId, "game");
 
-  coordinator.updateStableGamePresence("non-game");
+  coordinator.updateExplicitGameContext(false);
   assert.equal(coordinator.getSnapshot().conversationContextId, "default");
   coordinator.dispose();
 });
 
-test("bundled model game works without an environment signal while stable game still has priority", async () => {
+test("bundled model keeps work and reading while explicit game has final write authority", async () => {
   const classifier: AutomaticSituationClassifier = {
-    async classify({ text }) {
-      return text.includes("玩一局")
-        ? { contextId: "game", confidence: 0.94, status: "classified" }
-        : { contextId: "reading", confidence: 0.9, status: "classified" };
+    async classify() {
+      return { contextId: "reading", confidence: 0.9, status: "classified" };
     }
   };
   const coordinator = createAutomaticSituationCoordinator({ classifier, hysteresisMs: 0 });
 
-  await coordinator.classifyLatest({ messageId: "game", text: "我准备马上玩一局游戏" });
-  assert.equal(coordinator.getSnapshot().conversationContextId, "game");
-  assert.equal(coordinator.getSnapshot().conversationSource, "bundled-local-model");
-
   await coordinator.classifyLatest({ messageId: "reading", text: "我在读这篇文章" });
-  coordinator.updateStableGamePresence("game");
+  coordinator.updateExplicitGameContext(true);
   assert.equal(coordinator.getSnapshot().conversationContextId, "game");
-  assert.equal(coordinator.getSnapshot().conversationSource, "stable-game-signal");
+  assert.equal(coordinator.getSnapshot().conversationSource, "user-explicit");
 
-  coordinator.updateStableGamePresence("non-game");
+  coordinator.updateExplicitGameContext(false);
   assert.equal(coordinator.getSnapshot().conversationContextId, "reading");
   assert.equal(coordinator.getSnapshot().conversationSource, "bundled-local-model");
+  coordinator.dispose();
+});
+
+test("coordinator rejects a runtime model game result and cannot revive cleared explicit game", async () => {
+  const classifier = {
+    async classify() {
+      return { contextId: "game", confidence: 0.99, status: "classified" };
+    }
+  } as unknown as AutomaticSituationClassifier;
+  const coordinator = createAutomaticSituationCoordinator({ classifier, hysteresisMs: 0 });
+
+  coordinator.updateExplicitGameContext(true);
+  coordinator.updateExplicitGameContext(false);
+  const result = await coordinator.classifyLatest({ messageId: "late-game", text: "普通对话" });
+  assert.equal(result.reason, "invalid-output");
+  assert.equal(result.snapshot.conversationContextId, "default");
+  assert.notEqual(result.snapshot.conversationSource, "user-explicit");
   coordinator.dispose();
 });
 
@@ -209,7 +213,7 @@ test("hysteresis discards a superseded candidate before it can change state", as
   coordinator.dispose();
 });
 
-test("bundled classifier accepts explicit current game activity and rejects incidental game mentions", async () => {
+test("bundled classifier rejects game output because game is user-explicit only", async () => {
   const responseFor = (content: string) => async () => new Response(JSON.stringify({
     choices: [{ message: { content } }]
   }), { status: 200, headers: { "content-type": "application/json" } });
@@ -223,18 +227,6 @@ test("bundled classifier accepts explicit current game activity and rejects inci
 
   for (const text of [
     "我正在玩游戏，先陪我打一局。",
-    "我准备马上玩一局游戏。",
-    "我现在在排位中。",
-    "游戏中"
-  ]) {
-    assert.deepEqual(await classifier.classify({ text }), {
-      contextId: "game",
-      confidence: 0.96,
-      status: "classified"
-    }, text);
-  }
-
-  for (const text of [
     "我正在开发一款游戏。",
     "给我讲讲这款游戏的世界观。",
     "今天有哪些游戏新闻？",
@@ -320,8 +312,8 @@ test("bundled classifier rejects external targets and sends only one bounded use
   const messages = requestBody?.messages as Array<{ role: string; content: string }>;
   assert.equal(messages.length, 2);
   assert.equal(messages[0]?.role, "system");
-  assert.match(messages[0]?.content ?? "", /Allowed labels: default, work, game, reading\./u);
-  assert.match(messages[0]?.content ?? "", /Game knowledge, development, reviews, news/u);
+  assert.match(messages[0]?.content ?? "", /Allowed labels: default, work, reading\./u);
+  assert.match(messages[0]?.content ?? "", /Game development is work/u);
   assert.equal(messages[1]?.role, "user");
   assert.equal(messages[1]?.content.length, 1_000);
   assert.equal(requestBody?.stream, false);
@@ -380,4 +372,5 @@ test("the current reply uses an existing snapshot and starts classification only
   assert.ok(classificationIndex > doneIndex);
   assert.doesNotMatch(app.slice(snapshotIndex, streamIndex), /classifyLatest|classificationPromise/);
   assert.match(app.slice(chatHandlerStart, snapshotIndex), /cancelPendingClassification\(\)/);
+  assert.match(app.slice(chatHandlerStart, snapshotIndex), /coarseUserStateCoordinator\?\.handleUserMessage/);
 });

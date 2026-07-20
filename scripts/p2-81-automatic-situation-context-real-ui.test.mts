@@ -11,7 +11,7 @@ const p2_11g = readFileSync("scripts/p2-11g-real-ui-regression-runner.mjs", "utf
 
 test("P2-81 reports bundled real, Fake/injected, and real Windows probe evidence separately", () => {
   for (const token of [
-    "bundled-real local classifier",
+    "bundled-real local classifier plus user-explicit game context",
     "Fake/injected strategy",
     "real Windows probe",
     "fakeChatProvider: true",
@@ -57,12 +57,12 @@ test("P2-81 keeps real Windows probe evidence privacy-safe, closed-set, and free
   );
 });
 
-test("P2-81 real bundled classifier covers all contexts without confusing game topics with current play", () => {
+test("P2-81 keeps model work/reading/default separate from user-explicit game", () => {
   for (const token of [
     "game-development-is-work",
     "game-knowledge-is-reading",
     "ordinary-chat-is-default",
-    "current-game-activity-is-game",
+    "current-game-activity-is-user-explicit",
     "我正在开发一款游戏",
     "给我讲讲这款游戏的世界观",
     "今天心情不错，想和你随便聊聊",
@@ -71,6 +71,7 @@ test("P2-81 real bundled classifier covers all contexts without confusing game t
     'expectedContextId: "reading"',
     'expectedContextId: "default"',
     'expectedContextId: "game"',
+    'expectedSource: "user-explicit"',
     "automatic_situation_classified"
   ]) {
     assert.match(p2_81, new RegExp(escapeRegExp(token), "u"));

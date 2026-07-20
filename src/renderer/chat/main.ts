@@ -174,7 +174,7 @@ const saveProactiveCompanionSettingsButton = document.querySelector<HTMLButtonEl
 const environmentActionStatus = document.querySelector<HTMLElement>("#environment-action-status");
 const environmentBasicEnabled = document.querySelector<HTMLInputElement>("#environment-basic-enabled");
 const environmentMusicEnabled = document.querySelector<HTMLInputElement>("#environment-music-enabled");
-const environmentGameEnabled = document.querySelector<HTMLInputElement>("#environment-game-enabled");
+const environmentExplicitGameContextEnabled = document.querySelector<HTMLInputElement>("#environment-explicit-game-context-enabled");
 const saveEnvironmentActionSettingsButton = document.querySelector<HTMLButtonElement>("#save-environment-action-settings-button");
 const shortcutList = document.querySelector<HTMLElement>("#shortcut-list");
 const shortcutStatus = document.querySelector<HTMLElement>("#shortcut-status");
@@ -253,7 +253,7 @@ if (
   !settingsUserDisplayName || !settingsUserPreferredName || !saveUserProfileButton || !clearUserProfileButton ||
   !proactiveCompanionStatus || !proactiveCadenceControls ||
   !proactiveMemorySourceBubbles || !proactiveSearchSourceBubbles || !saveProactiveCompanionSettingsButton ||
-  !environmentActionStatus || !environmentBasicEnabled || !environmentMusicEnabled || !environmentGameEnabled || !saveEnvironmentActionSettingsButton ||
+  !environmentActionStatus || !environmentBasicEnabled || !environmentMusicEnabled || !environmentExplicitGameContextEnabled || !saveEnvironmentActionSettingsButton ||
   !shortcutList || !shortcutStatus ||
   !webSearchStatus || !webSearchEnabled || !webSearchProfile || !webSearchProfileNote ||
   !webSearchTimeout || !webSearchMaxResults || !webSearchSaveButton || !webSearchRefreshButton || !webSearchTestButton ||
@@ -356,7 +356,7 @@ const saveProactiveCompanionSettingsAction = saveProactiveCompanionSettingsButto
 const environmentActionStatusBox = environmentActionStatus;
 const environmentBasicEnabledField = environmentBasicEnabled;
 const environmentMusicEnabledField = environmentMusicEnabled;
-const environmentGameEnabledField = environmentGameEnabled;
+const environmentExplicitGameContextEnabledField = environmentExplicitGameContextEnabled;
 const saveEnvironmentActionSettingsAction = saveEnvironmentActionSettingsButton;
 const shortcutListElement = shortcutList;
 const shortcutStatusBox = shortcutStatus;
@@ -661,11 +661,11 @@ function renderEnvironmentActionSettings(
 ): void {
   environmentBasicEnabledField.checked = settings.basicEnabled;
   environmentMusicEnabledField.checked = settings.musicEnabled;
-  environmentGameEnabledField.checked = settings.gameEnabled;
+  environmentExplicitGameContextEnabledField.checked = settings.explicitGameContextEnabled;
   const enabledLabels = [
     settings.basicEnabled ? "基础开启" : null,
     settings.musicEnabled ? "媒体开启" : null,
-    settings.gameEnabled ? "游戏感知偏好开启" : null
+    settings.explicitGameContextEnabled ? "明确游戏情境开启" : "明确游戏情境关闭"
   ].filter((value): value is string => value !== null);
   if (enabledLabels.length === 0) {
     environmentActionStatusBox.textContent = "环境动作感知：关闭。";
@@ -720,7 +720,7 @@ async function saveEnvironmentActionSettings(): Promise<void> {
     const settings = await window.environmentActionApi.setSettings({
       basicEnabled: environmentBasicEnabledField.checked,
       musicEnabled: environmentMusicEnabledField.checked,
-      gameEnabled: environmentGameEnabledField.checked
+      explicitGameContextEnabled: environmentExplicitGameContextEnabledField.checked
     });
     renderEnvironmentActionSettings(settings, await window.environmentActionApi.getStatus());
     setSettingsFeedback("环境动作感知设置已保存。", "ready");

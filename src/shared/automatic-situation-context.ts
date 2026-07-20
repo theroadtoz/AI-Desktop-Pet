@@ -5,18 +5,16 @@ export const AUTOMATIC_CONVERSATION_CONTEXT_IDS = [
   "reading"
 ] as const;
 
-export const MODEL_CONVERSATION_CONTEXT_IDS = ["default", "work", "game", "reading"] as const;
+export const MODEL_CONVERSATION_CONTEXT_IDS = ["default", "work", "reading"] as const;
 export const AUTOMATIC_PRESENCE_STATE_IDS = ["default", "focus", "quiet", "sleep"] as const;
 
 export type AutomaticConversationContextId = typeof AUTOMATIC_CONVERSATION_CONTEXT_IDS[number];
 export type ModelConversationContextId = typeof MODEL_CONVERSATION_CONTEXT_IDS[number];
 export type AutomaticPresenceStateId = typeof AUTOMATIC_PRESENCE_STATE_IDS[number];
-export type AutomaticGamePresence = "game" | "non-game" | "unknown";
-
 export type AutomaticConversationSource =
   | "default"
   | "bundled-local-model"
-  | "stable-game-signal"
+  | "user-explicit"
   | "expired";
 
 export type AutomaticPresenceSource =
@@ -153,7 +151,7 @@ export function deriveAutomaticPresenceState(input: {
 function isAutomaticConversationSource(value: unknown): value is AutomaticConversationSource {
   return value === "default" ||
     value === "bundled-local-model" ||
-    value === "stable-game-signal" ||
+    value === "user-explicit" ||
     value === "expired";
 }
 

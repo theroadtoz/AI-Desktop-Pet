@@ -22,7 +22,9 @@ test("environment action IPC and basic-page controls use closed settings only", 
   }
   assert.match(appSource, /getSystemIdleTime\(\)[\s\S]*powerMonitor\.getSystemIdleTime\(\)/);
   assert.doesNotMatch(appSource, /onStableGamePresence/);
-  assert.doesNotMatch(appSource, /currentEnvironmentActionSettings\.gameEnabled\)[\s\S]{0,120}updateStableGamePresence/);
+  assert.match(appSource, /coarseUserStateCoordinator\?\.handleUserMessage\(submittedMessage\.content\)/);
+  assert.match(appSource, /setExplicitGameContextEnabled/);
+  assert.doesNotMatch(appSource, /updateStableGamePresence|stable-game-signal/);
   assert.match(preloadSource, /environmentActionApi/);
   assert.match(preloadSource, /defaultEnvironmentActionSettings/);
   assert.match(preloadSource, /environmentActions:get-status/);
@@ -31,8 +33,24 @@ test("environment action IPC and basic-page controls use closed settings only", 
   assert.match(html, /id="settings-basic-page"[\s\S]*id="environment-action-settings-title"/);
   assert.match(html, /id="environment-basic-enabled"/);
   assert.match(html, /id="environment-music-enabled"/);
-  assert.match(html, /id="environment-game-enabled"/);
-  assert.match(html, /默认启用/);
-  assert.match(html, /游戏环境感知当前不可用，也不会扫描正在运行的游戏/);
+  assert.match(html, /id="environment-explicit-game-context-enabled"/);
+  assert.match(html, /使用我明确提到的游戏情境/);
+  assert.match(html, /不会检测或扫描系统中的游戏、窗口、进程或路径/);
   assert.doesNotMatch(html, /感知正在运行的游戏/);
+  assert.doesNotMatch(html, /游戏环境感知偏好|游戏扫描/);
+
+  const subscribeIndex = appSource.indexOf("desktopContextMonitor.subscribe");
+  const initialSnapshotIndex = appSource.indexOf("desktopContextMonitor.getSnapshot()", subscribeIndex);
+  const monitorStartIndex = appSource.indexOf("desktopContextMonitor.updateSettings", initialSnapshotIndex);
+  assert.ok(subscribeIndex >= 0 && subscribeIndex < initialSnapshotIndex);
+  assert.ok(initialSnapshotIndex < monitorStartIndex);
+
+  const shutdownIndex = appSource.indexOf("function quiesceApp");
+  const unsubscribeIndex = appSource.indexOf("removeDesktopContextSnapshotListener?.()", shutdownIndex);
+  const coarseDisposeIndex = appSource.indexOf("coarseUserStateCoordinator?.dispose()", shutdownIndex);
+  const automaticDisposeIndex = appSource.indexOf("automaticSituationCoordinator?.dispose()", shutdownIndex);
+  const monitorDisposeIndex = appSource.indexOf("desktopContextMonitor.dispose()", shutdownIndex);
+  assert.ok(unsubscribeIndex < coarseDisposeIndex);
+  assert.ok(coarseDisposeIndex < automaticDisposeIndex);
+  assert.ok(automaticDisposeIndex < monitorDisposeIndex);
 });

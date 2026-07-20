@@ -123,9 +123,9 @@ function mergeSettingsUpdate(
       musicEnabled: typeof input.musicEnabled === "boolean"
         ? input.musicEnabled
         : current.musicEnabled,
-      gameEnabled: typeof input.gameEnabled === "boolean"
-        ? input.gameEnabled
-        : current.gameEnabled
+      explicitGameContextEnabled: typeof input.explicitGameContextEnabled === "boolean"
+        ? input.explicitGameContextEnabled
+        : current.explicitGameContextEnabled
     },
     userSelected: {
       basicEnabled: typeof input.basicEnabled === "boolean"
@@ -134,9 +134,9 @@ function mergeSettingsUpdate(
       musicEnabled: typeof input.musicEnabled === "boolean"
         ? true
         : currentUserSelected.musicEnabled,
-      gameEnabled: typeof input.gameEnabled === "boolean"
+      explicitGameContextEnabled: typeof input.explicitGameContextEnabled === "boolean"
         ? true
-        : currentUserSelected.gameEnabled
+        : currentUserSelected.explicitGameContextEnabled
     }
   };
 }

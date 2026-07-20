@@ -35,6 +35,7 @@ export type DesktopContextMonitor = {
   pollNow(): Promise<void>;
   getStatus(): EnvironmentActionRuntimeStatus;
   getSnapshot(): CompanionEnvironmentSnapshot;
+  subscribe(listener: (snapshot: CompanionEnvironmentSnapshot) => void): () => void;
   lock(): void;
   unlock(): void;
   suspend(): void;
@@ -108,7 +109,7 @@ export function createDesktopContextMonitor({
   let settings: EnvironmentActionSettings = {
     basicEnabled: false,
     musicEnabled: false,
-    gameEnabled: false
+    explicitGameContextEnabled: false
   };
   let disposed = false;
   let suspended = false;
@@ -516,8 +517,8 @@ export function createDesktopContextMonitor({
       }
       const basicChanged = settings.basicEnabled !== nextSettings.basicEnabled;
       const musicChanged = settings.musicEnabled !== nextSettings.musicEnabled;
-      const gameChanged = settings.gameEnabled !== nextSettings.gameEnabled;
-      if (!basicChanged && !musicChanged && !gameChanged) {
+      if (!basicChanged && !musicChanged) {
+        settings = { ...nextSettings };
         return;
       }
       if (basicChanged) {
@@ -527,8 +528,7 @@ export function createDesktopContextMonitor({
         stopMediaCollection();
       }
       const disabledSetting = (settings.basicEnabled && !nextSettings.basicEnabled) ||
-        (settings.musicEnabled && !nextSettings.musicEnabled) ||
-        (settings.gameEnabled && !nextSettings.gameEnabled);
+        (settings.musicEnabled && !nextSettings.musicEnabled);
       if (disabledSetting) {
         resetAllCandidates();
       } else if (basicChanged || musicChanged) {
@@ -590,6 +590,9 @@ export function createDesktopContextMonitor({
       };
     },
     getSnapshot: () => stabilizer.getSnapshot(),
+    subscribe(listener) {
+      return disposed ? () => undefined : stabilizer.subscribe(listener);
+    },
     lock() {
       if (!disposed) {
         stabilizer.lock();

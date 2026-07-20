@@ -22,26 +22,30 @@ const context = createRealUiRunContext({
   port: Number(process.env.P2_81_CDP_PORT || 9581)
 });
 const SITUATION_LABEL_PATTERN = /\b(default|work|game|reading|focus|quiet|sleep)\b/iu;
-const BUNDLED_CLASSIFIER_CASES = [
+const SITUATION_CONTEXT_CASES = [
   {
     id: "game-development-is-work",
     message: "我正在开发一款游戏，今天要完成存档模块。",
-    expectedContextId: "work"
+    expectedContextId: "work",
+    expectedSource: "bundled-local-model"
   },
   {
     id: "game-knowledge-is-reading",
     message: "给我讲讲这款游戏的世界观。",
-    expectedContextId: "reading"
+    expectedContextId: "reading",
+    expectedSource: "bundled-local-model"
   },
   {
     id: "ordinary-chat-is-default",
     message: "今天心情不错，想和你随便聊聊。",
-    expectedContextId: "default"
+    expectedContextId: "default",
+    expectedSource: "bundled-local-model"
   },
   {
-    id: "current-game-activity-is-game",
+    id: "current-game-activity-is-user-explicit",
     message: "我准备马上玩一局游戏，先陪我热个身。",
-    expectedContextId: "game"
+    expectedContextId: "game",
+    expectedSource: "user-explicit"
   }
 ];
 
@@ -217,7 +221,7 @@ async function runRealWindowsProbe() {
 async function main() {
   const checks = {};
   let bundledReal = {
-    kind: "bundled-real local classifier",
+    kind: "bundled-real local classifier plus user-explicit game context",
     fakeChatProvider: true,
     injected: false,
     observed: false,
@@ -246,7 +250,7 @@ async function main() {
     const bundledCases = [];
     const replies = [];
     let finalClassificationTelemetryIndex = 0;
-    for (const classifierCase of BUNDLED_CLASSIFIER_CASES) {
+    for (const classifierCase of SITUATION_CONTEXT_CASES) {
       const telemetryIndex = readTelemetryEvents().length;
       finalClassificationTelemetryIndex = telemetryIndex;
       replies.push(...await submitChatTurn(chat, classifierCase.message));
@@ -255,7 +259,7 @@ async function main() {
           candidate.type === "automatic_situation_classified" &&
           candidate.payload?.accepted === true &&
           candidate.payload?.result === "classified" &&
-          candidate.payload?.conversationSource === "bundled-local-model" &&
+          candidate.payload?.conversationSource === classifierCase.expectedSource &&
           candidate.payload?.conversationContextId === classifierCase.expectedContextId
         ), 20_000, `bundled-local-classification:${classifierCase.id}`, telemetryIndex);
         bundledCases.push({
@@ -276,7 +280,7 @@ async function main() {
     checks.replyDoesNotLeakSituationLabels = replies.every((reply) => !SITUATION_LABEL_PATTERN.test(reply));
     bundledReal = {
       ...bundledReal,
-      observed: bundledCases.length === BUNDLED_CLASSIFIER_CASES.length && bundledCases.every((entry) => entry.passed),
+      observed: bundledCases.length === SITUATION_CONTEXT_CASES.length && bundledCases.every((entry) => entry.passed),
       cases: bundledCases
     };
     checks.bundledRealClassificationObserved = bundledReal.observed;

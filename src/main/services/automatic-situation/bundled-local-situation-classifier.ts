@@ -15,27 +15,15 @@ const DEFAULT_MINIMUM_CONFIDENCE = 0.68;
 const MAX_CLASSIFICATION_TEXT_LENGTH = 1_000;
 const CLASSIFIER_SYSTEM_PROMPT = [
   "Classify only the current user message for a desktop companion.",
-  "Allowed labels: default, work, game, reading.",
+  "Allowed labels: default, work, reading.",
   "work means creating, coding, planning, studying, or completing a task.",
-  "game means the speaker explicitly says they are playing now, are about to start or resume playing, or are currently in a game or match.",
-  "Game knowledge, development, reviews, news, stories, and another person's play are not game; use work, reading, or default instead.",
+  "Game development is work. Game knowledge, reviews, news, and stories are reading or default.",
   "reading means primarily reading, reviewing, or understanding written material.",
   "default means ordinary conversation or uncertainty.",
   "Return exactly one JSON object with exactly two fields:",
-  '{"label":"default|work|game|reading","confidence":0.00}',
+  '{"label":"default|work|reading","confidence":0.00}',
   "Do not output markdown, explanation, actions, focus, quiet, or sleep."
 ].join("\n");
-
-const EXPLICIT_CURRENT_GAME_ACTIVITY_PATTERNS = [
-  /(?:^|[\s，。！？、；：,.!?;:])(?:我|我们|咱|咱们)(?:现在|此刻|这会儿|目前|马上|待会儿|等会儿|一会儿|接下来|已经|还)?(?:正(?:在)?|在|还在|已经在|准备(?:要|去)?|打算(?:去)?|马上(?:要|去)?|就要|要去)(?:现在|马上|待会儿|等会儿|一会儿|接下来)?(?:开始|继续|一起|去)?(?:玩|打|开黑|排位|匹配|开一局|来一局|进游戏|上游戏)/u,
-  /(?:^|[\s，。！？、；：,.!?;:])(?:现在|此刻|这会儿|目前|马上|待会儿|等会儿|一会儿|接下来|正(?:在)?|准备(?:要|去)?|打算(?:去)?|就要|要去)(?:现在|马上|待会儿|等会儿|一会儿|接下来)?(?:开始|继续|一起|去)?(?:玩|打|开黑|排位|匹配|开一局|来一局|进游戏|上游戏)/u,
-  /(?:^|[\s，。！？、；：,.!?;:])(?:我|我们|咱|咱们)(?:现在|此刻|这会儿|目前|已经|还)?(?:正(?:在)?|在|还在|已经在)?(?:游戏|对局|排位|匹配|副本|开黑)(?:中|里|内)(?:$|[\s，。！？、；：,.!?;:])/u,
-  /^(?:现在|此刻|这会儿|目前|正(?:在)?|还在|已经在)?(?:游戏|对局|排位|匹配|副本|开黑)(?:中|里|内)(?:了|呢)?[\s，。！？,.!]*$/u,
-  /\b(?:i(?:'m| am)|we(?:'re| are))\s+(?:(?:currently|now)\s+)?(?:playing|gaming|in\s+(?:a\s+|the\s+)?(?:game|match|queue|lobby))\b/iu,
-  /\b(?:i(?:'m| am)|we(?:'re| are))\s+(?:about to|going to|getting ready to|planning to)\s+(?:start|resume|play|game|queue)\b/iu,
-  /\b(?:i|we)\s+(?:will|want to|plan to)\s+(?:play|start|resume|queue)\b/iu,
-  /\blet'?s\s+(?:play|queue|start\s+(?:a|the)\s+game)\b/iu
-] as const;
 
 export function createBundledLocalSituationClassifier({
   getTarget,
@@ -95,9 +83,6 @@ export function createBundledLocalSituationClassifier({
         if (!parsed) {
           return defaultResult("invalid-output");
         }
-        if (parsed.label === "game" && !isExplicitCurrentGameActivity(text)) {
-          return defaultResult("invalid-output");
-        }
         if (parsed.confidence < minimumConfidence) {
           return defaultResult("low-confidence");
         }
@@ -115,11 +100,6 @@ export function createBundledLocalSituationClassifier({
       }
     }
   };
-}
-
-function isExplicitCurrentGameActivity(text: string): boolean {
-  const normalized = text.normalize("NFKC").trim();
-  return normalized.length > 0 && EXPLICIT_CURRENT_GAME_ACTIVITY_PATTERNS.some((pattern) => pattern.test(normalized));
 }
 
 function isAllowedBundledTarget(target: BundledLocalSituationTarget): boolean {

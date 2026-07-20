@@ -69,7 +69,7 @@ const defaultProactiveCompanionSettings: ProactiveCompanionSettings = {
 const defaultEnvironmentActionSettings: EnvironmentActionSettings = {
   basicEnabled: true,
   musicEnabled: true,
-  gameEnabled: true
+  explicitGameContextEnabled: true
 };
 const chatStreamErrorTypes = [
   "aborted",
@@ -302,9 +302,9 @@ function parseEnvironmentActionSettings(value: unknown): EnvironmentActionSettin
     musicEnabled: typeof settings.musicEnabled === "boolean"
       ? settings.musicEnabled
       : defaultEnvironmentActionSettings.musicEnabled,
-    gameEnabled: typeof settings.gameEnabled === "boolean"
-      ? settings.gameEnabled
-      : defaultEnvironmentActionSettings.gameEnabled
+    explicitGameContextEnabled: typeof settings.explicitGameContextEnabled === "boolean"
+      ? settings.explicitGameContextEnabled
+      : defaultEnvironmentActionSettings.explicitGameContextEnabled
   };
 }
 
@@ -335,6 +335,13 @@ function parseEnvironmentActionSettingsUpdate(value: unknown): EnvironmentAction
   if (!update || typeof update !== "object") {
     return null;
   }
+  if (Object.keys(update).some((key) => ![
+    "basicEnabled",
+    "musicEnabled",
+    "explicitGameContextEnabled"
+  ].includes(key))) {
+    return null;
+  }
   const parsed: EnvironmentActionSettingsUpdate = {};
   if ("basicEnabled" in update) {
     if (typeof update.basicEnabled !== "boolean") return null;
@@ -344,9 +351,9 @@ function parseEnvironmentActionSettingsUpdate(value: unknown): EnvironmentAction
     if (typeof update.musicEnabled !== "boolean") return null;
     parsed.musicEnabled = update.musicEnabled;
   }
-  if ("gameEnabled" in update) {
-    if (typeof update.gameEnabled !== "boolean") return null;
-    parsed.gameEnabled = update.gameEnabled;
+  if ("explicitGameContextEnabled" in update) {
+    if (typeof update.explicitGameContextEnabled !== "boolean") return null;
+    parsed.explicitGameContextEnabled = update.explicitGameContextEnabled;
   }
   return parsed;
 }
