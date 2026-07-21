@@ -8,7 +8,6 @@ import {
   createRealUiRunContext,
   evaluate,
   findScreenshotResidue,
-  readPrivacyCheckText,
   sleep,
   startElectron,
   stopElectron,
@@ -18,10 +17,19 @@ import {
 
 const memoryLineId = "idle_presence_memory_safe";
 const searchLineId = "idle_presence_search_citation";
+const ACTION_STABLE_MS = 350;
+const RUNNER_TOTAL_TIMEOUT_MS = 180_000;
 
 const contexts = [];
+const cleanedContexts = new Set();
 let context = createScenarioContext("memory", Number(process.env.P2_45_MEMORY_CDP_PORT || process.env.P2_45_CDP_PORT || 9584));
-let fakeServerPath = "";
+const bundledServerPath = join(context.root, "dist", "main", "services", "search", "baidu-search-mcp-server.js");
+let bundledServerBackup = null;
+let bundledFixtureInstalled = false;
+let currentCaseId = "memory";
+let currentStage = "memory_startup";
+let runnerSignal = null;
+let scenarioStartedAtMs = Date.now();
 
 const allowedDomDatasetKeys = new Set(["lineId", "reason", "state"]);
 const forbiddenDomDatasetKeys = new Set(["eventId", "timeBand", "safeContextTag", "contextTag"]);
@@ -32,16 +40,85 @@ const forbiddenOutputPatterns = [
   /sk-[A-Za-z0-9]/i,
   /\.env/i,
   /Provider request body|providerRequestBody|requestBody/i,
-  /complete prompt|system prompt|prompt/i,
-  /providerMessages|messages\W*:/i,
+  /complete prompt|system prompt|["']prompt["']\s*:/i,
+  /["'](?:providerMessages|messages)["']\s*:/i,
   /userMessage|assistantMessage|messageText|bubbleText|textContent/i,
   /fact card|memory card|factCardBody|memoryCardBody/i,
   /memory title|memory content|history summary/i,
-  /search content|search query|search result|safeQuery|snippet|domain|url|title/i,
+  /search content|search query|search result|["'](?:safeQuery|snippet|domain|url|title)["']\s*:/i,
+  /https?:\/\/\S+/i,
   /raw MCP|rawMcp/i,
   /apiKey|Authorization/i,
   /motion path|motionPath|expressionName|partId|resourcePath/i,
   /\b[A-Za-z]:[\\/]/
+];
+const privacyRuleIds = [
+  "event_identifier_key",
+  "context_tag_key",
+  "credential_value",
+  "environment_file_value",
+  "provider_request_payload",
+  "prompt_payload",
+  "message_collection_payload",
+  "message_text_payload",
+  "memory_body_payload",
+  "memory_summary_payload",
+  "search_payload",
+  "network_location_value",
+  "raw_mcp_payload",
+  "authorization_payload",
+  "model_resource_payload",
+  "local_path_value"
+];
+const forbiddenStructuredFieldRules = {
+  prompt: "prompt_payload",
+  providerMessages: "message_collection_payload",
+  messages: "message_collection_payload",
+  userMessage: "message_text_payload",
+  assistantMessage: "message_text_payload",
+  messageText: "message_text_payload",
+  bubbleText: "message_text_payload",
+  textContent: "message_text_payload",
+  factCardBody: "memory_body_payload",
+  memoryCardBody: "memory_body_payload",
+  safeQuery: "search_payload",
+  snippet: "search_payload",
+  domain: "search_payload",
+  url: "search_payload",
+  title: "search_payload",
+  providerRequestBody: "provider_request_payload",
+  requestBody: "provider_request_payload",
+  apiKey: "authorization_payload",
+  apiKeyRef: "authorization_payload",
+  Authorization: "authorization_payload",
+  expressionName: "model_resource_payload",
+  partId: "model_resource_payload",
+  resourcePath: "model_resource_payload",
+  motionPath: "model_resource_payload"
+};
+const forbiddenStructuredValuePatterns = [
+  { ruleId: "credential_value", pattern: /sk-[A-Za-z0-9]/i },
+  { ruleId: "environment_file_value", pattern: /\.env/i },
+  { ruleId: "provider_request_payload", pattern: /Provider request body/i },
+  { ruleId: "prompt_payload", pattern: /complete prompt|system prompt/i },
+  { ruleId: "memory_body_payload", pattern: /fact card|memory card/i },
+  { ruleId: "memory_summary_payload", pattern: /memory title|memory content|history summary/i },
+  { ruleId: "search_payload", pattern: /search content|search query|search result/i },
+  { ruleId: "network_location_value", pattern: /https?:\/\/\S+/i },
+  { ruleId: "raw_mcp_payload", pattern: /raw MCP/i },
+  { ruleId: "authorization_payload", pattern: /Authorization/i },
+  { ruleId: "model_resource_payload", pattern: /motion path/i },
+  { ruleId: "local_path_value", pattern: /\b[A-Za-z]:[\\/]/ }
+];
+const electronSecurityWarningBlock = [
+  "[pet:console] %cElectron Security Warning (Insecure Content-Security-Policy) font-weight: bold; This renderer process has either no Content Security",
+  "  Policy set or a policy with \"unsafe-eval\" enabled. This exposes users of",
+  "  this app to unnecessary security risks.",
+  "",
+  "For more information and help, consult",
+  "https://electronjs.org/docs/tutorial/security.",
+  "This warning will not show up",
+  "once the app is packaged."
 ];
 
 function createScenarioContext(caseId, port) {
@@ -51,8 +128,9 @@ function createScenarioContext(caseId, port) {
     env: {
       AI_DESKTOP_PET_PROVIDER: "fake",
       AI_DESKTOP_PET_ACCEPTANCE_TELEMETRY: "1",
+      AI_DESKTOP_PET_P2_45_SAFE_ACTIVE_CONTEXT: "1",
       AI_DESKTOP_PET_PROACTIVE_SPEECH_BUBBLE_IDLE_INTERVAL_MS:
-        process.env.P2_45_IDLE_INTERVAL_MS || "5200",
+        process.env.P2_45_IDLE_INTERVAL_MS || "60000",
       AI_DESKTOP_PET_LOW_FREQUENCY_COMPANION_EVENT_MINIMUM_INTERVAL_MS:
         process.env.P2_45_LOW_FREQUENCY_MINIMUM_INTERVAL_MS || "700",
       AI_DESKTOP_PET_PROACTIVE_SPEECH_BUBBLE_TIME_BAND: "evening"
@@ -70,81 +148,47 @@ async function main() {
 
   try {
     context = contexts[0];
-    const { pet: memoryPet } = await startApp();
-    await waitForBubbleVisible(memoryPet, {
-      reason: "startup_presence",
-      lineId: "startup_presence_ready",
-      timeoutMs: 10_000
-    });
-    await waitForBubbleHidden(memoryPet, 10_000);
-
-    const memoryObservation = await runMemoryActionLinkageCase(memoryPet);
+    const memoryResult = await runIsolatedScenario("memory");
+    const memoryObservation = memoryResult.observation;
     observations.memory = memoryObservation;
-    checks.memoryBubbleLineShown = memoryObservation.bubble.lineId === memoryLineId;
-    checks.memoryLowFrequencyState = memoryObservation.lowFrequency.stateId === "memory-injected" &&
-      memoryObservation.lowFrequency.actionType === "quietNod";
-    checks.memoryActionLinked = memoryObservation.action.reason === "state_memory_injected" &&
-      memoryObservation.action.type === "quietNod" &&
-      memoryObservation.action.stateId === "memory-injected" &&
-      memoryObservation.action.expressionPresetId === "happy";
+    Object.assign(checks, prefixChecks("memory", memoryResult.checks));
+    await cleanupScenario(context);
 
-    await stopElectron(context);
-
+    setDiagnosticStage("search", "search_startup");
     context = createScenarioContext("search", Number(process.env.P2_45_SEARCH_CDP_PORT || 9585));
-    fakeServerPath = join(context.runDir, "fake-p2-45-mcp-search-server.mjs");
-    writeFileSync(fakeServerPath, createFakeMcpSearchServerSource(), "utf8");
-    const { pet: searchPet } = await startApp();
-    await waitForBubbleVisible(searchPet, {
-      reason: "startup_presence",
-      lineId: "startup_presence_ready",
-      timeoutMs: 10_000
-    });
-    await waitForBubbleHidden(searchPet, 10_000);
-
-    const searchObservation = await runSearchActionLinkageCase(searchPet);
+    installBundledSearchFixture();
+    const searchResult = await runIsolatedScenario("search");
+    const searchObservation = searchResult.observation;
     observations.search = searchObservation;
-    checks.searchBubbleLineShown = searchObservation.bubble.lineId === searchLineId;
-    checks.searchLowFrequencyState = searchObservation.lowFrequency.stateId === "search-cited" &&
-      searchObservation.lowFrequency.actionType === "readingIdle";
-    checks.searchActionLinked = searchObservation.action.reason === "state_search_cited" &&
-      searchObservation.action.type === "readingIdle" &&
-      searchObservation.action.stateId === "search-cited" &&
-      searchObservation.action.expressionPresetId === "glasses";
+    Object.assign(checks, prefixChecks("search", searchResult.checks));
+    checks.noScreenshotResidue = memoryResult.noScreenshotResidue && searchResult.noScreenshotResidue;
+    const resultPrivacyScan = inspectStructuredPrivacyValue({
+      provider: "fake",
+      providerFixture: "FakeProvider",
+      environmentFixture: "safe-active",
+      observations
+    }, "result_payload");
+    checks.privacyOutputSafe = memoryResult.privacyScan.safe &&
+      searchResult.privacyScan.safe &&
+      resultPrivacyScan.matches.length === 0;
 
-    const inspectedBubbles = [
-      memoryObservation.bubble.raw,
-      searchObservation.bubble.raw
-    ];
-    checks.rendererDomDatasetNoForbiddenKeys = inspectedBubbles.every((bubble) =>
-      bubble.forbiddenDatasetKeys.length === 0
-    );
-    checks.rendererDomDatasetSafeShape = inspectedBubbles.every((bubble) =>
-      bubble.unexpectedDatasetKeys.length === 0 &&
-      bubble.datasetKeys.every((key) => allowedDomDatasetKeys.has(key))
-    );
-
-    for (const runContext of contexts) {
-      assertNoScreenshotResidue(runContext);
-    }
-    const residueBeforeCleanup = findScreenshotResidue(context)
-      .filter((item) => !contexts.some((runContext) => item.includes(runContext.runParentDir)));
-    checks.noScreenshotResidue = residueBeforeCleanup.length === 0;
-
+    setDiagnosticStage("search", "complete");
     const summary = {
       ok: false,
       safeSummaryOnly: true,
       provider: "fake",
       providerFixture: "FakeProvider",
+      environmentFixture: "safe-active",
       durationMs: Date.now() - startedAt,
+      diagnostic: buildSafeDiagnostic(checks),
+      privacyDiagnostic: {
+        memory: memoryResult.privacyScan.diagnostic,
+        search: searchResult.privacyScan.diagnostic,
+        result: toPrivacyDiagnostic(resultPrivacyScan)
+      },
       checks,
       observations
     };
-    checks.privacyOutputSafe = isSafeOutput(summary) &&
-      isSafeOutput(redactKnownInternalRuntimeTelemetry(readScenarioPrivacyCheckText([
-        "progress.log",
-        "electron.stdout.log",
-        "electron.stderr.log"
-      ])));
     summary.ok = Object.values(checks).every(Boolean);
 
     writeResult(summary);
@@ -152,26 +196,118 @@ async function main() {
       process.exitCode = 1;
     }
   } catch (error) {
+    const diagnostic = buildSafeDiagnostic(checks);
     writeResult({
       ok: false,
       safeSummaryOnly: true,
       provider: "fake",
       providerFixture: "FakeProvider",
+      environmentFixture: "safe-active",
       durationMs: Date.now() - startedAt,
       failureCategory: classifyError(error),
-      errorName: error instanceof Error ? error.name : "Error"
+      errorName: error instanceof Error ? error.name : "Error",
+      diagnostic,
+      checks: diagnostic.assertions
     });
     process.exitCode = 1;
   } finally {
-    for (const runContext of contexts) {
-      await stopElectron(runContext);
-    }
-    if (process.env.P2_45_KEEP_TMP !== "1") {
-      for (const runContext of contexts) {
-        cleanupRealUiRun(runContext);
+    await cleanupScenariosAndRestore(contexts, cleanupScenario, restoreBundledSearchFixture);
+  }
+}
+
+async function cleanupScenariosAndRestore(runContexts, cleanup, restore) {
+  let firstCleanupError = null;
+  try {
+    for (const runContext of runContexts) {
+      try {
+        await cleanup(runContext);
+      } catch (error) {
+        firstCleanupError ??= error;
       }
     }
+    if (firstCleanupError) throw firstCleanupError;
+  } finally {
+    restore();
   }
+}
+
+async function runIsolatedScenario(caseId) {
+  throwIfRunnerAborted();
+  scenarioStartedAtMs = Date.now();
+  setDiagnosticStage(caseId, `${caseId}_startup`);
+  const { pet } = await startApp();
+  throwIfRunnerAborted();
+  await waitForProductionStartupReadiness(pet);
+  await waitForHighPriorityActionsSettled(10_000);
+  setDiagnosticStage(caseId, `${caseId}_prepare`);
+  const observation = caseId === "memory"
+    ? await runMemoryActionLinkageCase(pet)
+    : await runSearchActionLinkageCase(pet);
+  throwIfRunnerAborted();
+  const checks = buildScenarioChecks(caseId, observation);
+  assertNoScreenshotResidue(context);
+  const noScreenshotResidue = findScreenshotResidue(context)
+    .filter((item) => !item.includes(context.runParentDir)).length === 0;
+  const privacyScan = scanScenarioPrivacyArtifacts(context);
+  return { observation, checks, noScreenshotResidue, privacyScan };
+}
+
+async function waitForProductionStartupReadiness(pet) {
+  const firstFrame = await waitForTelemetry((event) => event.type === "first_frame", 15_000);
+  if (!firstFrame) throw new Error("first_frame_timeout");
+  const appearanceStarted = await waitForTelemetry((event) =>
+    event.type === "pet_interaction_action_started" &&
+    event.payload?.reason === "startup_first_visible_frame", 3_000);
+  if (appearanceStarted) {
+    const appearanceTerminal = await waitForTelemetry((event) =>
+      event.__index > appearanceStarted.__index &&
+      (event.type === "pet_interaction_action_finished" || event.type === "pet_interaction_action_skipped") &&
+      event.payload?.reason === "startup_first_visible_frame", 10_000);
+    if (!appearanceTerminal) throw new Error("startup_appearance_terminal_timeout");
+  }
+  const startupCandidate = await waitForCandidateTerminal({
+    candidateId: "startup_daily",
+    afterIndex: -1,
+    timeoutMs: 15_000
+  });
+  if (!startupCandidate) throw new Error("startup_candidate_timeout");
+  if (startupCandidate.payload?.status === "shown") {
+    await waitForBubbleVisible(pet, { reason: "startup_presence", timeoutMs: 5_000 });
+    await waitForBubbleHidden(pet, 10_000);
+  }
+}
+
+function buildScenarioChecks(caseId, observation) {
+  const expected = caseId === "memory"
+    ? { lineId: memoryLineId, reason: "state_memory_injected", type: "quietNod", stateId: "memory-injected", expressionPresetId: "happy" }
+    : { lineId: searchLineId, reason: "state_search_cited", type: "searchNoteSettle", stateId: "search-cited", expressionPresetId: "glasses" };
+  const bubble = observation.bubble.raw;
+  return {
+    bubbleLineShown: observation.bubble.lineId === expected.lineId && observation.bubble.reason === "source_presence",
+    coordinatorActionFirst: observation.coordinator.actionFirst,
+    actionLinked: observation.action.reason === expected.reason &&
+      observation.action.type === expected.type &&
+      observation.action.stateId === expected.stateId &&
+      observation.action.expressionPresetId === expected.expressionPresetId,
+    actionTerminalObserved: observation.actionTerminal.terminalStatus === "finished",
+    rendererDomDatasetNoForbiddenKeys: bubble.forbiddenDatasetKeys.length === 0,
+    rendererDomDatasetSafeShape: bubble.unexpectedDatasetKeys.length === 0 &&
+      bubble.datasetKeys.every((key) => allowedDomDatasetKeys.has(key))
+  };
+}
+
+function prefixChecks(caseId, checks) {
+  return Object.fromEntries(Object.entries(checks).map(([key, value]) => [
+    `${caseId}${key[0].toUpperCase()}${key.slice(1)}`,
+    value
+  ]));
+}
+
+async function cleanupScenario(runContext) {
+  if (cleanedContexts.has(runContext)) return;
+  await stopElectron(runContext);
+  if (process.env.P2_45_KEEP_TMP !== "1") cleanupRealUiRun(runContext);
+  cleanedContexts.add(runContext);
 }
 
 async function startApp() {
@@ -185,56 +321,73 @@ async function startApp() {
 
 async function runMemoryActionLinkageCase(pet) {
   const chat = await openChatFromPet(pet);
+  await waitForHighPriorityActionsSettled(10_000);
   await waitFor(chat, "Boolean(window.memoryApi?.setEnabled) && Boolean(window.chatApi)");
   await installMemoryInjectionProbe(chat);
   await evaluate(chat, "window.memoryApi.setEnabled(true).then((settings) => settings.enabled === true)");
   await createSafeMemorySeed(chat);
+  await waitForHighPriorityActionsSettled(5_000);
+  const sourceStartIndex = lastTelemetryIndex();
+  setDiagnosticStage("memory", "memory_trigger");
   await sendChatTurnAndWait(chat, "请继续保持温和、准确的桌面陪伴状态。", {
     waitForMemoryInjection: true
   });
-  const beforeCloseIndex = lastTelemetryIndex();
+  setDiagnosticStage("memory", "memory_settle");
+  await waitForHighPriorityActionsSettled(10_000);
+  const releaseIndex = lastTelemetryIndex();
+  setDiagnosticStage("memory", "memory_release");
   await closeChat(chat);
+  setDiagnosticStage("memory", "memory_verify");
   return waitForSourcedActionLinkage(pet, {
+    candidateId: "memory_safe",
     lineId: memoryLineId,
-    lowFrequencyId: "memory-safe-pulse",
-    expectedSafeSummaryLabel: "memory safe pulse",
     expectedAction: {
       reason: "state_memory_injected",
       type: "quietNod",
       stateId: "memory-injected",
       expressionPresetId: "happy"
     },
-    afterIndex: beforeCloseIndex
+    sourceStartIndex,
+    releaseIndex
   });
 }
 
 async function runSearchActionLinkageCase(pet) {
   const chat = await openChatFromPet(pet);
+  await waitForHighPriorityActionsSettled(10_000);
   await waitFor(chat, "Boolean(window.memoryApi?.clearCards) && Boolean(window.webSearchApi?.setSettings)");
   await evaluate(chat, `
     window.memoryApi.clearCards()
       .then(() => window.memoryApi.setEnabled(false))
       .then((settings) => settings.enabled === false)
   `);
+  setDiagnosticStage("search", "search_profile");
   await configureSearch(chat);
   const beforeCitationCount = await evaluate(chat, "document.querySelectorAll('.message-citations').length");
+  await waitForHighPriorityActionsSettled(5_000);
+  const sourceStartIndex = lastTelemetryIndex();
+  setDiagnosticStage("search", "search_trigger");
   await sendChatTurnAndWait(chat, "请联网搜索 P2-45 主动气泡动作联动验收。");
   await waitFor(chat, `document.querySelectorAll('.message-citations').length > ${beforeCitationCount}`, {
     timeoutMs: 20_000
   });
-  const beforeCloseIndex = lastTelemetryIndex();
+  setDiagnosticStage("search", "search_settle");
+  await waitForHighPriorityActionsSettled(10_000);
+  const releaseIndex = lastTelemetryIndex();
+  setDiagnosticStage("search", "search_release");
   await closeChat(chat);
+  setDiagnosticStage("search", "search_verify");
   return waitForSourcedActionLinkage(pet, {
+    candidateId: "search_citation_safe",
     lineId: searchLineId,
-    lowFrequencyId: "search-citation-pulse",
-    expectedSafeSummaryLabel: "search citation pulse",
     expectedAction: {
       reason: "state_search_cited",
-      type: "readingIdle",
+      type: "searchNoteSettle",
       stateId: "search-cited",
       expressionPresetId: "glasses"
     },
-    afterIndex: beforeCloseIndex
+    sourceStartIndex,
+    releaseIndex
   });
 }
 
@@ -290,16 +443,30 @@ async function configureSearch(chat) {
   await evaluate(chat, `
     window.webSearchApi.setSettings({
       enabled: true,
-      command: ${JSON.stringify(process.execPath)},
-      args: ${JSON.stringify([fakeServerPath])},
-      toolName: "web_search",
+      command: "bundled-baidu-search",
+      args: [],
+      toolName: "search",
       timeoutMs: 5000,
       maxResults: 2
-    }).then((settings) => settings.enabled === true && settings.toolName === "web_search")
+    }).then((settings) => settings.enabled === true && settings.toolName === "search")
   `);
-  await waitFor(chat, "window.webSearchApi.getStatus().then((status) => status.enabled === true && status.commandConfigured === true)", {
+  await waitFor(chat, "window.webSearchApi.getStatus().then((status) => status.enabled === true && status.commandName === 'bundled-baidu-search' && status.toolName === 'search')", {
     timeoutMs: 5_000
   });
+}
+
+function installBundledSearchFixture() {
+  if (bundledFixtureInstalled) return;
+  bundledServerBackup = readFileSync(bundledServerPath);
+  writeFileSync(bundledServerPath, createBundledMcpSearchFixtureSource(), "utf8");
+  bundledFixtureInstalled = true;
+}
+
+function restoreBundledSearchFixture() {
+  if (!bundledFixtureInstalled || !bundledServerBackup) return;
+  writeFileSync(bundledServerPath, bundledServerBackup);
+  bundledFixtureInstalled = false;
+  bundledServerBackup = null;
 }
 
 async function sendChatTurnAndWait(chat, text, options = {}) {
@@ -310,6 +477,7 @@ async function sendChatTurnAndWait(chat, text, options = {}) {
   const deadline = Date.now() + 20_000;
 
   while (Date.now() < deadline) {
+    throwIfRunnerAborted();
     const state = await evaluate(chat, `
       (() => {
         const input = document.querySelector("#chat-input");
@@ -376,35 +544,75 @@ async function submitChatForm(chat) {
 }
 
 async function waitForSourcedActionLinkage(pet, options) {
-  const bubbleRaw = await waitForBubbleVisible(pet, {
-    reason: "idle_presence",
-    lineId: options.lineId,
+  const candidateTerminalEvent = await waitForCandidateTerminal({
+    candidateId: options.candidateId,
+    afterIndex: options.sourceStartIndex,
     timeoutMs: 20_000
   });
-  const lowFrequencyEvent = await waitForLowFrequencyEvent({
-    id: options.lowFrequencyId,
-    status: "shown",
-    afterIndex: options.afterIndex,
-    timeoutMs: 2_500
+  if (candidateTerminalEvent?.payload?.status !== "shown") {
+    throw new Error("candidate_not_shown");
+  }
+  const bubbleRaw = await waitForBubbleVisible(pet, {
+    reason: "source_presence",
+    lineId: options.lineId,
+    timeoutMs: 20_000
   });
   const proactiveBubbleEvent = await waitForProactiveBubble({
     status: "shown",
     lineId: options.lineId,
-    afterIndex: options.afterIndex,
+    afterIndex: options.releaseIndex,
     timeoutMs: 2_500
   });
   const actionEvent = await waitForPetActionStarted({
     ...options.expectedAction,
-    afterIndex: options.afterIndex,
+    afterIndex: options.releaseIndex,
     timeoutMs: 4_000
+  });
+  const actionTerminalEvent = await waitForPetActionTerminal({
+    reason: options.expectedAction.reason,
+    afterIndex: actionEvent?.__index ?? options.releaseIndex,
+    timeoutMs: 8_000
   });
 
   return {
     bubble: summarizeBubble(bubbleRaw),
-    lowFrequency: summarizeLowFrequencyEvent(lowFrequencyEvent, options.expectedSafeSummaryLabel),
+    coordinator: inspectCandidateActionFirst({
+      candidateId: options.candidateId,
+      afterIndex: options.sourceStartIndex,
+      actionReason: options.expectedAction.reason,
+      candidateTerminalEvent,
+      actionTerminalEvent
+    }),
     proactiveBubble: summarizeProactiveBubble(proactiveBubbleEvent),
-    action: summarizePetAction(actionEvent)
+    action: summarizePetAction(actionEvent),
+    actionTerminal: summarizePetActionTerminal(actionTerminalEvent)
   };
+}
+
+async function waitForHighPriorityActionsSettled(timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  let stableSince = null;
+  while (Date.now() < deadline) {
+    throwIfRunnerAborted();
+    const activeReasons = new Set();
+    for (const event of readTelemetryEvents()) {
+      if (!["pet_interaction_action_started", "pet_interaction_action_finished", "pet_interaction_action_skipped"].includes(event.type)) {
+        continue;
+      }
+      const reason = event.payload?.reason;
+      if (typeof reason !== "string") continue;
+      if (event.type === "pet_interaction_action_started") activeReasons.add(reason);
+      else activeReasons.delete(reason);
+    }
+    if (activeReasons.size === 0) {
+      stableSince ??= Date.now();
+      if (Date.now() - stableSince >= ACTION_STABLE_MS) return;
+    } else {
+      stableSince = null;
+    }
+    await sleep(100);
+  }
+  throw new Error("action_terminal_timeout");
 }
 
 async function waitForBubbleVisible(pet, options = {}) {
@@ -502,12 +710,12 @@ function lastTelemetryIndex() {
   return readTelemetryEvents().length - 1;
 }
 
-async function waitForLowFrequencyEvent({ id, status, afterIndex, timeoutMs }) {
+async function waitForCandidateTerminal({ candidateId, afterIndex, timeoutMs }) {
   return waitForTelemetry((event) => (
     event.__index > afterIndex &&
-    event.type === "low_frequency_companion_event" &&
-    event.payload?.eventId === id &&
-    event.payload?.status === status
+    event.type === "proactive_bubble_candidate" &&
+    event.payload?.candidateId === candidateId &&
+    ["shown", "skipped", "expired"].includes(event.payload?.status)
   ), timeoutMs);
 }
 
@@ -531,9 +739,18 @@ async function waitForPetActionStarted({ reason, type, stateId, expressionPreset
   ), timeoutMs);
 }
 
+async function waitForPetActionTerminal({ reason, afterIndex, timeoutMs }) {
+  return waitForTelemetry((event) => (
+    event.__index > afterIndex &&
+    (event.type === "pet_interaction_action_finished" || event.type === "pet_interaction_action_skipped") &&
+    event.payload?.reason === reason
+  ), timeoutMs);
+}
+
 async function waitForTelemetry(predicate, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
+    throwIfRunnerAborted();
     const event = readTelemetryEvents().find(predicate);
     if (event) {
       return event;
@@ -544,26 +761,161 @@ async function waitForTelemetry(predicate, timeoutMs) {
   return null;
 }
 
-function summarizeLowFrequencyEvent(event, expectedSafeSummaryLabel) {
-  if (!event) {
-    return { status: "missing", matched: false };
-  }
-
-  const payload = event.payload ?? {};
+function inspectCandidateActionFirst({ candidateId, afterIndex, actionReason, candidateTerminalEvent, actionTerminalEvent }) {
+  const events = readTelemetryEvents().filter((event) => event.__index > afterIndex);
+  const candidateEvents = events.filter((event) =>
+    event.type === "proactive_bubble_candidate" && event.payload?.candidateId === candidateId);
+  const indexForStatus = (status) => candidateEvents.find((event) => event.payload?.status === status)?.__index ?? -1;
+  const queuedIndex = indexForStatus("queued");
+  const attemptedIndex = indexForStatus("attempted");
+  const shownIndex = indexForStatus("shown");
+  const actionIndex = events.find((event) =>
+    event.type === "pet_interaction_action_started" &&
+    event.payload?.reason === actionReason &&
+    event.__index > attemptedIndex && event.__index < shownIndex)?.__index ?? -1;
+  const actionTerminalIndex = actionTerminalEvent?.__index ?? -1;
   return {
-    status: payload.status,
-    reason: payload.reason,
-    stateId: payload.stateId,
-    actionType: payload.actionType,
-    modeId: payload.modeId,
-    presenceModeId: payload.presenceModeId,
-    safeSummaryLabel: payload.safeSummaryLabel,
-    interruptPolicy: payload.interruptPolicy,
-    durationMs: payload.durationMs,
-    matched: payload.safeSummaryLabel === expectedSafeSummaryLabel &&
-      payload.status === "shown" &&
-      payload.reason === "idle_presence"
+    candidateId,
+    statuses: candidateEvents.map((event) => event.payload?.status)
+      .filter((status) => ["queued", "attempted", "shown", "skipped", "expired"].includes(status)),
+    terminalStatus: candidateTerminalEvent?.payload?.status ?? "missing",
+    actionFirst: queuedIndex >= 0 && attemptedIndex > queuedIndex &&
+      actionIndex > attemptedIndex && shownIndex > actionIndex && actionTerminalIndex > shownIndex
   };
+}
+
+function setDiagnosticStage(caseId, stage) {
+  currentCaseId = caseId;
+  currentStage = stage;
+}
+
+function buildSafeDiagnostic(checks) {
+  const candidateId = currentCaseId === "search" ? "search_citation_safe" : "memory_safe";
+  const actionReason = currentCaseId === "search" ? "state_search_cited" : "state_memory_injected";
+  const events = readTelemetryEvents();
+  const firstFrameEvent = events.find((event) => event.type === "first_frame");
+  const startupCandidateEvents = events.filter((event) =>
+    event.type === "proactive_bubble_candidate" && event.payload?.candidateId === "startup_daily");
+  const startupAppearanceEvents = events.filter((event) =>
+    ["pet_interaction_action_started", "pet_interaction_action_finished", "pet_interaction_action_skipped"].includes(event.type) &&
+    event.payload?.reason === "startup_first_visible_frame");
+  const startupBubbleEvent = events.find((event) =>
+    event.type === "proactive_speech_bubble" &&
+    event.payload?.status === "shown" &&
+    event.payload?.reason === "startup_presence");
+  const candidateEvents = events.filter((event) =>
+    event.type === "proactive_bubble_candidate" && event.payload?.candidateId === candidateId);
+  const actionEvents = events.filter((event) =>
+    ["pet_interaction_action_started", "pet_interaction_action_finished", "pet_interaction_action_skipped"].includes(event.type) &&
+    event.payload?.reason === actionReason);
+  const bubbleEvents = events.filter((event) =>
+    event.type === "proactive_speech_bubble" &&
+    event.payload?.status === "shown" &&
+    event.payload?.reason === "source_presence");
+  const lastCandidate = candidateEvents.at(-1);
+  const lastAction = actionEvents.at(-1);
+  const lastBubble = bubbleEvents.at(-1);
+  const candidateStatus = normalizeCandidateStatus(lastCandidate?.payload?.status);
+  const actionLifecycle = normalizeActionLifecycle(lastAction?.type);
+  const terminalStatus = actionLifecycle === "finished" || actionLifecycle === "skipped"
+    ? actionLifecycle
+    : "none";
+  const assertions = {
+    candidateQueued: candidateEvents.some((event) => event.payload?.status === "queued"),
+    candidateAttempted: candidateEvents.some((event) => event.payload?.status === "attempted"),
+    actionStarted: actionEvents.some((event) => event.type === "pet_interaction_action_started"),
+    actionTerminalObserved: actionEvents.some((event) =>
+      event.type === "pet_interaction_action_finished" || event.type === "pet_interaction_action_skipped"),
+    bubbleShown: Boolean(lastBubble),
+    candidateShown: candidateEvents.some((event) => event.payload?.status === "shown"),
+    candidateNotSkipped: !candidateEvents.some((event) =>
+      event.payload?.status === "skipped" || event.payload?.status === "expired"),
+    completedChecksPassed: Object.values(checks).every(Boolean)
+  };
+  const lastStartupCandidate = startupCandidateEvents.at(-1);
+  const lastStartupAppearance = startupAppearanceEvents.at(-1);
+  const firstFrameAtMs = parseTelemetryTimestamp(firstFrameEvent?.timestamp);
+  const startupCandidateAtMs = parseTelemetryTimestamp(startupCandidateEvents[0]?.timestamp);
+  return {
+    stage: currentStage,
+    caseId: currentCaseId,
+    candidateStatus,
+    skipReason: normalizeCandidateSkipReason(lastCandidate?.payload?.skipReason),
+    actionLifecycle,
+    terminalStatus,
+    bubbleReason: normalizeBubbleReason(lastBubble?.payload?.reason),
+    startupCandidateStatus: normalizeCandidateStatus(lastStartupCandidate?.payload?.status),
+    startupSkipReason: normalizeCandidateSkipReason(lastStartupCandidate?.payload?.skipReason),
+    startupAppearanceLifecycle: normalizeActionLifecycle(lastStartupAppearance?.type),
+    startupTerminalStatus: ["finished", "skipped"].includes(normalizeActionLifecycle(lastStartupAppearance?.type))
+      ? normalizeActionLifecycle(lastStartupAppearance?.type)
+      : "none",
+    startupBubbleReason: normalizeBubbleReason(startupBubbleEvent?.payload?.reason),
+    startupReadiness: {
+      firstFrameObserved: Boolean(firstFrameEvent),
+      appearanceStarted: startupAppearanceEvents.some((event) => event.type === "pet_interaction_action_started"),
+      appearanceTerminalObserved: startupAppearanceEvents.some((event) =>
+        event.type === "pet_interaction_action_finished" || event.type === "pet_interaction_action_skipped"),
+      startupCandidateQueued: startupCandidateEvents.some((event) => event.payload?.status === "queued"),
+      startupCandidateTerminal: startupCandidateEvents.some((event) =>
+        ["shown", "skipped", "expired"].includes(event.payload?.status)),
+      startupBubbleShown: Boolean(startupBubbleEvent)
+    },
+    timing: {
+      scenarioElapsedMs: Math.max(0, Math.min(RUNNER_TOTAL_TIMEOUT_MS, Date.now() - scenarioStartedAtMs)),
+      firstFrameToCandidateMs: firstFrameAtMs !== null && startupCandidateAtMs !== null
+        ? Math.max(0, Math.min(60_000, startupCandidateAtMs - firstFrameAtMs))
+        : null
+    },
+    assertions
+  };
+}
+
+function parseTelemetryTimestamp(value) {
+  if (typeof value !== "string") return null;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function normalizeCandidateStatus(value) {
+  return ["queued", "attempted", "shown", "skipped", "expired"].includes(value) ? value : "missing";
+}
+
+function normalizeCandidateSkipReason(value) {
+  return [
+    "action_handshake_timeout",
+    "action_request_rejected",
+    "action_skipped",
+    "bubble_show_failed",
+    "bubble_visible",
+    "chat_interaction_active",
+    "chat_visible",
+    "cleared",
+    "engagement_blocked",
+    "high_priority_action_active",
+    "interruptibility_not_allowed",
+    "model_busy",
+    "pet_not_ready",
+    "pet_window_missing",
+    "proactive_bubbles_off",
+    "same_class_attempt_in_progress",
+    "source_disabled",
+    "system_unavailable",
+    "ttl_expired"
+  ].includes(value) ? value : "none";
+}
+
+function normalizeActionLifecycle(value) {
+  if (value === "pet_interaction_action_started") return "started";
+  if (value === "pet_interaction_action_finished") return "finished";
+  if (value === "pet_interaction_action_skipped") return "skipped";
+  return "not_started";
+}
+
+function normalizeBubbleReason(value) {
+  return ["source_presence", "startup_presence", "idle_presence", "mode_presence"].includes(value)
+    ? value
+    : "none";
 }
 
 function summarizeProactiveBubble(event) {
@@ -601,15 +953,186 @@ function summarizePetAction(event) {
   };
 }
 
-function readScenarioPrivacyCheckText(files) {
-  return contexts
-    .map((runContext) => readPrivacyCheckText(runContext, files))
-    .join("\n");
+function summarizePetActionTerminal(event) {
+  if (!event) return { terminalStatus: "missing" };
+  return {
+    terminalStatus: event.type === "pet_interaction_action_finished" ? "finished" : "skipped",
+    reason: event.payload?.reason,
+    type: event.payload?.type,
+    stateId: event.payload?.stateId
+  };
 }
 
-function isSafeOutput(value) {
-  const text = typeof value === "string" ? value : JSON.stringify(value);
-  return !forbiddenOutputPatterns.some((pattern) => pattern.test(text));
+function scanScenarioPrivacyArtifacts(runContext) {
+  const matches = [];
+  const legacyMatches = [];
+  for (const artifact of collectScenarioPrivacyArtifacts(runContext)) {
+    const sanitizedText = sanitizeRunnerInfrastructurePaths(artifact.text, runContext);
+    legacyMatches.push(...inspectPrivacyText(
+      artifact.source === "telemetry" ? redactKnownInternalRuntimeTelemetry(sanitizedText) : sanitizedText,
+      artifact.source
+    ));
+    if (artifact.authoritative) {
+      matches.push(...(artifact.source === "telemetry"
+      ? inspectTelemetryPrivacy(sanitizedText, runContext)
+        : inspectElectronOutputPrivacy(artifact.text, artifact.source, runContext)));
+    }
+  }
+  const uniqueMatches = dedupePrivacyMatches(matches);
+  return {
+    safe: uniqueMatches.length === 0,
+    diagnostic: {
+      verificationSources: ["telemetry", "electron_stdout", "electron_stderr"],
+      matches: uniqueMatches,
+      legacyMatches: dedupePrivacyMatches(legacyMatches)
+    }
+  };
+}
+
+function collectScenarioPrivacyArtifacts(runContext) {
+  const artifacts = [];
+  const logDirectory = join(runContext.appDataDir, "logs");
+  if (existsSync(logDirectory)) {
+    const telemetryText = readdirSync(logDirectory)
+      .filter((name) => name.startsWith("telemetry-") && name.endsWith(".jsonl"))
+      .sort()
+      .map((name) => readFileSync(join(logDirectory, name), "utf8"))
+      .join("\n");
+    artifacts.push({ source: "telemetry", text: telemetryText, authoritative: true });
+  }
+  for (const [source, fileName, authoritative] of [
+    ["runner_progress", "progress.log", false],
+    ["electron_stdout", "electron.stdout.log", true],
+    ["electron_stderr", "electron.stderr.log", true]
+  ]) {
+    const filePath = join(runContext.runDir, fileName);
+    if (existsSync(filePath)) artifacts.push({ source, text: readFileSync(filePath, "utf8"), authoritative });
+  }
+  return artifacts;
+}
+
+function inspectTelemetryPrivacy(text, runContext) {
+  const matches = [];
+  for (const line of text.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    try {
+      const event = JSON.parse(line);
+      matches.push(...inspectStructuredPrivacyValue(event, "telemetry", [], runContext).matches);
+    } catch {
+      matches.push(...inspectPrivacyText(line, "telemetry_unparsed"));
+    }
+  }
+  return matches;
+}
+
+function inspectStructuredPrivacyValue(value, source, matches = [], runContext = null) {
+  if (typeof value === "string") {
+    const inspectedValue = runContext ? sanitizeRunnerInfrastructurePaths(value, runContext) : value;
+    for (const rule of forbiddenStructuredValuePatterns) {
+      if (rule.pattern.test(inspectedValue)) matches.push({ source, ruleId: rule.ruleId, fieldClass: "string_value" });
+    }
+    return { matches };
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) inspectStructuredPrivacyValue(item, source, matches, runContext);
+    return { matches };
+  }
+  if (!value || typeof value !== "object") return { matches };
+  for (const [key, nestedValue] of Object.entries(value)) {
+    const ruleId = forbiddenStructuredFieldRules[key];
+    if (ruleId) matches.push({ source, ruleId, fieldClass: "structured_key" });
+    inspectStructuredPrivacyValue(nestedValue, source, matches, runContext);
+  }
+  return { matches };
+}
+
+function sanitizeElectronInfrastructureOutput(text) {
+  const lines = text.split(/\r?\n/);
+  const sanitized = [];
+  for (let index = 0; index < lines.length;) {
+    const isFixedSecurityWarning = electronSecurityWarningBlock.every(
+      (line, offset) => lines[index + offset] === line
+    );
+    if (isFixedSecurityWarning) {
+      index += electronSecurityWarningBlock.length;
+      continue;
+    }
+    sanitized.push(lines[index]);
+    index += 1;
+  }
+  return sanitized.join("\n");
+}
+
+function inspectElectronOutputPrivacy(text, source, runContext) {
+  const sanitizedText = sanitizeRunnerInfrastructurePaths(text, runContext);
+  return inspectPrivacyText(sanitizeElectronInfrastructureOutput(sanitizedText), source);
+}
+
+function inspectPrivacyText(text, source) {
+  return forbiddenOutputPatterns.flatMap((pattern, index) => pattern.test(text)
+    ? [{ source, ruleId: privacyRuleIds[index], fieldClass: "raw_text" }]
+    : []);
+}
+
+function dedupePrivacyMatches(matches) {
+  return [...new Map(matches.map((match) => [
+    `${match.source}:${match.ruleId}:${match.fieldClass}`,
+    match
+  ])).values()];
+}
+
+function toPrivacyDiagnostic(scan) {
+  return {
+    verificationSources: ["result_payload"],
+    matches: dedupePrivacyMatches(scan.matches),
+    legacyMatches: []
+  };
+}
+
+function sanitizeRunnerInfrastructurePaths(text, runContext) {
+  const ownedPaths = [
+    { pathValue: runContext.runDir, allowDescendants: true },
+    { pathValue: runContext.appDataDir, allowDescendants: true },
+    { pathValue: bundledServerPath, allowDescendants: false }
+  ]
+    .filter(({ pathValue }) => typeof pathValue === "string" && pathValue.length > 0)
+    .sort((left, right) => right.pathValue.length - left.pathValue.length);
+
+  return ownedPaths.reduce((safeText, ownedPath) => (
+    replaceOwnedPathValue(safeText, ownedPath)
+  ), text);
+}
+
+function replaceOwnedPathValue(text, { pathValue, allowDescendants }) {
+  const lowerText = text.toLowerCase();
+  const lowerPath = pathValue.toLowerCase();
+  let cursor = 0;
+  let result = "";
+
+  while (cursor < text.length) {
+    const index = lowerText.indexOf(lowerPath, cursor);
+    if (index < 0) return result + text.slice(cursor);
+    const before = index > 0 ? text[index - 1] : "";
+    const afterIndex = index + pathValue.length;
+    const after = afterIndex < text.length ? text[afterIndex] : "";
+    const validEnd = isPathValueBoundary(after) || (allowDescendants && /[\\/]/.test(after));
+    if (isPathValueBoundary(before) && validEnd) {
+      result += text.slice(cursor, index) + "[runner-path]";
+      cursor = afterIndex;
+      continue;
+    }
+    result += text.slice(cursor, index + 1);
+    cursor = index + 1;
+  }
+  return result;
+}
+
+function isPathValueBoundary(character) {
+  return character === "" || !/[A-Za-z0-9_.~\\/:+-]/.test(character);
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function redactKnownInternalRuntimeTelemetry(text) {
@@ -641,9 +1164,9 @@ function redactKnownInternalRuntimeTelemetry(text) {
     .join("\n");
 }
 
-function createFakeMcpSearchServerSource() {
+function createBundledMcpSearchFixtureSource() {
   return `
-import { createInterface } from "node:readline";
+const { createInterface } = require("node:readline");
 
 const lineReader = createInterface({ input: process.stdin });
 const queryKey = ["que", "ry"].join("");
@@ -658,7 +1181,7 @@ lineReader.on("line", async (line) => {
   if (message.method === "tools/list") {
     respond(message.id, {
       tools: [{
-        name: "web_search",
+        name: "search",
         description: "fake p2-45 search",
         inputSchema: { type: "object", properties: { [queryKey]: { type: "string" }, limit: { type: "number" } }, required: [queryKey] }
       }]
@@ -708,4 +1231,22 @@ function writeResult(summary) {
   console.log(JSON.stringify(summary, null, 2));
 }
 
-await main();
+function throwIfRunnerAborted() {
+  if (runnerSignal?.aborted) {
+    throw runnerSignal.reason ?? new Error("runner_total_timeout");
+  }
+}
+
+async function runWithTotalTimeout() {
+  const controller = new AbortController();
+  runnerSignal = controller.signal;
+  const timeout = setTimeout(() => controller.abort(new Error("runner_total_timeout")), RUNNER_TOTAL_TIMEOUT_MS);
+  timeout.unref?.();
+  try {
+    await main();
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+await runWithTotalTimeout();

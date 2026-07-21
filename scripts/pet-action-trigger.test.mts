@@ -214,24 +214,28 @@ test("main search citation trigger uses only citation count after safe payload c
   assert.notEqual(citationStart, -1);
   assert.match(citationSource, /createWebSearchCitationPayload\(webSearchResolution\.context\)/);
   assert.match(citationSource, /const webSearchCitationCount = webSearchCitation\?\.citations\.length \?\? 0;/);
-  assert.match(citationSource, /if \(webSearchCitationCount > 0\) \{\s*sendPetActionTrigger\("state_search_cited"\);\s*queueSourcedLowFrequencyCompanionEvent\("search-citation-pulse", \{\s*actionStateId: "search-cited"\s*\}\);\s*\}/);
+  assert.match(citationSource, /if \(webSearchCitationCount > 0\) \{\s*queueSourcedLowFrequencyCompanionEvent\("search-citation-pulse", \{\s*actionStateId: "search-cited"\s*\}\);\s*\}/);
+  assert.doesNotMatch(citationSource, /sendPetActionTrigger\("state_search_cited"\)/);
   assert.doesNotMatch(citationSource, /sendPetActionTrigger\([^)]*(query|url|title|snippet|result|payload)/i);
   assert.doesNotMatch(citationSource, /queueSourcedLowFrequencyCompanionEvent\([^)]*(query|url|title|snippet|result|payload)/i);
 });
 
-test("main proactive bubble trigger fires only after a shown bubble without text payloads", async () => {
-  const source = await readFile(new URL("../src/main/app.ts", import.meta.url), "utf8");
-  const bubbleStart = source.indexOf("function sendProactiveSpeechBubble");
-  const bubbleEnd = source.indexOf("function isChatVisible", bubbleStart);
-  const bubbleSource = source.slice(bubbleStart, bubbleEnd);
-  const shownIndex = bubbleSource.indexOf('logProactiveSpeechBubbleDecision("shown", payload)');
-  const triggerIndex = bubbleSource.indexOf("sendPetActionTrigger(actionTriggerReason)");
+test("main proactive bubble trigger is action-first through the unified coordinator", async () => {
+  const appSource = await readFile(new URL("../src/main/app.ts", import.meta.url), "utf8");
+  const coordinatorSource = await readFile(
+    new URL("../src/main/services/proactive-companion/proactive-bubble-coordinator.ts", import.meta.url),
+    "utf8"
+  );
+  const requestIndex = coordinatorSource.indexOf("options.requestAction(candidate.actionReason)");
+  const lifecycleIndex = coordinatorSource.indexOf("onActionLifecycle(event)");
+  const showIndex = coordinatorSource.indexOf("options.showBubble(payload)", lifecycleIndex);
 
-  assert.notEqual(bubbleStart, -1);
-  assert.match(bubbleSource, /actionTriggerReason: PetActionTriggerReason = "state_proactive_bubble_visible"/);
-  assert.equal(shownIndex >= 0, true);
-  assert.equal(triggerIndex > shownIndex, true);
-  assert.doesNotMatch(bubbleSource, /sendPetActionTrigger\([^)]*(payload|lineId|text|content|message|prompt|expressionName|motion|partId)/i);
+  assert.match(appSource, /requestAction: sendPetActionTrigger/);
+  assert.match(appSource, /proactiveBubbleCoordinator\?\.onActionLifecycle\(\{ status: "started", reason: actionReason \}\)/);
+  assert.ok(requestIndex >= 0);
+  assert.ok(lifecycleIndex > requestIndex);
+  assert.ok(showIndex > lifecycleIndex);
+  assert.doesNotMatch(coordinatorSource, /requestAction\([^)]*(payload|lineId|text|content|message|prompt|expressionName|motion|partId)/i);
 });
 
 test("main low frequency proactive bubble action linkage uses event action state only", async () => {
@@ -244,8 +248,9 @@ test("main low frequency proactive bubble action linkage uses event action state
   assert.match(source, /getPetActionStateTriggerReason/);
   assert.match(
     idleSchedulerSource,
-    /const actionStateId = getEffectiveLowFrequencyCompanionActionStateId\(selection\.event\);[\s\S]*sendProactiveSpeechBubble\(\s*payload,\s*getPetActionStateTriggerReason\(actionStateId\)\s*\)/
+    /const actionStateId = getEffectiveLowFrequencyCompanionActionStateId\(selection\.event\);[\s\S]*proactiveBubbleCoordinator\?\.queuePresence\(\s*"idle_presence",\s*payload,\s*getPetActionStateTriggerReason\(actionStateId\)\s*\)/
   );
+  assert.doesNotMatch(idleSchedulerSource, /sendPetActionTrigger|webContents\.send\("pet:proactive-speech-bubble"/);
   assert.doesNotMatch(idleSchedulerSource, /getPetActionStateTriggerReason\([^)]*(payload|lineId|safeContextTag|text|content|message|prompt)/i);
 });
 
@@ -323,7 +328,7 @@ test("main mode changes trigger only fixed state reasons and preserve bubble sup
   assert.match(source, /selectPetActionStateForModeChange/);
   assert.match(source, /PET_MODE_ACTION_STATE_TRIGGER_DELAY_MS = 2_000/);
   assert.match(source, /function schedulePetModeActionStateTrigger\(reason: PetActionTriggerReason\)/);
-  assert.match(source, /cancelPendingModeActionStateTrigger\(\);[\s\S]*sendPetActionTrigger\(reason\);/);
+  assert.match(source, /cancelPendingModeActionStateTrigger\(\);[\s\S]*createProactiveSpeechBubblePayload\("mode_presence"\);[\s\S]*proactiveBubbleCoordinator\?\.queuePresence\("mode_presence", payload, reason\);/);
   assert.match(source, /function markProactiveSpeechBubbleHidden\(\): void \{\s*proactiveSpeechBubbleVisibleUntil = 0;\s*\}/);
   assert.match(source, /selectPetActionStateForModeChange\(\{\s*dialogueModeId: currentDialogueModeId,\s*presenceModeId: currentPresenceModeId\s*\}\)/);
   assert.equal(source.match(/const actionState = selectPetActionStateForModeChange/g)?.length, 2);
@@ -333,7 +338,12 @@ test("main mode changes trigger only fixed state reasons and preserve bubble sup
   assert.match(beforeQuitSource, /event\.preventDefault\(\);/);
   assert.match(beforeQuitSource, /shutdownCoordinator\.shutdown\(\)/);
   assert.match(source, /openChatWindow\(\): void[\s\S]*cancelStartupProactiveSpeechBubbleTimer\(\);[\s\S]*cancelIdleProactiveSpeechBubbleTimer\(\);[\s\S]*markProactiveSpeechBubbleHidden\(\);[\s\S]*sendPetActionTrigger\("chat_opened"\);/);
-  assert.match(source, /currentPresenceModeId === "sleep"[\s\S]*cancelStartupProactiveSpeechBubbleTimer\(\);[\s\S]*cancelIdleProactiveSpeechBubbleTimer\(\);[\s\S]*markProactiveSpeechBubbleHidden\(\);[\s\S]*nextIdleProactiveSpeechBubbleReason = "idle_presence";/);
+  assert.match(source, /currentPresenceModeId === "sleep"[\s\S]*cancelStartupProactiveSpeechBubbleTimer\(\);[\s\S]*cancelIdleProactiveSpeechBubbleTimer\(\);[\s\S]*markProactiveSpeechBubbleHidden\(\);[\s\S]*clearSourcedLowFrequencyCompanionEvents\(\);/);
+  const modeSchedulerSource = source.slice(
+    source.indexOf("function schedulePetModeActionStateTrigger"),
+    source.indexOf("function logProactiveSpeechBubbleDecision")
+  );
+  assert.doesNotMatch(modeSchedulerSource, /sendPetActionTrigger\(reason\)|webContents\.send\("pet:proactive-speech-bubble"/);
   assert.doesNotMatch(source, /sendPetActionTrigger\([^)]*actionType|pet:action-trigger",\s*\{\s*reason,\s*type/);
 });
 

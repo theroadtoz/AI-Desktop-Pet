@@ -18,11 +18,15 @@ import type { UserProfile, UserProfileInput } from "./user-profile";
 import type { PetActionTrigger } from "./pet-action-trigger";
 import type { LlamaCppRuntimeSafeSummary, LlamaCppRuntimeSettingsUpdate } from "./llama-cpp-runtime";
 import type { LocalModelDiagnosticSafeSummary } from "./local-model-diagnostic";
-import type { ProactiveSpeechBubblePayload } from "./proactive-speech-bubble";
+import type {
+  ProactiveSpeechBubbleActivation,
+  ProactiveSpeechBubblePayload
+} from "./proactive-speech-bubble";
 import type {
   ProactiveCompanionSettings,
   ProactiveCompanionSettingsUpdate
 } from "./proactive-companion-settings";
+import type { ProactiveBubbleCandidateId } from "./proactive-speech-bubble";
 import type {
   EnvironmentActionRuntimeStatus,
   EnvironmentActionSettings,
@@ -42,10 +46,12 @@ export type PetWindowCommand =
   | { type: "pet:health"; payload: RenderHealth }
   | { type: "pet:telemetry"; payload: PetTelemetryEvent }
   | { type: "pet:pointer-hit-change"; payload: PetPointerHitState }
+  | { type: "pet:bubble-hit-region-change"; payload: PetOverlayHitRegion | null }
   | { type: "pet:apply-presentation"; payload: PetPresentationIntent }
   | { type: "pet:action-trigger"; payload: PetActionTrigger }
   | { type: "pet:proactive-speech-bubble"; payload: ProactiveSpeechBubblePayload }
   | { type: "pet:clear-proactive-speech-bubble" }
+  | { type: "pet:activate-proactive-speech-bubble"; payload: ProactiveSpeechBubbleActivation }
   | { type: "pet:window-motion-feedback"; payload: PetWindowMotionFeedback }
   | { type: "automaticSituation:changed"; payload: AutomaticSituationSnapshot }
   | { type: "pet:inject-webgl-context-loss" }
@@ -185,6 +191,13 @@ export type PetDragDelta = {
   deltaY: number;
 };
 
+export type PetOverlayHitRegion = {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+};
+
 export type PetWindowMotionFeedback = {
   type: "shake_light_feedback";
 };
@@ -202,11 +215,16 @@ export type PetApi = {
   reportRenderHealth(state: RenderHealth): void;
   reportTelemetry(type: string, payload?: Record<string, unknown>): void;
   setPointerHit(isHit: boolean): void;
+  setBubblePointerHit(isHit: boolean): void;
+  setBubbleHitRegion(region: PetOverlayHitRegion | null): void;
   presentationReady(): void;
   onPresentationIntent(handler: (intent: PetPresentationIntent) => void): () => void;
   onActionTrigger(handler: (trigger: PetActionTrigger) => void): () => void;
   onProactiveSpeechBubble(handler: (payload: ProactiveSpeechBubblePayload) => void): () => void;
   onClearProactiveSpeechBubble(handler: () => void): () => void;
+  activateProactiveSpeechBubble(payload: ProactiveSpeechBubbleActivation): Promise<boolean>;
+  injectProactiveBubbleCandidateForAcceptance(candidateId: ProactiveBubbleCandidateId): Promise<boolean>;
+  getNativeWindowHandleForAcceptance(): Promise<string | null>;
   onInjectWebGLContextLoss(handler: () => void): () => void;
   onWindowMotionFeedback(handler: (feedback: PetWindowMotionFeedback) => void): () => void;
   openChat(): void;

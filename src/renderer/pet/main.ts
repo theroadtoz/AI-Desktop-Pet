@@ -45,9 +45,10 @@ import {
   getProactiveSpeechBubbleLine,
   type ProactiveSpeechBubblePayload
 } from "../../shared/proactive-speech-bubble";
+import { isClientPointInsideVisibleBubble } from "./proactive-bubble-pointer-hit";
 
 const foundCanvas = document.querySelector<HTMLCanvasElement>("#pet-canvas");
-const foundProactiveSpeechBubble = document.querySelector<HTMLDivElement>("#proactive-speech-bubble");
+const foundProactiveSpeechBubble = document.querySelector<HTMLButtonElement>("#proactive-speech-bubble");
 
 if (!foundCanvas) {
   throw new Error("pet canvas missing");
@@ -58,7 +59,7 @@ if (!foundProactiveSpeechBubble) {
 }
 
 const canvas: HTMLCanvasElement = foundCanvas;
-const proactiveSpeechBubble: HTMLDivElement = foundProactiveSpeechBubble;
+const proactiveSpeechBubble: HTMLButtonElement = foundProactiveSpeechBubble;
 const foundGl = canvas.getContext("webgl2", {
   alpha: true,
   antialias: true,
@@ -271,18 +272,74 @@ let hasPlayedStartupAppearance = false;
 let currentDialogueModeId: DialogueModeId = DEFAULT_DIALOGUE_MODE_ID;
 let currentPresenceModeId: PresenceModeId = DEFAULT_PRESENCE_MODE_ID;
 let proactiveSpeechBubbleTimeout: number | null = null;
+let currentProactiveSpeechBubblePayload: ProactiveSpeechBubblePayload | null = null;
+let isBubblePointerHit = false;
+let bubbleHitRegionAnimationFrame: number | null = null;
+
+function setBubblePointerHit(nextIsHit: boolean): void {
+  if (nextIsHit === isBubblePointerHit) {
+    return;
+  }
+  isBubblePointerHit = nextIsHit;
+  window.petApi?.setBubblePointerHit(nextIsHit);
+}
+
+function cancelBubbleHitRegionUpdate(): void {
+  if (bubbleHitRegionAnimationFrame !== null) {
+    window.cancelAnimationFrame(bubbleHitRegionAnimationFrame);
+    bubbleHitRegionAnimationFrame = null;
+  }
+}
+
+function scheduleBubbleHitRegionUpdate(): void {
+  cancelBubbleHitRegionUpdate();
+  bubbleHitRegionAnimationFrame = window.requestAnimationFrame(() => {
+    bubbleHitRegionAnimationFrame = window.requestAnimationFrame(() => {
+      bubbleHitRegionAnimationFrame = null;
+      if (!currentProactiveSpeechBubblePayload || proactiveSpeechBubble.dataset.state !== "visible") {
+        window.petApi?.setBubbleHitRegion(null);
+        return;
+      }
+      const rect = proactiveSpeechBubble.getBoundingClientRect();
+      window.petApi?.setBubbleHitRegion({
+        left: rect.left,
+        top: rect.top,
+        right: rect.right,
+        bottom: rect.bottom
+      });
+    });
+  });
+}
+
+function updateBubblePointerHit(clientX: number, clientY: number): void {
+  setBubblePointerHit(isClientPointInsideVisibleBubble(
+    clientX,
+    clientY,
+    proactiveSpeechBubble.getBoundingClientRect(),
+    currentProactiveSpeechBubblePayload !== null && proactiveSpeechBubble.dataset.state === "visible"
+  ));
+}
+
+function clearBubblePointerHit(): void {
+  setBubblePointerHit(false);
+}
 
 function clearProactiveSpeechBubble(): void {
+  cancelBubbleHitRegionUpdate();
   if (proactiveSpeechBubbleTimeout !== null) {
     window.clearTimeout(proactiveSpeechBubbleTimeout);
     proactiveSpeechBubbleTimeout = null;
   }
 
   proactiveSpeechBubble.textContent = "";
+  currentProactiveSpeechBubblePayload = null;
   proactiveSpeechBubble.dataset.state = "hidden";
   delete proactiveSpeechBubble.dataset.lineId;
   delete proactiveSpeechBubble.dataset.reason;
   proactiveSpeechBubble.setAttribute("aria-hidden", "true");
+  proactiveSpeechBubble.tabIndex = -1;
+  clearBubblePointerHit();
+  window.petApi?.setBubbleHitRegion(null);
 }
 
 function showProactiveSpeechBubble(payload: ProactiveSpeechBubblePayload): void {
@@ -293,15 +350,45 @@ function showProactiveSpeechBubble(payload: ProactiveSpeechBubblePayload): void 
 
   clearProactiveSpeechBubble();
   proactiveSpeechBubble.textContent = getProactiveSpeechBubbleLine(payload.lineId);
+  currentProactiveSpeechBubblePayload = payload;
   proactiveSpeechBubble.dataset.state = "visible";
   proactiveSpeechBubble.dataset.lineId = payload.lineId;
   proactiveSpeechBubble.dataset.reason = payload.reason;
   proactiveSpeechBubble.setAttribute("aria-hidden", "false");
+  proactiveSpeechBubble.tabIndex = 0;
+  scheduleBubbleHitRegionUpdate();
   proactiveSpeechBubbleTimeout = window.setTimeout(
     clearProactiveSpeechBubble,
     clampProactiveSpeechBubbleDuration(payload.durationMs)
   );
 }
+
+proactiveSpeechBubble.addEventListener("pointerenter", () => {
+  if (currentProactiveSpeechBubblePayload) {
+    setBubblePointerHit(true);
+  }
+});
+proactiveSpeechBubble.addEventListener("pointerleave", () => {
+  clearBubblePointerHit();
+});
+window.addEventListener("mousemove", (event) => {
+  updateBubblePointerHit(event.clientX, event.clientY);
+}, true);
+window.addEventListener("pointermove", (event) => {
+  updateBubblePointerHit(event.clientX, event.clientY);
+}, true);
+window.addEventListener("blur", clearBubblePointerHit);
+document.addEventListener("mouseleave", clearBubblePointerHit);
+proactiveSpeechBubble.addEventListener("click", () => {
+  const payload = currentProactiveSpeechBubblePayload;
+  if (!payload) {
+    return;
+  }
+  void window.petApi?.activateProactiveSpeechBubble({
+    lineId: payload.lineId,
+    reason: payload.reason
+  });
+});
 
 async function applyBasePresentationToLoadedModel(
   presentation: EmotionPresentation,
@@ -762,6 +849,7 @@ void window.petApi?.getAutomaticSituation().then((snapshot) => {
 
 window.addEventListener("resize", () => {
   resizeCanvas();
+  scheduleBubbleHitRegionUpdate();
 
   if (isUsingLive2D) {
     live2DRenderer?.boostInteraction();

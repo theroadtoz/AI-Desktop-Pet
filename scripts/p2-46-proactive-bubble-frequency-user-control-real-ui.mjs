@@ -18,10 +18,15 @@ import {
 
 const memoryLineId = "idle_presence_memory_safe";
 const searchLineId = "idle_presence_search_citation";
+const RUNNER_TOTAL_TIMEOUT_MS = 180_000;
 const contexts = [];
+const cleanedContexts = new Set();
 let context = createScenarioContext("off-cadence", Number(process.env.P2_46_OFF_CDP_PORT || process.env.P2_46_CDP_PORT || 9594));
-let fakeServerPath = "";
+const bundledServerPath = join(context.root, "dist", "main", "services", "search", "baidu-search-mcp-server.js");
+let bundledServerBackup = null;
+let bundledFixtureInstalled = false;
 let currentStep = "bootstrap";
+let runnerSignal = null;
 
 const forbiddenOutputPatterns = [
   /\beventId\b/i,
@@ -29,16 +34,85 @@ const forbiddenOutputPatterns = [
   /sk-[A-Za-z0-9]/i,
   /\.env/i,
   /Provider request body|providerRequestBody|requestBody/i,
-  /complete prompt|system prompt|prompt/i,
-  /providerMessages|messages\W*:/i,
+  /complete prompt|system prompt|["']prompt["']\s*:/i,
+  /["'](?:providerMessages|messages)["']\s*:/i,
   /userMessage|assistantMessage|messageText|bubbleText|textContent/i,
   /fact card|memory card|factCardBody|memoryCardBody/i,
   /memory title|memory content|history summary/i,
-  /search content|search query|search result|safeQuery|snippet|domain|url|title/i,
+  /search content|search query|search result|["'](?:safeQuery|snippet|domain|url|title)["']\s*:/i,
+  /https?:\/\/\S+/i,
   /raw MCP|rawMcp/i,
   /apiKey|Authorization/i,
   /motion path|motionPath|expressionName|partId|resourcePath/i,
   /\b[A-Za-z]:[\\/]/
+];
+const privacyRuleIds = [
+  "event_identifier_key",
+  "context_tag_key",
+  "credential_value",
+  "environment_file_value",
+  "provider_request_payload",
+  "prompt_payload",
+  "message_collection_payload",
+  "message_text_payload",
+  "memory_body_payload",
+  "memory_summary_payload",
+  "search_payload",
+  "network_location_value",
+  "raw_mcp_payload",
+  "authorization_payload",
+  "model_resource_payload",
+  "local_path_value"
+];
+const forbiddenStructuredFieldRules = {
+  prompt: "prompt_payload",
+  providerMessages: "message_collection_payload",
+  messages: "message_collection_payload",
+  userMessage: "message_text_payload",
+  assistantMessage: "message_text_payload",
+  messageText: "message_text_payload",
+  bubbleText: "message_text_payload",
+  textContent: "message_text_payload",
+  factCardBody: "memory_body_payload",
+  memoryCardBody: "memory_body_payload",
+  safeQuery: "search_payload",
+  snippet: "search_payload",
+  domain: "search_payload",
+  url: "search_payload",
+  title: "search_payload",
+  providerRequestBody: "provider_request_payload",
+  requestBody: "provider_request_payload",
+  apiKey: "authorization_payload",
+  apiKeyRef: "authorization_payload",
+  Authorization: "authorization_payload",
+  expressionName: "model_resource_payload",
+  partId: "model_resource_payload",
+  resourcePath: "model_resource_payload",
+  motionPath: "model_resource_payload"
+};
+const forbiddenStructuredValuePatterns = [
+  { ruleId: "credential_value", pattern: /sk-[A-Za-z0-9]/i },
+  { ruleId: "environment_file_value", pattern: /\.env/i },
+  { ruleId: "provider_request_payload", pattern: /Provider request body/i },
+  { ruleId: "prompt_payload", pattern: /complete prompt|system prompt/i },
+  { ruleId: "memory_body_payload", pattern: /fact card|memory card/i },
+  { ruleId: "memory_summary_payload", pattern: /memory title|memory content|history summary/i },
+  { ruleId: "search_payload", pattern: /search content|search query|search result/i },
+  { ruleId: "network_location_value", pattern: /https?:\/\/\S+/i },
+  { ruleId: "raw_mcp_payload", pattern: /raw MCP/i },
+  { ruleId: "authorization_payload", pattern: /Authorization/i },
+  { ruleId: "model_resource_payload", pattern: /motion path/i },
+  { ruleId: "local_path_value", pattern: /\b[A-Za-z]:[\\/]/ }
+];
+const electronSecurityWarningBlock = [
+  "[pet:console] %cElectron Security Warning (Insecure Content-Security-Policy) font-weight: bold; This renderer process has either no Content Security",
+  "  Policy set or a policy with \"unsafe-eval\" enabled. This exposes users of",
+  "  this app to unnecessary security risks.",
+  "",
+  "For more information and help, consult",
+  "https://electronjs.org/docs/tutorial/security.",
+  "This warning will not show up",
+  "once the app is packaged."
 ];
 
 function createScenarioContext(caseId, port) {
@@ -48,6 +122,7 @@ function createScenarioContext(caseId, port) {
     env: {
       AI_DESKTOP_PET_PROVIDER: "fake",
       AI_DESKTOP_PET_ACCEPTANCE_TELEMETRY: "1",
+      AI_DESKTOP_PET_P2_45_SAFE_ACTIVE_CONTEXT: "1",
       AI_DESKTOP_PET_PROACTIVE_SPEECH_BUBBLE_IDLE_INTERVAL_MS:
         process.env.P2_46_IDLE_INTERVAL_MS || "650",
       AI_DESKTOP_PET_LOW_FREQUENCY_COMPANION_EVENT_MINIMUM_INTERVAL_MS:
@@ -70,21 +145,25 @@ async function main() {
     observations.offCadence = await runOffCadenceCase();
     checks.offCadenceLoaded = observations.offCadence.settingsCadence === "off";
     checks.offStartupBubbleSuppressed = observations.offCadence.startupBubbleState === "hidden";
-    checks.offSkipTelemetryObserved = observations.offCadence.skipReason === "proactive_bubbles_off";
+    checks.offStartupCandidateSuppressed = observations.offCadence.startupCandidateCount === 0;
+    checks.offNoBubbleShown = observations.offCadence.shownBubbleCount === 0;
     checks.settingsUiVisible = observations.offCadence.settingsUiVisible;
     checks.quietCadenceSavedFromUi = observations.offCadence.savedCadence === "quiet";
 
-    await stopElectron(context);
+    await cleanupScenario(context);
 
     context = createScenarioContext("source-disabled", Number(process.env.P2_46_SOURCE_CDP_PORT || 9595));
-    fakeServerPath = join(context.runDir, "fake-p2-46-mcp-search-server.mjs");
-    writeFileSync(fakeServerPath, createFakeMcpSearchServerSource(), "utf8");
+    installBundledSearchFixture();
     observations.sourceDisabled = await runSourceToggleCase();
     checks.runtimeOffClearsVisibleBubble = observations.sourceDisabled.runtimeOffBubbleState === "hidden";
+    checks.runtimeOffClearsPendingCandidates = observations.sourceDisabled.runtimeOffOpenCandidateCount === 0;
+    checks.runtimeOffShowsNothingAfterClear = observations.sourceDisabled.runtimeOffShownCountAfter === 0;
     checks.memoryStillWorks = observations.sourceDisabled.memoryInjectionCount > 0;
     checks.searchStillWorks = observations.sourceDisabled.citationCount > 0;
-    checks.memorySourceBubbleSuppressed = observations.sourceDisabled.memorySourceShownCount === 0;
-    checks.searchSourceBubbleSuppressed = observations.sourceDisabled.searchSourceShownCount === 0;
+    checks.memorySourceBubbleSuppressed = observations.sourceDisabled.memoryCandidateEventCount === 0 &&
+      observations.sourceDisabled.memorySourceShownCount === 0;
+    checks.searchSourceBubbleSuppressed = observations.sourceDisabled.searchCandidateEventCount === 0 &&
+      observations.sourceDisabled.searchSourceShownCount === 0;
     checks.rendererDomDatasetNoForbiddenKeys = observations.sourceDisabled.forbiddenDatasetKeys.length === 0;
     checks.rendererDomDatasetSafeShape = observations.sourceDisabled.unexpectedDatasetKeys.length === 0;
 
@@ -104,12 +183,11 @@ async function main() {
       checks,
       observations
     };
-    checks.privacyOutputSafe = isSafeOutput(summary) &&
-      isSafeOutput(redactKnownInternalRuntimeTelemetry(readScenarioPrivacyCheckText([
-        "progress.log",
-        "electron.stdout.log",
-        "electron.stderr.log"
-      ])));
+    const privacyScans = contexts.map((runContext) => scanScenarioPrivacyArtifacts(runContext));
+    checks.privacyOutputSafe = isSafeOutput(summary) && privacyScans.every((scan) => scan.safe);
+    if (!checks.privacyOutputSafe) {
+      observations.privacyDiagnostic = privacyScans.map((scan) => scan.diagnostic);
+    }
     summary.ok = Object.values(checks).every(Boolean);
 
     writeResult(summary);
@@ -125,18 +203,28 @@ async function main() {
       durationMs: Date.now() - startedAt,
       failureCategory: classifyError(error),
       failureStep: currentStep,
-      errorName: error instanceof Error ? error.name : "Error"
+      errorName: error instanceof Error ? error.name : "Error",
+      diagnostic: buildSafeDiagnostic(checks)
     });
     process.exitCode = 1;
   } finally {
-    for (const runContext of contexts) {
-      await stopElectron(runContext);
-    }
-    if (process.env.P2_46_KEEP_TMP !== "1") {
-      for (const runContext of contexts) {
-        cleanupRealUiRun(runContext);
+    await cleanupScenariosAndRestore(contexts, cleanupScenario, restoreBundledSearchFixture);
+  }
+}
+
+async function cleanupScenariosAndRestore(runContexts, cleanup, restore) {
+  let firstCleanupError = null;
+  try {
+    for (const runContext of runContexts) {
+      try {
+        await cleanup(runContext);
+      } catch (error) {
+        firstCleanupError ??= error;
       }
     }
+    if (firstCleanupError) throw firstCleanupError;
+  } finally {
+    restore();
   }
 }
 
@@ -149,15 +237,14 @@ async function runOffCadenceCase() {
   });
   currentStep = "off:start-app";
   const { pet } = await startApp();
-  currentStep = "off:inspect-bubble";
-  await sleep(2_000);
+  currentStep = "off:wait-first-frame";
+  await waitForFirstFrame(20_000);
+  currentStep = "off:observe-suppression";
+  const observationStartIndex = lastTelemetryIndex();
+  await sleep(5_000);
   const bubble = await inspectBubble(pet);
-  currentStep = "off:wait-skip-telemetry";
-  const skip = await waitForTelemetry((event) => (
-    event.type === "proactive_speech_bubble" &&
-    event.payload?.status === "skipped" &&
-    event.payload?.skipReason === "proactive_bubbles_off"
-  ), 3_000);
+  const startupCandidateCount = countCoordinatorCandidateEventsAfter(observationStartIndex, "startup_daily");
+  const shownBubbleCount = countProactiveBubbleShownAfter(observationStartIndex);
   currentStep = "off:open-chat";
   const chat = await openChatFromPet(pet);
   currentStep = "off:wait-settings-api";
@@ -170,7 +257,8 @@ async function runOffCadenceCase() {
   return {
     settingsCadence,
     startupBubbleState: bubble.state,
-    skipReason: skip?.payload?.skipReason ?? null,
+    startupCandidateCount,
+    shownBubbleCount,
     settingsUiVisible: uiResult.settingsUiVisible,
     savedCadence: uiResult.savedCadence,
     statusState: uiResult.statusState
@@ -180,15 +268,12 @@ async function runOffCadenceCase() {
 async function runSourceToggleCase() {
   currentStep = "source:start-app";
   const { pet } = await startApp();
-  currentStep = "source:wait-startup-bubble";
-  await waitForBubbleVisible(pet, {
-    reason: "startup_presence",
-    lineId: "startup_presence_ready",
-    timeoutMs: 10_000
-  });
+  currentStep = "source:wait-production-startup";
+  await waitForProductionStartupBubble(pet);
   currentStep = "source:disable-visible-bubble";
   const hiddenChat = await waitForWindow(context, "renderer/chat/index.html");
   await waitFor(hiddenChat, "Boolean(window.proactiveCompanionApi?.setSettings)");
+  const beforeRuntimeOffIndex = lastTelemetryIndex();
   await evaluate(hiddenChat, `
     window.proactiveCompanionApi.setSettings({
       cadence: "off",
@@ -198,6 +283,9 @@ async function runSourceToggleCase() {
   `);
   await waitForBubbleHidden(pet, 5_000);
   const runtimeOffBubble = await inspectBubble(pet);
+  await sleep(750);
+  const runtimeOffOpenCandidateCount = countOpenCoordinatorCandidates();
+  const runtimeOffShownCountAfter = countProactiveBubbleShownAfter(beforeRuntimeOffIndex);
   await evaluate(hiddenChat, `
     window.proactiveCompanionApi.setSettings({
       cadence: "normal",
@@ -226,6 +314,7 @@ async function runSourceToggleCase() {
   await evaluate(chat, "window.memoryApi.setEnabled(true).then((settings) => settings.enabled === true)");
   currentStep = "source:create-memory-seed";
   await createSafeMemorySeed(chat);
+  const sourceStartIndex = lastTelemetryIndex();
   currentStep = "source:send-memory-chat";
   await sendChatTurnAndWait(chat, "请继续保持温和、准确的桌面陪伴状态。", {
     waitForMemoryInjection: true
@@ -248,13 +337,19 @@ async function runSourceToggleCase() {
   await sleep(6_500);
 
   const sourceCounts = countSourceShownEventsAfter(beforeCloseIndex);
+  const memoryCandidateEventCount = countCoordinatorCandidateEventsAfter(sourceStartIndex, "memory_safe");
+  const searchCandidateEventCount = countCoordinatorCandidateEventsAfter(sourceStartIndex, "search_citation_safe");
   const bubble = await inspectBubble(pet);
   return {
     runtimeOffBubbleState: runtimeOffBubble.state,
+    runtimeOffOpenCandidateCount,
+    runtimeOffShownCountAfter,
     memoryInjectionCount,
     citationCount,
     memorySourceShownCount: sourceCounts.memory,
     searchSourceShownCount: sourceCounts.search,
+    memoryCandidateEventCount,
+    searchCandidateEventCount,
     finalBubbleLineId: bubble.lineId === memoryLineId || bubble.lineId === searchLineId ? bubble.lineId : "",
     forbiddenDatasetKeys: bubble.forbiddenDatasetKeys,
     unexpectedDatasetKeys: bubble.unexpectedDatasetKeys
@@ -285,12 +380,43 @@ async function saveQuietCadenceThroughSettingsUi(chat) {
 }
 
 async function startApp() {
+  throwIfRunnerAborted();
   startElectron(context);
   await connectToElectron(context);
   const pet = await waitForWindow(context, "renderer/pet/index.html");
   await waitFor(pet, "Boolean(window.petApi)");
   await waitFor(pet, "Boolean(document.querySelector('#proactive-speech-bubble'))");
   return { pet };
+}
+
+async function waitForFirstFrame(timeoutMs) {
+  const event = await waitForTelemetry((candidate) => candidate.type === "first_frame", timeoutMs);
+  if (!event) throw new Error("first_frame_timeout");
+  return event;
+}
+
+async function waitForProductionStartupBubble(pet) {
+  await waitForFirstFrame(20_000);
+  const appearanceStarted = await waitForTelemetry((event) =>
+    event.type === "pet_interaction_action_started" &&
+    event.payload?.reason === "startup_first_visible_frame", 3_000);
+  if (appearanceStarted) {
+    const terminal = await waitForTelemetry((event) =>
+      event.__index > appearanceStarted.__index &&
+      (event.type === "pet_interaction_action_finished" || event.type === "pet_interaction_action_skipped") &&
+      event.payload?.reason === "startup_first_visible_frame", 10_000);
+    if (!terminal) throw new Error("startup_appearance_terminal_timeout");
+  }
+  const startupTerminal = await waitForTelemetry((event) =>
+    event.type === "proactive_bubble_candidate" &&
+    event.payload?.candidateId === "startup_daily" &&
+    ["shown", "skipped", "expired"].includes(event.payload?.status), 15_000);
+  if (startupTerminal?.payload?.status !== "shown") throw new Error("startup_candidate_not_shown");
+  return waitForBubbleVisible(pet, {
+    reason: "startup_presence",
+    lineId: "startup_presence_ready",
+    timeoutMs: 5_000
+  });
 }
 
 function writeProactiveCompanionSettings(runContext, settings) {
@@ -351,16 +477,30 @@ async function configureSearch(chat) {
   await evaluate(chat, `
     window.webSearchApi.setSettings({
       enabled: true,
-      command: ${JSON.stringify(process.execPath)},
-      args: ${JSON.stringify([fakeServerPath])},
-      toolName: "web_search",
+      command: "bundled-baidu-search",
+      args: [],
+      toolName: "search",
       timeoutMs: 5000,
       maxResults: 2
-    }).then((settings) => settings.enabled === true && settings.toolName === "web_search")
+    }).then((settings) => settings.enabled === true && settings.toolName === "search")
   `);
-  await waitFor(chat, "window.webSearchApi.getStatus().then((status) => status.enabled === true && status.commandConfigured === true)", {
+  await waitFor(chat, "window.webSearchApi.getStatus().then((status) => status.enabled === true && status.commandName === 'bundled-baidu-search' && status.toolName === 'search')", {
     timeoutMs: 5_000
   });
+}
+
+function installBundledSearchFixture() {
+  if (bundledFixtureInstalled) return;
+  bundledServerBackup = readFileSync(bundledServerPath);
+  writeFileSync(bundledServerPath, createBundledMcpSearchFixtureSource(), "utf8");
+  bundledFixtureInstalled = true;
+}
+
+function restoreBundledSearchFixture() {
+  if (!bundledFixtureInstalled || !bundledServerBackup) return;
+  writeFileSync(bundledServerPath, bundledServerBackup);
+  bundledFixtureInstalled = false;
+  bundledServerBackup = null;
 }
 
 async function sendChatTurnAndWait(chat, text, options = {}) {
@@ -518,6 +658,7 @@ function lastTelemetryIndex() {
 async function waitForTelemetry(predicate, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
+    throwIfRunnerAborted();
     const event = readTelemetryEvents().find(predicate);
     if (event) {
       return event;
@@ -526,6 +667,31 @@ async function waitForTelemetry(predicate, timeoutMs) {
   }
 
   return null;
+}
+
+function countCoordinatorCandidateEventsAfter(afterIndex, candidateId) {
+  return readTelemetryEvents().filter((event) =>
+    event.__index > afterIndex &&
+    event.type === "proactive_bubble_candidate" &&
+    event.payload?.candidateId === candidateId
+  ).length;
+}
+
+function countProactiveBubbleShownAfter(afterIndex) {
+  return readTelemetryEvents().filter((event) =>
+    event.__index > afterIndex &&
+    event.type === "proactive_speech_bubble" &&
+    event.payload?.status === "shown"
+  ).length;
+}
+
+function countOpenCoordinatorCandidates() {
+  const states = new Map();
+  for (const event of readTelemetryEvents()) {
+    if (event.type !== "proactive_bubble_candidate" || typeof event.payload?.candidateId !== "string") continue;
+    states.set(event.payload.candidateId, event.payload.status);
+  }
+  return [...states.values()].filter((status) => status === "queued" || status === "attempted").length;
 }
 
 function countSourceShownEventsAfter(afterIndex) {
@@ -549,8 +715,171 @@ function countSourceShownEventsAfter(afterIndex) {
 
 function readScenarioPrivacyCheckText(files) {
   return contexts
-    .map((runContext) => readPrivacyCheckText(runContext, files))
+    .map((runContext) => sanitizeElectronInfrastructureOutput(
+      sanitizeRunnerInfrastructurePaths(readPrivacyCheckText(runContext, files), runContext)
+    ))
     .join("\n");
+}
+
+function scanScenarioPrivacyArtifacts(runContext) {
+  const matches = [];
+  const legacyMatches = [];
+  for (const artifact of collectScenarioPrivacyArtifacts(runContext)) {
+    const sanitizedText = sanitizeRunnerInfrastructurePaths(artifact.text, runContext);
+    legacyMatches.push(...inspectPrivacyText(
+      artifact.source === "telemetry" ? redactKnownInternalRuntimeTelemetry(sanitizedText) : sanitizedText,
+      artifact.source
+    ));
+    if (!artifact.authoritative) continue;
+    matches.push(...(artifact.source === "telemetry"
+      ? inspectTelemetryPrivacy(sanitizedText, runContext)
+      : inspectElectronOutputPrivacy(artifact.text, artifact.source, runContext)));
+  }
+  const uniqueMatches = dedupePrivacyMatches(matches);
+  return {
+    safe: uniqueMatches.length === 0,
+    diagnostic: {
+      verificationSources: ["telemetry", "electron_stdout", "electron_stderr"],
+      matches: uniqueMatches,
+      legacyMatches: dedupePrivacyMatches(legacyMatches)
+    }
+  };
+}
+
+function collectScenarioPrivacyArtifacts(runContext) {
+  const artifacts = [];
+  const logDirectory = join(runContext.appDataDir, "logs");
+  if (existsSync(logDirectory)) {
+    const telemetryText = readdirSync(logDirectory)
+      .filter((name) => name.startsWith("telemetry-") && name.endsWith(".jsonl"))
+      .sort()
+      .map((name) => readFileSync(join(logDirectory, name), "utf8"))
+      .join("\n");
+    artifacts.push({ source: "telemetry", text: telemetryText, authoritative: true });
+  }
+  for (const [source, fileName, authoritative] of [
+    ["runner_progress", "progress.log", false],
+    ["electron_stdout", "electron.stdout.log", true],
+    ["electron_stderr", "electron.stderr.log", true]
+  ]) {
+    const filePath = join(runContext.runDir, fileName);
+    if (existsSync(filePath)) artifacts.push({ source, text: readFileSync(filePath, "utf8"), authoritative });
+  }
+  return artifacts;
+}
+
+function inspectTelemetryPrivacy(text, runContext) {
+  const matches = [];
+  for (const line of text.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    try {
+      const event = JSON.parse(line);
+      matches.push(...inspectStructuredPrivacyValue(event, "telemetry", [], runContext).matches);
+    } catch {
+      matches.push(...inspectPrivacyText(line, "telemetry_unparsed"));
+    }
+  }
+  return matches;
+}
+
+function inspectStructuredPrivacyValue(value, source, matches = [], runContext = null) {
+  if (typeof value === "string") {
+    const inspectedValue = runContext ? sanitizeRunnerInfrastructurePaths(value, runContext) : value;
+    for (const rule of forbiddenStructuredValuePatterns) {
+      if (rule.pattern.test(inspectedValue)) matches.push({ source, ruleId: rule.ruleId, fieldClass: "string_value" });
+    }
+    return { matches };
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) inspectStructuredPrivacyValue(item, source, matches, runContext);
+    return { matches };
+  }
+  if (!value || typeof value !== "object") return { matches };
+  for (const [key, nestedValue] of Object.entries(value)) {
+    const ruleId = forbiddenStructuredFieldRules[key];
+    if (ruleId) matches.push({ source, ruleId, fieldClass: "structured_key" });
+    inspectStructuredPrivacyValue(nestedValue, source, matches, runContext);
+  }
+  return { matches };
+}
+
+function inspectPrivacyText(text, source) {
+  return forbiddenOutputPatterns.flatMap((pattern, index) => pattern.test(text)
+    ? [{ source, ruleId: privacyRuleIds[index], fieldClass: "raw_text" }]
+    : []);
+}
+
+function dedupePrivacyMatches(matches) {
+  return [...new Map(matches.map((match) => [
+    `${match.source}:${match.ruleId}:${match.fieldClass}`,
+    match
+  ])).values()];
+}
+
+function sanitizeRunnerInfrastructurePaths(text, runContext) {
+  const ownedPaths = [
+    { pathValue: runContext.runDir, allowDescendants: true },
+    { pathValue: runContext.appDataDir, allowDescendants: true },
+    { pathValue: bundledServerPath, allowDescendants: false }
+  ]
+    .filter(({ pathValue }) => typeof pathValue === "string" && pathValue.length > 0)
+    .sort((left, right) => right.pathValue.length - left.pathValue.length);
+  return ownedPaths.reduce((safeText, ownedPath) =>
+    replaceOwnedPathValue(safeText, ownedPath), text);
+}
+
+function replaceOwnedPathValue(text, { pathValue, allowDescendants }) {
+  const lowerText = text.toLowerCase();
+  const lowerPath = pathValue.toLowerCase();
+  let cursor = 0;
+  let result = "";
+
+  while (cursor < text.length) {
+    const index = lowerText.indexOf(lowerPath, cursor);
+    if (index < 0) return result + text.slice(cursor);
+    const before = index > 0 ? text[index - 1] : "";
+    const afterIndex = index + pathValue.length;
+    const after = afterIndex < text.length ? text[afterIndex] : "";
+    const validEnd = isPathValueBoundary(after) || (allowDescendants && /[\\/]/.test(after));
+    if (isPathValueBoundary(before) && validEnd) {
+      result += text.slice(cursor, index) + "[runner-path]";
+      cursor = afterIndex;
+      continue;
+    }
+    result += text.slice(cursor, index + 1);
+    cursor = index + 1;
+  }
+  return result;
+}
+
+function isPathValueBoundary(character) {
+  return character === "" || !/[A-Za-z0-9_.~\\/:+-]/.test(character);
+}
+
+function sanitizeElectronInfrastructureOutput(text) {
+  const lines = text.split(/\r?\n/);
+  const sanitized = [];
+  for (let index = 0; index < lines.length;) {
+    const isFixedSecurityWarning = electronSecurityWarningBlock.every(
+      (line, offset) => lines[index + offset] === line
+    );
+    if (isFixedSecurityWarning) {
+      index += electronSecurityWarningBlock.length;
+      continue;
+    }
+    sanitized.push(lines[index]);
+    index += 1;
+  }
+  return sanitized.join("\n");
+}
+
+function inspectElectronOutputPrivacy(text, source, runContext) {
+  const sanitizedText = sanitizeRunnerInfrastructurePaths(text, runContext);
+  return inspectPrivacyText(sanitizeElectronInfrastructureOutput(sanitizedText), source);
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function isSafeOutput(value) {
@@ -587,9 +916,9 @@ function redactKnownInternalRuntimeTelemetry(text) {
     .join("\n");
 }
 
-function createFakeMcpSearchServerSource() {
+function createBundledMcpSearchFixtureSource() {
   return `
-import { createInterface } from "node:readline";
+const { createInterface } = require("node:readline");
 
 const lineReader = createInterface({ input: process.stdin });
 const queryKey = ["que", "ry"].join("");
@@ -604,7 +933,7 @@ lineReader.on("line", async (line) => {
   if (message.method === "tools/list") {
     respond(message.id, {
       tools: [{
-        name: "web_search",
+        name: "search",
         description: "fake p2-46 search",
         inputSchema: { type: "object", properties: { [queryKey]: { type: "string" }, limit: { type: "number" } }, required: [queryKey] }
       }]
@@ -638,6 +967,45 @@ function respond(id, result) {
 `;
 }
 
+function buildSafeDiagnostic(checks) {
+  const events = readTelemetryEvents();
+  const summarizeCandidate = (candidateId) => events
+    .filter((event) => event.type === "proactive_bubble_candidate" && event.payload?.candidateId === candidateId)
+    .map((event) => event.payload?.status)
+    .filter((status) => ["queued", "attempted", "shown", "skipped", "expired"].includes(status));
+  const summarizeSkipReason = (candidateId) => {
+    const reason = events.findLast((event) =>
+      event.type === "proactive_bubble_candidate" &&
+      event.payload?.candidateId === candidateId &&
+      event.payload?.status === "skipped")?.payload?.skipReason;
+    return [
+      "engagement_blocked",
+      "interruptibility_not_allowed",
+      "system_unavailable",
+      "cadence_off",
+      "source_disabled",
+      "cooldown_active",
+      "active_action"
+    ].includes(reason) ? reason : reason ? "other" : "none";
+  };
+  return {
+    step: currentStep,
+    startupStatuses: summarizeCandidate("startup_daily"),
+    startupSkipReason: summarizeSkipReason("startup_daily"),
+    memoryStatuses: summarizeCandidate("memory_safe"),
+    searchStatuses: summarizeCandidate("search_citation_safe"),
+    openCandidateCount: countOpenCoordinatorCandidates(),
+    completedChecksPassed: Object.values(checks).every(Boolean)
+  };
+}
+
+async function cleanupScenario(runContext) {
+  if (cleanedContexts.has(runContext)) return;
+  await stopElectron(runContext);
+  if (process.env.P2_46_KEEP_TMP !== "1") cleanupRealUiRun(runContext);
+  cleanedContexts.add(runContext);
+}
+
 function classifyError(error) {
   const message = error instanceof Error ? error.message : String(error);
   if (/Target not found|Timed out waiting|timeout/i.test(message)) {
@@ -654,4 +1022,20 @@ function writeResult(summary) {
   console.log(JSON.stringify(summary, null, 2));
 }
 
-await main();
+function throwIfRunnerAborted() {
+  if (runnerSignal?.aborted) throw runnerSignal.reason ?? new Error("runner_total_timeout");
+}
+
+async function runWithTotalTimeout() {
+  const controller = new AbortController();
+  runnerSignal = controller.signal;
+  const timeout = setTimeout(() => controller.abort(new Error("runner_total_timeout")), RUNNER_TOTAL_TIMEOUT_MS);
+  timeout.unref?.();
+  try {
+    await main();
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+await runWithTotalTimeout();

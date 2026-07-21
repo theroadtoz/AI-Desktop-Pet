@@ -1,10 +1,11 @@
 import { screen, type BrowserWindow } from "electron";
-import type { PetDragDelta } from "../../shared/ipc-contract";
+import type { PetDragDelta, PetOverlayHitRegion } from "../../shared/ipc-contract";
 import { clampPetBounds } from "../../shared/pet-presentation";
 import {
   createWindowMotionDetector,
   type WindowMotionTelemetryCandidate
 } from "./window-motion-detector";
+import { isScreenPointInOverlayHitRegion } from "./overlay-hit-region";
 
 const RESTORE_DELAY_MS = 60;
 const POINTER_POLL_INTERVAL_MS = 50;
@@ -16,6 +17,8 @@ const HIT_RECTS = [
 
 export type PointerController = {
   setPointerHit(isHit: boolean): void;
+  setOverlayHit(isHit: boolean): void;
+  setOverlayHitRegion(region: PetOverlayHitRegion | null): void;
   setLocked(isLocked: boolean): void;
   syncWindowSize(): void;
   isLocked(): boolean;
@@ -33,6 +36,7 @@ export type PointerControllerOptions = {
     isChatInteractionActive: boolean;
   };
   onWindowMotionCandidate?: (candidate: WindowMotionTelemetryCandidate) => void;
+  onOverlayRegionHitChanged?: (isHit: boolean) => void;
   nowMs?: () => number;
 };
 
@@ -41,6 +45,9 @@ export function createPointerController(
   options: PointerControllerOptions = {}
 ): PointerController {
   let isPointerHit = false;
+  let isOverlayHit = false;
+  let isOverlayRegionHit = false;
+  let overlayHitRegion: PetOverlayHitRegion | null = null;
   let isDragging = false;
   let isLocked = false;
   let isIgnoringMouseEvents = true;
@@ -79,19 +86,17 @@ export function createPointerController(
     clearRestoreTimer();
     restoreTimer = setTimeout(() => {
       restoreTimer = null;
-      if (!isPointerHit && !isDragging) {
+      if (!isPointerHit && !isOverlayHit && !isOverlayRegionHit && !isDragging) {
         setPassThrough();
       }
     }, RESTORE_DELAY_MS);
   }
 
-  function isCursorInHitRect(): boolean {
+  function isCursorInHitRect(cursor: Electron.Point, bounds: Electron.Rectangle): boolean {
     if (window.isDestroyed()) {
       return false;
     }
 
-    const cursor = screen.getCursorScreenPoint();
-    const bounds = window.getBounds();
     const x = (cursor.x - bounds.x) / bounds.width;
     const y = (cursor.y - bounds.y) / bounds.height;
 
@@ -101,6 +106,21 @@ export function createPointerController(
       y >= hitRect.top &&
       y <= hitRect.bottom
     ));
+  }
+
+  function setOverlayRegionHit(nextIsHit: boolean): void {
+    if (nextIsHit === isOverlayRegionHit) {
+      return;
+    }
+    isOverlayRegionHit = nextIsHit;
+    options.onOverlayRegionHitChanged?.(nextIsHit);
+    if (isLocked) {
+      setPassThrough();
+    } else if (isOverlayRegionHit || isOverlayHit || isPointerHit || isDragging) {
+      setInteractive();
+    } else {
+      schedulePassThrough();
+    }
   }
 
   function clampBoundsToWorkArea(bounds: Electron.Rectangle): Electron.Rectangle {
@@ -121,7 +141,7 @@ export function createPointerController(
 
     isPointerHit = nextIsHit;
 
-    if (isPointerHit || isDragging) {
+    if (isPointerHit || isOverlayHit || isOverlayRegionHit || isDragging) {
       setInteractive();
       return;
     }
@@ -134,7 +154,10 @@ export function createPointerController(
       return;
     }
 
-    const nextIsHit = isCursorInHitRect();
+    const cursor = screen.getCursorScreenPoint();
+    const bounds = window.getBounds();
+    const nextIsHit = isCursorInHitRect(cursor, bounds);
+    setOverlayRegionHit(isScreenPointInOverlayHitRegion(cursor, bounds, overlayHitRegion));
 
     if (nextIsHit !== isPointerHit) {
       setPointerHit(nextIsHit);
@@ -143,6 +166,25 @@ export function createPointerController(
 
   return {
     setPointerHit,
+    setOverlayHit(nextIsHit: boolean) {
+      if (nextIsHit === isOverlayHit) {
+        return;
+      }
+      isOverlayHit = nextIsHit;
+      if (isLocked) {
+        setPassThrough();
+      } else if (isOverlayHit || isOverlayRegionHit || isPointerHit || isDragging) {
+        setInteractive();
+      } else {
+        schedulePassThrough();
+      }
+    },
+    setOverlayHitRegion(nextRegion: PetOverlayHitRegion | null) {
+      overlayHitRegion = nextRegion ? { ...nextRegion } : null;
+      if (!overlayHitRegion) {
+        setOverlayRegionHit(false);
+      }
+    },
     syncWindowSize() {
       if (window.isDestroyed()) {
         return;
@@ -164,7 +206,7 @@ export function createPointerController(
         return;
       }
 
-      if (isPointerHit) {
+      if (isPointerHit || isOverlayHit || isOverlayRegionHit) {
         setInteractive();
         return;
       }
@@ -242,7 +284,7 @@ export function createPointerController(
         return;
       }
 
-      if (isPointerHit) {
+      if (isPointerHit || isOverlayHit || isOverlayRegionHit) {
         setInteractive();
         return;
       }
@@ -254,6 +296,12 @@ export function createPointerController(
       if (pollTimer) {
         clearInterval(pollTimer);
         pollTimer = null;
+      }
+      isOverlayHit = false;
+      overlayHitRegion = null;
+      if (isOverlayRegionHit) {
+        isOverlayRegionHit = false;
+        options.onOverlayRegionHitChanged?.(false);
       }
     }
   };

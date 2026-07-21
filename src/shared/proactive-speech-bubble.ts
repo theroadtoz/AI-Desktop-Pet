@@ -25,6 +25,10 @@ export const PROACTIVE_SPEECH_BUBBLE_LINE_CATALOG = {
   idle_presence_history_summary: "长聊我收轻了。",
   idle_presence_memory_safe: "我把记忆轻轻收好。",
   idle_presence_search_citation: "引用线索我收好了。",
+  environment_music_started: "有音乐呀，我陪你听一会儿。",
+  environment_game_started: "玩得轻松点。",
+  environment_returned_from_away: "回来啦，慢慢进入状态。",
+  environment_long_work_recovery: "这段辛苦了，先缓一缓。",
   mode_presence_focus: "我会放轻声音。",
   mode_presence_work: "工作模式，先稳住。",
   mode_presence_game: "游戏模式，轻松点。",
@@ -36,7 +40,14 @@ export type ProactiveSpeechBubbleLineId = keyof typeof PROACTIVE_SPEECH_BUBBLE_L
 export const PROACTIVE_SPEECH_BUBBLE_REASONS = [
   "startup_presence",
   "idle_presence",
-  "mode_presence"
+  "mode_presence",
+  "music_presence",
+  "game_presence",
+  "return_presence",
+  "work_recovery",
+  "evening_presence",
+  "silence_presence",
+  "source_presence"
 ] as const;
 
 export type ProactiveSpeechBubbleReason = typeof PROACTIVE_SPEECH_BUBBLE_REASONS[number];
@@ -64,6 +75,28 @@ export type ProactiveSpeechBubblePayload = {
   reason: ProactiveSpeechBubbleReason;
   durationMs: number;
 };
+
+export type ProactiveSpeechBubbleActivation = Pick<
+  ProactiveSpeechBubblePayload,
+  "lineId" | "reason"
+>;
+
+export const PROACTIVE_BUBBLE_CANDIDATE_IDS = [
+  "idle_presence",
+  "mode_presence",
+  "startup_daily",
+  "music_started",
+  "explicit_game_started",
+  "returned_from_away",
+  "long_work_recovery",
+  "evening_companion",
+  "long_silence",
+  "memory_safe",
+  "search_citation_safe",
+  "history_summary_safe"
+] as const;
+
+export type ProactiveBubbleCandidateId = typeof PROACTIVE_BUBBLE_CANDIDATE_IDS[number];
 
 export const DEFAULT_PROACTIVE_SPEECH_BUBBLE_LINE_ID: ProactiveSpeechBubbleLineId = "startup_presence_ready";
 export const DEFAULT_PROACTIVE_SPEECH_BUBBLE_DURATION_MS = 4_200;

@@ -18,7 +18,9 @@ export const PET_TELEMETRY_EVENT_TYPES = [
   "pet_interaction_action_skipped",
   "pet_window_motion_detected",
   "pet_window_motion_feedback",
-  "pet_scale_adjusted"
+  "pet_scale_adjusted",
+  "proactive_bubble_overlay_hit_changed",
+  "proactive_bubble_overlay_region_changed"
 ] as const;
 
 export const PET_RENDERER_TELEMETRY_EVENT_TYPES = [
@@ -94,7 +96,11 @@ export const PET_TELEMETRY_ALLOWED_FIELDS = [
   "physicsUpdatesPerSecond",
   "breathUpdatesPerSecond",
   "directionChanges",
-  "distancePx"
+  "distancePx",
+  "overlayHitState",
+  "overlayHitAuthority",
+  "regionState",
+  "authority"
 ] as const;
 
 export type PetTelemetryEventType = typeof PET_TELEMETRY_EVENT_TYPES[number];
@@ -233,6 +239,10 @@ const PET_WINDOW_MOTION_REASONS = ["drag_direction_changes", "fast_linear_drag"]
 const PET_WINDOW_MOTION_FEEDBACK_TYPES = ["shake_light_feedback"] as const;
 const PET_WINDOW_MOTION_FEEDBACK_RESULTS = ["started", "skipped"] as const;
 const PET_TELEMETRY_COOLDOWN_STATES = ["available", "cooling_down"] as const;
+const PROACTIVE_BUBBLE_OVERLAY_HIT_STATES = ["active", "inactive"] as const;
+const PROACTIVE_BUBBLE_OVERLAY_HIT_AUTHORITIES = ["main_poll"] as const;
+const PROACTIVE_BUBBLE_OVERLAY_REGION_STATES = ["registered", "cleared", "rejected"] as const;
+const PROACTIVE_BUBBLE_OVERLAY_REGION_AUTHORITIES = ["main"] as const;
 const PET_RENDERERS = ["live2d", "placeholder"] as const;
 const PET_WINDOWS = ["pet"] as const;
 const PET_RENDER_BUDGET_MODES = ["active", "idle", "background"] as const;
@@ -474,6 +484,20 @@ function sanitizeScaleAdjustedPayload(payload: Record<string, unknown>): PetTele
   return safe;
 }
 
+function sanitizeProactiveBubbleOverlayHitPayload(payload: Record<string, unknown>): PetTelemetryPayload {
+  const safe: PetTelemetryPayload = {};
+  putString(safe, payload, "overlayHitState", PROACTIVE_BUBBLE_OVERLAY_HIT_STATES);
+  putString(safe, payload, "overlayHitAuthority", PROACTIVE_BUBBLE_OVERLAY_HIT_AUTHORITIES);
+  return safe;
+}
+
+function sanitizeProactiveBubbleOverlayRegionPayload(payload: Record<string, unknown>): PetTelemetryPayload {
+  const safe: PetTelemetryPayload = {};
+  putString(safe, payload, "regionState", PROACTIVE_BUBBLE_OVERLAY_REGION_STATES);
+  putString(safe, payload, "authority", PROACTIVE_BUBBLE_OVERLAY_REGION_AUTHORITIES);
+  return safe;
+}
+
 function sanitizePayload(type: PetTelemetryEventType, payload: Record<string, unknown>): PetTelemetryPayload {
   switch (type) {
     case "pet_health":
@@ -503,6 +527,10 @@ function sanitizePayload(type: PetTelemetryEventType, payload: Record<string, un
       return sanitizeWindowMotionFeedbackPayload(payload);
     case "pet_scale_adjusted":
       return sanitizeScaleAdjustedPayload(payload);
+    case "proactive_bubble_overlay_hit_changed":
+      return sanitizeProactiveBubbleOverlayHitPayload(payload);
+    case "proactive_bubble_overlay_region_changed":
+      return sanitizeProactiveBubbleOverlayRegionPayload(payload);
   }
 }
 

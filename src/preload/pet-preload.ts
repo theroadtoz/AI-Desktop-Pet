@@ -4,9 +4,15 @@ import type {
   PetWindowMotionFeedback,
   RenderHealth,
   PetDragDelta,
-  PetFirstFrameInfo
+  PetFirstFrameInfo,
+  PetOverlayHitRegion
 } from "../shared/ipc-contract";
-import type { ProactiveSpeechBubblePayload, ProactiveSpeechBubbleReason } from "../shared/proactive-speech-bubble";
+import type {
+  ProactiveBubbleCandidateId,
+  ProactiveSpeechBubbleActivation,
+  ProactiveSpeechBubblePayload,
+  ProactiveSpeechBubbleReason
+} from "../shared/proactive-speech-bubble";
 import type { PetActionTrigger, PetActionTriggerReason } from "../shared/pet-action-trigger";
 import type { AutomaticSituationSnapshot } from "../shared/automatic-situation-context";
 import type { PetPresentationIntent, PetRoleState } from "../shared/pet-role-state";
@@ -61,12 +67,41 @@ const proactiveSpeechBubbleLineIds = [
   "idle_presence_history_summary",
   "idle_presence_memory_safe",
   "idle_presence_search_citation",
+  "environment_music_started",
+  "environment_game_started",
+  "environment_returned_from_away",
+  "environment_long_work_recovery",
   "mode_presence_focus",
   "mode_presence_work",
   "mode_presence_game",
   "mode_presence_reading"
 ] as const;
-const proactiveSpeechBubbleReasons = ["startup_presence", "idle_presence", "mode_presence"] as const;
+const proactiveSpeechBubbleReasons = [
+  "startup_presence",
+  "idle_presence",
+  "mode_presence",
+  "music_presence",
+  "game_presence",
+  "return_presence",
+  "work_recovery",
+  "evening_presence",
+  "silence_presence",
+  "source_presence"
+] as const;
+const proactiveBubbleCandidateIds = [
+  "idle_presence",
+  "mode_presence",
+  "startup_daily",
+  "music_started",
+  "explicit_game_started",
+  "returned_from_away",
+  "long_work_recovery",
+  "evening_companion",
+  "long_silence",
+  "memory_safe",
+  "search_citation_safe",
+  "history_summary_safe"
+] as const;
 const petActionTriggerReasons = [
   "chat_opened",
   "chat_input_focus",
@@ -98,6 +133,25 @@ const petActionTriggerReasons = [
   "state_proactive_bubble_visible"
 ] as const;
 const scaleWheelModifierPattern = /^(Ctrl|Alt|Shift|Meta)(\+(Ctrl|Alt|Shift|Meta))*$/;
+
+function parsePetOverlayHitRegion(value: unknown): PetOverlayHitRegion | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const region = value as Partial<PetOverlayHitRegion>;
+  if (Object.keys(region).length !== 4 ||
+    ![region.left, region.top, region.right, region.bottom].every((item) =>
+      typeof item === "number" && Number.isFinite(item) && item >= 0) ||
+    region.right! <= region.left! || region.bottom! <= region.top!) {
+    return null;
+  }
+  return {
+    left: region.left!,
+    top: region.top!,
+    right: region.right!,
+    bottom: region.bottom!
+  };
+}
 
 function parseAutomaticSituationSnapshot(value: unknown): AutomaticSituationSnapshot | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -292,6 +346,19 @@ const api: PetApi = {
   setPointerHit(isHit: boolean) {
     ipcRenderer.send("pet:pointer-hit-change", { isHit });
   },
+  setBubblePointerHit(isHit: boolean) {
+    ipcRenderer.send("pet:bubble-pointer-hit-change", { isHit });
+  },
+  setBubbleHitRegion(region: PetOverlayHitRegion | null) {
+    if (region === null) {
+      ipcRenderer.send("pet:bubble-hit-region-change", null);
+      return;
+    }
+    const parsed = parsePetOverlayHitRegion(region);
+    if (parsed) {
+      ipcRenderer.send("pet:bubble-hit-region-change", parsed);
+    }
+  },
   presentationReady() {
     ipcRenderer.send("pet:presentation-ready");
   },
@@ -346,6 +413,21 @@ const api: PetApi = {
     return () => {
       ipcRenderer.removeListener("pet:clear-proactive-speech-bubble", listener);
     };
+  },
+  async activateProactiveSpeechBubble(payload: ProactiveSpeechBubbleActivation) {
+    const result = await ipcRenderer.invoke("pet:activate-proactive-speech-bubble", payload);
+    return result === true;
+  },
+  async injectProactiveBubbleCandidateForAcceptance(candidateId: ProactiveBubbleCandidateId) {
+    if (!proactiveBubbleCandidateIds.includes(candidateId)) {
+      return false;
+    }
+    const result = await ipcRenderer.invoke("pet:p2-83a-inject-candidate", candidateId);
+    return result === true;
+  },
+  async getNativeWindowHandleForAcceptance() {
+    const value = await ipcRenderer.invoke("pet:p2-83a-native-window-handle");
+    return typeof value === "string" && /^\d{1,20}$/u.test(value) ? value : null;
   },
   onInjectWebGLContextLoss(handler: () => void) {
     const listener = (): void => {

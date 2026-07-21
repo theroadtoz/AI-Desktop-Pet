@@ -72,3 +72,39 @@ test("sandboxed pet preload has no relative runtime dependencies", async () => {
   assert.doesNotMatch(preload, /require\(["']\.{1,2}\//);
   assert.doesNotMatch(preload, /import\(["']\.{1,2}\//);
 });
+
+test("pet preload sends only finite nonnegative exact overlay regions", async () => {
+  const preload = await readFile(join(process.cwd(), "dist", "preload", "pet-preload.js"), "utf8");
+  const sends: unknown[][] = [];
+  let petApi: { setBubbleHitRegion(value: unknown): void } | undefined;
+  const contextBridge = {
+    exposeInMainWorld(name: string, value: unknown) {
+      if (name === "petApi") petApi = value as typeof petApi;
+    }
+  };
+  const ipcRenderer = {
+    send(...args: unknown[]) { sends.push(args); },
+    invoke() { return Promise.resolve(null); },
+    on() {},
+    removeListener() {}
+  };
+  const module = { exports: {} };
+  new Function("require", "exports", "module", preload)(
+    (id: string) => {
+      assert.equal(id, "electron");
+      return { contextBridge, ipcRenderer };
+    },
+    module.exports,
+    module
+  );
+
+  assert.ok(petApi);
+  petApi.setBubbleHitRegion({ left: 1, top: 2, right: 30, bottom: 40 });
+  petApi.setBubbleHitRegion({ left: -1, top: 2, right: 30, bottom: 40 });
+  petApi.setBubbleHitRegion({ left: 1, top: 2, right: 30, bottom: 40, text: "private" });
+  petApi.setBubbleHitRegion(null);
+  assert.deepEqual(sends, [
+    ["pet:bubble-hit-region-change", { left: 1, top: 2, right: 30, bottom: 40 }],
+    ["pet:bubble-hit-region-change", null]
+  ]);
+});

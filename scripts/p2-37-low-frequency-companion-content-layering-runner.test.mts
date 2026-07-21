@@ -22,6 +22,7 @@ const p224eSource = readFileSync(
   "scripts/p2-24e-proactive-speech-bubble-v2-real-ui.mjs",
   "utf8"
 );
+const petPreloadSource = readFileSync("src/preload/pet-preload.ts", "utf8");
 
 test("p2-37 package command builds and runs the content layering real UI runner", () => {
   assert.equal(
@@ -160,14 +161,35 @@ test("p2-37 runner keeps output to safe summaries without raw private surfaces",
   }
 });
 
-test("older real UI runner line allowlists include every current proactive bubble line id", () => {
+test("preload accepts every line while migrated runners keep catalog-backed scoped allowlists", () => {
   for (const lineId of Object.keys(PROACTIVE_SPEECH_BUBBLE_LINE_CATALOG)) {
     const pattern = new RegExp(escapeRegExp(JSON.stringify(lineId)));
-    assert.match(p234Source, pattern, `p2-34 should allow ${lineId}`);
-    assert.match(p236Source, pattern, `p2-36 should allow ${lineId}`);
-    assert.match(p224eSource, pattern, `p2-24e should allow ${lineId}`);
+    assert.match(petPreloadSource, pattern, `pet preload should allow ${lineId}`);
   }
+
+  assertCatalogBackedScopedLines("p2-34", extractStringSet(p234Source, "safeLineIds"));
+  assertCatalogBackedScopedLines("p2-36", extractStringSet(p236Source, "allowedLineIds"));
+  assertCatalogBackedScopedLines("p2-24e", extractStringSet(p224eSource, "safeLineIds"));
 });
+
+function assertCatalogBackedScopedLines(runnerId: string, lineIds: Set<string>): void {
+  assert.ok(lineIds.size > 0, `${runnerId} should keep a scoped safe line allowlist`);
+  for (const lineId of lineIds) {
+    assert.ok(
+      Object.hasOwn(PROACTIVE_SPEECH_BUBBLE_LINE_CATALOG, lineId),
+      `${runnerId} scoped line should exist in the catalog: ${lineId}`
+    );
+  }
+  for (const lineId of ["startup_presence_ready", "idle_presence_evening", "mode_presence_focus"]) {
+    assert.ok(lineIds.has(lineId), `${runnerId} should retain ${lineId}`);
+  }
+}
+
+function extractStringSet(source: string, name: string): Set<string> {
+  const match = source.match(new RegExp(`const ${escapeRegExp(name)} = new Set\\(\\[([\\s\\S]*?)\\]\\);`));
+  assert.ok(match, `missing string set ${name}`);
+  return new Set([...match[1].matchAll(/"([a-z0-9_-]+)"/g)].map((item) => item[1]));
+}
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

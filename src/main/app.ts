@@ -24,14 +24,15 @@ import type {
   PetActivityEcho,
   PetDragDelta,
   PetFirstFrameInfo,
+  PetOverlayHitRegion,
   PetPointerHitState,
   PetTelemetryEvent,
   RenderHealth
 } from "../shared/ipc-contract";
 import { isChatMessage } from "../shared/ipc-contract";
 import {
+  PROACTIVE_BUBBLE_CANDIDATE_IDS,
   DEFAULT_PROACTIVE_SPEECH_BUBBLE_DURATION_MS,
-  DEFAULT_PROACTIVE_SPEECH_BUBBLE_LINE_ID,
   getProactiveSpeechBubbleTimeBand,
   isProactiveSpeechBubbleTimeBand,
   selectProactiveSpeechBubbleLineId,
@@ -109,6 +110,7 @@ import {
   type PetPresentationPreferences
 } from "../shared/pet-presentation";
 import {
+  isPetActionTriggerReason,
   isPetNearWorkAreaEdge,
   type PetActionTriggerReason
 } from "../shared/pet-action-trigger";
@@ -157,6 +159,15 @@ import {
   createCoarseUserStateCoordinator,
   type CoarseUserStateCoordinator
 } from "./services/automatic-situation/coarse-user-state-coordinator";
+import {
+  createProactiveBubbleCoordinator,
+  type ProactiveBubbleCoordinator,
+  type ProactiveBubbleRuntimeGates
+} from "./services/proactive-companion/proactive-bubble-coordinator";
+import {
+  createProactiveBubbleLedgerStore,
+  type ProactiveBubbleLedgerStore
+} from "./services/config/proactive-bubble-ledger-store";
 import {
   createWebSearchSettingsStore,
   normalizeWebSearchSettings,
@@ -229,6 +240,8 @@ let historyStore: HistoryStore | null = null;
 let memoryStore: MemoryStore | null = null;
 let webSearchSettingsStore: WebSearchSettingsStore | null = null;
 let proactiveCompanionSettingsStore: ProactiveCompanionSettingsStore | null = null;
+let proactiveBubbleLedgerStore: ProactiveBubbleLedgerStore | null = null;
+let proactiveBubbleCoordinator: ProactiveBubbleCoordinator | null = null;
 let environmentActionSettingsStore: EnvironmentActionSettingsStore | null = null;
 let shortcutPreferencesStore: ShortcutPreferencesStore | null = null;
 let userProfileStore: UserProfileStore | null = null;
@@ -263,7 +276,8 @@ let idleProactiveSpeechBubbleTimer: NodeJS.Timeout | null = null;
 let hasHandledStartupProactiveSpeechBubble = false;
 let proactiveSpeechBubbleTick = 0;
 let proactiveSpeechBubbleVisibleUntil = 0;
-let nextIdleProactiveSpeechBubbleReason: ProactiveSpeechBubbleReason = "idle_presence";
+let hasPetFirstFrame = false;
+let activePetActionReason: PetActionTriggerReason | null = null;
 let lastLowFrequencyCompanionEventAt: number | null = null;
 let lastLowFrequencyCompanionEventId: LowFrequencyCompanionEvent["eventId"] | null = null;
 let pendingSourcedLowFrequencyCompanionEvents: SourcedLowFrequencyCompanionEvent[] = [];
@@ -288,8 +302,15 @@ const PET_INITIAL_EDGE_GLANCE_DELAY_MS = 2_350;
 const PET_DRAG_END_EDGE_GLANCE_DELAY_MS = 100;
 const PET_CHAT_REPLY_SUSTAIN_MIN_CHARS = 42;
 const PET_CHAT_REPLY_SUSTAIN_DELAY_MS = 1_250;
-const PET_STARTUP_PROACTIVE_SPEECH_BUBBLE_DELAY_MS = 1_100;
+const PET_STARTUP_PROACTIVE_SPEECH_BUBBLE_DELAY_MS = 3_500;
 const isAcceptanceTelemetryEnabled = process.env.AI_DESKTOP_PET_ACCEPTANCE_TELEMETRY === "1";
+const isP283aAcceptanceInjectionOnly = isAcceptanceTelemetryEnabled &&
+  process.env.AI_DESKTOP_PET_P2_83A_SAFE_INJECTION === "1";
+const isP245AcceptanceSafeActive = isAcceptanceTelemetryEnabled &&
+  process.env.AI_DESKTOP_PET_P2_45_SAFE_ACTIVE_CONTEXT === "1";
+const p283aAcceptanceScenario = isP283aAcceptanceInjectionOnly
+  ? process.env.AI_DESKTOP_PET_P2_83A_SCENARIO
+  : undefined;
 const PET_IDLE_PROACTIVE_SPEECH_BUBBLE_BASE_INTERVAL_MS = readProactiveSpeechBubbleIdleIntervalMs(
   process.env.AI_DESKTOP_PET_PROACTIVE_SPEECH_BUBBLE_IDLE_INTERVAL_MS,
   isAcceptanceTelemetryEnabled
@@ -328,8 +349,9 @@ const desktopContextMonitor = createDesktopContextMonitor({
   getSystemIdleTime() {
     return powerMonitor.getSystemIdleTime();
   },
-  sendReason(reason) {
-    return sendPetActionTrigger(reason);
+  sendReason() {
+    // P2-83A owns environment action delivery after the coordinator handshake.
+    return true;
   }
 });
 const handleSystemLock = (): void => desktopContextMonitor.lock();
@@ -553,7 +575,7 @@ function readLowFrequencyCompanionEventAcceptanceMinimumIntervalMs(
     return null;
   }
 
-  return Math.min(60 * 60_000, Math.max(900, Math.round(parsed)));
+  return Math.min(60 * 60_000, Math.max(100, Math.round(parsed)));
 }
 
 function startBundledLlamaCppRuntimeIfAvailable(options: {
@@ -906,6 +928,7 @@ function applyAutomaticSituationSnapshot(snapshot: AutomaticSituationSnapshot): 
   const previousPresenceStateId = currentPresenceModeId;
   currentDialogueModeId = snapshot.conversationContextId;
   currentPresenceModeId = snapshot.presenceStateId;
+  proactiveBubbleCoordinator?.updateDialogueMode(currentDialogueModeId);
 
   if (previousDialogueContextId !== currentDialogueModeId) {
     const runtimeActionReason = petActionRuntimePolicy.onDialogueModeChanged(
@@ -921,10 +944,7 @@ function applyAutomaticSituationSnapshot(snapshot: AutomaticSituationSnapshot): 
     if (actionState && actionState.stateId !== "idle") {
       schedulePetModeActionStateTrigger(actionState.triggerReason);
     }
-    if (runtimeActionReason) {
-      sendPetActionTrigger(runtimeActionReason);
-    }
-    nextIdleProactiveSpeechBubbleReason = "mode_presence";
+    void runtimeActionReason;
   }
 
   if (previousPresenceStateId !== currentPresenceModeId) {
@@ -933,7 +953,6 @@ function applyAutomaticSituationSnapshot(snapshot: AutomaticSituationSnapshot): 
       cancelStartupProactiveSpeechBubbleTimer();
       cancelIdleProactiveSpeechBubbleTimer();
       markProactiveSpeechBubbleHidden();
-      nextIdleProactiveSpeechBubbleReason = "idle_presence";
       clearSourcedLowFrequencyCompanionEvents();
     }
 
@@ -948,7 +967,6 @@ function applyAutomaticSituationSnapshot(snapshot: AutomaticSituationSnapshot): 
       schedulePetModeActionStateTrigger(actionState.triggerReason);
     }
     if (currentPresenceModeId !== "sleep") {
-      nextIdleProactiveSpeechBubbleReason = "mode_presence";
     }
   }
 
@@ -967,6 +985,7 @@ function applyAutomaticSituationSnapshot(snapshot: AutomaticSituationSnapshot): 
     });
     scheduleIdleProactiveSpeechBubble();
   }
+  refreshProactiveBubbleRuntimeGates();
 }
 
 function cancelPendingModeActionStateTrigger(): void {
@@ -980,38 +999,12 @@ function cancelPendingModeActionStateTrigger(): void {
 
 function schedulePetModeActionStateTrigger(reason: PetActionTriggerReason): void {
   cancelPendingModeActionStateTrigger();
+  if (isP283aAcceptanceInjectionOnly) return;
   pendingModeActionStateTriggerTimer = setTimeout(() => {
     pendingModeActionStateTriggerTimer = null;
-    sendPetActionTrigger(reason);
+    const payload = createProactiveSpeechBubblePayload("mode_presence");
+    proactiveBubbleCoordinator?.queuePresence("mode_presence", payload, reason);
   }, PET_MODE_ACTION_STATE_TRIGGER_DELAY_MS);
-}
-
-function getProactiveSpeechBubbleSkipReason(): string | null {
-  if (!petWindow || petWindow.isDestroyed()) {
-    return "pet_window_missing";
-  }
-
-  if (currentProactiveCompanionSettings.cadence === "off") {
-    return "proactive_bubbles_off";
-  }
-
-  if (currentPresenceModeId === "sleep") {
-    return "sleep_mode";
-  }
-
-  if (isChatVisible()) {
-    return "chat_visible";
-  }
-
-  if (isChatInteractionActive) {
-    return "chat_interaction_active";
-  }
-
-  if (Date.now() < proactiveSpeechBubbleVisibleUntil) {
-    return "bubble_visible";
-  }
-
-  return null;
 }
 
 function logProactiveSpeechBubbleDecision(
@@ -1032,7 +1025,7 @@ function logProactiveSpeechBubbleDecision(
 }
 
 function logLowFrequencyCompanionEventDecision(
-  status: "shown" | "skipped",
+  status: "queued" | "shown" | "skipped",
   event: LowFrequencyCompanionEvent | null,
   extra: {
     skipReason?: string | undefined;
@@ -1062,33 +1055,25 @@ function logLowFrequencyCompanionEventDecision(
   });
 }
 
-function sendProactiveSpeechBubble(
-  payload: ProactiveSpeechBubblePayload,
-  actionTriggerReason: PetActionTriggerReason = "state_proactive_bubble_visible"
-): boolean {
-  const skipReason = getProactiveSpeechBubbleSkipReason();
-  if (skipReason) {
-    logProactiveSpeechBubbleDecision("skipped", payload, { skipReason });
-    return false;
-  }
-
-  if (!petWindow || petWindow.isDestroyed()) {
-    return false;
-  }
-
-  petWindow.webContents.send("pet:proactive-speech-bubble", payload);
-  proactiveSpeechBubbleVisibleUntil = Date.now() + payload.durationMs;
-  logProactiveSpeechBubbleDecision("shown", payload);
-  sendPetActionTrigger(actionTriggerReason);
-  return true;
-}
-
 function isChatVisible(): boolean {
   return Boolean(chatWindow && !chatWindow.isDestroyed() && chatWindow.isVisible());
 }
 
-function canShowStartupProactiveSpeechBubble(): boolean {
-  return getProactiveSpeechBubbleSkipReason() === null;
+function getProactiveBubbleRuntimeGates(): ProactiveBubbleRuntimeGates {
+  return {
+    petReady: hasPetFirstFrame,
+    petWindowAvailable: Boolean(petWindow && !petWindow.isDestroyed()),
+    chatVisible: isChatVisible(),
+    interactionActive: isChatInteractionActive,
+    modelBusy: p283aAcceptanceScenario === "busy" ||
+      activeChatRequestVersion !== null || Boolean(chatEngine?.hasActiveStream()),
+    highPriorityActionActive: activePetActionReason !== null,
+    highPriorityActionReason: activePetActionReason
+  };
+}
+
+function refreshProactiveBubbleRuntimeGates(): void {
+  proactiveBubbleCoordinator?.updateRuntimeGates(getProactiveBubbleRuntimeGates());
 }
 
 function cancelStartupProactiveSpeechBubbleTimer(): void {
@@ -1180,6 +1165,7 @@ function queueSourcedLowFrequencyCompanionEvent(
   eventId: LowFrequencyCompanionEventId,
   options: { actionStateId: PetActionStateId; now?: number }
 ): void {
+  if (isP283aAcceptanceInjectionOnly) return;
   if (
     eventId !== "history-summary-pulse" &&
     eventId !== "memory-safe-pulse" &&
@@ -1206,6 +1192,19 @@ function queueSourcedLowFrequencyCompanionEvent(
     eventId === "history-summary-pulse" &&
     currentProactiveCompanionSettings.cadence === "off"
   ) {
+    return;
+  }
+
+  if (proactiveBubbleCoordinator) {
+    const sourceEventId = eventId === "memory-safe-pulse"
+      ? "memory_safe"
+      : eventId === "search-citation-pulse"
+        ? "search_citation_safe"
+        : "history_summary_safe";
+    proactiveBubbleCoordinator.queueSource(
+      sourceEventId,
+      getPetActionStateTriggerReason(options.actionStateId)
+    );
     return;
   }
 
@@ -1236,6 +1235,7 @@ function clearQueuedSourcedLowFrequencyCompanionEvent(eventId: LowFrequencyCompa
 
 function clearSourcedLowFrequencyCompanionEvents(): void {
   pendingSourcedLowFrequencyCompanionEvents = [];
+  proactiveBubbleCoordinator?.clear();
 }
 
 function getPendingSourcedLowFrequencyCompanionEvent(
@@ -1357,6 +1357,9 @@ function selectRuntimeLowFrequencyCompanionEvent(now: number): {
 
 function scheduleIdleProactiveSpeechBubble(): void {
   cancelIdleProactiveSpeechBubbleTimer();
+  refreshProactiveBubbleRuntimeGates();
+  if (isP283aAcceptanceInjectionOnly) return;
+  proactiveBubbleCoordinator?.tick();
 
   if (currentPresenceModeId === "sleep" || currentProactiveCompanionSettings.cadence === "off") {
     return;
@@ -1369,98 +1372,68 @@ function scheduleIdleProactiveSpeechBubble(): void {
 
   idleProactiveSpeechBubbleTimer = setTimeout(() => {
     idleProactiveSpeechBubbleTimer = null;
-    const reason = nextIdleProactiveSpeechBubbleReason;
-    if (reason !== "mode_presence") {
-      const now = Date.now();
-      const selection = selectRuntimeLowFrequencyCompanionEvent(now);
-      if (!selection.event || selection.skipReason) {
-        logLowFrequencyCompanionEventDecision("skipped", selection.event, {
-          skipReason: selection.skipReason,
-          elapsedSinceLastEventMs: selection.elapsedSinceLastEventMs,
-          minimumIntervalMs: selection.minimumIntervalMs
-        });
-        scheduleIdleProactiveSpeechBubble();
-        return;
-      }
-
-      const payload = createProactiveSpeechBubblePayload(selection.event.bubbleReason, {
-        safeContextTag: getLowFrequencyCompanionSafeContextTag(selection.event)
+    const now = Date.now();
+    const selection = selectRuntimeLowFrequencyCompanionEvent(now);
+    if (!selection.event || selection.skipReason) {
+      logLowFrequencyCompanionEventDecision("skipped", selection.event, {
+        skipReason: selection.skipReason,
+        elapsedSinceLastEventMs: selection.elapsedSinceLastEventMs,
+        minimumIntervalMs: selection.minimumIntervalMs
       });
-      const actionStateId = getEffectiveLowFrequencyCompanionActionStateId(selection.event);
-      if (sendProactiveSpeechBubble(
-        payload,
-        getPetActionStateTriggerReason(actionStateId)
-      )) {
-        lastLowFrequencyCompanionEventAt = now;
-        lastLowFrequencyCompanionEventId = selection.event.eventId;
-        clearQueuedSourcedLowFrequencyCompanionEvent(selection.event.eventId);
-        logLowFrequencyCompanionEventDecision("shown", selection.event, {
-          durationMs: payload.durationMs,
-          elapsedSinceLastEventMs: selection.elapsedSinceLastEventMs,
-          minimumIntervalMs: selection.minimumIntervalMs,
-          actionStateId
-        });
-      } else {
-        logLowFrequencyCompanionEventDecision("skipped", selection.event, {
-          durationMs: payload.durationMs,
-          elapsedSinceLastEventMs: selection.elapsedSinceLastEventMs,
-          minimumIntervalMs: selection.minimumIntervalMs,
-          skipReason: getProactiveSpeechBubbleSkipReason() ?? "send_failed",
-          actionStateId
-        });
-      }
       scheduleIdleProactiveSpeechBubble();
       return;
     }
 
-    const payload = createProactiveSpeechBubblePayload(reason);
-    if (sendProactiveSpeechBubble(payload)) {
-      nextIdleProactiveSpeechBubbleReason = "idle_presence";
-    }
+    const payload = createProactiveSpeechBubblePayload(selection.event.bubbleReason, {
+      safeContextTag: getLowFrequencyCompanionSafeContextTag(selection.event)
+    });
+    const actionStateId = getEffectiveLowFrequencyCompanionActionStateId(selection.event);
+    proactiveBubbleCoordinator?.queuePresence(
+      "idle_presence",
+      payload,
+      getPetActionStateTriggerReason(actionStateId)
+    );
+    lastLowFrequencyCompanionEventAt = now;
+    lastLowFrequencyCompanionEventId = selection.event.eventId;
+    clearQueuedSourcedLowFrequencyCompanionEvent(selection.event.eventId);
+    logLowFrequencyCompanionEventDecision("queued", selection.event, {
+      durationMs: payload.durationMs,
+      elapsedSinceLastEventMs: selection.elapsedSinceLastEventMs,
+      minimumIntervalMs: selection.minimumIntervalMs,
+      actionStateId
+    });
     scheduleIdleProactiveSpeechBubble();
   }, nextDelayMs);
 }
 
 function scheduleStartupProactiveSpeechBubbleIfNeeded(): void {
+  if (isP283aAcceptanceInjectionOnly) {
+    hasHandledStartupProactiveSpeechBubble = true;
+    cancelStartupProactiveSpeechBubbleTimer();
+    cancelIdleProactiveSpeechBubbleTimer();
+    refreshProactiveBubbleRuntimeGates();
+    return;
+  }
   if (hasHandledStartupProactiveSpeechBubble) {
     scheduleIdleProactiveSpeechBubble();
     return;
   }
 
-  hasHandledStartupProactiveSpeechBubble = true;
   cancelStartupProactiveSpeechBubbleTimer();
-
-  if (!canShowStartupProactiveSpeechBubble()) {
-    logProactiveSpeechBubbleDecision("skipped", {
-      lineId: DEFAULT_PROACTIVE_SPEECH_BUBBLE_LINE_ID,
-      reason: "startup_presence",
-      durationMs: DEFAULT_PROACTIVE_SPEECH_BUBBLE_DURATION_MS
-    }, {
-      skipReason: getProactiveSpeechBubbleSkipReason() ?? "startup_blocked"
-    });
-    scheduleIdleProactiveSpeechBubble();
-    return;
-  }
-
   startupProactiveSpeechBubbleTimer = setTimeout(() => {
     startupProactiveSpeechBubbleTimer = null;
-    if (!canShowStartupProactiveSpeechBubble()) {
-      logProactiveSpeechBubbleDecision("skipped", {
-        lineId: DEFAULT_PROACTIVE_SPEECH_BUBBLE_LINE_ID,
-        reason: "startup_presence",
-        durationMs: DEFAULT_PROACTIVE_SPEECH_BUBBLE_DURATION_MS
-      }, {
-        skipReason: getProactiveSpeechBubbleSkipReason() ?? "startup_blocked"
-      });
-      return;
-    }
-
-    sendProactiveSpeechBubble({
-      ...createProactiveSpeechBubblePayload("startup_presence"),
-      lineId: DEFAULT_PROACTIVE_SPEECH_BUBBLE_LINE_ID
-    });
-    scheduleIdleProactiveSpeechBubble();
+    flushStartupProactiveSpeechBubbleCandidate();
   }, PET_STARTUP_PROACTIVE_SPEECH_BUBBLE_DELAY_MS);
+  startupProactiveSpeechBubbleTimer.unref?.();
+}
+
+function flushStartupProactiveSpeechBubbleCandidate(): void {
+  if (hasHandledStartupProactiveSpeechBubble || isP283aAcceptanceInjectionOnly) return;
+  hasHandledStartupProactiveSpeechBubble = true;
+  cancelStartupProactiveSpeechBubbleTimer();
+  refreshProactiveBubbleRuntimeGates();
+  proactiveBubbleCoordinator?.onFirstFrame();
+  scheduleIdleProactiveSpeechBubble();
 }
 
 function isCurrentPetWindowNearEdge(): boolean {
@@ -1502,6 +1475,12 @@ function createPointerControllerForWindow(window: BrowserWindow): PointerControl
       isScaleGestureActive: false,
       isChatInteractionActive
     }),
+    onOverlayRegionHitChanged: (isHit) => {
+      logTelemetry("proactive_bubble_overlay_hit_changed", {
+        overlayHitState: isHit ? "active" : "inactive",
+        overlayHitAuthority: "main_poll"
+      });
+    },
     onWindowMotionCandidate: (candidate) => {
       logPetTelemetry({
         type: "pet_window_motion_detected",
@@ -1523,6 +1502,32 @@ function createPointerControllerForWindow(window: BrowserWindow): PointerControl
       }
     }
   });
+}
+
+function parsePetOverlayHitRegion(
+  value: unknown,
+  contentWidth: number,
+  contentHeight: number
+): PetOverlayHitRegion | null {
+  if (!value || typeof value !== "object" || Array.isArray(value) ||
+    !Number.isFinite(contentWidth) || !Number.isFinite(contentHeight) ||
+    contentWidth <= 0 || contentHeight <= 0) {
+    return null;
+  }
+  const region = value as Partial<PetOverlayHitRegion>;
+  if (Object.keys(region).length !== 4 ||
+    ![region.left, region.top, region.right, region.bottom].every((item) =>
+      typeof item === "number" && Number.isFinite(item) && item >= 0) ||
+    region.right! <= region.left! || region.bottom! <= region.top! ||
+    region.right! > contentWidth || region.bottom! > contentHeight) {
+    return null;
+  }
+  return {
+    left: region.left!,
+    top: region.top!,
+    right: region.right!,
+    bottom: region.bottom!
+  };
 }
 
 function publishPetPresentation(intent: PetPresentationIntent): void {
@@ -1695,13 +1700,12 @@ function startPerformanceHeartbeat(): void {
 
   performanceHeartbeat = setInterval(() => {
     syncAutomaticPresenceLifecycle();
-    const companionReason = petActionRuntimePolicy.onCompanionTick({
+    refreshProactiveBubbleRuntimeGates();
+    proactiveBubbleCoordinator?.tick();
+    petActionRuntimePolicy.onCompanionTick({
       presenceModeId: currentPresenceModeId,
       timeBand: getRuntimeProactiveSpeechBubbleTimeBand()
     });
-    if (companionReason) {
-      sendPetActionTrigger(companionReason);
-    }
 
     logTelemetry("performance_heartbeat", {
       processMetrics: app.getAppMetrics().map((metric) => ({
@@ -2178,6 +2182,10 @@ function rebuildPetWindow(recoverySource?: string): void {
   pointerController?.dispose();
   pointerController = null;
   desktopContextMonitor.setRendererReady(false);
+  hasPetFirstFrame = false;
+  activePetActionReason = null;
+  markProactiveSpeechBubbleHidden();
+  proactiveBubbleCoordinator?.clear();
 
   if (petWindow && !petWindow.isDestroyed()) {
     petWindow.destroy();
@@ -2251,6 +2259,49 @@ app.whenReady().then(async () => {
   petActionRuntimePolicy.syncPresenceMode(currentPresenceModeId);
   proactiveCompanionSettingsStore = createProactiveCompanionSettingsStore();
   currentProactiveCompanionSettings = proactiveCompanionSettingsStore.getSettings();
+  if (p283aAcceptanceScenario === "quiet" || p283aAcceptanceScenario === "off") {
+    currentProactiveCompanionSettings = {
+      ...currentProactiveCompanionSettings,
+      cadence: p283aAcceptanceScenario
+    };
+  }
+  proactiveBubbleLedgerStore = createProactiveBubbleLedgerStore({
+    userDataPath: app.getPath("userData")
+  });
+  proactiveBubbleCoordinator = createProactiveBubbleCoordinator({
+    acceptanceInjectionOnly: isP283aAcceptanceInjectionOnly,
+    ledger: proactiveBubbleLedgerStore,
+    getRuntimeGates: getProactiveBubbleRuntimeGates,
+    requestAction: sendPetActionTrigger,
+    showBubble(payload) {
+      if (!petWindow || petWindow.isDestroyed()) {
+        return false;
+      }
+      petWindow.webContents.send("pet:proactive-speech-bubble", payload);
+      proactiveSpeechBubbleVisibleUntil = Date.now() + payload.durationMs;
+      logProactiveSpeechBubbleDecision("shown", payload);
+      return true;
+    },
+    clearBubble() {
+      proactiveSpeechBubbleVisibleUntil = 0;
+      if (petWindow && !petWindow.isDestroyed()) {
+        petWindow.webContents.send("pet:clear-proactive-speech-bubble");
+      }
+    },
+    openChat() {
+      openChatWindow();
+    },
+    reportDecision(decision) {
+      logTelemetry("proactive_bubble_candidate", {
+        candidateId: decision.candidateId,
+        status: decision.state,
+        lineId: decision.lineId,
+        reason: decision.reason,
+        skipReason: decision.skipReason
+      });
+    }
+  });
+  proactiveBubbleCoordinator.updateSettings(currentProactiveCompanionSettings);
   environmentActionSettingsStore = createEnvironmentActionSettingsStore();
   currentEnvironmentActionSettings = environmentActionSettingsStore.getSettings();
   automaticSituationCoordinator = createAutomaticSituationCoordinator({
@@ -2274,11 +2325,32 @@ app.whenReady().then(async () => {
   });
   removeCoarseUserStateListener = coarseUserStateCoordinator.subscribe((state) => {
     automaticSituationCoordinator?.updateExplicitGameContext(state.explicitGameContext === "active");
+    proactiveBubbleCoordinator?.updateCoarseState(isP245AcceptanceSafeActive
+      ? {
+          activity: "active",
+          interruptibility: "allowed",
+          media: state.media,
+          timeBand: state.timeBand,
+          explicitGameContext: state.explicitGameContext,
+          engagement: "allowed"
+        }
+      : state);
   });
   removeDesktopContextSnapshotListener = desktopContextMonitor.subscribe((snapshot) => {
     coarseUserStateCoordinator?.updateEnvironment(snapshot);
   });
   coarseUserStateCoordinator.updateEnvironment(desktopContextMonitor.getSnapshot());
+  const initialCoarseState = coarseUserStateCoordinator.getState();
+  proactiveBubbleCoordinator.updateCoarseState(isP245AcceptanceSafeActive
+    ? {
+        activity: "active",
+        interruptibility: "allowed",
+        media: initialCoarseState.media,
+        timeBand: initialCoarseState.timeBand,
+        explicitGameContext: initialCoarseState.explicitGameContext,
+        engagement: "allowed"
+      }
+    : initialCoarseState);
   syncAutomaticPresenceLifecycle();
   petActionRuntimePolicy.syncEveningDateKey(environmentActionSettingsStore.getEveningDateKey());
   desktopContextMonitor.updateSettings(currentEnvironmentActionSettings);
@@ -2382,6 +2454,7 @@ app.whenReady().then(async () => {
     cancelStartupProactiveSpeechBubbleTimer();
     cancelIdleProactiveSpeechBubbleTimer();
     markProactiveSpeechBubbleHidden();
+    proactiveBubbleCoordinator?.clear();
     showChatWindow(chatWindow);
     focusChatInput(chatWindow);
     if (!wasVisible) {
@@ -2731,23 +2804,14 @@ app.whenReady().then(async () => {
       throw new Error("Proactive companion settings store unavailable");
     }
 
-    const previousSettings = currentProactiveCompanionSettings;
     currentProactiveCompanionSettings = proactiveCompanionSettingsStore.saveSettings(update);
     syncAutomaticPresenceLifecycle();
-
-    if (
-      currentProactiveCompanionSettings.cadence === "off" ||
-      (previousSettings.memorySourceBubbles && !currentProactiveCompanionSettings.memorySourceBubbles) ||
-      (previousSettings.searchSourceBubbles && !currentProactiveCompanionSettings.searchSourceBubbles)
-    ) {
-      clearSourcedLowFrequencyCompanionEvents();
-    }
+    proactiveBubbleCoordinator?.updateSettings(currentProactiveCompanionSettings);
 
     if (currentProactiveCompanionSettings.cadence === "off") {
       cancelStartupProactiveSpeechBubbleTimer();
       cancelIdleProactiveSpeechBubbleTimer();
       clearPetProactiveSpeechBubble();
-      nextIdleProactiveSpeechBubbleReason = "idle_presence";
     } else {
       scheduleIdleProactiveSpeechBubble();
     }
@@ -2769,12 +2833,77 @@ app.whenReady().then(async () => {
     openChatWindow();
   });
 
+  ipcMain.handle("pet:activate-proactive-speech-bubble", (event, value: unknown) => {
+    if (!isPetSender(event)) {
+      return false;
+    }
+    return proactiveBubbleCoordinator?.activateBubble(value) ?? false;
+  });
+
+  ipcMain.handle("pet:p2-83a-inject-candidate", (event, candidateId: unknown) => {
+    if (
+      !isAcceptanceTelemetryEnabled ||
+      process.env.AI_DESKTOP_PET_P2_83A_SAFE_INJECTION !== "1" ||
+      !isPetSender(event) ||
+      !PROACTIVE_BUBBLE_CANDIDATE_IDS.includes(candidateId as never)
+    ) {
+      return false;
+    }
+    proactiveBubbleCoordinator?.queueSafeCandidateForAcceptance(candidateId as never);
+    return true;
+  });
+
+  ipcMain.handle("pet:p2-83a-native-window-handle", (event) => {
+    if (
+      process.platform !== "win32" ||
+      !isAcceptanceTelemetryEnabled ||
+      process.env.AI_DESKTOP_PET_P2_83A_SAFE_INJECTION !== "1" ||
+      !isPetSender(event) ||
+      !petWindow ||
+      petWindow.isDestroyed()
+    ) {
+      return null;
+    }
+    const handle = petWindow.getNativeWindowHandle();
+    return handle.length >= 8
+      ? handle.readBigUInt64LE(0).toString(10)
+      : String(handle.readUInt32LE(0));
+  });
+
   ipcMain.on("pet:pointer-hit-change", (event, state: PetPointerHitState) => {
     if (!isPetSender(event) || typeof state?.isHit !== "boolean") {
       return;
     }
 
     pointerController?.setPointerHit(state.isHit);
+  });
+
+  ipcMain.on("pet:bubble-pointer-hit-change", (event, state: PetPointerHitState) => {
+    if (!isPetSender(event) || typeof state?.isHit !== "boolean") {
+      return;
+    }
+    pointerController?.setOverlayHit(state.isHit);
+  });
+
+  ipcMain.on("pet:bubble-hit-region-change", (event, value: unknown) => {
+    if (!isPetSender(event) || !petWindow || petWindow.isDestroyed()) {
+      return;
+    }
+    if (value === null) {
+      pointerController?.setOverlayHitRegion(null);
+      logTelemetry("proactive_bubble_overlay_region_changed", {
+        regionState: "cleared",
+        authority: "main"
+      });
+      return;
+    }
+    const [contentWidth = 0, contentHeight = 0] = petWindow.getContentSize();
+    const region = parsePetOverlayHitRegion(value, contentWidth, contentHeight);
+    pointerController?.setOverlayHitRegion(region);
+    logTelemetry("proactive_bubble_overlay_region_changed", {
+      regionState: region ? "registered" : "rejected",
+      authority: "main"
+    });
   });
 
   ipcMain.on("pet:drag-start", (event) => {
@@ -2817,6 +2946,8 @@ app.whenReady().then(async () => {
 
     logTelemetry("first_frame", sanitizeFirstFrame(info));
     console.info("[pet] first frame reported");
+    hasPetFirstFrame = true;
+    refreshProactiveBubbleRuntimeGates();
     scheduleInitialEdgeGlanceIfNeeded();
     scheduleStartupProactiveSpeechBubbleIfNeeded();
   });
@@ -2839,6 +2970,38 @@ app.whenReady().then(async () => {
     }
 
     logTelemetry(petTelemetryEvent.type, petTelemetryEvent.payload);
+    const actionReason = petTelemetryEvent.payload?.reason;
+    if (
+      (petTelemetryEvent.type === "pet_interaction_action_started" ||
+        petTelemetryEvent.type === "pet_interaction_action_skipped" ||
+        petTelemetryEvent.type === "pet_interaction_action_finished") &&
+      isPetActionTriggerReason(actionReason)
+    ) {
+      if (petTelemetryEvent.type === "pet_interaction_action_started") {
+        activePetActionReason = actionReason;
+        proactiveBubbleCoordinator?.onActionLifecycle({ status: "started", reason: actionReason });
+      } else {
+        if (activePetActionReason === actionReason) {
+          activePetActionReason = null;
+        }
+        if (petTelemetryEvent.type === "pet_interaction_action_skipped") {
+          proactiveBubbleCoordinator?.onActionLifecycle({ status: "skipped", reason: actionReason });
+        }
+      }
+      refreshProactiveBubbleRuntimeGates();
+    }
+    if (
+      petTelemetryEvent.payload?.reason === "startup_first_visible_frame" &&
+      (petTelemetryEvent.type === "pet_interaction_action_finished" ||
+        petTelemetryEvent.type === "pet_interaction_action_skipped")
+    ) {
+      cancelStartupProactiveSpeechBubbleTimer();
+      startupProactiveSpeechBubbleTimer = setTimeout(() => {
+        startupProactiveSpeechBubbleTimer = null;
+        flushStartupProactiveSpeechBubbleCandidate();
+      }, PET_ACTION_TRIGGER_THROTTLE_MS + 150);
+      startupProactiveSpeechBubbleTimer.unref?.();
+    }
     const activityEcho = createPetActivityEcho(petTelemetryEvent);
 
     if (activityEcho) {
@@ -2893,6 +3056,7 @@ app.whenReady().then(async () => {
     } else {
       scheduleIdleProactiveSpeechBubble();
     }
+    refreshProactiveBubbleRuntimeGates();
   });
 
   ipcMain.on("pet:adjust-scale", (event, value: unknown) => {
@@ -2982,7 +3146,9 @@ app.whenReady().then(async () => {
       return;
     }
 
+    proactiveBubbleCoordinator?.onUserMessage();
     coarseUserStateCoordinator?.handleUserMessage(submittedMessage.content);
+    refreshProactiveBubbleRuntimeGates();
     activeChatRequestVersion = request.requestVersion;
     syncAutomaticPresenceLifecycle();
     clearChatReplySustainTimer();
@@ -3062,12 +3228,13 @@ app.whenReady().then(async () => {
       queueSourcedLowFrequencyCompanionEvent("memory-safe-pulse", {
         actionStateId: memorySafePulseActionStateId
       });
+    } else {
+      sendPetActionTrigger(selectMainPetActionTriggerForMemorySafeChatReply({
+        providerId,
+        autoCaptureSkippedReason: autoMemoryCaptureForActivity.skippedReason,
+        memoryInjectionCount: memoryContext.count
+      }));
     }
-    sendPetActionTrigger(selectMainPetActionTriggerForMemorySafeChatReply({
-      providerId,
-      autoCaptureSkippedReason: autoMemoryCaptureForActivity.skippedReason,
-      memoryInjectionCount: memoryContext.count
-    }));
     const situationSnapshotForRequest = automaticSituationCoordinator?.getSnapshot() ?? {
       conversationContextId: "default" as const,
       conversationSource: "default" as const,
@@ -3106,7 +3273,6 @@ app.whenReady().then(async () => {
       const webSearchCitation = createWebSearchCitationPayload(webSearchResolution.context);
       const webSearchCitationCount = webSearchCitation?.citations.length ?? 0;
       if (webSearchCitationCount > 0) {
-        sendPetActionTrigger("state_search_cited");
         queueSourcedLowFrequencyCompanionEvent("search-citation-pulse", {
           actionStateId: "search-cited"
         });
@@ -3880,6 +4046,9 @@ function quiesceApp(): void {
   powerMonitor.removeListener("resume", handleSystemResume);
   removeDesktopContextSnapshotListener?.();
   removeDesktopContextSnapshotListener = null;
+  proactiveBubbleCoordinator?.dispose();
+  proactiveBubbleCoordinator = null;
+  proactiveBubbleLedgerStore = null;
   coarseUserStateCoordinator?.dispose();
   coarseUserStateCoordinator = null;
   removeCoarseUserStateListener?.();

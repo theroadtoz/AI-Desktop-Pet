@@ -57,6 +57,12 @@ test("p2-47 runner serializes the current desktop presence regression chain", ()
   }
 });
 
+test("p2-47 pins the finite p2-34 cadence acceptance environment", () => {
+  assert.match(runnerSource, /P2_34_IDLE_INTERVAL_MS: "850"/);
+  assert.match(runnerSource, /P2_34_LOW_FREQUENCY_MINIMUM_INTERVAL_MS: "250"/);
+  assert.match(runnerSource, /env: \{ \.\.\.process\.env, \.\.\.\(item\.env \?\? \{\}\) \}/);
+});
+
 test("p2-47 runner keeps output safe and cleans targeted residue", () => {
   for (const token of [
     "safeSummaryOnly: true",
@@ -112,7 +118,7 @@ test("p2-47 locks the detection-derived preload and clear-bubble contracts", () 
   assert.match(clearPetBubbleBody, /markProactiveSpeechBubbleHidden\(\)/);
   assert.match(clearPetBubbleBody, /petWindow\.webContents\.send\("pet:clear-proactive-speech-bubble"\)/);
   assert.doesNotMatch(clearPetBubbleBody, /sendPetActionTrigger|pet:action-trigger/);
-  assert.match(mainSource, /if \(currentProactiveCompanionSettings\.cadence === "off"\) \{[\s\S]*cancelStartupProactiveSpeechBubbleTimer\(\)[\s\S]*cancelIdleProactiveSpeechBubbleTimer\(\)[\s\S]*clearPetProactiveSpeechBubble\(\)[\s\S]*nextIdleProactiveSpeechBubbleReason = "idle_presence";[\s\S]*\} else \{/);
+  assert.match(mainSource, /if \(currentProactiveCompanionSettings\.cadence === "off"\) \{[\s\S]*cancelStartupProactiveSpeechBubbleTimer\(\)[\s\S]*cancelIdleProactiveSpeechBubbleTimer\(\)[\s\S]*clearPetProactiveSpeechBubble\(\)[\s\S]*\} else \{[\s\S]*scheduleIdleProactiveSpeechBubble\(\)/);
   assert.match(mainSource, /ipcMain\.handle\("proactiveCompanion:get-settings", \(event\) => \{[\s\S]*if \(!isChatSender\(event\)[\s\S]*throw new Error\("Unauthorized proactive companion settings request"\)/);
   assert.match(mainSource, /ipcMain\.handle\("proactiveCompanion:set-settings", \(event, update: unknown\) => \{[\s\S]*if \(!isChatSender\(event\)[\s\S]*throw new Error\("Unauthorized proactive companion settings request"\)/);
 

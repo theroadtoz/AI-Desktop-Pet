@@ -10,12 +10,12 @@ export type ExplicitGameContextMessageIntent = "start" | "end-or-correct" | "non
 export type CoarseUserEngagement = "allowed" | "defer" | "suppressed" | "unknown";
 
 export type CoarseUserState = {
-  activity: CompanionEnvironmentActivity;
-  interruptibility: CompanionEnvironmentInterruptibility;
-  media: CompanionEnvironmentMedia;
-  timeBand: CompanionEnvironmentTimeBand;
-  explicitGameContext: "active" | "inactive" | "unknown";
-  engagement: CoarseUserEngagement;
+  readonly activity: CompanionEnvironmentActivity;
+  readonly interruptibility: CompanionEnvironmentInterruptibility;
+  readonly media: CompanionEnvironmentMedia;
+  readonly timeBand: CompanionEnvironmentTimeBand;
+  readonly explicitGameContext: "active" | "inactive" | "unknown";
+  readonly engagement: CoarseUserEngagement;
 };
 
 export type CoarseUserStateCoordinator = {
@@ -98,14 +98,14 @@ export function createCoarseUserStateCoordinator({
   let enabled = explicitGameContextEnabled;
   let explicitGameExpiresAtMs: number | null = null;
   let expiryTimer: ReturnType<typeof setTimeout> | null = null;
-  let state: CoarseUserState = {
+  let state: CoarseUserState = Object.freeze({
     activity: "unknown",
     interruptibility: "unknown",
     media: "unknown",
     timeBand: "unknown",
     explicitGameContext: "inactive",
     engagement: "unknown"
-  };
+  });
 
   function publish(next: CoarseUserState): CoarseUserState {
     if (Object.keys(next).every((key) => next[key as keyof CoarseUserState] === state[key as keyof CoarseUserState])) {

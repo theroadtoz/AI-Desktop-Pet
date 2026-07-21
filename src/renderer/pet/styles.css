@@ -19,6 +19,7 @@ body {
 }
 
 #proactive-speech-bubble {
+  appearance: none;
   position: fixed;
   top: clamp(12px, 6vh, 34px);
   left: clamp(14px, 8vw, 38px);
@@ -33,6 +34,8 @@ body {
   font: 13px/1.45 "Microsoft YaHei", "Segoe UI", sans-serif;
   letter-spacing: 0;
   overflow-wrap: anywhere;
+  text-align: left;
+  cursor: pointer;
   pointer-events: none;
   opacity: 0;
   visibility: hidden;
@@ -47,4 +50,10 @@ body {
   opacity: 1;
   visibility: visible;
   transform: translateY(0);
+  pointer-events: auto;
+}
+
+#proactive-speech-bubble[data-state="visible"]:focus-visible {
+  outline: 2px solid #6b5ad7;
+  outline-offset: 2px;
 }

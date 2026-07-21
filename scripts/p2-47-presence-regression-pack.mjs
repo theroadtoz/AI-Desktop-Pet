@@ -19,7 +19,11 @@ const scripts = [
   {
     id: "P2-34",
     script: "scripts/p2-34-companion-presence-idle-mode-cadence-real-ui.mjs",
-    reason: "startup idle mode focus quiet sleep and chat-open cadence"
+    reason: "startup idle mode focus quiet sleep and chat-open cadence",
+    env: {
+      P2_34_IDLE_INTERVAL_MS: "850",
+      P2_34_LOW_FREQUENCY_MINIMUM_INTERVAL_MS: "250"
+    }
   },
   {
     id: "P2-45",
@@ -125,7 +129,7 @@ function runChild(item) {
     const startedAt = Date.now();
     const child = spawn(process.execPath, ["--no-warnings", item.script], {
       cwd: root,
-      env: process.env,
+      env: { ...process.env, ...(item.env ?? {}) },
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true
     });
