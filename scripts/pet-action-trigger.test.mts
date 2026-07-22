@@ -4,9 +4,14 @@ import test from "node:test";
 import {
   PET_ACTION_TRIGGER_ACTION_BY_REASON,
   PET_ACTION_TRIGGER_REASONS,
+  PET_ACTION_TRIGGER_REQUEST_ID_PATTERN,
+  PET_ACTION_TRIGGER_ORIGIN,
+  PET_ACTION_TRIGGER_SUPERSESSION_POLICIES,
   type PetActionTriggerReason,
   getPetActionTriggerActionType,
   isPetNearWorkAreaEdge,
+  isPetActionTriggerRequestId,
+  isPetActionTriggerSupersessionPolicy,
   parsePetActionTrigger
 } from "../src/shared/pet-action-trigger.ts";
 import {
@@ -226,16 +231,65 @@ test("main proactive bubble trigger is action-first through the unified coordina
     new URL("../src/main/services/proactive-companion/proactive-bubble-coordinator.ts", import.meta.url),
     "utf8"
   );
-  const requestIndex = coordinatorSource.indexOf("options.requestAction(candidate.actionReason)");
+  const requestIndex = coordinatorSource.indexOf("const actionRequestId = options.requestAction(candidate.actionReason);");
   const lifecycleIndex = coordinatorSource.indexOf("onActionLifecycle(event)");
   const showIndex = coordinatorSource.indexOf("options.showBubble(payload)", lifecycleIndex);
 
-  assert.match(appSource, /requestAction: sendPetActionTrigger/);
-  assert.match(appSource, /proactiveBubbleCoordinator\?\.onActionLifecycle\(\{ status: "started", reason: actionReason \}\)/);
+  assert.match(appSource, /function requestPetActionTrigger\([\s\S]*reason: PetActionTriggerReason,[\s\S]*policy\?: PetActionDispatchPolicy[\s\S]*\): string \| null/);
+  assert.match(appSource, /function sendPetActionTrigger\(reason: PetActionTriggerReason, policy\?: PetActionDispatchPolicy\): boolean \{\s+return requestPetActionTrigger\(reason, policy\) !== null;\s+\}/);
+  assert.match(appSource, /requestAction: requestPetActionTrigger/);
+  assert.match(appSource, /proactiveBubbleCoordinator\?\.onActionLifecycle\([\s\S]*lifecycleRequestId === undefined[\s\S]*requestId: lifecycleRequestId/);
   assert.ok(requestIndex >= 0);
   assert.ok(lifecycleIndex > requestIndex);
   assert.ok(showIndex > lifecycleIndex);
   assert.doesNotMatch(coordinatorSource, /requestAction\([^)]*(payload|lineId|text|content|message|prompt|expressionName|motion|partId)/i);
+  assert.doesNotMatch(coordinatorSource, /ActionRequestResult = string \| null \| boolean/);
+});
+
+test("main pet action dispatch coordinator keeps the only send adapter and safe request ids", async () => {
+  const source = await readFile(new URL("../src/main/app.ts", import.meta.url), "utf8");
+  const coordinatorStart = source.indexOf("let petActionDispatchCoordinator");
+  const coordinatorEnd = source.indexOf("type SourcedLowFrequencyCompanionEvent", coordinatorStart);
+  const coordinatorSource = source.slice(coordinatorStart, coordinatorEnd);
+
+  assert.notEqual(coordinatorStart, -1);
+  assert.match(coordinatorSource, /createPetActionDispatchCoordinator\(\{\s*send\(trigger\) \{\s*if \(!petWindow \|\| petWindow\.isDestroyed\(\)\) \{\s*throw new Error\("Pet window unavailable"\);\s*\}\s*petWindow\.webContents\.send\("pet:action-trigger", trigger\);\s*\},\s*now: \(\) => Date\.now\(\),\s*createRequestId: \(\) => randomUUID\(\)\.replaceAll\("-", ""\)\s*\}\)/);
+  assert.doesNotMatch(coordinatorSource, /petWindow\.webContents\.send\("pet:action-trigger", \{ reason \}\)/);
+  assert.doesNotMatch(coordinatorSource, /createRequestId: \(\) => randomUUID\(\)(?!\.replaceAll)/);
+});
+
+test("main telemetry lifecycle maps renderer started and terminal events through sanitized reasons only", async () => {
+  const source = await readFile(new URL("../src/main/app.ts", import.meta.url), "utf8");
+  const telemetryStart = source.indexOf('ipcMain.on("pet:telemetry"');
+  const telemetryEnd = source.indexOf('const activityEcho = createPetActivityEcho(petTelemetryEvent);', telemetryStart);
+  const telemetrySource = source.slice(telemetryStart, telemetryEnd);
+
+  assert.notEqual(telemetryStart, -1);
+  assert.match(telemetrySource, /const actionReason = petTelemetryEvent\.payload\?\.reason;/);
+  assert.match(telemetrySource, /const requestId = petTelemetryEvent\.payload\?\.requestId;/);
+  assert.match(telemetrySource, /const actionInstanceId = petTelemetryEvent\.payload\?\.actionInstanceId;/);
+  assert.match(telemetrySource, /const lifecycleStatus = petTelemetryEvent\.type === "pet_interaction_action_started"[\s\S]*\? "started"[\s\S]*\? "skipped"[\s\S]*: "finished";/);
+  assert.match(telemetrySource, /const lifecycleRequestId = typeof requestId === "string" \? requestId : undefined;/);
+  assert.match(telemetrySource, /const lifecycleActionInstanceId = typeof actionInstanceId === "string" \? actionInstanceId : undefined;/);
+  assert.match(telemetrySource, /petActionDispatchCoordinator\?\.onLifecycle\(/);
+  assert.match(telemetrySource, /actionInstanceId: lifecycleActionInstanceId/);
+  assert.match(telemetrySource, /proactiveBubbleCoordinator\?\.onActionLifecycle\(/);
+  assert.match(telemetrySource, /status: "started", reason: actionReason, requestId: lifecycleRequestId/);
+  assert.match(telemetrySource, /status: "skipped", reason: actionReason, requestId: lifecycleRequestId/);
+  assert.match(telemetrySource, /isPetActionTriggerReason\(actionReason\)/);
+  assert.doesNotMatch(telemetrySource, /rendererEvent\./);
+});
+
+test("main pet action trigger wrapper only accepts coordinator dispatch and preserves throttle", async () => {
+  const source = await readFile(new URL("../src/main/app.ts", import.meta.url), "utf8");
+  const wrapperStart = source.indexOf("function sendPetActionTrigger(reason: PetActionTriggerReason, policy?: PetActionDispatchPolicy): boolean");
+  const wrapperEnd = source.indexOf("function syncAutomaticPresenceLifecycle()", wrapperStart);
+  const wrapperSource = source.slice(wrapperStart, wrapperEnd);
+
+  assert.notEqual(wrapperStart, -1);
+  assert.match(wrapperSource, /return requestPetActionTrigger\(reason, policy\) !== null;/);
+  assert.doesNotMatch(wrapperSource, /lastPetActionTriggerAtByReason\[reason\] = now;/);
+  assert.doesNotMatch(wrapperSource, /petWindow\.webContents\.send\("pet:action-trigger"/);
 });
 
 test("main low frequency proactive bubble action linkage uses event action state only", async () => {
@@ -288,7 +342,7 @@ test("pet action trigger allowlist only exposes fixed action and reason combinat
   assert.deepEqual(PET_ACTION_TRIGGER_ACTION_BY_REASON, EXPECTED_ACTIONS_BY_REASON);
 
   for (const reason of PET_ACTION_TRIGGER_REASONS) {
-    assert.deepEqual(parsePetActionTrigger({ reason }), { reason });
+    assert.deepEqual(parsePetActionTrigger({ reason }), { reason, origin: PET_ACTION_TRIGGER_ORIGIN });
     assert.equal(getPetActionTriggerActionType(reason), PET_ACTION_TRIGGER_ACTION_BY_REASON[reason]);
   }
 });
@@ -300,18 +354,71 @@ test("pet action trigger parser rejects arbitrary action payloads and unsafe rea
   assert.equal(parsePetActionTrigger(null), null);
 });
 
-test("pet preload mirrors the fixed action trigger reason allowlist without accepting action payloads", async () => {
-  const source = await readFile(new URL("../src/preload/pet-preload.ts", import.meta.url), "utf8");
-  const parserStart = source.indexOf("function parsePetActionTrigger");
-  const parserEnd = source.indexOf("function parseProactiveSpeechBubblePayload", parserStart);
-  const parserSource = source.slice(parserStart, parserEnd);
+test("pet action trigger parser preserves only safe request ids", () => {
+  assert.equal(isPetActionTriggerRequestId("abc-DEF_123"), true);
+  assert.equal(isPetActionTriggerRequestId(""), false);
+  assert.equal(isPetActionTriggerRequestId("a".repeat(64)), true);
+  assert.equal(isPetActionTriggerRequestId("a".repeat(65)), false);
+  assert.equal(isPetActionTriggerRequestId("abc/def"), false);
+  assert.equal(PET_ACTION_TRIGGER_REQUEST_ID_PATTERN.test("abc-DEF_123"), true);
+  assert.deepEqual(parsePetActionTrigger({ reason: "chat_opened", requestId: "req_123-ABC" }), {
+    reason: "chat_opened",
+    requestId: "req_123-ABC",
+    origin: PET_ACTION_TRIGGER_ORIGIN
+  });
+  assert.deepEqual(parsePetActionTrigger({ reason: "chat_opened", requestId: "a".repeat(64) }), {
+    reason: "chat_opened",
+    requestId: "a".repeat(64),
+    origin: PET_ACTION_TRIGGER_ORIGIN
+  });
+  assert.equal(parsePetActionTrigger({ reason: "chat_opened", requestId: "a".repeat(65) }), null);
+  assert.equal(parsePetActionTrigger({ reason: "chat_opened", requestId: "bad/id" }), null);
+});
 
+test("pet action trigger parser permits closed chat supersession only with a safe main request id", () => {
+  assert.deepEqual(PET_ACTION_TRIGGER_SUPERSESSION_POLICIES, ["replace_active"]);
+  assert.equal(isPetActionTriggerSupersessionPolicy("replace_active"), true);
+  assert.equal(isPetActionTriggerSupersessionPolicy("force"), false);
+  assert.deepEqual(parsePetActionTrigger({
+    reason: "chat_opened",
+    requestId: "req_chat_1",
+    supersessionPolicy: "replace_active"
+  }), {
+    reason: "chat_opened",
+    requestId: "req_chat_1",
+    supersessionPolicy: "replace_active",
+    origin: PET_ACTION_TRIGGER_ORIGIN
+  });
+  assert.equal(parsePetActionTrigger({
+    reason: "chat_opened",
+    supersessionPolicy: "replace_active"
+  }), null);
+  assert.equal(parsePetActionTrigger({
+    reason: "state_work",
+    requestId: "req_work_1",
+    supersessionPolicy: "replace_active"
+  }), null);
+  assert.equal(parsePetActionTrigger({
+    reason: "chat_opened",
+    requestId: "req_forged",
+    supersessionPolicy: "replace_active",
+    origin: "main_dispatch"
+  }), null);
+});
+
+test("pet preload mirrors the fixed trigger parser without a sandbox-unsafe shared runtime import", async () => {
+  const source = await readFile(new URL("../src/preload/pet-preload.ts", import.meta.url), "utf8");
+
+  assert.match(source, /import type \{[\s\S]*PetActionTrigger[\s\S]*\} from "\.\.\/shared\/pet-action-trigger";/);
+  assert.match(source, /function parsePetActionTrigger\(/);
   for (const reason of PET_ACTION_TRIGGER_REASONS) {
     assert.match(source, new RegExp(JSON.stringify(reason)));
   }
-
-  assert.match(parserSource, /return typeof reason === "string" && petActionTriggerReasons\.includes/);
-  assert.doesNotMatch(parserSource, /actionType|expressionName|motion|payload\.type/);
+  assert.match(source, /petActionTriggerRequestIdPattern = \/\^\[A-Za-z0-9_-\]\{1,64\}\$\//);
+  assert.match(source, /petActionTriggerSupersessionPolicies = \["replace_active"\]/);
+  assert.match(source, /petActionTriggerOrigin = "main_dispatch"/);
+  assert.match(source, /Object\.hasOwn\(trigger, "origin"\)/);
+  assert.doesNotMatch(source, /import \{ parsePetActionTrigger \}/);
 });
 
 test("main mode changes trigger only fixed state reasons and preserve bubble suppression", async () => {
@@ -337,7 +444,7 @@ test("main mode changes trigger only fixed state reasons and preserve bubble sup
   assert.match(quiesceSource, /cancelPendingModeActionStateTrigger\(\);/);
   assert.match(beforeQuitSource, /event\.preventDefault\(\);/);
   assert.match(beforeQuitSource, /shutdownCoordinator\.shutdown\(\)/);
-  assert.match(source, /openChatWindow\(\): void[\s\S]*cancelStartupProactiveSpeechBubbleTimer\(\);[\s\S]*cancelIdleProactiveSpeechBubbleTimer\(\);[\s\S]*markProactiveSpeechBubbleHidden\(\);[\s\S]*sendPetActionTrigger\("chat_opened"\);/);
+  assert.match(source, /openChatWindow\(\): void[\s\S]*cancelStartupProactiveSpeechBubbleTimer\(\);[\s\S]*cancelIdleProactiveSpeechBubbleTimer\(\);[\s\S]*markProactiveSpeechBubbleHidden\(\);[\s\S]*sendPetActionTrigger\("chat_opened", \{ supersessionPolicy: "replace_active" \}\);/);
   assert.match(source, /currentPresenceModeId === "sleep"[\s\S]*cancelStartupProactiveSpeechBubbleTimer\(\);[\s\S]*cancelIdleProactiveSpeechBubbleTimer\(\);[\s\S]*markProactiveSpeechBubbleHidden\(\);[\s\S]*clearSourcedLowFrequencyCompanionEvents\(\);/);
   const modeSchedulerSource = source.slice(
     source.indexOf("function schedulePetModeActionStateTrigger"),
@@ -345,6 +452,64 @@ test("main mode changes trigger only fixed state reasons and preserve bubble sup
   );
   assert.doesNotMatch(modeSchedulerSource, /sendPetActionTrigger\(reason\)|webContents\.send\("pet:proactive-speech-bubble"/);
   assert.doesNotMatch(source, /sendPetActionTrigger\([^)]*actionType|pet:action-trigger",\s*\{\s*reason,\s*type/);
+});
+
+test("main action lifecycle and proactive gates use only coordinator-owned state", async () => {
+  const source = await readFile(new URL("../src/main/app.ts", import.meta.url), "utf8");
+  const telemetryStart = source.indexOf('ipcMain.on("pet:telemetry"');
+  const telemetrySource = source.slice(telemetryStart, source.indexOf('ipcMain.on("chat:send"', telemetryStart));
+  const rebuildStart = source.indexOf("function rebuildPetWindow");
+  const rebuildSource = source.slice(rebuildStart, source.indexOf("app.whenReady()", rebuildStart));
+  const quiesceStart = source.indexOf("function quiesceApp(): void");
+  const quiesceSource = source.slice(quiesceStart, source.indexOf("async function stopLocalRuntimesForShutdown", quiesceStart));
+
+  assert.notEqual(telemetryStart, -1);
+  assert.match(telemetrySource, /const lifecycleResult = typeof actionReason === "string"\s*\? petActionDispatchCoordinator\?\.onLifecycle\(/);
+  assert.match(telemetrySource, /if \(isPetActionTriggerReason\(actionReason\)\) \{\s*if \(lifecycleResult === "main_started"\) \{\s*proactiveBubbleCoordinator\?\.onActionLifecycle/);
+  assert.match(telemetrySource, /else if \(lifecycleResult === "main_terminal"\) \{\s*if \(petTelemetryEvent\.type === "pet_interaction_action_skipped"\)/);
+  assert.match(telemetrySource, /refreshProactiveBubbleRuntimeGates\(\);/);
+  assert.match(source, /const actionDispatchState = petActionDispatchCoordinator\?\.getState\(\);/);
+  assert.match(source, /highPriorityActionActive: actionDispatchState\?\.busy \?\? false/);
+  assert.match(source, /highPriorityActionReason: actionDispatchState\?\.activeMainRequest\?\.reason \?\? null/);
+  assert.doesNotMatch(source, /activePetActionReason/);
+  assert.match(rebuildSource, /petActionDispatchCoordinator\?\.reset\(\);/);
+  assert.match(quiesceSource, /petActionDispatchCoordinator\?\.reset\(\);/);
+});
+
+test("opening chat clears the current action before dispatching chat_opened", async () => {
+  const source = await readFile(new URL("../src/main/app.ts", import.meta.url), "utf8");
+  const openChatStart = source.indexOf("function openChatWindow(): void");
+  const openChatSource = source.slice(openChatStart, source.indexOf("openChatWindowAdapter = openChatWindow;", openChatStart));
+  const clearBubbleIndex = openChatSource.indexOf("proactiveBubbleCoordinator?.clear();");
+  const resetIndex = openChatSource.indexOf("petActionDispatchCoordinator?.reset();");
+  const clearChatThrottleIndex = openChatSource.indexOf("delete lastPetActionTriggerAtByReason.chat_opened;");
+  const refreshGatesIndex = openChatSource.indexOf("refreshProactiveBubbleRuntimeGates();");
+  const dispatchIndex = openChatSource.indexOf('sendPetActionTrigger("chat_opened", { supersessionPolicy: "replace_active" });');
+
+  assert.notEqual(openChatStart, -1);
+  assert.ok(clearBubbleIndex >= 0);
+  assert.ok(resetIndex > clearBubbleIndex);
+  assert.ok(clearChatThrottleIndex > resetIndex);
+  assert.ok(refreshGatesIndex > resetIndex);
+  assert.ok(clearChatThrottleIndex < dispatchIndex);
+  assert.ok(dispatchIndex > refreshGatesIndex);
+  assert.equal((openChatSource.match(/petActionDispatchCoordinator\?\.reset\(\);/g) ?? []).length, 1);
+  assert.match(openChatSource, /if \(!wasVisible\) \{\s*petActionDispatchCoordinator\?\.reset\(\);\s*refreshProactiveBubbleRuntimeGates\(\);\s*\}/);
+  assert.equal((openChatSource.match(/delete lastPetActionTriggerAtByReason\./g) ?? []).length, 1);
+  assert.match(openChatSource, /if \(!wasVisible\) \{[\s\S]*delete lastPetActionTriggerAtByReason\.chat_opened;[\s\S]*sendPetActionTrigger\("chat_opened", \{ supersessionPolicy: "replace_active" \}\);/);
+});
+
+test("ordinary pet action sends retain the 700ms per-reason throttle", async () => {
+  const source = await readFile(new URL("../src/main/app.ts", import.meta.url), "utf8");
+  const wrapperStart = source.indexOf("function requestPetActionTrigger(");
+  const wrapperEnd = source.indexOf("function syncAutomaticPresenceLifecycle()", wrapperStart);
+  const wrapperSource = source.slice(wrapperStart, wrapperEnd);
+
+  assert.match(source, /const PET_ACTION_TRIGGER_THROTTLE_MS = 700;/);
+  assert.match(wrapperSource, /const lastTriggeredAt = lastPetActionTriggerAtByReason\[reason\] \?\? 0;/);
+  assert.match(wrapperSource, /if \(now - lastTriggeredAt < PET_ACTION_TRIGGER_THROTTLE_MS\) \{/);
+  assert.match(wrapperSource, /lastPetActionTriggerAtByReason\[reason\] = now;/);
+  assert.doesNotMatch(wrapperSource, /delete lastPetActionTriggerAtByReason|lastPetActionTriggerAtByReason = \{\}/);
 });
 
 test("pet renderer rapid touch combo annotates the fixed flustered state", async () => {

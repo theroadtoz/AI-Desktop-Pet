@@ -2,14 +2,30 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
 const appSource = await readFile(new URL("../src/main/app.ts", import.meta.url), "utf8");
+const secondInstanceSource = appSource.slice(
+  appSource.indexOf('app.on("second-instance", () => {'),
+  appSource.indexOf('app.on("child-process-gone"', appSource.indexOf('app.on("second-instance", () => {'))
+);
 
 function assertSourceIncludes(pattern, description) {
   assert.match(appSource, pattern, description);
 }
 
+function assertSecondInstanceIncludes(pattern, description) {
+  assert.match(secondInstanceSource, pattern, description);
+}
+
 assertSourceIncludes(/function ensurePetWindow\(reason: string\): BrowserWindow \{/, "ensurePetWindow exists in the main process");
 assertSourceIncludes(/function showExistingPetWindow\(reason: string\): BrowserWindow \| null \{/, "showExistingPetWindow exists in the main process");
-assertSourceIncludes(/app\.on\("second-instance", \(\) => \{[\s\S]*ensurePetWindow\("second_instance"\)/, "second-instance reuses the pet guard");
+assertSecondInstanceIncludes(/ensurePetWindow\("second_instance"\)/, "second-instance reuses the pet guard");
+assertSecondInstanceIncludes(/if \(openChatWindowAdapter\) \{[\s\S]*openChatWindowAdapter\(\);/, "second-instance uses the shared chat adapter when available");
+assertSecondInstanceIncludes(/else \{\s*pendingChatWindowOpen = true;/, "unbound second-instance caches one chat open for adapter binding");
+assertSourceIncludes(/let openChatWindowAdapter: \(\(\) => void\) \| null = null;/, "main process keeps a narrow chat adapter reference");
+assertSourceIncludes(/let pendingChatWindowOpen = false;/, "main process keeps a one-shot pending chat-open flag");
+assertSourceIncludes(/openChatWindowAdapter = openChatWindow;/, "bootstrap binds the shared chat adapter");
+assertSourceIncludes(/openChatWindowAdapter = openChatWindow;\s*if \(pendingChatWindowOpen\) \{\s*pendingChatWindowOpen = false;\s*openChatWindowAdapter\(\);/, "adapter binding consumes the pending chat-open once");
+assertSourceIncludes(/function quiesceApp\(\): void \{[\s\S]*openChatWindowAdapter = null;\s*pendingChatWindowOpen = false;/, "quiesce clears chat-open adapter state");
+assert.doesNotMatch(secondInstanceSource, /showChatWindow\(chatWindow\);\s*focusChatInput\(chatWindow\);/, "second-instance no longer directly shows and focuses chat");
 assertSourceIncludes(/app\.whenReady\(\)\.then\(async \(\) => \{[\s\S]*ensurePetWindow\("startup"\)/, "startup uses the pet guard");
 assertSourceIncludes(/app\.on\("activate", \(\) => \{[\s\S]*ensurePetWindow\("activate"\)/, "activate uses the pet guard");
 assertSourceIncludes(/render-process-gone[\s\S]*rebuildPetWindow\("renderer_process_gone"\)/, "renderer crash recovery uses rebuildPetWindow");
@@ -22,6 +38,75 @@ assert.equal(directCreateCalls, 1, "createPetWindow is only called by createReco
 
 const directCreateRecoverableCalls = [...appSource.matchAll(/\bcreateRecoverablePetWindow\(\)/g)].length;
 assert.equal(directCreateRecoverableCalls, 3, "createRecoverablePetWindow only appears in its declaration, ensurePetWindow, and rebuildPetWindow");
+
+function createPendingChatOpenHarness() {
+  let adapter = null;
+  let chatWindow = null;
+  let pendingChatWindowOpen = false;
+  let openCount = 0;
+
+  function secondInstance() {
+    if (adapter) {
+      adapter();
+    } else {
+      pendingChatWindowOpen = true;
+    }
+  }
+
+  function bindAdapter() {
+    adapter = () => {
+      openCount += 1;
+      chatWindow = { destroyed: false };
+    };
+    if (pendingChatWindowOpen) {
+      pendingChatWindowOpen = false;
+      adapter();
+    }
+  }
+
+  function setChatWindow() {
+    chatWindow = { destroyed: false };
+  }
+
+  function quiesce() {
+    adapter = null;
+    pendingChatWindowOpen = false;
+  }
+
+  return {
+    secondInstance,
+    bindAdapter,
+    setChatWindow,
+    quiesce,
+    get openCount() {
+      return openCount;
+    },
+    get pendingChatWindowOpen() {
+      return pendingChatWindowOpen;
+    }
+  };
+}
+
+const earlySecondInstance = createPendingChatOpenHarness();
+earlySecondInstance.secondInstance();
+earlySecondInstance.secondInstance();
+assert.equal(earlySecondInstance.pendingChatWindowOpen, true, "early launches keep one pending open");
+earlySecondInstance.bindAdapter();
+assert.equal(earlySecondInstance.openCount, 1, "adapter binding consumes the early launch exactly once");
+earlySecondInstance.secondInstance();
+assert.equal(earlySecondInstance.openCount, 2, "later launches use the bound adapter");
+
+const quiescedSecondInstance = createPendingChatOpenHarness();
+quiescedSecondInstance.secondInstance();
+quiescedSecondInstance.quiesce();
+quiescedSecondInstance.bindAdapter();
+assert.equal(quiescedSecondInstance.openCount, 0, "quiesce discards an unconsumed pending open");
+
+const existingChatBeforeBinding = createPendingChatOpenHarness();
+existingChatBeforeBinding.setChatWindow();
+existingChatBeforeBinding.secondInstance();
+existingChatBeforeBinding.bindAdapter();
+assert.equal(existingChatBeforeBinding.openCount, 1, "an existing chat window still consumes the standard pending open after adapter binding");
 
 class FakePetWindow {
   constructor(id) {
@@ -138,6 +223,7 @@ console.log(JSON.stringify({
   result: "passed",
   checks: {
     sourceGuardEntrypoints: "passed",
+    pendingChatOpenTiming: "passed",
     repeatedEnsureCreatesOneWindow: "passed",
     rendererRecoveryReplacesWindow: "passed"
   }

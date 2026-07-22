@@ -44,7 +44,8 @@ function createHarness(options: {
     highPriorityActionActive: false,
     highPriorityActionReason: null as PetActionTriggerReason | null
   };
-  const requested: PetActionTriggerReason[] = [];
+  const requested: Array<{ reason: PetActionTriggerReason; requestId: string }> = [];
+  let nextRequestId = 1;
   const shown: ProactiveSpeechBubblePayload[] = [];
   const decisions: Array<{ candidateId: string; state: string; skipReason?: string }> = [];
   let opened = 0;
@@ -57,8 +58,9 @@ function createHarness(options: {
     },
     getRuntimeGates: () => gates,
     requestAction(reason) {
-      requested.push(reason);
-      return true;
+      const requestId = `request-${nextRequestId++}`;
+      requested.push({ reason, requestId });
+      return requestId;
     },
     showBubble(payload) {
       shown.push(payload);
@@ -113,10 +115,10 @@ test("acceptance injection-only mode suppresses every automatic source but permi
     reason: "idle_presence",
     durationMs: 4_200
   }, "state_listen");
-  assert.deepEqual(h.requested, []);
+  assert.deepEqual(h.requested.map((item) => item.reason), []);
 
   h.coordinator.queueSafeCandidateForAcceptance("evening_companion");
-  assert.deepEqual(h.requested, ["evening_companion_tick"]);
+  assert.deepEqual(h.requested.map((item) => item.reason), ["evening_companion_tick"]);
   h.coordinator.dispose();
 });
 
@@ -127,12 +129,12 @@ test("mode presence waits for chat close and then preserves action-first orderin
     reason: "mode_presence",
     durationMs: 4_200
   }, "state_work");
-  assert.deepEqual(h.requested, []);
+  assert.deepEqual(h.requested.map((item) => item.reason), []);
   assert.equal(h.decisions.at(-1)?.state, "queued");
 
   h.setGates({ chatVisible: false });
-  assert.deepEqual(h.requested, ["state_work"]);
-  h.coordinator.onActionLifecycle({ status: "started", reason: "state_work" });
+  assert.deepEqual(h.requested.map((item) => item.reason), ["state_work"]);
+  h.coordinator.onActionLifecycle({ status: "started", reason: "state_work", requestId: h.requested.at(-1)!.requestId });
   assert.equal(h.shown.at(-1)?.lineId, "mode_presence_work");
   h.coordinator.dispose();
 });
@@ -145,7 +147,7 @@ test("defer hard-suppresses mode presence", () => {
     reason: "mode_presence",
     durationMs: 4_200
   }, "state_work");
-  assert.deepEqual(h.requested, []);
+  assert.deepEqual(h.requested.map((item) => item.reason), []);
   assert.equal(h.decisions.at(-1)?.state, "skipped");
   assert.equal(h.decisions.at(-1)?.skipReason, "engagement_blocked");
   h.coordinator.dispose();
@@ -154,9 +156,9 @@ test("defer hard-suppresses mode presence", () => {
 test("startup waits for action started before showing and click opens chat", () => {
   const h = createHarness();
   h.coordinator.onFirstFrame();
-  assert.deepEqual(h.requested, ["state_greet"]);
+  assert.deepEqual(h.requested.map((item) => item.reason), ["state_greet"]);
   assert.equal(h.shown.length, 0);
-  h.coordinator.onActionLifecycle({ status: "started", reason: "state_greet" });
+  h.coordinator.onActionLifecycle({ status: "started", reason: "state_greet", requestId: h.requested.at(-1)!.requestId });
   assert.equal(h.shown[0]?.lineId, "startup_presence_ready");
   assert.equal(h.coordinator.activateBubble({ lineId: "startup_presence_ready", reason: "startup_presence" }), true);
   assert.equal(h.opened, 1);
@@ -168,7 +170,7 @@ test("defer hard-suppresses every candidate", () => {
   deferred.coordinator.updateCoarseState(state({ engagement: "defer" }));
   deferred.coordinator.onFirstFrame();
   deferred.coordinator.queueSource("search_citation_safe");
-  assert.deepEqual(deferred.requested, []);
+  assert.deepEqual(deferred.requested.map((item) => item.reason), []);
   assert.ok(deferred.decisions.filter((decision) => decision.skipReason === "engagement_blocked").length >= 2);
   deferred.coordinator.dispose();
 });
@@ -177,13 +179,13 @@ test("unknown state permits only startup and source candidates", () => {
   const startup = createHarness();
   startup.coordinator.updateCoarseState(state({ engagement: "unknown", interruptibility: "unknown" }));
   startup.coordinator.onFirstFrame();
-  assert.deepEqual(startup.requested, ["state_greet"]);
+  assert.deepEqual(startup.requested.map((item) => item.reason), ["state_greet"]);
   startup.coordinator.dispose();
 
   const source = createHarness();
   source.coordinator.updateCoarseState(state({ engagement: "unknown", interruptibility: "unknown" }));
   source.coordinator.queueSource("search_citation_safe");
-  assert.deepEqual(source.requested, ["state_search_cited"]);
+  assert.deepEqual(source.requested.map((item) => item.reason), ["state_search_cited"]);
   source.coordinator.dispose();
 
   const mode = createHarness();
@@ -220,30 +222,41 @@ test("chat-wait candidate gets one close decision and skips on a second open", (
     reason: "mode_presence",
     durationMs: 4_200
   }, "state_work");
-  assert.deepEqual(h.requested, []);
+  assert.deepEqual(h.requested.map((item) => item.reason), []);
 
   h.setGates({ chatVisible: false });
-  assert.deepEqual(h.requested, ["state_work"]);
+  assert.deepEqual(h.requested.map((item) => item.reason), ["state_work"]);
   h.setGates({ chatVisible: true });
   assert.equal(h.decisions.at(-1)?.state, "skipped");
   assert.equal(h.decisions.at(-1)?.skipReason, "chat_visible");
 
-  h.coordinator.onActionLifecycle({ status: "started", reason: "state_work" });
+  h.coordinator.onActionLifecycle({ status: "started", reason: "state_work", requestId: h.requested.at(-1)!.requestId });
   assert.equal(h.shown.length, 0);
   h.setGates({ chatVisible: false });
   h.coordinator.tick();
-  assert.deepEqual(h.requested, ["state_work"]);
+  assert.deepEqual(h.requested.map((item) => item.reason), ["state_work"]);
   h.coordinator.dispose();
 });
 
 test("forged and expired bubble activation is rejected", () => {
   const h = createHarness();
   h.coordinator.onFirstFrame();
-  h.coordinator.onActionLifecycle({ status: "started", reason: "state_greet" });
+  h.coordinator.onActionLifecycle({ status: "started", reason: "state_greet", requestId: h.requested.at(-1)!.requestId });
   assert.equal(h.coordinator.activateBubble({ lineId: "idle_presence_soft", reason: "startup_presence" }), false);
   h.coordinator.onBubbleHidden();
   assert.equal(h.coordinator.activateBubble({ lineId: "startup_presence_ready", reason: "startup_presence" }), false);
   assert.equal(h.opened, 0);
+  h.coordinator.dispose();
+});
+
+test("action lifecycle without request id is ignored when the request is remote", () => {
+  const h = createHarness();
+  h.coordinator.onFirstFrame();
+  const requestId = h.requested.at(-1)!.requestId;
+  h.coordinator.onActionLifecycle({ status: "started", reason: "state_greet" });
+  assert.equal(h.shown.length, 0);
+  h.coordinator.onActionLifecycle({ status: "started", reason: "state_greet", requestId });
+  assert.equal(h.shown[0]?.lineId, "startup_presence_ready");
   h.coordinator.dispose();
 });
 
@@ -253,14 +266,14 @@ test("music requires a stopped baseline and game waits for one chat close", () =
   assert.equal(h.requested.length, 0);
   h.coordinator.updateCoarseState(state({ media: "stopped" }));
   h.coordinator.updateCoarseState(state({ media: "playing" }));
-  assert.deepEqual(h.requested, ["state_music_playing_stable"]);
-  h.coordinator.onActionLifecycle({ status: "skipped", reason: "state_music_playing_stable" });
+  assert.deepEqual(h.requested.map((item) => item.reason), ["state_music_playing_stable"]);
+  h.coordinator.onActionLifecycle({ status: "skipped", reason: "state_music_playing_stable", requestId: h.requested.at(-1)!.requestId });
 
   h.setGates({ chatVisible: true });
   h.coordinator.updateCoarseState(state({ media: "playing", explicitGameContext: "active" }));
   assert.equal(h.requested.length, 1);
   h.setGates({ chatVisible: false });
-  assert.equal(h.requested.at(-1), "state_game_presence_stable", JSON.stringify(h.decisions));
+  assert.equal(h.requested.at(-1)?.reason, "state_game_presence_stable", JSON.stringify(h.decisions));
   h.coordinator.dispose();
 });
 
@@ -268,23 +281,23 @@ test("return, evening transition, long work exit, and long silence create closed
   const h = createHarness();
   h.coordinator.updateCoarseState(state({ activity: "away", engagement: "defer" }));
   h.coordinator.updateCoarseState(state({ activity: "active", engagement: "allowed" }));
-  assert.equal(h.requested.at(-1), "return_from_idle");
-  h.coordinator.onActionLifecycle({ status: "skipped", reason: "return_from_idle" });
+  assert.equal(h.requested.at(-1)?.reason, "return_from_idle");
+  h.coordinator.onActionLifecycle({ status: "skipped", reason: "return_from_idle", requestId: h.requested.at(-1)!.requestId });
 
   h.coordinator.updateCoarseState(state({ timeBand: "evening" }));
-  assert.equal(h.requested.at(-1), "evening_companion_tick");
-  h.coordinator.onActionLifecycle({ status: "skipped", reason: "evening_companion_tick" });
+  assert.equal(h.requested.at(-1)?.reason, "evening_companion_tick");
+  h.coordinator.onActionLifecycle({ status: "skipped", reason: "evening_companion_tick", requestId: h.requested.at(-1)!.requestId });
 
   h.coordinator.updateDialogueMode("work");
   h.advance(101);
   h.coordinator.updateDialogueMode("default");
-  assert.equal(h.requested.at(-1), "long_work_session_complete");
-  h.coordinator.onActionLifecycle({ status: "skipped", reason: "long_work_session_complete" });
+  assert.equal(h.requested.at(-1)?.reason, "long_work_session_complete");
+  h.coordinator.onActionLifecycle({ status: "skipped", reason: "long_work_session_complete", requestId: h.requested.at(-1)!.requestId });
 
   h.coordinator.onUserMessage();
   h.advance(101);
   h.coordinator.tick();
-  assert.equal(h.requested.at(-1), "state_listen");
+  assert.equal(h.requested.at(-1)?.reason, "state_listen");
   h.coordinator.dispose();
 });
 
@@ -322,7 +335,7 @@ test("off resets edge and timer latches without backfilling after re-enable", ()
   h.coordinator.updateDialogueMode("default");
   h.coordinator.tick();
   h.coordinator.updateCoarseState(state({ media: "playing" }));
-  assert.deepEqual(h.requested, []);
+  assert.deepEqual(h.requested.map((item) => item.reason), []);
   h.coordinator.dispose();
 });
 
@@ -335,7 +348,7 @@ test("every hard suppression clears a displayed bubble", () => {
   ]) {
     const h = createHarness();
     h.coordinator.onFirstFrame();
-    h.coordinator.onActionLifecycle({ status: "started", reason: "state_greet" });
+    h.coordinator.onActionLifecycle({ status: "started", reason: "state_greet", requestId: h.requested.at(-1)!.requestId });
     const before = h.cleared;
     h.coordinator.updateCoarseState(state(coarseUpdate));
     assert.ok(h.cleared > before, JSON.stringify(coarseUpdate));
@@ -350,7 +363,7 @@ test("every hard suppression clears a displayed bubble", () => {
   ]) {
     const h = createHarness();
     h.coordinator.onFirstFrame();
-    h.coordinator.onActionLifecycle({ status: "started", reason: "state_greet" });
+    h.coordinator.onActionLifecycle({ status: "started", reason: "state_greet", requestId: h.requested.at(-1)!.requestId });
     const before = h.cleared;
     h.setGates(runtimeUpdate);
     assert.ok(h.cleared > before, JSON.stringify(runtimeUpdate));
@@ -361,38 +374,83 @@ test("every hard suppression clears a displayed bubble", () => {
 test("the coordinator action itself does not clear its own displayed bubble", () => {
   const h = createHarness();
   h.coordinator.onFirstFrame();
-  h.coordinator.onActionLifecycle({ status: "started", reason: "state_greet" });
+  h.coordinator.onActionLifecycle({ status: "started", reason: "state_greet", requestId: h.requested.at(-1)!.requestId });
   const before = h.cleared;
   h.setGates({ highPriorityActionActive: true, highPriorityActionReason: "state_greet" });
   assert.equal(h.cleared, before);
   h.coordinator.dispose();
 });
 
-test("same-class replacement records a terminal state for the displaced candidate", () => {
+test("search supersedes memory and blocks lower-priority memory/history", () => {
   const h = createHarness({ chatVisible: true });
   h.coordinator.queueSource("memory_safe");
   h.coordinator.queueSource("search_citation_safe");
-  assert.ok(h.decisions.some((decision) =>
-    decision.candidateId === "memory_safe" &&
-    decision.state === "skipped" &&
-    decision.skipReason === "replaced_by_same_class"));
+  assert.equal(h.decisions.at(-2)?.candidateId, "memory_safe");
+  assert.equal(h.decisions.at(-2)?.state, "skipped");
+  assert.equal(h.decisions.at(-2)?.skipReason, "replaced_by_higher_priority");
   assert.equal(h.decisions.at(-1)?.candidateId, "search_citation_safe");
   assert.equal(h.decisions.at(-1)?.state, "queued");
+  h.coordinator.queueSource("history_summary_safe");
+  assert.equal(h.decisions.at(-1)?.candidateId, "history_summary_safe");
+  assert.equal(h.decisions.at(-1)?.state, "skipped");
+  assert.equal(h.decisions.at(-1)?.skipReason, "lower_priority_candidate");
   h.coordinator.dispose();
 });
 
-test("same-class candidate cannot replace an active action handshake", () => {
+test("same-priority source stays stable", () => {
+  const h = createHarness({ chatVisible: true });
+  h.coordinator.queueSource("memory_safe");
+  h.coordinator.queueSource("history_summary_safe");
+  assert.equal(h.decisions.at(-1)?.candidateId, "history_summary_safe");
+  assert.equal(h.decisions.at(-1)?.state, "skipped");
+  assert.equal(h.decisions.at(-1)?.skipReason, "same_priority_stable");
+  h.coordinator.dispose();
+});
+
+test("active attempt in the same mutex group blocks replacement", () => {
   const h = createHarness();
   h.coordinator.queueSource("memory_safe");
-  assert.deepEqual(h.requested, ["state_memory_injected"]);
+  assert.deepEqual(h.requested.map((item) => item.reason), ["state_memory_injected"]);
   h.coordinator.queueSource("search_citation_safe");
-  assert.deepEqual(h.requested, ["state_memory_injected"]);
-  assert.ok(h.decisions.some((decision) =>
-    decision.candidateId === "search_citation_safe" &&
-    decision.state === "skipped" &&
-    decision.skipReason === "same_class_attempt_in_progress"));
-  h.coordinator.onActionLifecycle({ status: "started", reason: "state_memory_injected" });
+  assert.deepEqual(h.requested.map((item) => item.reason), ["state_memory_injected"]);
+  assert.equal(h.decisions.at(-1)?.candidateId, "search_citation_safe");
+  assert.equal(h.decisions.at(-1)?.state, "skipped");
+  assert.equal(h.decisions.at(-1)?.skipReason, "same_mutex_group_attempt_in_progress");
+  h.coordinator.onActionLifecycle({ status: "started", reason: "state_memory_injected", requestId: h.requested.at(-1)!.requestId });
   assert.equal(h.shown.at(-1)?.lineId, "idle_presence_memory_safe");
+  h.coordinator.dispose();
+});
+
+test("different mutex groups do not replace each other", () => {
+  const h = createHarness({ chatVisible: true });
+  h.coordinator.queuePresence("mode_presence", {
+    lineId: "mode_presence_work",
+    reason: "mode_presence",
+    durationMs: 4_200
+  }, "state_work");
+  h.coordinator.queueSource("memory_safe");
+  assert.equal(h.decisions.at(-1)?.candidateId, "memory_safe");
+  assert.equal(h.decisions.at(-1)?.state, "queued");
+  assert.equal(h.decisions.at(-1)?.skipReason, undefined);
+  h.coordinator.dispose();
+});
+
+test("one skipped replacement stays terminal and is not replayed", () => {
+  const h = createHarness({ chatVisible: true });
+  h.coordinator.queueSource("memory_safe");
+  h.coordinator.queueSource("search_citation_safe");
+  const skippedCount = h.decisions.filter((decision) =>
+    decision.candidateId === "memory_safe" &&
+    decision.state === "skipped" &&
+    decision.skipReason === "replaced_by_higher_priority").length;
+  h.coordinator.queueSource("search_citation_safe");
+  assert.equal(
+    h.decisions.filter((decision) =>
+      decision.candidateId === "memory_safe" &&
+      decision.state === "skipped" &&
+      decision.skipReason === "replaced_by_higher_priority").length,
+    skippedCount
+  );
   h.coordinator.dispose();
 });
 
@@ -403,11 +461,42 @@ test("resolved legacy presence keeps its selected line and action behind action-
     reason: "mode_presence",
     durationMs: 4_200
   }, "state_work");
-  assert.equal(h.requested.at(-1), "state_work");
+  assert.equal(h.requested.at(-1)?.reason, "state_work");
   assert.equal(h.shown.length, 0);
-  h.coordinator.onActionLifecycle({ status: "started", reason: "state_work" });
+  h.coordinator.onActionLifecycle({ status: "started", reason: "state_work", requestId: h.requested.at(-1)!.requestId });
   assert.equal(h.shown.at(-1)?.lineId, "mode_presence_work");
   h.coordinator.dispose();
+});
+
+
+test("stale or missing action lifecycle ids are ignored", () => {
+  const h = createHarness();
+  h.coordinator.onFirstFrame();
+  const requestId = h.requested.at(-1)!.requestId;
+  h.coordinator.onActionLifecycle({ status: "started", reason: "state_greet", requestId: "request-0" });
+  assert.equal(h.shown.length, 0);
+  h.coordinator.onActionLifecycle({ status: "started", reason: "state_greet" });
+  assert.equal(h.shown.length, 0);
+  h.coordinator.onActionLifecycle({ status: "started", reason: "state_greet", requestId });
+  assert.equal(h.shown.at(-1)?.lineId, "startup_presence_ready");
+  h.coordinator.dispose();
+});
+
+test("matching lifecycle ids drive started and skipped outcomes", () => {
+  const started = createHarness();
+  started.coordinator.onFirstFrame();
+  started.coordinator.onActionLifecycle({ status: "started", reason: "state_greet", requestId: started.requested.at(-1)!.requestId });
+  assert.equal(started.shown.at(-1)?.lineId, "startup_presence_ready");
+  started.coordinator.dispose();
+
+  const skipped = createHarness();
+  skipped.coordinator.updateCoarseState(state({ media: "stopped" }));
+  skipped.coordinator.updateCoarseState(state({ media: "playing" }));
+  assert.equal(skipped.requested.at(-1)?.reason, "state_music_playing_stable");
+  skipped.coordinator.onActionLifecycle({ status: "skipped", reason: "state_music_playing_stable", requestId: skipped.requested.at(-1)!.requestId });
+  assert.equal(skipped.decisions.at(-1)?.state, "skipped");
+  assert.equal(skipped.decisions.at(-1)?.skipReason, "action_skipped");
+  skipped.coordinator.dispose();
 });
 
 test("coordinator source contains no raw environment or content fields", () => {
@@ -424,7 +513,8 @@ test("pet renderer rebuild resets first-frame, active action, and coordinator vi
   const end = source.indexOf("app.whenReady()", start);
   const rebuildSource = source.slice(start, end);
   assert.match(rebuildSource, /hasPetFirstFrame = false;/);
-  assert.match(rebuildSource, /activePetActionReason = null;/);
+  assert.match(rebuildSource, /petActionDispatchCoordinator\?\.reset\(\);/);
+  assert.doesNotMatch(source, /activePetActionReason/);
   assert.match(rebuildSource, /markProactiveSpeechBubbleHidden\(\);/);
   assert.match(rebuildSource, /proactiveBubbleCoordinator\?\.clear\(\);/);
 });

@@ -39,6 +39,10 @@ export const PET_ACTION_TRIGGER_REASONS = [
 ] as const;
 
 export type PetActionTriggerReason = typeof PET_ACTION_TRIGGER_REASONS[number];
+export const PET_ACTION_TRIGGER_REQUEST_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
+export const PET_ACTION_TRIGGER_SUPERSESSION_POLICIES = ["replace_active"] as const;
+export type PetActionTriggerSupersessionPolicy = typeof PET_ACTION_TRIGGER_SUPERSESSION_POLICIES[number];
+export const PET_ACTION_TRIGGER_ORIGIN = "main_dispatch" as const;
 
 export type PetActionTriggerActionType =
   | "greeting"
@@ -62,8 +66,14 @@ export type PetActionTriggerActionType =
   | "longWorkRecovery"
   | "searchNoteSettle";
 
-export type PetActionTrigger = {
+export type PetActionTriggerPayload = {
   reason: PetActionTriggerReason;
+  requestId?: string;
+  supersessionPolicy?: PetActionTriggerSupersessionPolicy;
+};
+
+export type PetActionTrigger = PetActionTriggerPayload & {
+  origin: typeof PET_ACTION_TRIGGER_ORIGIN;
 };
 
 export const PET_ACTION_TRIGGER_ACTION_BY_REASON: Readonly<Record<PetActionTriggerReason, PetActionTriggerActionType>> = {
@@ -103,13 +113,55 @@ export function isPetActionTriggerReason(value: unknown): value is PetActionTrig
   return typeof value === "string" && PET_ACTION_TRIGGER_REASONS.includes(value as PetActionTriggerReason);
 }
 
+export function isPetActionTriggerRequestId(value: unknown): value is string {
+  return typeof value === "string" && PET_ACTION_TRIGGER_REQUEST_ID_PATTERN.test(value);
+}
+
+export function isPetActionTriggerSupersessionPolicy(
+  value: unknown
+): value is PetActionTriggerSupersessionPolicy {
+  return typeof value === "string" && PET_ACTION_TRIGGER_SUPERSESSION_POLICIES.includes(
+    value as PetActionTriggerSupersessionPolicy
+  );
+}
+
 export function parsePetActionTrigger(value: unknown): PetActionTrigger | null {
   if (typeof value !== "object" || value === null) {
     return null;
   }
 
-  const reason = (value as Partial<PetActionTrigger>).reason;
-  return isPetActionTriggerReason(reason) ? { reason } : null;
+  const trigger = value as Partial<PetActionTrigger>;
+  if (Object.hasOwn(trigger, "origin")) {
+    return null;
+  }
+  if (!isPetActionTriggerReason(trigger.reason)) {
+    return null;
+  }
+
+  if (trigger.requestId === undefined && trigger.supersessionPolicy === undefined) {
+    return { reason: trigger.reason, origin: PET_ACTION_TRIGGER_ORIGIN };
+  }
+
+  if (!isPetActionTriggerRequestId(trigger.requestId)) {
+    return null;
+  }
+  if (trigger.supersessionPolicy === undefined) {
+    return {
+      reason: trigger.reason,
+      requestId: trigger.requestId,
+      origin: PET_ACTION_TRIGGER_ORIGIN
+    };
+  }
+
+  return trigger.reason === "chat_opened" &&
+    isPetActionTriggerSupersessionPolicy(trigger.supersessionPolicy)
+    ? {
+        reason: trigger.reason,
+        requestId: trigger.requestId,
+        supersessionPolicy: trigger.supersessionPolicy,
+        origin: PET_ACTION_TRIGGER_ORIGIN
+      }
+    : null;
 }
 
 export function getPetActionTriggerActionType(reason: PetActionTriggerReason): PetActionTriggerActionType {

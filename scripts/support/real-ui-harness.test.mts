@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { CdpClient } from "./real-ui-harness.mjs";
+import { CdpClient, waitForChildExit } from "./real-ui-harness.mjs";
 
 type SocketListener = (event: any) => void;
 
@@ -143,4 +143,31 @@ test("CdpClient rejects pending sends and clears listeners on socket errors", as
   });
 
   assert.equal(eventCalls, 0);
+});
+
+test("waitForChildExit waits for the owned Electron child close event", async () => {
+  const listeners = new Map<string, Set<(...args: any[]) => void>>();
+  const child = {
+    exitCode: null,
+    signalCode: null,
+    once(event: string, listener: (...args: any[]) => void) {
+      const eventListeners = listeners.get(event) ?? new Set();
+      eventListeners.add(listener);
+      listeners.set(event, eventListeners);
+    }
+  };
+
+  const waiting = waitForChildExit(child, 100);
+  let resolved = false;
+  void waiting.then(() => { resolved = true; });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(resolved, false);
+
+  child.exitCode = 0;
+  for (const listener of listeners.get("close") ?? []) {
+    listener(0, null);
+  }
+
+  await waiting;
+  assert.equal(resolved, true);
 });

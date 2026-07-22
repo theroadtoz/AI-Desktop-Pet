@@ -48,7 +48,8 @@ import {
 } from "./support/pet-action-semantic-constants.mjs";
 import {
   PET_ACTION_TRIGGER_REASONS,
-  getPetActionTriggerActionType
+  getPetActionTriggerActionType,
+  parsePetActionTrigger
 } from "../src/shared/pet-action-trigger.ts";
 import {
   PET_ACTION_STATE_CATALOG,
@@ -87,6 +88,7 @@ function createFakeInteractionActionPlayer(options: {
   const timers: FakePlayerTimer[] = [];
   const calls: string[] = [];
   const telemetry: { type: PetTelemetryEventType; payload: Record<string, unknown> }[] = [];
+  const rawTelemetry: { type: PetTelemetryEventType; payload: Record<string, unknown> }[] = [];
   const player = createInteractionActionPlayer({
     now: () => nowMs,
     scheduleTimeout: (callback, delayMs) => {
@@ -156,7 +158,9 @@ function createFakeInteractionActionPlayer(options: {
     },
     getPersistentPresentation: () => persistent,
     reportTelemetry: (type, payload) => {
-      telemetry.push({ type, payload });
+      rawTelemetry.push({ type, payload });
+      const { actionInstanceId: _actionInstanceId, ...legacyPayload } = payload;
+      telemetry.push({ type, payload: legacyPayload });
     }
   });
 
@@ -165,6 +169,7 @@ function createFakeInteractionActionPlayer(options: {
     timers,
     calls,
     telemetry,
+    rawTelemetry,
     setNow(value: number): void {
       nowMs = value;
     },
@@ -1816,6 +1821,60 @@ test("P2-77 search result interrupts reply thinking", () => {
   );
 });
 
+test("main-arbitrated chat open replaces a non-interruptible active action without cross-wiring request ids", async () => {
+  const harness = createFakeInteractionActionPlayer();
+  const searchTrigger = parsePetActionTrigger({ reason: "state_search_cited", requestId: "request_search" });
+  const chatTrigger = parsePetActionTrigger({
+    reason: "chat_opened",
+    requestId: "request_chat",
+    supersessionPolicy: "replace_active"
+  });
+  assert.ok(searchTrigger);
+  assert.ok(chatTrigger);
+  assert.equal(harness.player.playMainAction(
+    getPetInteractionAction("searchNoteSettle"),
+    searchTrigger
+  ), true);
+  await Promise.resolve();
+
+  assert.equal(harness.player.playMainAction(
+    getPetInteractionAction("dialogueOpenWelcome"),
+    chatTrigger
+  ), true);
+  await Promise.resolve();
+
+  assert.equal(harness.player.getActiveActionType(), "dialogueOpenWelcome");
+  assert.equal(harness.calls.includes("stopMotion:interrupted"), true);
+  assert.equal(harness.telemetry.some((event) => (
+    event.type === "pet_interaction_action_finished" &&
+    event.payload.type === "searchNoteSettle" &&
+    event.payload.requestId === "request_search"
+  )), true);
+  assert.equal(harness.telemetry.some((event) => (
+    event.type === "pet_interaction_action_started" &&
+    event.payload.type === "dialogueOpenWelcome" &&
+    event.payload.requestId === "request_chat"
+  )), true);
+});
+
+test("renderer-local chat-shaped actions cannot forge main supersession strategy fields", async () => {
+  const harness = createFakeInteractionActionPlayer();
+  assert.equal(harness.player.playAction(getPetInteractionAction("searchNoteSettle"), "state_search_cited"), true);
+  await Promise.resolve();
+
+  assert.equal(harness.player.playAction(
+    getPetInteractionAction("dialogueOpenWelcome"),
+    "chat_opened",
+    {
+      requestId: "forged_request",
+      supersessionPolicy: "replace_active",
+      origin: "main_dispatch"
+    } as never
+  ), false);
+  assert.equal(harness.player.getActiveActionType(), "searchNoteSettle");
+  assert.equal(harness.telemetry.at(-1)?.payload.skipReason, "active_action");
+});
+
 test("P2-77 explicit mode transitions interrupt the long reply settle motion", async () => {
   const replySettle = getPetInteractionAction("replyWarmSettle");
   const motion = createFakeMotionPlayback(replySettle.motionPresetId);
@@ -1949,6 +2008,73 @@ test("interaction action player only emits renderer telemetry contract fields", 
       /prompt|message|content|api|key|body|path|url/i.test(key)
     )), []);
   }
+});
+
+test("interaction action player preserves safe request ids through lifecycle telemetry", () => {
+  const harness = createFakeInteractionActionPlayer();
+  const action = getPetInteractionAction("greeting");
+  const trigger = parsePetActionTrigger({ reason: "chat_opened", requestId: "req_123-ABC" });
+  assert.ok(trigger);
+
+  assert.equal(harness.player.playMainAction(action, trigger), true);
+  assert.deepEqual(harness.telemetry[0], {
+    type: "pet_interaction_action_started",
+    payload: {
+      type: "greeting",
+      reason: "chat_opened",
+      requestId: "req_123-ABC",
+      durationMs: action.durationMs
+    }
+  });
+
+  harness.setNow(1_000 + action.durationMs);
+  harness.timers[0]?.callback();
+
+  assert.deepEqual(harness.telemetry.at(-1), {
+    type: "pet_interaction_action_finished",
+    payload: {
+      type: "greeting",
+      reason: "chat_opened",
+      requestId: "req_123-ABC"
+    }
+  });
+});
+
+test("renderer-local lifecycle attempts receive distinct action instance ids", () => {
+  const harness = createFakeInteractionActionPlayer();
+  const action = getPetInteractionAction("thinking");
+
+  assert.equal(harness.player.playAction(action, "click_body"), true);
+  assert.equal(harness.player.playAction(action, "click_body"), false);
+
+  const startedId = harness.rawTelemetry[0]?.payload.actionInstanceId;
+  const skippedId = harness.rawTelemetry[1]?.payload.actionInstanceId;
+  assert.equal(typeof startedId, "string");
+  assert.equal(typeof skippedId, "string");
+  assert.notEqual(startedId, skippedId);
+});
+
+test("pet renderer forwards the preload-authenticated trigger through the dedicated main action path", async () => {
+  const source = await readFile(new URL("../src/renderer/pet/main.ts", import.meta.url), "utf8");
+  const triggerStart = source.indexOf("const removeActionTriggerListener = window.petApi?.onActionTrigger");
+  const triggerEnd = source.indexOf("const removeProactiveSpeechBubbleListener", triggerStart);
+  const triggerSource = source.slice(triggerStart, triggerEnd);
+  const startupStart = source.indexOf(
+    'interactionActionPlayer.playAction(getPetInteractionAction("appearance"), "startup_first_visible_frame")'
+  );
+  const startupSource = source.slice(startupStart - 80, startupStart + 140);
+  const clickStart = source.indexOf("function triggerPendingClickInteractionAction()");
+  const clickEnd = source.indexOf("const petClickActionScheduler", clickStart);
+  const clickSource = source.slice(clickStart, clickEnd);
+  const windowShakeStart = source.indexOf("const removeWindowMotionFeedbackListener");
+  const windowShakeEnd = source.indexOf("}) ?? null;", windowShakeStart);
+  const windowShakeSource = source.slice(windowShakeStart, windowShakeEnd);
+
+  assert.match(triggerSource, /interactionActionPlayer\.playMainAction\([\s\S]*trigger,/);
+  assert.doesNotMatch(triggerSource, /requestId: trigger\.requestId|supersessionPolicy: trigger\.supersessionPolicy/);
+  assert.doesNotMatch(startupSource, /requestId/);
+  assert.doesNotMatch(clickSource, /requestId/);
+  assert.doesNotMatch(windowShakeSource, /requestId/);
 });
 
 test("click action scheduler delays clicks and lets double click cancel the action", () => {
@@ -2160,7 +2286,7 @@ test("main emits chat_opened only for a hidden-to-visible transition", async () 
   assert.match(functionSource, /const wasVisible = Boolean\(/);
   assert.match(
     functionSource,
-    /if \(!wasVisible\) \{[\s\S]*sendPetActionTrigger\("chat_opened"\);[\s\S]*\}/
+    /if \(!wasVisible\) \{[\s\S]*sendPetActionTrigger\("chat_opened", \{ supersessionPolicy: "replace_active" \}\);[\s\S]*\}/
   );
 });
 

@@ -815,9 +815,9 @@ const removeActionTriggerListener = window.petApi?.onActionTrigger((trigger) => 
     dialogueModeId: currentDialogueModeId,
     presenceModeId: currentPresenceModeId
   });
-  interactionActionPlayer.playAction(
+  interactionActionPlayer.playMainAction(
     getPetInteractionAction(actionType),
-    trigger.reason,
+    trigger,
     {
       stateId: state.stateId,
       modeId: currentDialogueModeId,

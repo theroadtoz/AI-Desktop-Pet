@@ -576,6 +576,28 @@ export function cleanupRealUiRun(context) {
   rmSync(context.runParentDir, { recursive: true, force: true });
 }
 
+export async function waitForChildExit(child, timeoutMs = 10_000) {
+  if (!child || child.exitCode !== null || child.signalCode !== null) {
+    return;
+  }
+
+  await new Promise((resolveExit, rejectExit) => {
+    const timeout = setTimeout(() => {
+      rejectExit(new Error(`Timed out waiting for Electron child ${child.pid ?? "unknown"} to exit`));
+    }, timeoutMs);
+    timeout.unref();
+
+    child.once("close", () => {
+      clearTimeout(timeout);
+      resolveExit();
+    });
+    child.once("error", (error) => {
+      clearTimeout(timeout);
+      rejectExit(error);
+    });
+  });
+}
+
 export async function stopElectron(context) {
   const seen = new Set();
   for (const page of context.pages) {
@@ -585,10 +607,17 @@ export async function stopElectron(context) {
     seen.add(page.cdp);
     page.cdp.close();
   }
-  context.child?.kill();
+  const child = context.child;
   context.child = null;
   context.pages = [];
-  await sleep(1_000);
+  if (!child) {
+    return;
+  }
+
+  if (child.exitCode === null && child.signalCode === null) {
+    child.kill();
+  }
+  await waitForChildExit(child);
 }
 
 function isInside(targetPath, parentPath) {

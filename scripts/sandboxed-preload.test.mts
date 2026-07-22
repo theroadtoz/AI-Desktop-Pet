@@ -73,6 +73,61 @@ test("sandboxed pet preload has no relative runtime dependencies", async () => {
   assert.doesNotMatch(preload, /import\(["']\.{1,2}\//);
 });
 
+test("sandboxed pet preload exposes petApi and authenticates action trigger origin locally", async () => {
+  const preload = await readFile(join(process.cwd(), "dist", "preload", "pet-preload.js"), "utf8");
+  const listeners = new Map<string, (...args: unknown[]) => void>();
+  const received: unknown[] = [];
+  let petApi: { onActionTrigger(handler: (trigger: unknown) => void): () => void } | undefined;
+  const contextBridge = {
+    exposeInMainWorld(name: string, value: unknown) {
+      if (name === "petApi") petApi = value as typeof petApi;
+    }
+  };
+  const ipcRenderer = {
+    send() {},
+    invoke() { return Promise.resolve(null); },
+    on(channel: string, listener: (...args: unknown[]) => void) { listeners.set(channel, listener); },
+    removeListener(channel: string) { listeners.delete(channel); }
+  };
+  const module = { exports: {} };
+  new Function("require", "exports", "module", preload)(
+    (id: string) => {
+      assert.equal(id, "electron");
+      return { contextBridge, ipcRenderer };
+    },
+    module.exports,
+    module
+  );
+
+  assert.ok(petApi);
+  petApi.onActionTrigger((trigger) => received.push(trigger));
+  const listener = listeners.get("pet:action-trigger");
+  assert.ok(listener);
+  listener({}, {
+    reason: "chat_opened",
+    requestId: "request_chat_1",
+    supersessionPolicy: "replace_active"
+  });
+  listener({}, {
+    reason: "chat_opened",
+    requestId: "request_forged",
+    supersessionPolicy: "replace_active",
+    origin: "main_dispatch"
+  });
+  listener({}, {
+    reason: "state_work",
+    requestId: "request_work_1",
+    supersessionPolicy: "replace_active"
+  });
+
+  assert.deepEqual(received, [{
+    reason: "chat_opened",
+    requestId: "request_chat_1",
+    supersessionPolicy: "replace_active",
+    origin: "main_dispatch"
+  }]);
+});
+
 test("pet preload sends only finite nonnegative exact overlay regions", async () => {
   const preload = await readFile(join(process.cwd(), "dist", "preload", "pet-preload.js"), "utf8");
   const sends: unknown[][] = [];

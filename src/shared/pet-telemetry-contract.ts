@@ -1,6 +1,7 @@
 import type { DialogueModeId } from "./dialogue-style";
 import type { PresenceModeId } from "./presence-mode";
 import { PET_MOTION_PRESET_IDS } from "./pet-motion-presets.ts";
+import { isPetActionTriggerRequestId } from "./pet-action-trigger.ts";
 
 export const PET_TELEMETRY_EVENT_TYPES = [
   "pet_health",
@@ -45,6 +46,8 @@ export const PET_TELEMETRY_ALLOWED_FIELDS = [
   "feedbackType",
   "result",
   "skipReason",
+  "requestId",
+  "actionInstanceId",
   "cooldownState",
   "stateId",
   "modeId",
@@ -343,6 +346,13 @@ function putActionTypes(target: PetTelemetryPayload, payload: Record<string, unk
   }
 }
 
+function putRequestId(target: PetTelemetryPayload, payload: Record<string, unknown>, key: string): void {
+  const value = payload[key];
+  if (isPetActionTriggerRequestId(value)) {
+    target[key] = value;
+  }
+}
+
 function sanitizeHealthPayload(payload: Record<string, unknown>): PetTelemetryPayload {
   const safe: PetTelemetryPayload = {};
   putString(safe, payload, "renderer", PET_RENDERERS);
@@ -436,6 +446,8 @@ function sanitizeInteractionActionPayload(payload: Record<string, unknown>): Pet
   const safe: PetTelemetryPayload = {};
   putString(safe, payload, "type", PET_INTERACTION_ACTION_TYPES);
   putString(safe, payload, "reason", PET_INTERACTION_REASONS);
+  putRequestId(safe, payload, "requestId");
+  putRequestId(safe, payload, "actionInstanceId");
   putString(safe, payload, "stateId", PET_ACTION_STATE_IDS);
   putNumber(safe, payload, "durationMs");
   putDialogueModeId(safe, payload, "modeId");

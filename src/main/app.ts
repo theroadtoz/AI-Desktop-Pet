@@ -11,6 +11,7 @@ import {
   type IpcMainEvent,
   type IpcMainInvokeEvent
 } from "electron";
+import { randomUUID } from "node:crypto";
 import { release as getOsRelease } from "node:os";
 import { isAbsolute, join } from "node:path";
 import type { ChatContextBudgetSummary, ChatProviderId, ChatRequest, ChatRuntimeContext } from "../shared/chat-provider";
@@ -195,6 +196,11 @@ import { registerModelAssetProtocol } from "./services/model-asset-protocol";
 import { createPointerController, type PointerController } from "./services/pointer-controller";
 import { createShortcutRegistry, type ShortcutRegistry } from "./services/shortcut-registry";
 import { createTelemetryService, type TelemetryPayload, type TelemetryService } from "./services/telemetry";
+import {
+  createPetActionDispatchCoordinator,
+  type PetActionDispatchCoordinator,
+  type PetActionDispatchPolicy
+} from "./services/pet-action-dispatch-coordinator";
 import { isTrustedIpcSender } from "./ipc/trusted-ipc-sender";
 import { createAppShutdownCoordinator } from "./lifecycle/app-shutdown-coordinator";
 import {
@@ -253,6 +259,8 @@ let latestLlamaCppRuntimeSummary: LlamaCppRuntimeSummary | null = null;
 let latestBundledLlamaCppRuntimeSummary: BundledLlamaCppRuntimeSafeSummary | null = null;
 let bundledLlamaCppRuntimeStartupPromise: Promise<BundledLlamaCppRuntimeSafeSummary> | null = null;
 let refreshCurrentProvider: (() => void) | null = null;
+let openChatWindowAdapter: (() => void) | null = null;
+let pendingChatWindowOpen = false;
 let automaticSituationCoordinator: AutomaticSituationCoordinator | null = null;
 let removeAutomaticSituationListener: (() => void) | null = null;
 let coarseUserStateCoordinator: CoarseUserStateCoordinator | null = null;
@@ -277,10 +285,20 @@ let hasHandledStartupProactiveSpeechBubble = false;
 let proactiveSpeechBubbleTick = 0;
 let proactiveSpeechBubbleVisibleUntil = 0;
 let hasPetFirstFrame = false;
-let activePetActionReason: PetActionTriggerReason | null = null;
 let lastLowFrequencyCompanionEventAt: number | null = null;
 let lastLowFrequencyCompanionEventId: LowFrequencyCompanionEvent["eventId"] | null = null;
 let pendingSourcedLowFrequencyCompanionEvents: SourcedLowFrequencyCompanionEvent[] = [];
+let petActionDispatchCoordinator: PetActionDispatchCoordinator | null = createPetActionDispatchCoordinator({
+  send(trigger) {
+    if (!petWindow || petWindow.isDestroyed()) {
+      throw new Error("Pet window unavailable");
+    }
+
+    petWindow.webContents.send("pet:action-trigger", trigger);
+  },
+  now: () => Date.now(),
+  createRequestId: () => randomUUID().replaceAll("-", "")
+});
 
 type SourcedLowFrequencyCompanionEvent = {
   eventId: LowFrequencyCompanionEventId;
@@ -405,9 +423,10 @@ if (!gotLock) {
 app.on("second-instance", () => {
   logTelemetry("second_instance_received");
   ensurePetWindow("second_instance");
-  if (chatWindow) {
-    showChatWindow(chatWindow);
-    focusChatInput(chatWindow);
+  if (openChatWindowAdapter) {
+    openChatWindowAdapter();
+  } else {
+    pendingChatWindowOpen = true;
   }
 });
 
@@ -887,20 +906,31 @@ function logPetTelemetry(event: { type: PetTelemetryEventType; payload?: unknown
   logTelemetry(safeEvent.type, safeEvent.payload);
 }
 
-function sendPetActionTrigger(reason: PetActionTriggerReason): boolean {
-  if (!petWindow || petWindow.isDestroyed()) {
-    return false;
+function requestPetActionTrigger(
+  reason: PetActionTriggerReason,
+  policy?: PetActionDispatchPolicy
+): string | null {
+  if (!petActionDispatchCoordinator) {
+    return null;
   }
 
   const now = Date.now();
   const lastTriggeredAt = lastPetActionTriggerAtByReason[reason] ?? 0;
   if (now - lastTriggeredAt < PET_ACTION_TRIGGER_THROTTLE_MS) {
-    return false;
+    return null;
+  }
+
+  const result = petActionDispatchCoordinator.dispatch(reason, policy);
+  if (!result.accepted) {
+    return null;
   }
 
   lastPetActionTriggerAtByReason[reason] = now;
-  petWindow.webContents.send("pet:action-trigger", { reason });
-  return true;
+  return result.requestId;
+}
+
+function sendPetActionTrigger(reason: PetActionTriggerReason, policy?: PetActionDispatchPolicy): boolean {
+  return requestPetActionTrigger(reason, policy) !== null;
 }
 
 function syncAutomaticPresenceLifecycle(): AutomaticSituationSnapshot | null {
@@ -1060,6 +1090,7 @@ function isChatVisible(): boolean {
 }
 
 function getProactiveBubbleRuntimeGates(): ProactiveBubbleRuntimeGates {
+  const actionDispatchState = petActionDispatchCoordinator?.getState();
   return {
     petReady: hasPetFirstFrame,
     petWindowAvailable: Boolean(petWindow && !petWindow.isDestroyed()),
@@ -1067,8 +1098,8 @@ function getProactiveBubbleRuntimeGates(): ProactiveBubbleRuntimeGates {
     interactionActive: isChatInteractionActive,
     modelBusy: p283aAcceptanceScenario === "busy" ||
       activeChatRequestVersion !== null || Boolean(chatEngine?.hasActiveStream()),
-    highPriorityActionActive: activePetActionReason !== null,
-    highPriorityActionReason: activePetActionReason
+    highPriorityActionActive: actionDispatchState?.busy ?? false,
+    highPriorityActionReason: actionDispatchState?.activeMainRequest?.reason ?? null
   };
 }
 
@@ -2183,7 +2214,7 @@ function rebuildPetWindow(recoverySource?: string): void {
   pointerController = null;
   desktopContextMonitor.setRendererReady(false);
   hasPetFirstFrame = false;
-  activePetActionReason = null;
+  petActionDispatchCoordinator?.reset();
   markProactiveSpeechBubbleHidden();
   proactiveBubbleCoordinator?.clear();
 
@@ -2272,7 +2303,7 @@ app.whenReady().then(async () => {
     acceptanceInjectionOnly: isP283aAcceptanceInjectionOnly,
     ledger: proactiveBubbleLedgerStore,
     getRuntimeGates: getProactiveBubbleRuntimeGates,
-    requestAction: sendPetActionTrigger,
+    requestAction: requestPetActionTrigger,
     showBubble(payload) {
       if (!petWindow || petWindow.isDestroyed()) {
         return false;
@@ -2455,13 +2486,24 @@ app.whenReady().then(async () => {
     cancelIdleProactiveSpeechBubbleTimer();
     markProactiveSpeechBubbleHidden();
     proactiveBubbleCoordinator?.clear();
+    if (!wasVisible) {
+      petActionDispatchCoordinator?.reset();
+      refreshProactiveBubbleRuntimeGates();
+    }
     showChatWindow(chatWindow);
     focusChatInput(chatWindow);
     if (!wasVisible) {
+      delete lastPetActionTriggerAtByReason.chat_opened;
       transitionPetRole({ type: "chat:opened" });
-      sendPetActionTrigger("chat_opened");
+      sendPetActionTrigger("chat_opened", { supersessionPolicy: "replace_active" });
       logWindowSnapshot("chat_opened");
     }
+  }
+
+  openChatWindowAdapter = openChatWindow;
+  if (pendingChatWindowOpen) {
+    pendingChatWindowOpen = false;
+    openChatWindowAdapter();
   }
 
   function isPetSender(event: IpcMainEvent | IpcMainInvokeEvent): boolean {
@@ -2971,21 +3013,45 @@ app.whenReady().then(async () => {
 
     logTelemetry(petTelemetryEvent.type, petTelemetryEvent.payload);
     const actionReason = petTelemetryEvent.payload?.reason;
+    const requestId = petTelemetryEvent.payload?.requestId;
+    const actionInstanceId = petTelemetryEvent.payload?.actionInstanceId;
     if (
-      (petTelemetryEvent.type === "pet_interaction_action_started" ||
-        petTelemetryEvent.type === "pet_interaction_action_skipped" ||
-        petTelemetryEvent.type === "pet_interaction_action_finished") &&
-      isPetActionTriggerReason(actionReason)
+      petTelemetryEvent.type === "pet_interaction_action_started" ||
+      petTelemetryEvent.type === "pet_interaction_action_skipped" ||
+      petTelemetryEvent.type === "pet_interaction_action_finished"
     ) {
-      if (petTelemetryEvent.type === "pet_interaction_action_started") {
-        activePetActionReason = actionReason;
-        proactiveBubbleCoordinator?.onActionLifecycle({ status: "started", reason: actionReason });
-      } else {
-        if (activePetActionReason === actionReason) {
-          activePetActionReason = null;
-        }
-        if (petTelemetryEvent.type === "pet_interaction_action_skipped") {
-          proactiveBubbleCoordinator?.onActionLifecycle({ status: "skipped", reason: actionReason });
+      const lifecycleStatus = petTelemetryEvent.type === "pet_interaction_action_started"
+        ? "started"
+        : petTelemetryEvent.type === "pet_interaction_action_skipped"
+          ? "skipped"
+          : "finished";
+      const lifecycleRequestId = typeof requestId === "string" ? requestId : undefined;
+      const lifecycleActionInstanceId = typeof actionInstanceId === "string" ? actionInstanceId : undefined;
+      const lifecycleResult = typeof actionReason === "string"
+        ? petActionDispatchCoordinator?.onLifecycle(
+          {
+            status: lifecycleStatus,
+            reason: actionReason,
+            ...(lifecycleRequestId ? { requestId: lifecycleRequestId } : {}),
+            ...(lifecycleActionInstanceId ? { actionInstanceId: lifecycleActionInstanceId } : {})
+          }
+        ) ?? "ignored"
+        : "ignored";
+      if (isPetActionTriggerReason(actionReason)) {
+        if (lifecycleResult === "main_started") {
+          proactiveBubbleCoordinator?.onActionLifecycle(
+            lifecycleRequestId === undefined
+              ? { status: "started", reason: actionReason }
+              : { status: "started", reason: actionReason, requestId: lifecycleRequestId }
+          );
+        } else if (lifecycleResult === "main_terminal") {
+          if (petTelemetryEvent.type === "pet_interaction_action_skipped") {
+            proactiveBubbleCoordinator?.onActionLifecycle(
+              lifecycleRequestId === undefined
+                ? { status: "skipped", reason: actionReason }
+                : { status: "skipped", reason: actionReason, requestId: lifecycleRequestId }
+            );
+          }
         }
       }
       refreshProactiveBubbleRuntimeGates();
@@ -4030,6 +4096,8 @@ app.on("window-all-closed", () => {
 });
 
 function quiesceApp(): void {
+  openChatWindowAdapter = null;
+  pendingChatWindowOpen = false;
   if (activeChatRequestVersion !== null) {
     chatEngine?.abortActiveStream();
     transitionPetRole({ type: "request:cancelled", requestVersion: activeChatRequestVersion });
@@ -4048,6 +4116,8 @@ function quiesceApp(): void {
   removeDesktopContextSnapshotListener = null;
   proactiveBubbleCoordinator?.dispose();
   proactiveBubbleCoordinator = null;
+  petActionDispatchCoordinator?.reset();
+  petActionDispatchCoordinator = null;
   proactiveBubbleLedgerStore = null;
   coarseUserStateCoordinator?.dispose();
   coarseUserStateCoordinator = null;

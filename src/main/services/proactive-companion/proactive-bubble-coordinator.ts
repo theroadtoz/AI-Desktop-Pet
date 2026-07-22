@@ -54,7 +54,7 @@ export type ProactiveBubbleCoordinator = {
     actionReason: PetActionTriggerReason
   ): void;
   queueSafeCandidateForAcceptance(candidateId: ProactiveBubbleCandidateId): void;
-  onActionLifecycle(event: { status: "started" | "skipped"; reason: PetActionTriggerReason }): void;
+  onActionLifecycle(event: { status: "started" | "skipped"; reason: PetActionTriggerReason; requestId?: string }): void;
   onBubbleHidden(): void;
   activateBubble(value: unknown): boolean;
   tick(): void;
@@ -62,8 +62,12 @@ export type ProactiveBubbleCoordinator = {
   dispose(): void;
 };
 
+type ActionRequestResult = string | null;
+
 type CandidateDefinition = {
-  candidateClass: ProactiveBubbleCandidateClass;
+  budgetClass: ProactiveBubbleCandidateClass;
+  mutexGroup: "startup" | "environment" | "silence" | "source";
+  supersessionPolicy: "higher_priority_only";
   priority: number;
   lineId: ProactiveSpeechBubbleLineId;
   reason: ProactiveSpeechBubbleReason;
@@ -78,6 +82,7 @@ type Candidate = CandidateDefinition & {
   expiresAtMs: number;
   mayWaitForChatClose: boolean;
   waitedForChatClose: boolean;
+  actionRequestId?: string;
 };
 
 export const PROACTIVE_BUBBLE_ACTION_HANDSHAKE_TIMEOUT_MS = 2_000;
@@ -87,51 +92,51 @@ export const PROACTIVE_BUBBLE_LONG_WORK_MS = 90 * 60_000;
 
 const DEFINITIONS: Readonly<Record<ProactiveBubbleCandidateId, CandidateDefinition>> = {
   idle_presence: {
-    candidateClass: "silence", priority: 10, lineId: "idle_presence_soft",
+    budgetClass: "silence", mutexGroup: "silence", supersessionPolicy: "higher_priority_only", priority: 10, lineId: "idle_presence_soft",
     reason: "idle_presence", actionReason: "state_proactive_bubble_visible"
   },
   mode_presence: {
-    candidateClass: "environment", priority: 50, lineId: "mode_presence_focus",
+    budgetClass: "environment", mutexGroup: "environment", supersessionPolicy: "higher_priority_only", priority: 50, lineId: "mode_presence_focus",
     reason: "mode_presence", actionReason: "state_proactive_bubble_visible"
   },
   startup_daily: {
-    candidateClass: "startup", priority: 40, lineId: "startup_presence_ready",
+    budgetClass: "startup", mutexGroup: "startup", supersessionPolicy: "higher_priority_only", priority: 40, lineId: "startup_presence_ready",
     reason: "startup_presence", actionReason: "state_greet"
   },
   music_started: {
-    candidateClass: "environment", priority: 60, lineId: "environment_music_started",
+    budgetClass: "environment", mutexGroup: "environment", supersessionPolicy: "higher_priority_only", priority: 60, lineId: "environment_music_started",
     reason: "music_presence", actionReason: "state_music_playing_stable"
   },
   explicit_game_started: {
-    candidateClass: "environment", priority: 60, lineId: "environment_game_started",
+    budgetClass: "environment", mutexGroup: "environment", supersessionPolicy: "higher_priority_only", priority: 60, lineId: "environment_game_started",
     reason: "game_presence", actionReason: "state_game_presence_stable"
   },
   returned_from_away: {
-    candidateClass: "environment", priority: 70, lineId: "environment_returned_from_away",
+    budgetClass: "environment", mutexGroup: "environment", supersessionPolicy: "higher_priority_only", priority: 70, lineId: "environment_returned_from_away",
     reason: "return_presence", actionReason: "return_from_idle"
   },
   long_work_recovery: {
-    candidateClass: "environment", priority: 70, lineId: "environment_long_work_recovery",
+    budgetClass: "environment", mutexGroup: "environment", supersessionPolicy: "higher_priority_only", priority: 70, lineId: "environment_long_work_recovery",
     reason: "work_recovery", actionReason: "long_work_session_complete"
   },
   evening_companion: {
-    candidateClass: "environment", priority: 40, lineId: "idle_presence_evening",
+    budgetClass: "environment", mutexGroup: "environment", supersessionPolicy: "higher_priority_only", priority: 40, lineId: "idle_presence_evening",
     reason: "evening_presence", actionReason: "evening_companion_tick"
   },
   long_silence: {
-    candidateClass: "silence", priority: 20, lineId: "idle_presence_soft",
+    budgetClass: "silence", mutexGroup: "silence", supersessionPolicy: "higher_priority_only", priority: 20, lineId: "idle_presence_soft",
     reason: "silence_presence", actionReason: "state_listen"
   },
   memory_safe: {
-    candidateClass: "source", priority: 80, lineId: "idle_presence_memory_safe",
+    budgetClass: "source", mutexGroup: "source", supersessionPolicy: "higher_priority_only", priority: 80, lineId: "idle_presence_memory_safe",
     reason: "source_presence", actionReason: "state_memory_injected"
   },
   search_citation_safe: {
-    candidateClass: "source", priority: 90, lineId: "idle_presence_search_citation",
+    budgetClass: "source", mutexGroup: "source", supersessionPolicy: "higher_priority_only", priority: 90, lineId: "idle_presence_search_citation",
     reason: "source_presence", actionReason: "state_search_cited"
   },
   history_summary_safe: {
-    candidateClass: "source", priority: 80, lineId: "idle_presence_history_summary",
+    budgetClass: "source", mutexGroup: "source", supersessionPolicy: "higher_priority_only", priority: 80, lineId: "idle_presence_history_summary",
     reason: "source_presence", actionReason: "state_proactive_bubble_visible"
   }
 };
@@ -148,7 +153,7 @@ const INITIAL_COARSE_STATE: Readonly<CoarseUserState> = Object.freeze({
 export function createProactiveBubbleCoordinator(options: {
   ledger: ProactiveBubbleLedgerStore;
   getRuntimeGates: () => ProactiveBubbleRuntimeGates;
-  requestAction: (reason: PetActionTriggerReason) => boolean;
+  requestAction: (reason: PetActionTriggerReason) => ActionRequestResult;
   showBubble: (payload: ProactiveSpeechBubblePayload) => boolean;
   clearBubble: () => void;
   openChat: () => void;
@@ -264,19 +269,26 @@ export function createProactiveBubbleCoordinator(options: {
       mayWaitForChatClose: config.mayWaitForChatClose ?? false,
       waitedForChatClose: false
     };
-    for (const existing of [...pending]) {
-      if (existing.candidateClass !== candidate.candidateClass) continue;
-      terminal(
-        existing,
-        queuedAtMs > existing.expiresAtMs ? "expired" : "skipped",
-        queuedAtMs > existing.expiresAtMs ? "ttl_expired" : "replaced_by_same_class"
-      );
+    if (activeAttempt?.mutexGroup === candidate.mutexGroup) {
+      report(candidate, "skipped", "same_mutex_group_attempt_in_progress");
+      return;
     }
-    if (activeAttempt?.candidateClass === candidate.candidateClass) {
-      if (queuedAtMs > activeAttempt.expiresAtMs) {
-        terminal(activeAttempt, "expired", "ttl_expired");
+    const sameGroupPending = pending.filter((existing) => existing.mutexGroup === candidate.mutexGroup);
+    if (sameGroupPending.length > 0) {
+      const highestPending = sameGroupPending.reduce((highest, item) =>
+        item.priority > highest.priority ||
+        (item.priority === highest.priority && item.sequence < highest.sequence) ? item : highest
+      );
+      if (candidate.supersessionPolicy === "higher_priority_only" && candidate.priority > highestPending.priority) {
+        for (const existing of sameGroupPending) {
+          terminal(existing, "skipped", "replaced_by_higher_priority");
+        }
       } else {
-        report(candidate, "skipped", "same_class_attempt_in_progress");
+        report(
+          candidate,
+          "skipped",
+          candidate.priority === highestPending.priority ? "same_priority_stable" : "lower_priority_candidate"
+        );
         return;
       }
     }
@@ -291,7 +303,7 @@ export function createProactiveBubbleCoordinator(options: {
     if (!runtimeGates.petWindowAvailable) return "pet_window_missing";
     if (settings.cadence === "off") return "proactive_bubbles_off";
     const mayProceedWithUnknown = candidate.candidateId === "startup_daily" ||
-      candidate.candidateClass === "source";
+      candidate.budgetClass === "source";
     if (coarseState.engagement === "suppressed" || coarseState.engagement === "defer") {
       return "engagement_blocked";
     }
@@ -337,7 +349,7 @@ export function createProactiveBubbleCoordinator(options: {
     const cadence = settings.cadence as Exclude<ProactiveCompanionCadence, "off">;
     const budgetReason = options.ledger.canShow({
       cadence,
-      candidateClass: candidate.candidateClass,
+      candidateClass: candidate.budgetClass,
       lineId: candidate.lineId,
       nowMs: currentNow,
       dateKey: getLocalDateKey(currentNow)
@@ -350,11 +362,13 @@ export function createProactiveBubbleCoordinator(options: {
     removePending(candidate);
     activeAttempt = candidate;
     report(candidate, "attempted");
-    if (!options.requestAction(candidate.actionReason)) {
+    const actionRequestId = options.requestAction(candidate.actionReason);
+    if (!actionRequestId) {
       terminal(candidate, "skipped", "action_request_rejected");
       processPending();
       return;
     }
+    candidate.actionRequestId = actionRequestId;
     actionTimer = setTimeoutFn(() => {
       actionTimer = null;
       if (activeAttempt?.sequence === candidate.sequence) {
@@ -553,7 +567,7 @@ export function createProactiveBubbleCoordinator(options: {
     },
     onActionLifecycle(event) {
       const candidate = activeAttempt;
-      if (!candidate || candidate.actionReason !== event.reason) return;
+      if (!candidate || !event.requestId || candidate.actionReason !== event.reason || candidate.actionRequestId !== event.requestId) return;
       clearActionTimer();
       activeAttempt = null;
       if (event.status === "skipped") {
@@ -575,7 +589,7 @@ export function createProactiveBubbleCoordinator(options: {
       visibleCandidate = candidate;
       const shownAtMs = now();
       options.ledger.recordShown({
-        candidateClass: candidate.candidateClass,
+        candidateClass: candidate.budgetClass,
         lineId: candidate.lineId,
         nowMs: shownAtMs,
         dateKey: getLocalDateKey(shownAtMs)

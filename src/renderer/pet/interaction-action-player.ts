@@ -6,7 +6,10 @@ import {
 } from "../../shared/interaction-action-catalog.ts";
 import type { PetAccessoryResolution } from "../../shared/pet-accessory";
 import type { PetActionStateId } from "../../shared/pet-action-state-machine";
-import type { PetActionTriggerReason } from "../../shared/pet-action-trigger";
+import type {
+  PetActionTrigger,
+  PetActionTriggerReason,
+} from "../../shared/pet-action-trigger";
 import type { PresenceModeId } from "../../shared/presence-mode";
 import type {
   InteractionActionCooldownSkipReason,
@@ -57,6 +60,8 @@ type ActiveInteractionAction = {
   action: PetInteractionAction;
   reason: InteractionActionReason;
   strategy?: InteractionActionStrategy;
+  actionInstanceId: string;
+  requestId?: string;
   playbackPhase?: NativeMotionPlaybackPhase;
   timeoutId?: TimeoutHandle;
   unsubscribeMotionState?: () => void;
@@ -68,6 +73,11 @@ export type InteractionActionPlayer = {
   playAction(
     action: PetInteractionAction,
     reason: InteractionActionReason,
+    strategy?: InteractionActionStrategy
+  ): boolean;
+  playMainAction(
+    action: PetInteractionAction,
+    trigger: PetActionTrigger,
     strategy?: InteractionActionStrategy
   ): boolean;
   interruptActiveMotionAction(): boolean;
@@ -144,6 +154,7 @@ export function createInteractionActionPlayer({
   let lastInteractionActionFinishedAtMs: number | undefined;
   let lastHeadPatFinishedAtMs: number | undefined;
   let lastWindowShakeFeedbackStartedAtMs: number | undefined;
+  let actionInstanceSequence = 0;
   const lastStrongInteractionActionFinishedAtMsByType: Partial<Record<PetInteractionActionType, number>> = {};
   const lastActionFinishedAtMsByType: Partial<Record<PetInteractionActionType, number>> = {};
 
@@ -161,6 +172,13 @@ export function createInteractionActionPlayer({
         candidateActionTypes: strategy.candidateActionTypes,
         selectedActionType: action.type
       } : {})
+    };
+  }
+
+  function createLifecycleTelemetry(activeAction: ActiveInteractionAction): Record<string, unknown> {
+    return {
+      actionInstanceId: activeAction.actionInstanceId,
+      ...(activeAction.requestId ? { requestId: activeAction.requestId } : {})
     };
   }
 
@@ -200,6 +218,7 @@ export function createInteractionActionPlayer({
     reportTelemetry("pet_interaction_action_finished", {
       type: action.type,
       reason,
+      ...createLifecycleTelemetry(activeAction),
       ...(action.motionPresetId ? { motionPresetId: action.motionPresetId } : {}),
       ...(terminalStatus ? { terminalStatus } : {})
     });
@@ -233,6 +252,7 @@ export function createInteractionActionPlayer({
       type: action.type,
       reason,
       durationMs: action.durationMs,
+      ...createLifecycleTelemetry(activeAction),
       ...createStrategyTelemetry(strategy, action),
       ...(action.motionPresetId ? { motionPresetId: action.motionPresetId } : {})
     });
@@ -315,8 +335,17 @@ export function createInteractionActionPlayer({
   function playAction(
     action: PetInteractionAction,
     reason: InteractionActionReason,
-    strategy?: InteractionActionStrategy
+    strategy?: InteractionActionStrategy,
+    mainTrigger?: PetActionTrigger
   ): boolean {
+    const actionInstanceId = `renderer_action_${++actionInstanceSequence}`;
+    const mainChatReplacesActiveAction = Boolean(
+      activeInteractionAction &&
+      reason === "chat_opened" &&
+      mainTrigger?.origin === "main_dispatch" &&
+      mainTrigger.requestId &&
+      mainTrigger.supersessionPolicy === "replace_active"
+    );
     const welcomeFollowupListen =
       activeInteractionAction?.action.type === "dialogueOpenWelcome" && action.type === "listen";
     const modeTransitionInterruptsReplySettle =
@@ -331,6 +360,7 @@ export function createInteractionActionPlayer({
     const interruptedActiveAction = Boolean(
       !welcomeFollowupListen &&
       (
+        mainChatReplacesActiveAction ||
         modeTransitionInterruptsReplySettle ||
         (
           activeInteractionAction?.action.interruptible &&
@@ -364,6 +394,8 @@ export function createInteractionActionPlayer({
       reportTelemetry("pet_interaction_action_skipped", {
         type: action.type,
         reason,
+        actionInstanceId,
+        ...(mainTrigger?.requestId ? { requestId: mainTrigger.requestId } : {}),
         skipReason,
         ...createStrategyTelemetry(strategy, action),
         ...(activeInteractionAction ? { activeType: activeInteractionAction.action.type } : {}),
@@ -377,7 +409,9 @@ export function createInteractionActionPlayer({
     const activeAction: ActiveInteractionAction = {
       action,
       reason,
+      actionInstanceId,
       ...(strategy ? { strategy } : {}),
+      ...(mainTrigger?.requestId ? { requestId: mainTrigger.requestId } : {}),
       ...(action.motionPresetId ? { playbackPhase: "loading" } : {})
     };
     activeInteractionAction = activeAction;
@@ -492,6 +526,9 @@ export function createInteractionActionPlayer({
       return activeInteractionAction?.action.type;
     },
     playAction,
+    playMainAction(action, trigger, strategy): boolean {
+      return playAction(action, trigger.reason, strategy, trigger);
+    },
     interruptActiveMotionAction(): boolean {
       if (!activeInteractionAction?.action.motionPresetId) {
         return false;

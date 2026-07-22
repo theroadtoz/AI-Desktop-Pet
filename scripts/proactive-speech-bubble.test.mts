@@ -349,6 +349,10 @@ test("pet preload keeps proactive speech bubble allowlists aligned", () => {
 
 test("main runtime routes proactive bubbles through the unified coordinator", () => {
   const appSource = readFileSync("src/main/app.ts", "utf8");
+  const coordinatorSource = readFileSync(
+    "src/main/services/proactive-companion/proactive-bubble-coordinator.ts",
+    "utf8"
+  );
   const idleSchedulerIndex = appSource.indexOf("function scheduleIdleProactiveSpeechBubble()");
   const idleSchedulerEndIndex = appSource.indexOf("function scheduleStartupProactiveSpeechBubbleIfNeeded()");
   const idleSchedulerSource = appSource.slice(idleSchedulerIndex, idleSchedulerEndIndex);
@@ -367,8 +371,15 @@ test("main runtime routes proactive bubbles through the unified coordinator", ()
   );
   assert.match(modeSchedulerSource, /proactiveBubbleCoordinator\?\.queuePresence\("mode_presence", payload, reason\)/);
   assert.doesNotMatch(modeSchedulerSource, /sendPetActionTrigger|webContents\.send\("pet:proactive-speech-bubble"/);
-  assert.match(appSource, /requestAction: sendPetActionTrigger/);
-  assert.match(appSource, /onActionLifecycle\(\{ status: "started", reason: actionReason \}\)/);
+  assert.match(appSource, /requestAction: requestPetActionTrigger/);
+  assert.match(
+    coordinatorSource,
+    /const actionRequestId = options\.requestAction\(candidate\.actionReason\);[\s\S]*onActionLifecycle\(event\)[\s\S]*options\.showBubble\(payload\)/
+  );
+  assert.match(
+    appSource,
+    /proactiveBubbleCoordinator\?\.onActionLifecycle\(\s*lifecycleRequestId === undefined\s*\?\s*\{ status: "started", reason: actionReason \}\s*:\s*\{ status: "started", reason: actionReason, requestId: lifecycleRequestId \}\s*\)/
+  );
   assert.match(appSource, /logTelemetry\("proactive_bubble_candidate", \{/);
   assert.match(appSource, /function flushStartupProactiveSpeechBubbleCandidate\(\)/);
   assert.match(appSource, /function flushStartupProactiveSpeechBubbleCandidate\(\)[\s\S]*proactiveBubbleCoordinator\?\.onFirstFrame\(\);[\s\S]*scheduleIdleProactiveSpeechBubble\(\);/);

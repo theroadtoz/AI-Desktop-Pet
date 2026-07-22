@@ -13,7 +13,11 @@ import type {
   ProactiveSpeechBubblePayload,
   ProactiveSpeechBubbleReason
 } from "../shared/proactive-speech-bubble";
-import type { PetActionTrigger, PetActionTriggerReason } from "../shared/pet-action-trigger";
+import type {
+  PetActionTrigger,
+  PetActionTriggerReason,
+  PetActionTriggerSupersessionPolicy
+} from "../shared/pet-action-trigger";
 import type { AutomaticSituationSnapshot } from "../shared/automatic-situation-context";
 import type { PetPresentationIntent, PetRoleState } from "../shared/pet-role-state";
 import type { PetScaleAdjustmentIntent } from "../shared/pet-presentation";
@@ -131,7 +135,10 @@ const petActionTriggerReasons = [
   "state_memory_skipped",
   "state_search_cited",
   "state_proactive_bubble_visible"
-] as const;
+] as const satisfies readonly PetActionTriggerReason[];
+const petActionTriggerRequestIdPattern = /^[A-Za-z0-9_-]{1,64}$/;
+const petActionTriggerSupersessionPolicies = ["replace_active"] as const satisfies readonly PetActionTriggerSupersessionPolicy[];
+const petActionTriggerOrigin = "main_dispatch" as const;
 const scaleWheelModifierPattern = /^(Ctrl|Alt|Shift|Meta)(\+(Ctrl|Alt|Shift|Meta))*$/;
 
 function parsePetOverlayHitRegion(value: unknown): PetOverlayHitRegion | null {
@@ -296,9 +303,40 @@ function parsePetActionTrigger(value: unknown): PetActionTrigger | null {
     return null;
   }
 
-  const reason = (value as Partial<PetActionTrigger>).reason;
-  return typeof reason === "string" && petActionTriggerReasons.includes(reason as PetActionTriggerReason)
-    ? { reason }
+  const trigger = value as Partial<PetActionTrigger>;
+  if (Object.hasOwn(trigger, "origin")) {
+    return null;
+  }
+  if (
+    typeof trigger.reason !== "string" ||
+    !petActionTriggerReasons.includes(trigger.reason as PetActionTriggerReason)
+  ) {
+    return null;
+  }
+  if (trigger.requestId === undefined && trigger.supersessionPolicy === undefined) {
+    return { reason: trigger.reason, origin: petActionTriggerOrigin };
+  }
+  if (
+    typeof trigger.requestId !== "string" ||
+    !petActionTriggerRequestIdPattern.test(trigger.requestId)
+  ) {
+    return null;
+  }
+  if (trigger.supersessionPolicy === undefined) {
+    return {
+      reason: trigger.reason,
+      requestId: trigger.requestId,
+      origin: petActionTriggerOrigin
+    };
+  }
+  return trigger.reason === "chat_opened" &&
+    petActionTriggerSupersessionPolicies.includes(trigger.supersessionPolicy)
+    ? {
+        reason: trigger.reason,
+        requestId: trigger.requestId,
+        supersessionPolicy: trigger.supersessionPolicy,
+        origin: petActionTriggerOrigin
+      }
     : null;
 }
 

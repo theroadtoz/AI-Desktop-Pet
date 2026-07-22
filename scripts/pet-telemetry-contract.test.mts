@@ -60,12 +60,58 @@ const FORBIDDEN_KEYS = [
   "resourcePath",
   "motion",
   "partId",
+  "requestId",
+  "payload"
+] as const;
+const FORBIDDEN_BODY_KEYS = [
+  "apiKey",
+  "systemPrompt",
+  "prompt",
+  "providerRequestBody",
+  "messages",
+  "content",
+  "reply",
+  "factCardBody",
+  "envLocal",
+  "rawMouseTrajectory",
+  "bounds",
+  "windowBounds",
+  "windowTitle",
+  "foregroundApp",
+  "url",
+  "query",
+  "title",
+  "snippet",
+  "rawResult",
+  "text",
+  "bubbleText",
+  "path",
+  "request",
+  "response",
+  "expressionName",
+  "expressionPath",
+  "resourcePath",
+  "motion",
+  "partId",
   "payload"
 ] as const;
 
 function assertNoForbiddenKeys(payload: Record<string, unknown> | undefined): void {
   const keys = Object.keys(payload ?? {});
+  for (const key of FORBIDDEN_BODY_KEYS) {
+    assert.equal(keys.includes(key), false, `${key} should be stripped`);
+  }
+  for (const key of keys) {
+    assert.equal(PET_TELEMETRY_ALLOWED_FIELDS.includes(key as never), true, `${key} should be listed as allowed`);
+  }
+}
+
+function assertOnlySafeRequestId(payload: Record<string, unknown> | undefined): void {
+  const keys = Object.keys(payload ?? {});
   for (const key of FORBIDDEN_KEYS) {
+    if (key === "requestId") {
+      continue;
+    }
     assert.equal(keys.includes(key), false, `${key} should be stripped`);
   }
   for (const key of keys) {
@@ -96,6 +142,7 @@ test("pet interaction action started keeps only safe action summary fields", () 
     payload: {
       type: "thinking",
       reason: "click_body",
+      requestId: "req_123-ABC",
       durationMs: 1400,
       stateId: "work",
       modeId: "work",
@@ -120,6 +167,7 @@ test("pet interaction action started keeps only safe action summary fields", () 
       payload: {
         type: "thinking",
         reason: "click_body",
+        requestId: "req_123-ABC",
         durationMs: 1400,
         stateId: "work",
         modeId: "work",
@@ -129,7 +177,65 @@ test("pet interaction action started keeps only safe action summary fields", () 
         expressionPresetId: "happy"
     }
   });
-  assertNoForbiddenKeys(event?.payload);
+  assertOnlySafeRequestId(event?.payload);
+});
+
+test("pet interaction action telemetry rejects unsafe request ids and preserves local lifecycles without request ids", () => {
+  const invalidRequestId = parsePetRendererTelemetryEvent({
+    type: "pet_interaction_action_started",
+    payload: {
+      type: "thinking",
+      reason: "click_body",
+      requestId: "bad/id",
+      durationMs: 1400
+    }
+  });
+  const localStarted = parsePetRendererTelemetryEvent({
+    type: "pet_interaction_action_started",
+    payload: {
+      type: "thinking",
+      reason: "click_body",
+      durationMs: 1400
+    }
+  });
+  const finished = parsePetRendererTelemetryEvent({
+    type: "pet_interaction_action_finished",
+    payload: {
+      type: "thinking",
+      reason: "click_body",
+      requestId: "req_123-ABC",
+      terminalStatus: "interrupted"
+    }
+  });
+
+  assert.deepEqual(invalidRequestId, {
+    type: "pet_interaction_action_started",
+    payload: {
+      type: "thinking",
+      reason: "click_body",
+      durationMs: 1400
+    }
+  });
+  assert.deepEqual(localStarted, {
+    type: "pet_interaction_action_started",
+    payload: {
+      type: "thinking",
+      reason: "click_body",
+      durationMs: 1400
+    }
+  });
+  assert.deepEqual(finished, {
+    type: "pet_interaction_action_finished",
+    payload: {
+      type: "thinking",
+      reason: "click_body",
+      requestId: "req_123-ABC",
+      terminalStatus: "interrupted"
+    }
+  });
+  assertNoForbiddenKeys(invalidRequestId?.payload);
+  assertNoForbiddenKeys(localStarted?.payload);
+  assertOnlySafeRequestId(finished?.payload);
 });
 
 test("native action terminal telemetry keeps only safe preset and terminal enums", () => {

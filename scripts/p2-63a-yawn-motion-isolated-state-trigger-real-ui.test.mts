@@ -19,7 +19,6 @@ import {
   diagnoseStateSleepFailure,
   injectFramePipelineProbe,
   injectIsolatedMotionPreset,
-  injectIsolatedStateSleepPath,
   injectNativeLifecycleProbe,
   injectPlayerLifecycleProbe,
   inspectPlayerWatchdogStructure,
@@ -516,6 +515,8 @@ test("probe timing and artifact retention are explicit and canonical-duration de
 test("isolated transforms bind yawn only on the state_sleep path for the real duration", () => {
   const presetSource = readFileSync("src/shared/pet-motion-presets.ts", "utf8");
   const mainSource = readFileSync("src/renderer/pet/main.ts", "utf8");
+  const triggerSource = readFileSync("src/shared/pet-action-trigger.ts", "utf8");
+  const appSource = readFileSync("src/main/app.ts", "utf8");
   const interactionSource = readFileSync("src/renderer/pet/interaction-actions.ts", "utf8");
   const cubismSource = readFileSync("src/renderer/pet/live2d/cubism-motion.ts", "utf8");
   const patchedPreset = injectIsolatedMotionPreset(presetSource, TIMING);
@@ -523,9 +524,29 @@ test("isolated transforms bind yawn only on the state_sleep path for the real du
   assert.match(patchedPreset, /const isolatedYawnPresetCount = APPROVED_MOTION_PRESETS\.filter\(\(preset\) => preset\.id === "yawn-once"\)\.length;/u);
   assert.match(patchedPreset, /APPROVED_MOTION_PRESETS\.map\(\(preset\) => \([\s\S]*preset\.id === "yawn-once"[\s\S]*id: "yawn-once"[\s\S]*path: "motions\/yawn-once\.motion3\.json"[\s\S]*semanticKind: "sleep"[\s\S]*durationHintSeconds: 4\.986[\s\S]*loop: false/u);
   assert.match(patchedPreset, /: preset/u);
-  const patchedMain = injectIsolatedStateSleepPath(mainSource, TIMING, RUN_ID);
-  assert.match(patchedMain, /trigger\.reason === "state_sleep"[\s\S]*durationMs: 4986[\s\S]*motionPresetId: "yawn-once"/u);
-  assert.equal((interactionSource.match(/motionPresetId: "yawn-once"/gu) ?? []).length, 1);
+  const actionTriggerHandlers = mainSource.match(/window\.petApi\?\.onActionTrigger\(\(trigger\) => \{[\s\S]*?\}\) \?\? null;/gu) ?? [];
+  assert.equal(actionTriggerHandlers.length, 1);
+  assert.match(actionTriggerHandlers[0] ?? "", /getPetActionTriggerActionType\(trigger\.reason\)/u);
+  assert.match(
+    actionTriggerHandlers[0] ?? "",
+    /interactionActionPlayer\.playMainAction\([\s\S]*getPetInteractionAction\(actionType\),[\s\S]*trigger,/u
+  );
+  assert.doesNotMatch(actionTriggerHandlers[0] ?? "", /interactionActionPlayer\.playAction\(/u);
+  const stateSleepSelections = [...triggerSource.matchAll(/state_sleep:\s*"([A-Za-z][A-Za-z0-9]*)"/gu)];
+  assert.equal(stateSleepSelections.length, 1);
+  const stateSleepActionType = stateSleepSelections[0]?.[1];
+  assert.equal(stateSleepActionType, "doze");
+  assert.equal((appSource.match(/webContents\.send\("pet:action-trigger", trigger\);/gu) ?? []).length, 1);
+  assert.match(appSource, /petActionDispatchCoordinator\.dispatch\(reason, policy\)/u);
+  const selectedActionBlocks = stateSleepActionType
+    ? interactionSource.match(new RegExp(
+      `^\\s{2}\\{\\s*\\n\\s*type: "${escapeRegExp(stateSleepActionType)}",[\\s\\S]*?^\\s{2}\\},`,
+      "gmu"
+    )) ?? []
+    : [];
+  assert.equal(selectedActionBlocks.length, 1);
+  assert.equal((selectedActionBlocks[0]?.match(/\btype:\s*"doze"/gu) ?? []).length, 1);
+  assert.equal((selectedActionBlocks[0]?.match(/motionPresetId:\s*"yawn-once"/gu) ?? []).length, 1);
   const probed = injectNativeLifecycleProbe(cubismSource, RUN_ID);
   for (const stage of [
     "load_attempt", "parse_attempt", "parser_blocked", "start_attempt", "queued",
