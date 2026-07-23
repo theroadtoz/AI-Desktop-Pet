@@ -1,4 +1,4 @@
-import type { ChatApi, ConfigApi, EnvironmentActionApi, HistoryApi, LocalRuntimeApi, MemoryApi, PetApi, PetPresentationApi, ProactiveCompanionApi, ShortcutApi, UserProfileApi, WebSearchApi } from "../shared/ipc-contract";
+import type { ChatApi, ConfigApi, DialogueAffectApi, EnvironmentActionApi, HistoryApi, LocalRuntimeApi, MemoryApi, PetApi, PetPresentationApi, ProactiveCompanionApi, ShortcutApi, UserProfileApi, WebSearchApi } from "../shared/ipc-contract";
 
 declare global {
   interface Window {
@@ -12,6 +12,7 @@ declare global {
     shortcutApi?: ShortcutApi;
     proactiveCompanionApi?: ProactiveCompanionApi;
     environmentActionApi?: EnvironmentActionApi;
+    dialogueAffectApi?: DialogueAffectApi;
     userProfileApi?: UserProfileApi;
     webSearchApi?: WebSearchApi;
   }

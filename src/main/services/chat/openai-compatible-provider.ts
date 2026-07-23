@@ -264,7 +264,8 @@ async function streamChatCompletions(input: {
             input.request.userProfileContext,
             getPromptTemplateProfile(providerId),
             input.request.runtimeContext,
-            input.request.webSearchContext
+            input.request.webSearchContext,
+            input.request.emotionalDialogueContextId
           ),
           providerId,
           input.options.model

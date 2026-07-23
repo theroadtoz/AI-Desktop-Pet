@@ -62,6 +62,11 @@ import { isMemoryId, parseMemoryCardDraft, parseMemoryCardUpdate, type MemoryCar
 import type { DialogueModeId } from "../shared/dialogue-style";
 import type { PresenceModeId } from "../shared/presence-mode";
 import type { AutomaticSituationSnapshot } from "../shared/automatic-situation-context";
+import { createUnknownUserAffect } from "../shared/companion-affect";
+import {
+  DEFAULT_DIALOGUE_AFFECT_SETTINGS,
+  type DialogueAffectSettings
+} from "../shared/dialogue-affect-settings";
 import { selectEmotionPresentation } from "../shared/emotion-presentation";
 import {
   getPetInteractionActionSafeEchoMessage,
@@ -149,6 +154,35 @@ import {
   createEnvironmentActionSettingsStore,
   type EnvironmentActionSettingsStore
 } from "./services/config/environment-action-settings-store";
+import {
+  createDialogueAffectSettingsStore,
+  type DialogueAffectSettingsStore
+} from "./services/config/dialogue-affect-settings-store";
+import {
+  createBundledLocalUserAffectClassifier
+} from "./services/affect/bundled-local-user-affect-classifier";
+import {
+  createPerceivedUserAffectTrackerRegistry,
+  type PerceivedUserAffectTracker,
+  type PerceivedUserAffectTrackerRegistry
+} from "./services/affect/perceived-user-affect";
+import {
+  createBackgroundUserAffectClassificationRunner,
+  type BackgroundUserAffectClassificationRunner,
+  type UserAffectClassificationIdentity
+} from "./services/affect/background-user-affect-classification";
+import {
+  createXitaAffectCoordinator,
+  type XitaAffectCoordinator
+} from "./services/affect/xita-affect-coordinator";
+import {
+  createXitaAffectStore,
+  type XitaAffectStore
+} from "./services/affect/xita-affect-store";
+import {
+  resolveAffectDialoguePresentation,
+  type AffectDialoguePresentationResolution
+} from "./services/affect/affect-dialogue-presentation-resolver";
 import { createDesktopContextMonitor } from "./services/desktop-context/desktop-context-monitor";
 import { createWindowsDesktopContextProvider } from "./services/desktop-context/windows-desktop-context-provider";
 import {
@@ -199,7 +233,8 @@ import { createTelemetryService, type TelemetryPayload, type TelemetryService } 
 import {
   createPetActionDispatchCoordinator,
   type PetActionDispatchCoordinator,
-  type PetActionDispatchPolicy
+  type PetActionDispatchPolicy,
+  type PetActionDispatchResult
 } from "./services/pet-action-dispatch-coordinator";
 import { isTrustedIpcSender } from "./ipc/trusted-ipc-sender";
 import { createAppShutdownCoordinator } from "./lifecycle/app-shutdown-coordinator";
@@ -249,6 +284,11 @@ let proactiveCompanionSettingsStore: ProactiveCompanionSettingsStore | null = nu
 let proactiveBubbleLedgerStore: ProactiveBubbleLedgerStore | null = null;
 let proactiveBubbleCoordinator: ProactiveBubbleCoordinator | null = null;
 let environmentActionSettingsStore: EnvironmentActionSettingsStore | null = null;
+let dialogueAffectSettingsStore: DialogueAffectSettingsStore | null = null;
+let userAffectTrackerRegistry: PerceivedUserAffectTrackerRegistry | null = null;
+let xitaAffectCoordinator: XitaAffectCoordinator | null = null;
+let xitaAffectStore: XitaAffectStore | null = null;
+let removeXitaAffectListener: (() => void) | null = null;
 let shortcutPreferencesStore: ShortcutPreferencesStore | null = null;
 let userProfileStore: UserProfileStore | null = null;
 let shortcutRegistry: ShortcutRegistry | null = null;
@@ -275,7 +315,10 @@ let currentDialogueModeId: DialogueModeId = "default";
 let currentPresenceModeId: PresenceModeId = "default";
 let currentProactiveCompanionSettings: ProactiveCompanionSettings = DEFAULT_PROACTIVE_COMPANION_SETTINGS;
 let currentEnvironmentActionSettings: EnvironmentActionSettings = DEFAULT_ENVIRONMENT_ACTION_SETTINGS;
+let currentDialogueAffectSettings: DialogueAffectSettings = DEFAULT_DIALOGUE_AFFECT_SETTINGS;
 let performanceHeartbeat: NodeJS.Timeout | null = null;
+let xitaAffectTickTimer: NodeJS.Timeout | null = null;
+let userAffectClassificationRunner: BackgroundUserAffectClassificationRunner | null = null;
 let isPetLocked = false;
 let initialEdgeGlanceTimer: NodeJS.Timeout | null = null;
 let pendingModeActionStateTriggerTimer: NodeJS.Timeout | null = null;
@@ -315,6 +358,8 @@ const STARTUP_LOCAL_FALLBACK_PROVIDER_CONFIG: ProviderConfig = {
 };
 const PET_WINDOW_TITLE = "Desktop Pet";
 const PET_ACTION_TRIGGER_THROTTLE_MS = 700;
+const XITA_AFFECT_TICK_INTERVAL_MS = 60_000;
+const MAX_USER_AFFECT_CONVERSATIONS = 32;
 const PET_MODE_ACTION_STATE_TRIGGER_DELAY_MS = 2_000;
 const PET_INITIAL_EDGE_GLANCE_DELAY_MS = 2_350;
 const PET_DRAG_END_EDGE_GLANCE_DELAY_MS = 100;
@@ -324,6 +369,11 @@ const PET_STARTUP_PROACTIVE_SPEECH_BUBBLE_DELAY_MS = 3_500;
 const isAcceptanceTelemetryEnabled = process.env.AI_DESKTOP_PET_ACCEPTANCE_TELEMETRY === "1";
 const isP283aAcceptanceInjectionOnly = isAcceptanceTelemetryEnabled &&
   process.env.AI_DESKTOP_PET_P2_83A_SAFE_INJECTION === "1";
+const isP284AcceptanceObservationEnabled = isAcceptanceTelemetryEnabled &&
+  process.env.AI_DESKTOP_PET_P2_84_SAFE_OBSERVATION === "1";
+const isP284AcceptanceFixtureEnabled = isP284AcceptanceObservationEnabled &&
+  process.env.AI_DESKTOP_PET_P2_84_SAFE_FIXTURE === "1";
+const P2_84_ACCEPTANCE_MEDIUM_LOW_FIXTURE = "__p2_84_medium_low_fixture__，以后回复短一点。";
 const isP245AcceptanceSafeActive = isAcceptanceTelemetryEnabled &&
   process.env.AI_DESKTOP_PET_P2_45_SAFE_ACTIVE_CONTEXT === "1";
 const p283aAcceptanceScenario = isP283aAcceptanceInjectionOnly
@@ -906,31 +956,253 @@ function logPetTelemetry(event: { type: PetTelemetryEventType; payload?: unknown
   logTelemetry(safeEvent.type, safeEvent.payload);
 }
 
-function requestPetActionTrigger(
+type PetActionTriggerAttempt =
+  | {
+      coordinatorAttempted: false;
+      reason: "coordinator_unavailable" | "throttled";
+    }
+  | {
+      coordinatorAttempted: true;
+      result: PetActionDispatchResult;
+    };
+
+function requestPetActionTriggerWithResult(
   reason: PetActionTriggerReason,
   policy?: PetActionDispatchPolicy
-): string | null {
+): PetActionTriggerAttempt {
   if (!petActionDispatchCoordinator) {
-    return null;
+    return { coordinatorAttempted: false, reason: "coordinator_unavailable" };
   }
 
   const now = Date.now();
   const lastTriggeredAt = lastPetActionTriggerAtByReason[reason] ?? 0;
   if (now - lastTriggeredAt < PET_ACTION_TRIGGER_THROTTLE_MS) {
-    return null;
+    return { coordinatorAttempted: false, reason: "throttled" };
   }
 
   const result = petActionDispatchCoordinator.dispatch(reason, policy);
-  if (!result.accepted) {
-    return null;
+  if (result.accepted) {
+    lastPetActionTriggerAtByReason[reason] = now;
   }
 
-  lastPetActionTriggerAtByReason[reason] = now;
-  return result.requestId;
+  return { coordinatorAttempted: true, result };
+}
+
+function requestPetActionTrigger(
+  reason: PetActionTriggerReason,
+  policy?: PetActionDispatchPolicy
+): string | null {
+  const attempt = requestPetActionTriggerWithResult(reason, policy);
+  return attempt.coordinatorAttempted && attempt.result.accepted
+    ? attempt.result.requestId
+    : null;
 }
 
 function sendPetActionTrigger(reason: PetActionTriggerReason, policy?: PetActionDispatchPolicy): boolean {
   return requestPetActionTrigger(reason, policy) !== null;
+}
+
+function cancelUserAffectClassification(): void {
+  userAffectClassificationRunner?.invalidate();
+}
+
+function logDialogueAffectDecision(
+  status: "applied" | "suppressed" | "corrected",
+  confidenceBand: "low" | "medium" | "high"
+): void {
+  logTelemetry("dialogue_affect_decision", {
+    enabled: currentDialogueAffectSettings.enabled,
+    status,
+    confidenceBand,
+    transitionReason: xitaAffectCoordinator?.getSnapshot().transitionReason ?? "restart-recovery"
+  });
+}
+
+function logDialogueAffectActionDispatch(result: PetActionDispatchResult): void {
+  logTelemetry("dialogue_affect_action_dispatch", {
+    status: result.accepted ? "accepted" : "suppressed",
+    reason: result.accepted ? "accepted" : result.reason,
+    ...(result.accepted ? { requestId: result.requestId } : {})
+  });
+}
+
+function logP284AcceptanceObservation(
+  presentation: AffectDialoguePresentationResolution | null
+): void {
+  if (!isP284AcceptanceObservationEnabled) {
+    return;
+  }
+  logTelemetry("p2_84_acceptance_observation", {
+    enabled: currentDialogueAffectSettings.enabled,
+    dialogueContextApplied: Boolean(presentation?.dialogueContextId),
+    actionIntentPresent: Boolean(presentation?.action)
+  });
+}
+
+function resetDialogueAffectToCalm(): void {
+  cancelUserAffectClassification();
+  userAffectTrackerRegistry?.clear();
+  xitaAffectCoordinator?.applyUserAffect(
+    createUnknownUserAffect(Date.now(), "user-correction")
+  );
+}
+
+type PendingUserAffectInference = Readonly<{
+  identity: UserAffectClassificationIdentity;
+  conversationId: string;
+  text: string;
+  tracker: PerceivedUserAffectTracker;
+  coordinator: XitaAffectCoordinator;
+}>;
+
+type DialogueAffectTurnResolution = Readonly<{
+  presentation: AffectDialoguePresentationResolution | null;
+  backgroundInference: PendingUserAffectInference | null;
+}>;
+
+function resolveDialogueAffectForMessage(
+  conversationId: string,
+  text: string,
+  classificationIdentity: UserAffectClassificationIdentity | null
+): DialogueAffectTurnResolution {
+  if (
+    !currentDialogueAffectSettings.enabled ||
+    !userAffectTrackerRegistry ||
+    !xitaAffectCoordinator
+  ) {
+    logDialogueAffectDecision("suppressed", "low");
+    logP284AcceptanceObservation(null);
+    return { presentation: null, backgroundInference: null };
+  }
+
+  const tracker = userAffectTrackerRegistry.getOrCreate(conversationId);
+  const coordinator = xitaAffectCoordinator;
+  const decision = isP284AcceptanceFixtureEnabled &&
+    text === P2_84_ACCEPTANCE_MEDIUM_LOW_FIXTURE
+    ? {
+        affect: {
+          kind: "low",
+          confidence: "medium",
+          source: "conversational-inference",
+          observedAtMs: Date.now()
+        } as const,
+        needsInference: false,
+        correctedKinds: []
+      }
+    : tracker.perceiveText(text);
+  if (!decision.needsInference) {
+    const snapshot = coordinator.applyUserAffect(decision.affect);
+    logDialogueAffectDecision(
+      decision.affect.source === "user-correction" ? "corrected" : "applied",
+      decision.affect.confidence
+    );
+    const presentation = resolveAffectDialoguePresentation({
+      state: snapshot.state,
+      intensity: snapshot.intensity,
+      hasExplicitEvidence: decision.affect.source === "explicit-text",
+      isDefaultPresence: currentPresenceModeId === "default",
+      isSleepEligible: currentPresenceModeId === "sleep"
+    });
+    logP284AcceptanceObservation(presentation);
+    return {
+      presentation,
+      backgroundInference: null
+    };
+  }
+
+  if (
+    !classificationIdentity ||
+    classificationIdentity.conversationId !== conversationId ||
+    !userAffectClassificationRunner
+  ) {
+    logDialogueAffectDecision("suppressed", "low");
+    return { presentation: null, backgroundInference: null };
+  }
+
+  const currentSnapshot = coordinator.getSnapshot();
+  const presentation = resolveAffectDialoguePresentation({
+    state: currentSnapshot.state,
+    intensity: currentSnapshot.intensity,
+    hasExplicitEvidence: false,
+    isDefaultPresence: currentPresenceModeId === "default",
+    isSleepEligible: currentPresenceModeId === "sleep"
+  });
+  logP284AcceptanceObservation(presentation);
+  return {
+    presentation,
+    backgroundInference: {
+      identity: classificationIdentity,
+      conversationId,
+      text,
+      tracker,
+      coordinator
+    }
+  };
+}
+
+function startBackgroundUserAffectClassification(
+  inference: PendingUserAffectInference
+): void {
+  const runner = userAffectClassificationRunner;
+  if (
+    !runner ||
+    !currentDialogueAffectSettings.enabled ||
+    inference.identity.conversationId !== inference.conversationId ||
+    userAffectTrackerRegistry?.get(inference.conversationId) !== inference.tracker ||
+    xitaAffectCoordinator !== inference.coordinator
+  ) {
+    logDialogueAffectDecision("suppressed", "low");
+    return;
+  }
+
+  runner.start({
+    identity: inference.identity,
+    text: inference.text,
+    onResult(result) {
+      if (
+        !currentDialogueAffectSettings.enabled ||
+        userAffectTrackerRegistry?.get(inference.conversationId) !== inference.tracker ||
+        xitaAffectCoordinator !== inference.coordinator
+      ) {
+        return;
+      }
+      const affect = inference.tracker.acceptInference(result);
+      if (affect.kind === "unknown") {
+        logDialogueAffectDecision("suppressed", affect.confidence);
+        return;
+      }
+      inference.coordinator.applyUserAffect(affect);
+      logDialogueAffectDecision("applied", affect.confidence);
+    },
+    onFailure() {
+      logDialogueAffectDecision("suppressed", "low");
+    }
+  });
+}
+
+function requestDialogueAffectAction(
+  resolution: AffectDialoguePresentationResolution | null
+): boolean {
+  if (
+    !currentDialogueAffectSettings.enabled ||
+    !resolution?.action ||
+    isPetLocked ||
+    currentPresenceModeId !== "default" ||
+    currentDialogueModeId !== "default" ||
+    petRoleSnapshot.chatOpen ||
+    isChatInteractionActive ||
+    activeChatRequestVersion !== null ||
+    chatEngine?.hasActiveStream()
+  ) {
+    return false;
+  }
+
+  const attempt = requestPetActionTriggerWithResult(resolution.action.reason);
+  if (!attempt.coordinatorAttempted) {
+    return false;
+  }
+  logDialogueAffectActionDispatch(attempt.result);
+  return attempt.result.accepted;
 }
 
 function syncAutomaticPresenceLifecycle(): AutomaticSituationSnapshot | null {
@@ -958,6 +1230,11 @@ function applyAutomaticSituationSnapshot(snapshot: AutomaticSituationSnapshot): 
   const previousPresenceStateId = currentPresenceModeId;
   currentDialogueModeId = snapshot.conversationContextId;
   currentPresenceModeId = snapshot.presenceStateId;
+  if (currentDialogueAffectSettings.enabled) {
+    xitaAffectCoordinator?.updatePresenceState(currentPresenceModeId);
+  } else {
+    xitaAffectCoordinator?.tick();
+  }
   proactiveBubbleCoordinator?.updateDialogueMode(currentDialogueModeId);
 
   if (previousDialogueContextId !== currentDialogueModeId) {
@@ -2283,6 +2560,54 @@ app.whenReady().then(async () => {
   webSearchSettingsStore = createWebSearchSettingsStore({
     userDataPath: app.getPath("userData")
   });
+  dialogueAffectSettingsStore = createDialogueAffectSettingsStore({
+    userDataPath: app.getPath("userData")
+  });
+  currentDialogueAffectSettings = dialogueAffectSettingsStore.getSettings();
+  userAffectTrackerRegistry = createPerceivedUserAffectTrackerRegistry({
+    maxEntries: MAX_USER_AFFECT_CONVERSATIONS
+  });
+  const userAffectClassifier = createBundledLocalUserAffectClassifier({
+    getTarget() {
+      const config = bundledLlamaCppProviderConfig;
+      if (!config || config.localPresetId !== "embedded-llama-cpp") {
+        return null;
+      }
+      return {
+        baseURL: config.baseURL,
+        model: config.model,
+        localPresetId: "embedded-llama-cpp"
+      };
+    }
+  });
+  userAffectClassificationRunner = createBackgroundUserAffectClassificationRunner({
+    classifier: userAffectClassifier
+  });
+  xitaAffectStore = createXitaAffectStore({
+    userDataPath: app.getPath("userData")
+  });
+  xitaAffectCoordinator = createXitaAffectCoordinator({
+    initialState: xitaAffectStore.load()
+  });
+  removeXitaAffectListener = xitaAffectCoordinator.subscribe((snapshot) => {
+    try {
+      xitaAffectStore?.save(snapshot);
+    } catch {
+      console.warn("[affect] Xita state save failed");
+    }
+    logTelemetry("xita_affect_transition", {
+      enabled: currentDialogueAffectSettings.enabled,
+      status: currentDialogueAffectSettings.enabled ? "applied" : "suppressed",
+      transitionReason: snapshot.transitionReason
+    });
+  });
+  if (!currentDialogueAffectSettings.enabled) {
+    resetDialogueAffectToCalm();
+  }
+  xitaAffectTickTimer = setInterval(() => {
+    xitaAffectCoordinator?.tick();
+  }, XITA_AFFECT_TICK_INTERVAL_MS);
+  xitaAffectTickTimer.unref?.();
   currentDialogueModeId = "default";
   petActionRuntimePolicy.syncDialogueMode(currentDialogueModeId);
   currentPetPresentationIntent = withCurrentAccessorySelection(currentPetPresentationIntent);
@@ -3211,6 +3536,10 @@ app.whenReady().then(async () => {
     if (!submittedMessage || !transitionPetRole({ type: "request:started", requestVersion: request.requestVersion })) {
       return;
     }
+    const classificationIdentity = userAffectClassificationRunner?.beginRequest(
+      request.requestVersion,
+      request.conversationId
+    ) ?? null;
 
     proactiveBubbleCoordinator?.onUserMessage();
     coarseUserStateCoordinator?.handleUserMessage(submittedMessage.content);
@@ -3220,6 +3549,10 @@ app.whenReady().then(async () => {
     clearChatReplySustainTimer();
     let autoMemoryCaptureForActivity: ChatMemoryActivityPayload["autoCapture"] =
       createFailedMemoryActivityAutoCapture(memoryStoreForRequest);
+    let affectTurnResolution: DialogueAffectTurnResolution = {
+      presentation: null,
+      backgroundInference: null
+    };
 
     try {
       const historyMessage: HistoryMessage = {
@@ -3241,6 +3574,11 @@ app.whenReady().then(async () => {
         });
         return;
       }
+      affectTurnResolution = resolveDialogueAffectForMessage(
+        request.conversationId,
+        submittedMessage.content,
+        classificationIdentity
+      );
 
       try {
         const autoMemoryCapture = memoryStoreForRequest.captureAutoMemoriesFromLatestUserMessage({
@@ -3325,6 +3663,7 @@ app.whenReady().then(async () => {
     }
 
     void resolveWebSearchForLatestMessage(submittedMessage.content).then((webSearchResolution) => {
+      const affectPresentation = affectTurnResolution.presentation;
       const dialogueStyleContext = {
         modeId: situationSnapshotForRequest.conversationContextId,
         styleId: "gentle-desktop-companion-v1" as const
@@ -3393,13 +3732,16 @@ app.whenReady().then(async () => {
         contextBudget: contextBudget.summary,
         memoryContext,
         dialogueStyleContext,
+        ...(affectPresentation?.dialogueContextId
+          ? { emotionalDialogueContextId: affectPresentation.dialogueContextId }
+          : {}),
         runtimeContext,
         ...(webSearchResolution.context ? { webSearchContext: webSearchResolution.context } : {}),
         ...(webSearchResolution.errorType ? { webSearchErrorType: webSearchResolution.errorType } : {}),
         ...(userProfileContext ? { userProfileContext } : {})
       };
 
-      return chatEngineForRequest.startChatStream(providerRequest, {
+      const streamPromise = chatEngineForRequest.startChatStream(providerRequest, {
         onDelta(delta) {
           if (!transitionPetRole({ type: "reply:delta", requestVersion: request.requestVersion })) {
             return;
@@ -3409,10 +3751,15 @@ app.whenReady().then(async () => {
           scheduleChatReplySustainTrigger(replyLength);
           event.sender.send("chat:stream-delta", { ...delta, requestVersion: request.requestVersion });
         }
-      }).then((result) => ({ result, webSearchCitation }));
-    }).then(({ result, webSearchCitation }: {
+      });
+      if (affectTurnResolution.backgroundInference) {
+        startBackgroundUserAffectClassification(affectTurnResolution.backgroundInference);
+      }
+      return streamPromise.then((result) => ({ result, webSearchCitation, affectPresentation }));
+    }).then(({ result, webSearchCitation, affectPresentation }: {
       result: Awaited<ReturnType<ChatEngine["startChatStream"]>>;
       webSearchCitation: WebSearchCitationPayload | null;
+      affectPresentation: AffectDialoguePresentationResolution | null;
     }) => {
       try {
         const historyMessage: HistoryMessage = {
@@ -3436,7 +3783,12 @@ app.whenReady().then(async () => {
         return;
       }
 
-      const expression = selectEmotionPresentation(result);
+      const replyExpression = selectEmotionPresentation(result);
+      const expression = currentDialogueAffectSettings.enabled &&
+        affectPresentation &&
+        replyExpression.mode === "neutral"
+        ? affectPresentation.expression
+        : replyExpression;
       const accepted = transitionPetRole({
         type: "reply:completed",
         requestVersion: request.requestVersion,
@@ -3451,12 +3803,16 @@ app.whenReady().then(async () => {
         return;
       }
 
-      if (shouldTriggerReplyWarmSettle({
+      const shouldRequestReplyWarmSettle = shouldTriggerReplyWarmSettle({
         completed: true,
         hasSearchCitation: Boolean(webSearchCitation?.citations.length),
         intensity: result.intensity
-      })) {
-        sendPetActionTrigger("chat_reply_completed");
+      });
+      if (shouldRequestReplyWarmSettle) {
+        const affectActionRequested = requestDialogueAffectAction(affectPresentation);
+        if (!affectActionRequested) {
+          sendPetActionTrigger("chat_reply_completed");
+        }
       }
 
       logTelemetry("chat_stream_completed", {
@@ -3600,6 +3956,30 @@ app.whenReady().then(async () => {
       maxResults: settings.maxResults
     });
     return settings;
+  });
+
+  ipcMain.handle("dialogueAffect:get-settings", (event) => {
+    if (!isChatSender(event) || !dialogueAffectSettingsStore) {
+      throw new Error("Unauthorized dialogue affect request");
+    }
+
+    return dialogueAffectSettingsStore.getSettings();
+  });
+
+  ipcMain.handle("dialogueAffect:set-settings", (event, update: unknown) => {
+    if (!isChatSender(event) || !dialogueAffectSettingsStore) {
+      throw new Error("Unauthorized dialogue affect request");
+    }
+
+    currentDialogueAffectSettings = dialogueAffectSettingsStore.saveSettings(update);
+    if (!currentDialogueAffectSettings.enabled) {
+      resetDialogueAffectToCalm();
+    }
+    logDialogueAffectDecision(
+      currentDialogueAffectSettings.enabled ? "applied" : "suppressed",
+      "low"
+    );
+    return currentDialogueAffectSettings;
   });
 
   ipcMain.handle("localRuntime:diagnose-local-model", async (event) => {
@@ -4098,6 +4478,7 @@ app.on("window-all-closed", () => {
 function quiesceApp(): void {
   openChatWindowAdapter = null;
   pendingChatWindowOpen = false;
+  cancelUserAffectClassification();
   if (activeChatRequestVersion !== null) {
     chatEngine?.abortActiveStream();
     transitionPetRole({ type: "request:cancelled", requestVersion: activeChatRequestVersion });
@@ -4127,6 +4508,27 @@ function quiesceApp(): void {
   removeAutomaticSituationListener = null;
   automaticSituationCoordinator?.dispose();
   automaticSituationCoordinator = null;
+  if (xitaAffectTickTimer) {
+    clearInterval(xitaAffectTickTimer);
+    xitaAffectTickTimer = null;
+  }
+  cancelUserAffectClassification();
+  const finalXitaAffectSnapshot = xitaAffectCoordinator?.tick();
+  if (finalXitaAffectSnapshot) {
+    try {
+      xitaAffectStore?.save(finalXitaAffectSnapshot);
+    } catch {
+      console.warn("[affect] final Xita state save failed");
+    }
+  }
+  removeXitaAffectListener?.();
+  removeXitaAffectListener = null;
+  xitaAffectCoordinator = null;
+  xitaAffectStore = null;
+  userAffectClassificationRunner = null;
+  userAffectTrackerRegistry?.clear();
+  userAffectTrackerRegistry = null;
+  dialogueAffectSettingsStore = null;
   desktopContextMonitor.dispose();
   if (initialEdgeGlanceTimer) {
     clearTimeout(initialEdgeGlanceTimer);

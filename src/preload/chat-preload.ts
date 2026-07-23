@@ -11,6 +11,7 @@ import type {
   ConfigApi,
   ConfigApiKeyRequest,
   ConfigSetApiKeyRequest,
+  DialogueAffectApi,
   EnvironmentActionApi,
   HistoryApi,
   LocalRuntimeApi,
@@ -28,6 +29,10 @@ import type {
   EnvironmentActionSettings,
   EnvironmentActionSettingsUpdate
 } from "../shared/environment-action-settings";
+import type {
+  DialogueAffectSettings,
+  DialogueAffectSettingsUpdate
+} from "../shared/dialogue-affect-settings";
 import type { Conversation, ConversationSummary, HistoryMessage } from "../shared/chat-history";
 import type { MemoryCard, MemoryCardDraft, MemoryCardUpdate, MemorySummary } from "../shared/chat-memory";
 import type { ProviderConfig, ProviderStatus } from "../shared/provider-config";
@@ -70,6 +75,9 @@ const defaultEnvironmentActionSettings: EnvironmentActionSettings = {
   basicEnabled: true,
   musicEnabled: true,
   explicitGameContextEnabled: true
+};
+const defaultDialogueAffectSettings: DialogueAffectSettings = {
+  enabled: true
 };
 const chatStreamErrorTypes = [
   "aborted",
@@ -356,6 +364,29 @@ function parseEnvironmentActionSettingsUpdate(value: unknown): EnvironmentAction
     parsed.explicitGameContextEnabled = update.explicitGameContextEnabled;
   }
   return parsed;
+}
+
+function parseDialogueAffectSettings(value: unknown): DialogueAffectSettings {
+  const settings = value as Partial<DialogueAffectSettings> | null;
+  return {
+    enabled: typeof settings?.enabled === "boolean"
+      ? settings.enabled
+      : defaultDialogueAffectSettings.enabled
+  };
+}
+
+function parseDialogueAffectSettingsUpdate(value: unknown): DialogueAffectSettingsUpdate | null {
+  const update = value as Partial<DialogueAffectSettingsUpdate> | null;
+  if (!update || typeof update !== "object" || Array.isArray(update)) {
+    return null;
+  }
+  if (Object.keys(update).some((key) => key !== "enabled")) {
+    return null;
+  }
+  if ("enabled" in update && typeof update.enabled !== "boolean") {
+    return null;
+  }
+  return { ...update };
 }
 
 function normalizeUserProfileText(value: unknown): string | null {
@@ -2177,6 +2208,21 @@ const environmentActionApi: EnvironmentActionApi = {
   }
 };
 
+const dialogueAffectApi: DialogueAffectApi = {
+  async getSettings() {
+    return parseDialogueAffectSettings(await ipcRenderer.invoke("dialogueAffect:get-settings"));
+  },
+  async setSettings(update) {
+    const parsedUpdate = parseDialogueAffectSettingsUpdate(update);
+    if (!parsedUpdate) {
+      throw new Error("Invalid dialogue affect settings");
+    }
+    return parseDialogueAffectSettings(
+      await ipcRenderer.invoke("dialogueAffect:set-settings", parsedUpdate)
+    );
+  }
+};
+
 const userProfileApi: UserProfileApi = {
   async getUserProfile() {
     const profile = await ipcRenderer.invoke("userProfile:get");
@@ -2273,5 +2319,6 @@ contextBridge.exposeInMainWorld("petPresentationApi", petPresentationApi);
 contextBridge.exposeInMainWorld("shortcutApi", shortcutApi);
 contextBridge.exposeInMainWorld("proactiveCompanionApi", proactiveCompanionApi);
 contextBridge.exposeInMainWorld("environmentActionApi", environmentActionApi);
+contextBridge.exposeInMainWorld("dialogueAffectApi", dialogueAffectApi);
 contextBridge.exposeInMainWorld("userProfileApi", userProfileApi);
 contextBridge.exposeInMainWorld("webSearchApi", webSearchApi);

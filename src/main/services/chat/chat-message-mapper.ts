@@ -2,6 +2,10 @@ import type { ChatMessage } from "../../../shared/chat";
 import type { ChatProviderMessage, ChatRuntimeContext } from "../../../shared/chat-provider";
 import type { MemoryInjection } from "../../../shared/chat-memory";
 import type { DialogueStyleContext } from "../../../shared/dialogue-style";
+import {
+  isAffectDialogueContextId,
+  type AffectDialogueContextId
+} from "../../../shared/companion-affect";
 import type { UserProfilePromptContext } from "../../../shared/user-profile";
 import type { WebSearchContext } from "../../../shared/web-search";
 import { formatWebSearchContextForPrompt } from "../search/web-search-provider";
@@ -26,6 +30,15 @@ const LOCAL_SMALL_MODEL_SYSTEM_PROMPT = [
   "技术专名准确/离线不编实时",
   "密钥私标不存记复述索要"
 ].join("\n");
+const AFFECT_DIALOGUE_CONTEXT_PROMPTS: Record<AffectDialogueContextId, string> = {
+  "warm-positive": "语气可以轻快真诚，但不夸张。",
+  "gentle-curious": "带一点好奇心自然接话，不要追问过多。",
+  "quiet-support": "本轮安静接住，不擅自判断用户状态。",
+  "steady-serious": "语气稳重清晰，不渲染情绪。",
+  "light-playful": "语气可以带一点轻松玩笑，但不夸张也不冒犯。",
+  "gentle-embarrassed": "语气稍微收一点，真诚自然地接话。",
+  "slow-sleepy": "语气放缓简短，不把用户的疲惫当作自己的状态。"
+};
 
 export function mapChatMessagesToOpenAICompatible(
   messages: readonly ChatProviderMessage[],
@@ -34,7 +47,8 @@ export function mapChatMessagesToOpenAICompatible(
   userProfileContext?: UserProfilePromptContext,
   promptTemplateProfile: PromptTemplateProfile = "cloud-chat",
   runtimeContext?: ChatRuntimeContext,
-  webSearchContext?: WebSearchContext
+  webSearchContext?: WebSearchContext,
+  emotionalDialogueContextId?: AffectDialogueContextId
 ): OpenAICompatibleMessage[] {
   const systemMessage = createSystemMessage(promptTemplateProfile);
   const personaMessage = createPersonaMessage(promptTemplateProfile);
@@ -43,6 +57,7 @@ export function mapChatMessagesToOpenAICompatible(
   const userProfileMessage = createUserProfileMessage(userProfileContext);
   const memoryMessage = createMemoryMessage(memoryContext);
   const webSearchMessage = createWebSearchMessage(webSearchContext);
+  const emotionalDialogueMessage = createEmotionalDialogueMessage(emotionalDialogueContextId);
   const sensitiveDataBoundaryMessage = createSensitiveDataBoundaryMessage(messages);
   const localTurnHintMessage = createLocalTurnHintMessage(messages, promptTemplateProfile);
 
@@ -54,6 +69,7 @@ export function mapChatMessagesToOpenAICompatible(
     ...(userProfileMessage ? [userProfileMessage] : []),
     ...(memoryMessage ? [memoryMessage] : []),
     ...(webSearchMessage ? [webSearchMessage] : []),
+    ...(emotionalDialogueMessage ? [emotionalDialogueMessage] : []),
     ...(sensitiveDataBoundaryMessage ? [sensitiveDataBoundaryMessage] : []),
     ...(localTurnHintMessage ? [localTurnHintMessage] : []),
     ...messages.map((message) => ({
@@ -61,6 +77,14 @@ export function mapChatMessagesToOpenAICompatible(
       content: message.content
     }))
   ];
+}
+
+function createEmotionalDialogueMessage(
+  contextId?: AffectDialogueContextId
+): OpenAICompatibleMessage | null {
+  return isAffectDialogueContextId(contextId)
+    ? { role: "system", content: `本轮语气：${AFFECT_DIALOGUE_CONTEXT_PROMPTS[contextId]}` }
+    : null;
 }
 
 function createLocalTurnHintMessage(

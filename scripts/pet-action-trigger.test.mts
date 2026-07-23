@@ -501,15 +501,23 @@ test("opening chat clears the current action before dispatching chat_opened", as
 
 test("ordinary pet action sends retain the 700ms per-reason throttle", async () => {
   const source = await readFile(new URL("../src/main/app.ts", import.meta.url), "utf8");
-  const wrapperStart = source.indexOf("function requestPetActionTrigger(");
-  const wrapperEnd = source.indexOf("function syncAutomaticPresenceLifecycle()", wrapperStart);
+  const dispatchStart = source.indexOf("function requestPetActionTriggerWithResult(");
+  const wrapperStart = source.indexOf("function requestPetActionTrigger(", dispatchStart);
+  const wrapperEnd = source.indexOf("function sendPetActionTrigger(", wrapperStart);
+  const dispatchSource = source.slice(dispatchStart, wrapperStart);
   const wrapperSource = source.slice(wrapperStart, wrapperEnd);
 
+  assert.notEqual(dispatchStart, -1);
+  assert.notEqual(wrapperStart, -1);
+  assert.notEqual(wrapperEnd, -1);
   assert.match(source, /const PET_ACTION_TRIGGER_THROTTLE_MS = 700;/);
-  assert.match(wrapperSource, /const lastTriggeredAt = lastPetActionTriggerAtByReason\[reason\] \?\? 0;/);
-  assert.match(wrapperSource, /if \(now - lastTriggeredAt < PET_ACTION_TRIGGER_THROTTLE_MS\) \{/);
-  assert.match(wrapperSource, /lastPetActionTriggerAtByReason\[reason\] = now;/);
-  assert.doesNotMatch(wrapperSource, /delete lastPetActionTriggerAtByReason|lastPetActionTriggerAtByReason = \{\}/);
+  assert.match(dispatchSource, /const lastTriggeredAt = lastPetActionTriggerAtByReason\[reason\] \?\? 0;/);
+  assert.match(dispatchSource, /if \(now - lastTriggeredAt < PET_ACTION_TRIGGER_THROTTLE_MS\) \{/);
+  assert.match(dispatchSource, /lastPetActionTriggerAtByReason\[reason\] = now;/);
+  assert.doesNotMatch(dispatchSource, /delete lastPetActionTriggerAtByReason|lastPetActionTriggerAtByReason = \{\}/);
+  assert.match(wrapperSource, /const attempt = requestPetActionTriggerWithResult\(reason, policy\);/);
+  assert.match(wrapperSource, /return attempt\.coordinatorAttempted && attempt\.result\.accepted/);
+  assert.doesNotMatch(wrapperSource, /petActionDispatchCoordinator\.dispatch\(/);
 });
 
 test("pet renderer rapid touch combo annotates the fixed flustered state", async () => {

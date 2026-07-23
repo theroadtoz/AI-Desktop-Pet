@@ -33,6 +33,10 @@ import type {
   EnvironmentActionSettingsUpdate
 } from "./environment-action-settings";
 import type {
+  DialogueAffectSettings,
+  DialogueAffectSettingsUpdate
+} from "./dialogue-affect-settings";
+import type {
   WebSearchCitationPayload,
   WebSearchConnectionTestResult,
   WebSearchSettings,
@@ -302,6 +306,11 @@ export type EnvironmentActionApi = {
   getSettings(): Promise<EnvironmentActionSettings>;
   getStatus(): Promise<EnvironmentActionRuntimeStatus>;
   setSettings(update: EnvironmentActionSettingsUpdate): Promise<EnvironmentActionSettings>;
+};
+
+export type DialogueAffectApi = {
+  getSettings(): Promise<DialogueAffectSettings>;
+  setSettings(update: DialogueAffectSettingsUpdate): Promise<DialogueAffectSettings>;
 };
 
 export type UserProfileApi = {

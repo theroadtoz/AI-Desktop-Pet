@@ -52,6 +52,10 @@ import {
   type EnvironmentActionSettings
 } from "../../shared/environment-action-settings";
 import {
+  DEFAULT_DIALOGUE_AFFECT_SETTINGS,
+  type DialogueAffectSettings
+} from "../../shared/dialogue-affect-settings";
+import {
   applyChatTurnDelta,
   createInitialChatTurnState,
   finishChatTurn,
@@ -176,6 +180,9 @@ const environmentBasicEnabled = document.querySelector<HTMLInputElement>("#envir
 const environmentMusicEnabled = document.querySelector<HTMLInputElement>("#environment-music-enabled");
 const environmentExplicitGameContextEnabled = document.querySelector<HTMLInputElement>("#environment-explicit-game-context-enabled");
 const saveEnvironmentActionSettingsButton = document.querySelector<HTMLButtonElement>("#save-environment-action-settings-button");
+const dialogueAffectStatus = document.querySelector<HTMLElement>("#dialogue-affect-status");
+const dialogueAffectEnabled = document.querySelector<HTMLInputElement>("#dialogue-affect-enabled");
+const saveDialogueAffectSettingsButton = document.querySelector<HTMLButtonElement>("#save-dialogue-affect-settings-button");
 const shortcutList = document.querySelector<HTMLElement>("#shortcut-list");
 const shortcutStatus = document.querySelector<HTMLElement>("#shortcut-status");
 const webSearchStatus = document.querySelector<HTMLElement>("#web-search-status");
@@ -254,6 +261,7 @@ if (
   !proactiveCompanionStatus || !proactiveCadenceControls ||
   !proactiveMemorySourceBubbles || !proactiveSearchSourceBubbles || !saveProactiveCompanionSettingsButton ||
   !environmentActionStatus || !environmentBasicEnabled || !environmentMusicEnabled || !environmentExplicitGameContextEnabled || !saveEnvironmentActionSettingsButton ||
+  !dialogueAffectStatus || !dialogueAffectEnabled || !saveDialogueAffectSettingsButton ||
   !shortcutList || !shortcutStatus ||
   !webSearchStatus || !webSearchEnabled || !webSearchProfile || !webSearchProfileNote ||
   !webSearchTimeout || !webSearchMaxResults || !webSearchSaveButton || !webSearchRefreshButton || !webSearchTestButton ||
@@ -358,6 +366,9 @@ const environmentBasicEnabledField = environmentBasicEnabled;
 const environmentMusicEnabledField = environmentMusicEnabled;
 const environmentExplicitGameContextEnabledField = environmentExplicitGameContextEnabled;
 const saveEnvironmentActionSettingsAction = saveEnvironmentActionSettingsButton;
+const dialogueAffectStatusBox = dialogueAffectStatus;
+const dialogueAffectEnabledField = dialogueAffectEnabled;
+const saveDialogueAffectSettingsAction = saveDialogueAffectSettingsButton;
 const shortcutListElement = shortcutList;
 const shortcutStatusBox = shortcutStatus;
 const webSearchStatusBox = webSearchStatus;
@@ -726,6 +737,45 @@ async function saveEnvironmentActionSettings(): Promise<void> {
     setSettingsFeedback("环境动作感知设置已保存。", "ready");
   } catch {
     setSettingsFeedback("无法保存环境动作感知设置，请稍后重试。", "fallback");
+  }
+}
+
+function renderDialogueAffectSettings(settings: DialogueAffectSettings): void {
+  dialogueAffectEnabledField.checked = settings.enabled;
+  dialogueAffectStatusBox.textContent = settings.enabled
+    ? "对话情感适配：已开启。"
+    : "对话情感适配：已关闭。";
+  dialogueAffectStatusBox.dataset.state = settings.enabled ? "ready" : "fallback";
+}
+
+async function refreshDialogueAffectSettings(): Promise<void> {
+  if (!window.dialogueAffectApi) {
+    renderDialogueAffectSettings(DEFAULT_DIALOGUE_AFFECT_SETTINGS);
+    dialogueAffectStatusBox.textContent = "对话情感适配设置不可用。";
+    dialogueAffectStatusBox.dataset.state = "fallback";
+    return;
+  }
+  try {
+    renderDialogueAffectSettings(await window.dialogueAffectApi.getSettings());
+  } catch {
+    renderDialogueAffectSettings(DEFAULT_DIALOGUE_AFFECT_SETTINGS);
+    dialogueAffectStatusBox.textContent = "无法读取对话情感适配设置。";
+    dialogueAffectStatusBox.dataset.state = "fallback";
+  }
+}
+
+async function saveDialogueAffectSettings(): Promise<void> {
+  if (!window.dialogueAffectApi || chatTurnState.isReplying) {
+    return;
+  }
+  try {
+    const settings = await window.dialogueAffectApi.setSettings({
+      enabled: dialogueAffectEnabledField.checked
+    });
+    renderDialogueAffectSettings(settings);
+    setSettingsFeedback("对话情感设置已保存。", "ready");
+  } catch {
+    setSettingsFeedback("无法保存对话情感设置，请稍后重试。", "fallback");
   }
 }
 
@@ -3178,6 +3228,12 @@ saveEnvironmentActionSettingsAction.addEventListener("click", () => {
   }
 });
 
+saveDialogueAffectSettingsAction.addEventListener("click", () => {
+  if (!chatTurnState.isReplying) {
+    void saveDialogueAffectSettings();
+  }
+});
+
 chatTabAction.addEventListener("click", () => {
   setActivePage("chat");
 });
@@ -3598,6 +3654,7 @@ window.chatApi?.focusInput();
 setMemorySessionStatus(null);
 void refreshProactiveCompanionSettings();
 void refreshEnvironmentActionSettings();
+void refreshDialogueAffectSettings();
 void refreshUserProfile();
 void refreshProviderStatus();
 void refreshWebSearchSettings();

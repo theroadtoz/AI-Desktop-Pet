@@ -137,6 +137,20 @@
                 <button id="save-environment-action-settings-button" class="button-light" type="button">保存环境感知设置</button>
               </div>
             </section>
+            <section class="content-stack" aria-labelledby="dialogue-affect-settings-title">
+              <h3 id="dialogue-affect-settings-title" class="settings-section-title">对话情感适配</h3>
+              <p id="dialogue-affect-status" class="status-box" data-state="ready" aria-live="polite">对话情感适配：默认开启。</p>
+              <label class="field-label">
+                <span>
+                  <input id="dialogue-affect-enabled" type="checkbox" />
+                  根据当前对话调整陪伴语气
+                </span>
+              </label>
+              <p class="selection-note">仅根据当前聊天短暂适配语气；不会保存你的情绪、聊天原文或推断结果。关闭后，不再进行对话情感适配。</p>
+              <div class="settings-actions">
+                <button id="save-dialogue-affect-settings-button" class="button-light" type="button">保存对话情感设置</button>
+              </div>
+            </section>
           </section>
           <section id="memory-page" class="settings-page memory-page content-stack" hidden aria-label="本地记忆">
             <div class="memory-actions">

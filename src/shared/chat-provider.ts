@@ -2,6 +2,7 @@ import type { ChatMessage, ChatRole } from "./chat";
 import type { MemoryInjection } from "./chat-memory";
 import type { DialogueStyleContext } from "./dialogue-style";
 import type { EmotionClassification } from "./emotion";
+import type { AffectDialogueContextId } from "./companion-affect";
 import type { ProviderId } from "./provider-config";
 import type { UserProfilePromptContext } from "./user-profile";
 import type { WebSearchContext, WebSearchErrorType } from "./web-search";
@@ -40,6 +41,7 @@ export type ChatRequest = {
   contextBudget?: ChatContextBudgetSummary;
   memoryContext?: MemoryInjection;
   dialogueStyleContext?: DialogueStyleContext;
+  emotionalDialogueContextId?: AffectDialogueContextId;
   userProfileContext?: UserProfilePromptContext;
   runtimeContext?: ChatRuntimeContext;
   webSearchContext?: WebSearchContext;
