@@ -75,6 +75,38 @@ const startupLineIds = new Set([
   "startup_presence_focus"
 ]);
 
+const safeCandidateSkipReasons = new Set([
+  "engagement_blocked",
+  "interruptibility_not_allowed",
+  "system_unavailable",
+  "context_allowed",
+  "context_lifecycle_unavailable",
+  "context_lifecycle_system_locked",
+  "context_lifecycle_suspended",
+  "context_lifecycle_sleep",
+  "context_presentation_busy",
+  "context_model_busy",
+  "context_chat_visible",
+  "context_user_active",
+  "context_affect_disabled",
+  "context_affect_action_chat_visible",
+  "context_focus_suppressed",
+  "context_proactive_off",
+  "context_source_disabled",
+  "context_environment_disabled",
+  "context_engagement_suppressed",
+  "context_engagement_deferred",
+  "context_affect_quiet_environment",
+  "context_explicit_game_proactive_owns_presentation"
+]);
+
+const safeSuppressionSkipReasons = new Set([
+  "engagement_blocked",
+  "interruptibility_not_allowed",
+  "system_unavailable",
+  "context_engagement_suppressed"
+]);
+
 const forbiddenOutputPatterns = [
   /sk-[A-Za-z0-9]/,
   /\.env\.local/i,
@@ -121,9 +153,7 @@ async function main(signal) {
     const startupShownActionFirst = startupOutcome.terminalStatus === "shown" &&
       startupCadence.passed && startupBubble.reason === "startup_presence" &&
       startupLineIds.has(startupBubble.lineId) && inspectBubbleSafety(startupBubble);
-    const startupSuppressedSafely = startupOutcome.terminalStatus === "skipped" &&
-      ["engagement_blocked", "interruptibility_not_allowed", "system_unavailable"].includes(startupOutcome.skipReason) &&
-      startupBubble.state === "hidden" && startupBubble.textLength === 0;
+    const startupSuppressedSafely = isSafeSuppression(startupOutcome, startupBubble);
     checks.startupCadenceOutcomeSafe = startupShownActionFirst || startupSuppressedSafely;
     checks.startupUsesCoordinatorActionFirst = startupShownActionFirst || startupSuppressedSafely;
     observations.startupBubble = summarizeBubble(startupBubble);
@@ -144,9 +174,7 @@ async function main(signal) {
     const idleOutcome = await waitForCandidateTerminal(signal, "idle_presence", idleStartIndex, 9_000);
     const idleCadence = inspectCandidateActionFirst("idle_presence", idleStartIndex);
     const idleBubble = await inspectBubble(signal, pet);
-    const idleSuppressedSafely = idleOutcome.terminalStatus === "skipped" &&
-      ["engagement_blocked", "interruptibility_not_allowed", "system_unavailable"].includes(idleOutcome.skipReason) &&
-      idleBubble.state === "hidden" && idleBubble.textLength === 0;
+    const idleSuppressedSafely = isSafeSuppression(idleOutcome, idleBubble);
     const idleShownActionFirst = idleOutcome.terminalStatus === "shown" &&
       idleCadence.passed && idleBubble.reason === "idle_presence" &&
       safeLineIds.has(idleBubble.lineId) && inspectBubbleSafety(idleBubble);
@@ -641,10 +669,20 @@ async function waitForCandidateTerminal(signal, candidateId, afterIndex, timeout
   if (!event) throw new Error("Timed out waiting for candidate terminal");
   return {
     terminalStatus: event.payload?.status,
-    skipReason: ["engagement_blocked", "interruptibility_not_allowed", "system_unavailable"].includes(event.payload?.skipReason)
-      ? event.payload.skipReason
-      : null
+    skipReason: sanitizeCandidateSkipReason(event.payload?.skipReason)
   };
+}
+
+function sanitizeCandidateSkipReason(skipReason) {
+  return typeof skipReason === "string" && safeCandidateSkipReasons.has(skipReason)
+    ? skipReason
+    : null;
+}
+
+function isSafeSuppression(outcome, bubble) {
+  return outcome.terminalStatus === "skipped" &&
+    safeSuppressionSkipReasons.has(outcome.skipReason) &&
+    bubble.state === "hidden" && bubble.textLength === 0;
 }
 
 async function waitForLowFrequencyQueuedDecision(signal, afterIndex, timeoutMs) {
