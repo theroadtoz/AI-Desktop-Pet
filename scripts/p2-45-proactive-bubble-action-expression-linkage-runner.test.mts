@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 
 const packageJson = JSON.parse(readFileSync("package.json", "utf8")) as {
@@ -146,6 +149,54 @@ test("p2-45 runner validates memory and search sourced bubbles drive fixed actio
   }
 });
 
+test("p2-45 begins DOM and action-first observation in parallel after release", async () => {
+  const wait = Function(
+    "waitForSourcedActionFirstLinkageTelemetry",
+    "waitForBubbleVisible",
+    "summarizeBubble",
+    "summarizeProactiveBubble",
+    "summarizePetAction",
+    "summarizePetActionTerminal",
+    "inspectCandidateActionFirst",
+    `return (${extractFunctionSource("waitForSourcedActionLinkage")});`
+  )(
+    () => new Promise((resolve) => {
+      actionStarted = true;
+      resolveAction = resolve;
+    }),
+    () => new Promise((resolve) => {
+      bubbleStarted = true;
+      resolveBubble = resolve;
+    }),
+    (bubble: Record<string, unknown>) => bubble,
+    (bubble: Record<string, unknown>) => bubble,
+    (action: Record<string, unknown>) => action,
+    (action: Record<string, unknown>) => action,
+    () => ({ actionFirstOrdering: true })
+  ) as (pet: unknown, options: Record<string, unknown>) => Promise<Record<string, unknown>>;
+
+  let actionStarted = false;
+  let bubbleStarted = false;
+  let resolveAction: ((value: unknown) => void) | undefined;
+  let resolveBubble: ((value: unknown) => void) | undefined;
+  const options = {
+    candidateId: "search_citation_safe",
+    lineId: "idle_presence_search_citation",
+    expectedAction: { reason: "state_search_cited" },
+    sourceStartIndex: 10,
+    releaseIndex: 12
+  };
+
+  const pending = wait({}, options);
+  assert.equal(actionStarted, true);
+  assert.equal(bubbleStarted, true);
+  resolveBubble?.({ reason: "source_presence" });
+  resolveAction?.({ candidateTerminalEvent: { __index: 13 } });
+  const result = await pending;
+  assert.deepEqual(result.bubble, { reason: "source_presence" });
+  assert.deepEqual(result.coordinator, { actionFirstOrdering: true });
+});
+
 test("p2-45 waits for high-priority action terminals before releasing sourced candidates", () => {
   assert.match(runnerSource, /ACTION_STABLE_MS = 350/);
   assert.match(runnerSource, /waitForHighPriorityActionsSettled\(10_000\)/);
@@ -245,8 +296,7 @@ test("p2-45 proves coordinator action-first ordering for conflict-free shown pat
 });
 
 test("p2-45 selects only a complete source action-first chain after early terminal candidates", () => {
-  const select = Function(`return (${extractBalancedFunctionSource("selectSourcedActionFirstLinkage")})`)() as
-    (events: Array<Record<string, unknown>>, options: Record<string, unknown>) => Record<string, { __index: number; payload: { status?: string } }> | null;
+  const select = createSourcedActionFirstSelector();
   const expectedAction = {
     reason: "state_memory_injected",
     type: "quietNod",
@@ -259,16 +309,17 @@ test("p2-45 selects only a complete source action-first chain after early termin
     event(2, "proactive_bubble_candidate", { candidateId: "memory_safe", status: "skipped", skipReason: "context_chat_visible" }),
     event(3, "proactive_bubble_candidate", { candidateId: "memory_safe", status: "queued" }),
     event(4, "proactive_bubble_candidate", { candidateId: "memory_safe", status: "attempted" }),
-    event(5, "pet_interaction_action_started", expectedAction),
+    event(5, "pet_interaction_action_started", { ...expectedAction, requestId: "memory-request" }),
     event(6, "proactive_speech_bubble", { status: "shown", reason: "source_presence", lineId: "idle_presence_memory_safe" }),
     event(7, "proactive_bubble_candidate", { candidateId: "memory_safe", status: "shown" }),
-    event(8, "pet_interaction_action_finished", { reason: expectedAction.reason })
+    event(8, "pet_interaction_action_finished", { reason: expectedAction.reason, requestId: "memory-request" })
   ];
   const selected = select(events, {
     candidateId: "memory_safe",
     lineId: "idle_presence_memory_safe",
     expectedAction,
-    afterIndex: 0
+    sourceStartIndex: 0,
+    releaseIndex: 2
   });
   assert.equal(selected?.candidateTerminalEvent.__index, 7);
   assert.equal(selected?.actionEvent.__index, 5);
@@ -276,18 +327,36 @@ test("p2-45 selects only a complete source action-first chain after early termin
   assert.equal(selected?.proactiveBubbleEvent.__index, 6);
   assert.deepEqual(selected?.earlyTerminalEvents.map((item) => item.payload.status), ["skipped"]);
 
+  const staleQueuedCycle = select([
+    event(1, "proactive_bubble_candidate", { candidateId: "memory_safe", status: "queued" }),
+    event(2, "proactive_bubble_candidate", { candidateId: "memory_safe", status: "skipped", skipReason: "context_chat_visible" }),
+    event(4, "proactive_bubble_candidate", { candidateId: "memory_safe", status: "attempted" }),
+    event(5, "pet_interaction_action_started", { ...expectedAction, requestId: "stale-request" }),
+    event(6, "proactive_speech_bubble", { status: "shown", reason: "source_presence", lineId: "idle_presence_memory_safe" }),
+    event(7, "proactive_bubble_candidate", { candidateId: "memory_safe", status: "shown" }),
+    event(8, "pet_interaction_action_finished", { reason: expectedAction.reason, requestId: "stale-request" })
+  ], {
+    candidateId: "memory_safe",
+    lineId: "idle_presence_memory_safe",
+    expectedAction,
+    sourceStartIndex: 0,
+    releaseIndex: 2
+  });
+  assert.equal(staleQueuedCycle, null);
+
   const wrongLifecycleOrder = select([
     event(1, "proactive_bubble_candidate", { candidateId: "memory_safe", status: "queued" }),
     event(2, "proactive_bubble_candidate", { candidateId: "memory_safe", status: "attempted" }),
-    event(3, "pet_interaction_action_started", expectedAction),
-    event(4, "pet_interaction_action_finished", { reason: expectedAction.reason }),
+    event(3, "pet_interaction_action_started", { ...expectedAction, requestId: "wrong-order" }),
+    event(4, "pet_interaction_action_finished", { reason: expectedAction.reason, requestId: "wrong-order" }),
     event(5, "proactive_speech_bubble", { status: "shown", reason: "source_presence", lineId: "idle_presence_memory_safe" }),
     event(6, "proactive_bubble_candidate", { candidateId: "memory_safe", status: "shown" })
   ], {
     candidateId: "memory_safe",
     lineId: "idle_presence_memory_safe",
     expectedAction,
-    afterIndex: 0
+    sourceStartIndex: 0,
+    releaseIndex: 0
   });
   assert.equal(wrongLifecycleOrder, null);
 
@@ -298,9 +367,95 @@ test("p2-45 selects only a complete source action-first chain after early termin
     candidateId: "memory_safe",
     lineId: "idle_presence_memory_safe",
     expectedAction,
-    afterIndex: 0
+    sourceStartIndex: 0,
+    releaseIndex: 0
   });
   assert.equal(rejected, null);
+});
+
+test("p2-45 source linkage allows pre-release queueing but requires post-release matching lifecycle", () => {
+  const select = createSourcedActionFirstSelector();
+  const expectedAction = {
+    reason: "state_search_cited",
+    type: "searchNoteSettle",
+    stateId: "search-cited",
+    expressionPresetId: "glasses"
+  };
+  const event = (index: number, type: string, payload: Record<string, unknown>) => ({ __index: index, type, payload });
+  const options = {
+    candidateId: "search_citation_safe",
+    lineId: "idle_presence_search_citation",
+    expectedAction,
+    sourceStartIndex: 10,
+    releaseIndex: 13
+  };
+  const valid = select([
+    event(11, "proactive_bubble_candidate", { candidateId: options.candidateId, status: "queued" }),
+    event(12, "pet_interaction_action_finished", { ...expectedAction, requestId: "request-old" }),
+    event(14, "proactive_bubble_candidate", { candidateId: options.candidateId, status: "attempted" }),
+    event(15, "pet_interaction_action_started", { ...expectedAction, requestId: "request-current" }),
+    event(16, "proactive_speech_bubble", { status: "shown", reason: "source_presence", lineId: options.lineId }),
+    event(17, "proactive_bubble_candidate", { candidateId: options.candidateId, status: "shown" }),
+    event(18, "pet_interaction_action_finished", { ...expectedAction, requestId: "request-current" })
+  ], options);
+  assert.equal(valid?.actionTerminalEvent.__index, 18);
+
+  const terminalWrongRequest = select([
+    event(11, "proactive_bubble_candidate", { candidateId: options.candidateId, status: "queued" }),
+    event(14, "proactive_bubble_candidate", { candidateId: options.candidateId, status: "attempted" }),
+    event(15, "pet_interaction_action_started", { ...expectedAction, requestId: "request-current" }),
+    event(16, "proactive_speech_bubble", { status: "shown", reason: "source_presence", lineId: options.lineId }),
+    event(17, "proactive_bubble_candidate", { candidateId: options.candidateId, status: "shown" }),
+    event(18, "pet_interaction_action_finished", { ...expectedAction, requestId: "request-other" })
+  ], options);
+  assert.equal(terminalWrongRequest, null);
+
+  const skippedMatchingRequest = select([
+    event(11, "proactive_bubble_candidate", { candidateId: options.candidateId, status: "queued" }),
+    event(14, "proactive_bubble_candidate", { candidateId: options.candidateId, status: "attempted" }),
+    event(15, "pet_interaction_action_started", { ...expectedAction, requestId: "request-current" }),
+    event(16, "proactive_speech_bubble", { status: "shown", reason: "source_presence", lineId: options.lineId }),
+    event(17, "proactive_bubble_candidate", { candidateId: options.candidateId, status: "shown" }),
+    event(18, "pet_interaction_action_skipped", { ...expectedAction, requestId: "request-current" }),
+    event(19, "pet_interaction_action_finished", { ...expectedAction, requestId: "request-current" })
+  ], options);
+  assert.equal(skippedMatchingRequest, null);
+
+  const preReleaseAction = select([
+    event(11, "proactive_bubble_candidate", { candidateId: options.candidateId, status: "queued" }),
+    event(12, "proactive_bubble_candidate", { candidateId: options.candidateId, status: "attempted" }),
+    event(13, "pet_interaction_action_started", { ...expectedAction, requestId: "request-current" }),
+    event(14, "proactive_speech_bubble", { status: "shown", reason: "source_presence", lineId: options.lineId }),
+    event(15, "proactive_bubble_candidate", { candidateId: options.candidateId, status: "shown" }),
+    event(16, "pet_interaction_action_finished", { ...expectedAction, requestId: "request-current" })
+  ], options);
+  assert.equal(preReleaseAction, null);
+
+  const expiredCandidate = select([
+    event(11, "proactive_bubble_candidate", { candidateId: options.candidateId, status: "queued" }),
+    event(12, "proactive_bubble_candidate", { candidateId: options.candidateId, status: "expired" })
+  ], options);
+  assert.equal(expiredCandidate, null);
+
+  const instanceFallback = select([
+    event(11, "proactive_bubble_candidate", { candidateId: options.candidateId, status: "queued" }),
+    event(14, "proactive_bubble_candidate", { candidateId: options.candidateId, status: "attempted" }),
+    event(15, "pet_interaction_action_started", { ...expectedAction, actionInstanceId: "instance-current" }),
+    event(16, "proactive_speech_bubble", { status: "shown", reason: "source_presence", lineId: options.lineId }),
+    event(17, "proactive_bubble_candidate", { candidateId: options.candidateId, status: "shown" }),
+    event(18, "pet_interaction_action_finished", { ...expectedAction, actionInstanceId: "instance-current" })
+  ], options);
+  assert.equal(instanceFallback?.actionTerminalEvent.__index, 18);
+
+  const instanceMismatch = select([
+    event(11, "proactive_bubble_candidate", { candidateId: options.candidateId, status: "queued" }),
+    event(14, "proactive_bubble_candidate", { candidateId: options.candidateId, status: "attempted" }),
+    event(15, "pet_interaction_action_started", { ...expectedAction, actionInstanceId: "instance-current" }),
+    event(16, "proactive_speech_bubble", { status: "shown", reason: "source_presence", lineId: options.lineId }),
+    event(17, "proactive_bubble_candidate", { candidateId: options.candidateId, status: "shown" }),
+    event(18, "pet_interaction_action_finished", { ...expectedAction, actionInstanceId: "instance-other" })
+  ], options);
+  assert.equal(instanceMismatch, null);
 });
 
 test("p2-45 normalizes the closed P2-85 context skip reasons without accepting arbitrary prefixes", () => {
@@ -391,6 +546,52 @@ test("p2-45 search uses the supported bundled production profile and restores it
   assert.match(runnerSource, /name: "search"/);
 });
 
+test("p2-45 search reply probe keeps only closed metadata and reports citation readiness states", () => {
+  const probeSource = extractFunctionSource("installReplyDoneProbe");
+  const evidenceSource = extractFunctionSource("waitForSearchReplyEvidence");
+  const diagnosticSource = extractFunctionSource("buildSafeDiagnostic");
+  assert.match(probeSource, /window\.chatApi\?\.onReplyDone/);
+  assert.match(probeSource, /requestVersion: Number\.isSafeInteger\(payload\.requestVersion\)/);
+  assert.match(probeSource, /hasCitation: Boolean\(payload\.webSearchCitation\)/);
+  assert.match(probeSource, /count: events\.length \+ 1/);
+  assert.doesNotMatch(probeSource, /payload\.(?:text|webSearchCitation\.(?:url|title|snippet)|error|query)/);
+  assert.match(evidenceSource, /normalizeSearchReplyEvidence/);
+  assert.match(diagnosticSource, /searchReplyEvidence/);
+  assert.match(diagnosticSource, /searchReplyDoneCount/);
+
+  const normalizeSource = extractFunctionSource("normalizeSearchReplyEvidence");
+  assert.match(normalizeSource, /reply_done_missing/);
+  assert.match(normalizeSource, /reply_done_without_citation/);
+  assert.match(normalizeSource, /citation_dom_missing/);
+  const normalize = Function(`return (${normalizeSource})`)() as
+    (value: { replyDoneObserved?: boolean; replyDoneWithCitation?: boolean; citationDomObserved?: boolean }) => string;
+  assert.equal(normalize({ replyDoneObserved: false }), "reply_done_missing");
+  assert.equal(normalize({ replyDoneObserved: true, replyDoneWithCitation: false }), "reply_done_without_citation");
+  assert.equal(normalize({ replyDoneObserved: true, replyDoneWithCitation: true, citationDomObserved: false }), "citation_dom_missing");
+  assert.equal(normalize({ replyDoneObserved: true, replyDoneWithCitation: true, citationDomObserved: true }), "ready");
+});
+
+test("p2-45 bundled search fixture completes an offline JSON-RPC citation round trip", { timeout: 5_000 }, async () => {
+  const fixtureSource = Function(`return (${extractBalancedFunctionSource("createBundledMcpSearchFixtureSource")})`)() as () => string;
+  const fixtureDir = mkdtempSync(join(tmpdir(), "p2-45-mcp-fixture-"));
+  const fixturePath = join(fixtureDir, "fixture.cjs");
+  writeFileSync(fixturePath, fixtureSource(), "utf8");
+  const child = spawn(process.execPath, [fixturePath], { stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
+  const client = createJsonRpcFixtureClient(child);
+  try {
+    const initialized = await client.request("initialize", {});
+    assert.equal(initialized?.capabilities?.tools !== undefined, true);
+    const listed = await client.request("tools/list", {});
+    const searchTool = listed?.tools?.find((tool: { name?: unknown }) => tool?.name === "search");
+    assert.ok(searchTool);
+    const called = await client.request("tools/call", { name: "search", arguments: { query: "fixture" } });
+    assert.equal(hasNormalizableFixtureCitation(called), true);
+  } finally {
+    await client.close();
+    rmSync(fixtureDir, { recursive: true, force: true });
+  }
+});
+
 test("p2-45 restores the bundled fixture after every cleanup attempt even when cleanup fails", async () => {
   const cleanupAll = Function(`return (${extractFunctionSource("cleanupScenariosAndRestore")})`)() as
     (contexts: string[], cleanup: (context: string) => Promise<void>, restore: () => void) => Promise<void>;
@@ -412,12 +613,16 @@ test("p2-45 restores the bundled fixture after every cleanup attempt even when c
 
 test("p2-45 requires source action start terminal and shown ordering", () => {
   const selectorSource = extractBalancedFunctionSource("selectSourcedActionFirstLinkage");
+  const terminalSelectorSource = extractFunctionSource("findMatchingActionTerminal");
   assert.match(selectorSource, /pet_interaction_action_started/);
-  assert.match(selectorSource, /pet_interaction_action_finished/);
+  assert.match(terminalSelectorSource, /pet_interaction_action_finished/);
+  assert.match(terminalSelectorSource, /pet_interaction_action_skipped/);
+  assert.match(selectorSource, /sourceStartIndex/);
+  assert.match(selectorSource, /releaseIndex/);
   assert.match(selectorSource, /proactive_speech_bubble/);
   assert.match(selectorSource, /event\.payload\?\.lineId === options\.lineId/);
   assert.match(selectorSource, /event\.__index > actionEvent\.__index[\s\S]*event\.__index < candidateTerminalEvent\.__index/);
-  assert.match(selectorSource, /event\.__index > candidateTerminalEvent\.__index/);
+  assert.match(terminalSelectorSource, /event\.__index > afterIndex/);
   assert.match(runnerSource, /actionTerminalObserved: observation\.actionTerminal\.terminalStatus === "finished"/);
   assert.match(runnerSource, /observation\.bubble\.reason === "source_presence"/);
 });
@@ -689,6 +894,110 @@ function extractActionSettlingHelpers() {
       }
     ) => Set<string>;
   };
+}
+
+function createSourcedActionFirstSelector() {
+  return Function(`
+    ${extractFunctionSource("isSameActionLifecycle")}
+    ${extractFunctionSource("findMatchingActionTerminal")}
+    return (${extractBalancedFunctionSource("selectSourcedActionFirstLinkage")});
+  `)() as (events: Array<Record<string, unknown>>, options: Record<string, unknown>) => Record<string, {
+    __index: number;
+    payload: { status?: string };
+  }> | null;
+}
+
+function createJsonRpcFixtureClient(child: ReturnType<typeof spawn>) {
+  let nextId = 1;
+  let outputBuffer = "";
+  let closed = false;
+  const pending = new Map<number, {
+    resolve: (result: any) => void;
+    reject: (error: Error) => void;
+    timeout: NodeJS.Timeout;
+  }>();
+
+  const rejectAll = (error: Error) => {
+    for (const request of pending.values()) {
+      clearTimeout(request.timeout);
+      request.reject(error);
+    }
+    pending.clear();
+  };
+  const consumeLine = (line: string) => {
+    try {
+      const response = JSON.parse(line) as { id?: unknown; result?: unknown };
+      if (typeof response.id !== "number") return;
+      const request = pending.get(response.id);
+      if (!request) return;
+      clearTimeout(request.timeout);
+      pending.delete(response.id);
+      request.resolve(response.result);
+    } catch {
+      rejectAll(new Error("fixture_invalid_json"));
+    }
+  };
+
+  child.stdout.setEncoding("utf8");
+  child.stdout.on("data", (chunk: string) => {
+    outputBuffer += chunk;
+    for (;;) {
+      const newline = outputBuffer.indexOf("\n");
+      if (newline < 0) return;
+      const line = outputBuffer.slice(0, newline).trim();
+      outputBuffer = outputBuffer.slice(newline + 1);
+      if (line) consumeLine(line);
+    }
+  });
+  child.stderr.resume();
+  child.on("error", () => rejectAll(new Error("fixture_process_error")));
+  child.on("exit", () => {
+    closed = true;
+    rejectAll(new Error("fixture_process_closed"));
+  });
+
+  return {
+    request(method: string, params: Record<string, unknown>) {
+      const id = nextId++;
+      return new Promise<any>((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          pending.delete(id);
+          reject(new Error("fixture_request_timeout"));
+        }, 1_500);
+        pending.set(id, { resolve, reject, timeout });
+        child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
+      });
+    },
+    async close() {
+      if (!closed) child.kill();
+      await new Promise<void>((resolve) => {
+        const timeout = setTimeout(resolve, 500);
+        child.once("exit", () => {
+          clearTimeout(timeout);
+          resolve();
+        });
+      });
+    }
+  };
+}
+
+function hasNormalizableFixtureCitation(result: unknown): boolean {
+  const content = (result as { content?: unknown })?.content;
+  if (!Array.isArray(content)) return false;
+  return content.some((entry) => {
+    if (!entry || typeof entry !== "object" || typeof (entry as { text?: unknown }).text !== "string") return false;
+    try {
+      const parsed = JSON.parse((entry as { text: string }).text) as { results?: unknown };
+      return Array.isArray(parsed.results) && parsed.results.some((item) => (
+        item && typeof item === "object" &&
+        typeof (item as { title?: unknown }).title === "string" &&
+        typeof (item as { snippet?: unknown }).snippet === "string" &&
+        typeof (item as { url?: unknown }).url === "string"
+      ));
+    } catch {
+      return false;
+    }
+  });
 }
 
 function extractBalancedFunctionSource(name: string): string {

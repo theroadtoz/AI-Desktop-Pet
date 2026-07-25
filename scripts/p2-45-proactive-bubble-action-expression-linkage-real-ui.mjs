@@ -30,6 +30,7 @@ let currentCaseId = "memory";
 let currentStage = "memory_startup";
 let runnerSignal = null;
 let scenarioStartedAtMs = Date.now();
+let currentSearchReplyEvidence = { status: "not_started", count: 0 };
 
 const allowedDomDatasetKeys = new Set(["lineId", "reason", "state"]);
 const forbiddenDomDatasetKeys = new Set(["eventId", "timeBand", "safeContextTag", "contextTag"]);
@@ -357,9 +358,11 @@ async function runMemoryActionLinkageCase(pet) {
 }
 
 async function runSearchActionLinkageCase(pet) {
+  currentSearchReplyEvidence = { status: "reply_done_missing", count: 0 };
   const chat = await openChatFromPet(pet);
   await waitForHighPriorityActionsSettled(10_000);
   await waitFor(chat, "Boolean(window.memoryApi?.clearCards) && Boolean(window.webSearchApi?.setSettings)");
+  await installReplyDoneProbe(chat);
   await evaluate(chat, `
     window.memoryApi.clearCards()
       .then(() => window.memoryApi.setEnabled(false))
@@ -368,13 +371,12 @@ async function runSearchActionLinkageCase(pet) {
   setDiagnosticStage("search", "search_profile");
   await configureSearch(chat);
   const beforeCitationCount = await evaluate(chat, "document.querySelectorAll('.message-citations').length");
+  const beforeReplyDoneCount = await evaluate(chat, "(window.__p245ReplyDoneEvents ?? []).length");
   await waitForHighPriorityActionsSettled(5_000);
   const sourceStartIndex = lastTelemetryIndex();
   setDiagnosticStage("search", "search_trigger");
   await sendChatTurnAndWait(chat, "请联网搜索 P2-45 主动气泡动作联动验收。");
-  await waitFor(chat, `document.querySelectorAll('.message-citations').length > ${beforeCitationCount}`, {
-    timeoutMs: 20_000
-  });
+  await waitForSearchReplyEvidence(chat, { beforeCitationCount, beforeReplyDoneCount, timeoutMs: 20_000 });
   setDiagnosticStage("search", "search_settle");
   await waitForHighPriorityActionsSettled(10_000);
   const releaseIndex = lastTelemetryIndex();
@@ -424,6 +426,60 @@ async function installMemoryInjectionProbe(chat) {
       return true;
     })()
   `);
+}
+
+async function installReplyDoneProbe(chat) {
+  await evaluate(chat, `
+    (() => {
+      window.__p245ReplyDoneEvents = [];
+      if (!window.__p245ReplyDoneProbeInstalled) {
+        window.chatApi?.onReplyDone((payload) => {
+          const events = window.__p245ReplyDoneEvents;
+          events.push({
+            requestVersion: Number.isSafeInteger(payload.requestVersion) && payload.requestVersion > 0 && payload.requestVersion <= 1_000_000
+              ? payload.requestVersion
+              : 0,
+            hasCitation: Boolean(payload.webSearchCitation),
+            count: events.length + 1
+          });
+        });
+        window.__p245ReplyDoneProbeInstalled = true;
+      }
+      return true;
+    })()
+  `);
+}
+
+async function waitForSearchReplyEvidence(chat, { beforeCitationCount, beforeReplyDoneCount, timeoutMs }) {
+  const deadline = Date.now() + timeoutMs;
+  let evidence = { replyDoneObserved: false, replyDoneWithCitation: false, citationDomObserved: false, count: 0 };
+  while (Date.now() < deadline) {
+    throwIfRunnerAborted();
+    evidence = await evaluate(chat, `
+      (() => {
+        const events = (window.__p245ReplyDoneEvents ?? []).slice(${beforeReplyDoneCount});
+        const replyDoneObserved = events.some((event) => Number.isSafeInteger(event?.requestVersion) && event.requestVersion > 0);
+        const replyDoneWithCitation = events.some((event) => event?.hasCitation === true);
+        return {
+          replyDoneObserved,
+          replyDoneWithCitation,
+          citationDomObserved: document.querySelectorAll('.message-citations').length > ${beforeCitationCount},
+          count: events.length
+        };
+      })()
+    `);
+    currentSearchReplyEvidence = {
+      status: normalizeSearchReplyEvidence(evidence),
+      count: normalizeSearchReplyDoneCount(evidence.count)
+    };
+    if (evidence.replyDoneObserved && evidence.replyDoneWithCitation && evidence.citationDomObserved) return evidence;
+    await sleep(150);
+  }
+  currentSearchReplyEvidence = {
+    status: normalizeSearchReplyEvidence(evidence),
+    count: normalizeSearchReplyDoneCount(evidence.count)
+  };
+  throw new Error(currentSearchReplyEvidence.status);
 }
 
 async function createSafeMemorySeed(chat) {
@@ -584,25 +640,29 @@ async function submitChatForm(chat) {
 }
 
 async function waitForSourcedActionLinkage(pet, options) {
-  const linkage = await waitForSourcedActionFirstLinkageTelemetry({
-    candidateId: options.candidateId,
-    lineId: options.lineId,
-    expectedAction: options.expectedAction,
-    afterIndex: options.sourceStartIndex,
-    timeoutMs: 20_000
-  });
+  const [linkage, bubbleRaw] = await Promise.all([
+    waitForSourcedActionFirstLinkageTelemetry({
+      candidateId: options.candidateId,
+      lineId: options.lineId,
+      expectedAction: options.expectedAction,
+      sourceStartIndex: options.sourceStartIndex,
+      releaseIndex: options.releaseIndex,
+      timeoutMs: 20_000
+    }),
+    waitForBubbleVisible(pet, {
+      reason: "source_presence",
+      lineId: options.lineId,
+      timeoutMs: 20_000
+    })
+  ]);
   if (!linkage) throw new Error("candidate_action_first_linkage_timeout");
-  const bubbleRaw = await waitForBubbleVisible(pet, {
-    reason: "source_presence",
-    lineId: options.lineId,
-    timeoutMs: 20_000
-  });
 
   return {
     bubble: summarizeBubble(bubbleRaw),
     coordinator: inspectCandidateActionFirst({
       candidateId: options.candidateId,
-      afterIndex: options.sourceStartIndex,
+      sourceStartIndex: options.sourceStartIndex,
+      releaseIndex: options.releaseIndex,
       actionReason: options.expectedAction.reason,
       lineId: options.lineId,
       candidateTerminalEvent: linkage.candidateTerminalEvent,
@@ -773,21 +833,32 @@ async function waitForSourcedActionFirstLinkageTelemetry(options) {
 }
 
 function selectSourcedActionFirstLinkage(events, options) {
-  const scopedEvents = events.filter((event) => event.__index > options.afterIndex);
-  const candidateEvents = scopedEvents.filter((event) =>
+  const sourceStartIndex = options.sourceStartIndex ?? options.afterIndex ?? -1;
+  const releaseIndex = options.releaseIndex ?? sourceStartIndex;
+  const sourceEvents = events.filter((event) => event.__index > sourceStartIndex);
+  const releasedEvents = sourceEvents.filter((event) => event.__index > releaseIndex);
+  const candidateEvents = sourceEvents.filter((event) =>
     event.type === "proactive_bubble_candidate" && event.payload?.candidateId === options.candidateId);
   const earlyTerminalEvents = candidateEvents.filter((event) =>
     ["skipped", "expired"].includes(event.payload?.status));
-  const shownCandidates = candidateEvents.filter((event) => event.payload?.status === "shown");
+  const shownCandidates = candidateEvents.filter((event) =>
+    event.payload?.status === "shown" && event.__index > releaseIndex);
 
   for (const candidateTerminalEvent of shownCandidates) {
     const attemptedEvent = [...candidateEvents].reverse().find((event) =>
-      event.payload?.status === "attempted" && event.__index < candidateTerminalEvent.__index);
+      event.payload?.status === "attempted" &&
+      event.__index > releaseIndex &&
+      event.__index < candidateTerminalEvent.__index);
+    const priorCandidateTerminalEvent = attemptedEvent && [...candidateEvents].reverse().find((event) =>
+      ["skipped", "expired", "shown"].includes(event.payload?.status) &&
+      event.__index < attemptedEvent.__index);
     const queuedEvent = attemptedEvent && [...candidateEvents].reverse().find((event) =>
-      event.payload?.status === "queued" && event.__index < attemptedEvent.__index);
+      event.payload?.status === "queued" &&
+      event.__index > (priorCandidateTerminalEvent?.__index ?? sourceStartIndex) &&
+      event.__index < attemptedEvent.__index);
     if (!attemptedEvent || !queuedEvent) continue;
 
-    const actionEvent = scopedEvents.find((event) =>
+    const actionEvent = releasedEvents.find((event) =>
       event.type === "pet_interaction_action_started" &&
       event.__index > attemptedEvent.__index &&
       event.__index < candidateTerminalEvent.__index &&
@@ -797,17 +868,14 @@ function selectSourcedActionFirstLinkage(events, options) {
       event.payload?.expressionPresetId === options.expectedAction.expressionPresetId);
     if (!actionEvent) continue;
 
-    const proactiveBubbleEvent = scopedEvents.find((event) =>
+    const proactiveBubbleEvent = releasedEvents.find((event) =>
       event.type === "proactive_speech_bubble" &&
       event.payload?.status === "shown" &&
       event.payload?.reason === "source_presence" &&
       event.payload?.lineId === options.lineId &&
       event.__index > actionEvent.__index &&
       event.__index < candidateTerminalEvent.__index);
-    const actionTerminalEvent = scopedEvents.find((event) =>
-      event.type === "pet_interaction_action_finished" &&
-      event.__index > candidateTerminalEvent.__index &&
-      event.payload?.reason === options.expectedAction.reason);
+    const actionTerminalEvent = findMatchingActionTerminal(releasedEvents, actionEvent, candidateTerminalEvent.__index);
     if (!actionTerminalEvent || !proactiveBubbleEvent) continue;
 
     return {
@@ -820,6 +888,27 @@ function selectSourcedActionFirstLinkage(events, options) {
   }
 
   return null;
+}
+
+function findMatchingActionTerminal(events, actionEvent, afterIndex) {
+  const terminal = events.find((event) =>
+    event.__index > afterIndex &&
+    (event.type === "pet_interaction_action_finished" || event.type === "pet_interaction_action_skipped") &&
+    isSameActionLifecycle(actionEvent, event));
+  return terminal?.type === "pet_interaction_action_finished" ? terminal : null;
+}
+
+function isSameActionLifecycle(actionEvent, terminalEvent) {
+  const actionPayload = actionEvent?.payload ?? {};
+  const terminalPayload = terminalEvent?.payload ?? {};
+  if (typeof actionPayload.requestId === "string" && actionPayload.requestId.length > 0) {
+    return terminalPayload.requestId === actionPayload.requestId;
+  }
+  if (typeof actionPayload.actionInstanceId === "string" && actionPayload.actionInstanceId.length > 0) {
+    return terminalPayload.actionInstanceId === actionPayload.actionInstanceId;
+  }
+  return typeof actionPayload.reason === "string" && actionPayload.reason.length > 0 &&
+    terminalPayload.reason === actionPayload.reason;
 }
 
 async function waitForProactiveBubble({ status, lineId, afterIndex, timeoutMs }) {
@@ -864,9 +953,10 @@ async function waitForTelemetry(predicate, timeoutMs) {
   return null;
 }
 
-function inspectCandidateActionFirst({ candidateId, afterIndex, actionReason, lineId, candidateTerminalEvent, actionEvent, actionTerminalEvent, proactiveBubbleEvent }) {
-  const events = readTelemetryEvents().filter((event) => event.__index > afterIndex);
+function inspectCandidateActionFirst({ candidateId, sourceStartIndex, releaseIndex, actionReason, lineId, candidateTerminalEvent, actionEvent, actionTerminalEvent, proactiveBubbleEvent }) {
+  const events = readTelemetryEvents();
   const candidateEvents = events.filter((event) =>
+    event.__index > sourceStartIndex &&
     event.type === "proactive_bubble_candidate" && event.payload?.candidateId === candidateId);
   const linkage = selectSourcedActionFirstLinkage(events, {
     candidateId,
@@ -877,7 +967,8 @@ function inspectCandidateActionFirst({ candidateId, afterIndex, actionReason, li
       stateId: actionEvent?.payload?.stateId,
       expressionPresetId: actionEvent?.payload?.expressionPresetId
     },
-    afterIndex: -1
+    sourceStartIndex,
+    releaseIndex
   });
   return {
     candidateId,
@@ -954,6 +1045,8 @@ function buildSafeDiagnostic(checks) {
     actionLifecycle,
     terminalStatus,
     bubbleReason: normalizeBubbleReason(lastBubble?.payload?.reason),
+    searchReplyEvidence: currentCaseId === "search" ? currentSearchReplyEvidence.status : "not_applicable",
+    searchReplyDoneCount: currentCaseId === "search" ? currentSearchReplyEvidence.count : 0,
     startupCandidateStatus: normalizeCandidateStatus(lastStartupCandidate?.payload?.status),
     startupSkipReason: normalizeCandidateSkipReason(lastStartupCandidate?.payload?.skipReason),
     startupAppearanceLifecycle: normalizeActionLifecycle(lastStartupAppearance?.type),
@@ -1044,6 +1137,17 @@ function normalizeBubbleReason(value) {
   return ["source_presence", "startup_presence", "idle_presence", "mode_presence"].includes(value)
     ? value
     : "none";
+}
+
+function normalizeSearchReplyEvidence(value) {
+  if (!value?.replyDoneObserved) return "reply_done_missing";
+  if (!value.replyDoneWithCitation) return "reply_done_without_citation";
+  if (!value.citationDomObserved) return "citation_dom_missing";
+  return "ready";
+}
+
+function normalizeSearchReplyDoneCount(value) {
+  return Number.isSafeInteger(value) && value >= 0 && value <= 20 ? value : 0;
 }
 
 function summarizeProactiveBubble(event) {
