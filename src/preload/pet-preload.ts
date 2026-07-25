@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type {
   PetApi,
+  P285AcceptanceScenarioId,
   PetWindowMotionFeedback,
   RenderHealth,
   PetDragDelta,
@@ -21,6 +22,13 @@ import type {
 import type { AutomaticSituationSnapshot } from "../shared/automatic-situation-context";
 import type { PetPresentationIntent, PetRoleState } from "../shared/pet-role-state";
 import type { PetScaleAdjustmentIntent } from "../shared/pet-presentation";
+
+const P2_85_ACCEPTANCE_SCENARIO_IDS = Object.freeze([
+  "chat_opened_replace_active",
+  "reply_visible_generic_once",
+  "explicit_game_single_presentation",
+  "proactive_suppress_single_defer"
+] as const satisfies readonly P285AcceptanceScenarioId[]);
 
 const petRoleStates = [
   "idle",
@@ -466,6 +474,17 @@ const api: PetApi = {
   async getNativeWindowHandleForAcceptance() {
     const value = await ipcRenderer.invoke("pet:p2-83a-native-window-handle");
     return typeof value === "string" && /^\d{1,20}$/u.test(value) ? value : null;
+  },
+  async runP285ScenarioForAcceptance(scenarioId: P285AcceptanceScenarioId) {
+    if (!P2_85_ACCEPTANCE_SCENARIO_IDS.includes(scenarioId)) {
+      return false;
+    }
+    const result = await ipcRenderer.invoke("pet:p2-85-run-scenario", scenarioId);
+    return result === true;
+  },
+  async resetP285AcceptanceBaseline() {
+    const result = await ipcRenderer.invoke("pet:p2-85-reset-baseline");
+    return result === true;
   },
   onInjectWebGLContextLoss(handler: () => void) {
     const listener = (): void => {

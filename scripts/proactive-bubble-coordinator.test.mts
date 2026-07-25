@@ -15,6 +15,8 @@ type CoarseUserState = import("../src/main/services/automatic-situation/coarse-u
 type ProactiveSpeechBubblePayload = import("../src/shared/proactive-speech-bubble").ProactiveSpeechBubblePayload;
 type PetActionTriggerReason = import("../src/shared/pet-action-trigger").PetActionTriggerReason;
 
+const HOUR_MS = 60 * 60_000;
+
 function state(update: Partial<CoarseUserState> = {}): CoarseUserState {
   return Object.freeze({
     activity: "active",
@@ -32,6 +34,9 @@ function createHarness(options: {
   mono?: number;
   chatVisible?: boolean;
   acceptanceInjectionOnly?: boolean;
+  longSilenceMs?: number;
+  longWorkMs?: number;
+  resolveContextGate?: (candidateId: string) => { decision: "allow" | "defer" | "suppress"; reason: string; replay: "never" | "existing-single-chat-close"; actionIntent: "none"; priority: number };
 } = {}) {
   let nowMs = options.now ?? new Date(2026, 6, 20, 8).getTime();
   let monoMs = options.mono ?? 0;
@@ -75,10 +80,11 @@ function createHarness(options: {
     reportDecision(decision) {
       decisions.push(decision);
     },
+    resolveContextGate: options.resolveContextGate,
     now: () => nowMs,
     monotonicNow: () => monoMs,
-    longSilenceMs: 100,
-    longWorkMs: 100,
+    longSilenceMs: options.longSilenceMs ?? 100,
+    longWorkMs: options.longWorkMs ?? 100,
     acceptanceInjectionOnly: options.acceptanceInjectionOnly
   });
   coordinator.updateSettings({ cadence: "normal", memorySourceBubbles: true, searchSourceBubbles: true });
@@ -91,6 +97,7 @@ function createHarness(options: {
     get opened() { return opened; },
     get cleared() { return cleared; },
     advance(ms: number) { nowMs += ms; monoMs += ms; },
+    setMonotonic(value: number) { monoMs = value; },
     setGates(update: Partial<typeof gates>) {
       gates = { ...gates, ...update };
       coordinator.updateRuntimeGates(gates);
@@ -301,6 +308,45 @@ test("return, evening transition, long work exit, and long silence create closed
   h.coordinator.dispose();
 });
 
+test("accelerated 2h long silence remains one-shot across 4h and 8h ticks", () => {
+  const h = createHarness({ longSilenceMs: 2 * HOUR_MS });
+  h.coordinator.onUserMessage();
+
+  h.advance(2 * HOUR_MS - 1);
+  h.coordinator.tick();
+  assert.equal(h.requested.length, 0);
+
+  h.advance(1);
+  h.coordinator.tick();
+  assert.deepEqual(h.requested.map((item) => item.reason), ["state_listen"]);
+  h.coordinator.onActionLifecycle({
+    status: "skipped",
+    reason: "state_listen",
+    requestId: h.requested.at(-1)!.requestId
+  });
+
+  h.advance(2 * HOUR_MS);
+  h.coordinator.tick();
+  h.advance(4 * HOUR_MS);
+  h.coordinator.tick();
+  assert.deepEqual(h.requested.map((item) => item.reason), ["state_listen"]);
+  h.coordinator.dispose();
+});
+
+test("monotonic rollback is clamped before a 2h long-work threshold and recovers by 8h", () => {
+  const h = createHarness({ mono: 4 * HOUR_MS, longWorkMs: 2 * HOUR_MS });
+  h.coordinator.updateDialogueMode("work");
+  h.setMonotonic(2 * HOUR_MS);
+  h.coordinator.updateDialogueMode("default");
+  assert.equal(h.requested.length, 0);
+
+  h.coordinator.updateDialogueMode("work");
+  h.setMonotonic(8 * HOUR_MS);
+  h.coordinator.updateDialogueMode("default");
+  assert.deepEqual(h.requested.map((item) => item.reason), ["long_work_session_complete"]);
+  h.coordinator.dispose();
+});
+
 test("suppressed candidate becomes terminal and is not replayed", () => {
   const h = createHarness();
   h.coordinator.updateCoarseState(state({ media: "stopped", engagement: "suppressed", interruptibility: "suppressed" }));
@@ -466,6 +512,138 @@ test("resolved legacy presence keeps its selected line and action behind action-
   h.coordinator.onActionLifecycle({ status: "started", reason: "state_work", requestId: h.requested.at(-1)!.requestId });
   assert.equal(h.shown.at(-1)?.lineId, "mode_presence_work");
   h.coordinator.dispose();
+});
+
+test("context suppression is terminal and never replayed after gates recover", () => {
+  const h = createHarness({
+    resolveContextGate: () => ({
+      decision: "suppress", reason: "affect_quiet_environment", replay: "never", actionIntent: "none", priority: 0
+    })
+  });
+  h.coordinator.queueSafeCandidateForAcceptance("evening_companion");
+  assert.equal(h.requested.length, 0);
+  assert.equal(h.decisions.at(-1)?.skipReason, "context_affect_quiet_environment");
+  h.coordinator.tick();
+  assert.equal(h.requested.length, 0);
+  h.coordinator.dispose();
+});
+
+test("context defer survives repeated chat and user-active updates then gets one pre-ttl close attempt", () => {
+  let interaction: "chat_visible" | "user_active" | "idle" = "chat_visible";
+  const h = createHarness({
+    chatVisible: true,
+    resolveContextGate: () => interaction !== "idle"
+      ? { decision: "defer", reason: interaction, replay: "existing-single-chat-close", actionIntent: "none", priority: 0 }
+      : { decision: "allow", reason: "allowed", replay: "never", actionIntent: "none", priority: 0 }
+  });
+  h.coordinator.queuePresence("mode_presence", {
+    lineId: "mode_presence_work", reason: "mode_presence", durationMs: 4_200
+  }, "state_work");
+  assert.equal(h.requested.length, 0);
+  h.coordinator.tick();
+  h.setGates({ chatVisible: true });
+  h.coordinator.tick();
+
+  interaction = "user_active";
+  h.setGates({ chatVisible: false, interactionActive: true });
+  h.coordinator.tick();
+  h.setGates({ interactionActive: true });
+  h.coordinator.tick();
+  assert.equal(
+    h.decisions.filter((decision) => decision.state === "skipped" || decision.state === "expired").length,
+    0
+  );
+
+  h.advance(29_999);
+  interaction = "idle";
+  h.setGates({ interactionActive: false });
+  assert.deepEqual(h.requested.map((item) => item.reason), ["state_work"]);
+  h.coordinator.onActionLifecycle({
+    status: "skipped",
+    reason: "state_work",
+    requestId: h.requested.at(-1)!.requestId
+  });
+  h.setGates({ chatVisible: true });
+  h.setGates({ chatVisible: false });
+  h.coordinator.tick();
+  assert.deepEqual(h.requested.map((item) => item.reason), ["state_work"]);
+  h.coordinator.dispose();
+});
+
+test("source model-busy defer reuses one close attempt without replay or candidate copy", () => {
+  let modelBusy = true;
+  const h = createHarness({
+    chatVisible: true,
+    resolveContextGate: () => modelBusy
+      ? { decision: "defer", reason: "model_busy", replay: "existing-single-chat-close", actionIntent: "none", priority: 0 }
+      : { decision: "allow", reason: "allowed", replay: "never", actionIntent: "none", priority: 0 }
+  });
+
+  h.coordinator.queueSource("memory_safe", "state_memory_recall");
+  h.coordinator.tick();
+  assert.equal(h.requested.length, 0);
+
+  modelBusy = false;
+  h.setGates({ chatVisible: false, interactionActive: false });
+  assert.deepEqual(h.requested.map((item) => item.reason), ["state_memory_recall"]);
+  h.coordinator.tick();
+  h.setGates({ chatVisible: true });
+  h.setGates({ chatVisible: false });
+  h.coordinator.tick();
+  assert.deepEqual(h.requested.map((item) => item.reason), ["state_memory_recall"]);
+  h.coordinator.dispose();
+});
+
+test("context defer expires once at the original ttl after repeated blocked ticks", () => {
+  let deferred = true;
+  const h = createHarness({
+    chatVisible: true,
+    resolveContextGate: () => deferred
+      ? { decision: "defer", reason: "chat_visible", replay: "existing-single-chat-close", actionIntent: "none", priority: 0 }
+      : { decision: "allow", reason: "allowed", replay: "never", actionIntent: "none", priority: 0 }
+  });
+  h.coordinator.queuePresence("mode_presence", {
+    lineId: "mode_presence_work", reason: "mode_presence", durationMs: 4_200
+  }, "state_work");
+  h.coordinator.tick();
+  h.setGates({ chatVisible: true });
+  h.coordinator.tick();
+  h.advance(30_001);
+  h.coordinator.tick();
+  assert.equal(h.requested.length, 0);
+  assert.deepEqual(
+    h.decisions.filter((decision) => decision.state === "expired").map((decision) => decision.skipReason),
+    ["ttl_expired"]
+  );
+  assert.equal(
+    h.decisions.some((decision) => decision.skipReason?.startsWith("context_")),
+    false
+  );
+
+  deferred = false;
+  h.setGates({ chatVisible: false });
+  h.coordinator.tick();
+  assert.equal(h.requested.length, 0);
+  h.coordinator.dispose();
+});
+
+test("dispose clears a deferred candidate before an accelerated 8h clock advance", () => {
+  let deferred = true;
+  const h = createHarness({
+    chatVisible: true,
+    resolveContextGate: () => deferred
+      ? { decision: "defer", reason: "chat_visible", replay: "existing-single-chat-close", actionIntent: "none", priority: 0 }
+      : { decision: "allow", reason: "allowed", replay: "never", actionIntent: "none", priority: 0 }
+  });
+  h.coordinator.queueSafeCandidateForAcceptance("evening_companion");
+  h.coordinator.dispose();
+  h.advance(8 * HOUR_MS);
+  deferred = false;
+  h.setGates({ chatVisible: false });
+  h.coordinator.tick();
+  h.coordinator.dispose();
+  assert.equal(h.requested.length, 0);
+  assert.equal(h.decisions.filter((decision) => decision.skipReason === "cleared").length, 1);
 });
 
 

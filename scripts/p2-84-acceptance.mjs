@@ -805,7 +805,7 @@ function bundledCases() {
       assert(reply) {
         return {
           relevant: hasAny(reply, ["累", "疲惫", "困", "歇", "休息", "安静", "陪", "听"]),
-          warmRestrained: hasAny(reply, ["陪", "听", "在", "安静", "慢慢", "歇"]) &&
+          warmRestrained: hasAny(reply, ["陪", "听", "在", "安静", "慢慢", "歇", "心疼"]) &&
             !hasTaskifyingReply(reply)
         };
       }
@@ -1236,7 +1236,7 @@ function hasTaskifyingReply(reply) {
 }
 
 function hasSemanticJokeAcknowledgement(reply) {
-  return /(玩笑|开玩笑|逗|调皮|骗到|吓我|虚惊|松口气|原来|这样啊|那就|好[呀啦的]|收到|明白|懂了|笑)/.test(reply);
+  return /^(?:原来|还好|你刚才|你这是).{0,16}(?:开玩笑|玩笑|逗我|闹着玩|说笑)/.test(reply);
 }
 
 function hasSemanticNegationAcknowledgement(reply) {

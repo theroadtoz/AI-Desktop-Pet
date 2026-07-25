@@ -31,6 +31,7 @@ import {
   calculateInitialPetBounds,
   calculatePetVisibleRegion
 } from "../src/shared/pet-presentation.ts";
+import { resolveCompanionContextArbitration } from "../src/main/services/companion-context/companion-context-arbitration-policy.ts";
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -438,8 +439,8 @@ test("main mode changes trigger only fixed state reasons and preserve bubble sup
   assert.match(source, /cancelPendingModeActionStateTrigger\(\);[\s\S]*createProactiveSpeechBubblePayload\("mode_presence"\);[\s\S]*proactiveBubbleCoordinator\?\.queuePresence\("mode_presence", payload, reason\);/);
   assert.match(source, /function markProactiveSpeechBubbleHidden\(\): void \{\s*proactiveSpeechBubbleVisibleUntil = 0;\s*\}/);
   assert.match(source, /selectPetActionStateForModeChange\(\{\s*dialogueModeId: currentDialogueModeId,\s*presenceModeId: currentPresenceModeId\s*\}\)/);
-  assert.equal(source.match(/const actionState = selectPetActionStateForModeChange/g)?.length, 2);
-  assert.equal(source.match(/schedulePetModeActionStateTrigger\(actionState\.triggerReason\)/g)?.length, 2);
+  assert.equal(source.match(/const actionState = selectPetActionStateForModeChange/g)?.length, 1);
+  assert.equal(source.match(/schedulePetModeActionStateTrigger\(actionState\.triggerReason\)/g)?.length, 1);
   assert.match(source, /createAppShutdownCoordinator\(\{\s*quiesce: quiesceApp,/);
   assert.match(quiesceSource, /cancelPendingModeActionStateTrigger\(\);/);
   assert.match(beforeQuitSource, /event\.preventDefault\(\);/);
@@ -476,7 +477,41 @@ test("main action lifecycle and proactive gates use only coordinator-owned state
   assert.match(quiesceSource, /petActionDispatchCoordinator\?\.reset\(\);/);
 });
 
-test("opening chat clears the current action before dispatching chat_opened", async () => {
+test("explicit game keeps one proactive bubble candidate and suppresses automatic mode action", async () => {
+  const decision = resolveCompanionContextArbitration({
+    channel: "automatic-mode-action",
+    lifecycle: "ready",
+    interaction: "idle",
+    engagement: "allowed",
+    dialogueMode: "game",
+    dialogueSource: "user-explicit",
+    presenceMode: "default",
+    affectBand: "default",
+    presentationBusy: false,
+    proactiveCadence: "normal",
+    affectEnabled: false,
+    relevantSourceEnabled: true,
+    environmentEnabled: true
+  });
+
+  assert.deepEqual(decision, {
+    decision: "suppress",
+    reason: "explicit_game_proactive_owns_presentation",
+    replay: "never",
+    actionIntent: "none",
+    priority: 0
+  });
+
+  const source = await readFile(new URL("../src/main/app.ts", import.meta.url), "utf8");
+  const situationStart = source.indexOf("function applyAutomaticSituationSnapshot");
+  const situationSource = source.slice(situationStart, source.indexOf("function cancelPendingModeActionStateTrigger", situationStart));
+  assert.match(situationSource, /createCompanionContextArbitrationInput\("automatic-mode-action", snapshot\.conversationSource\)/);
+  assert.match(situationSource, /automaticActionDecision\.decision === "allow"/);
+  assert.equal((situationSource.match(/schedulePetModeActionStateTrigger\(/g) ?? []).length, 1);
+  assert.match(source, /queueSafeCandidateForAcceptance\("explicit_game_started"\)/);
+});
+
+test("opening chat clears the bubble before directly dispatching chat_opened", async () => {
   const source = await readFile(new URL("../src/main/app.ts", import.meta.url), "utf8");
   const openChatStart = source.indexOf("function openChatWindow(): void");
   const openChatSource = source.slice(openChatStart, source.indexOf("openChatWindowAdapter = openChatWindow;", openChatStart));
@@ -488,13 +523,11 @@ test("opening chat clears the current action before dispatching chat_opened", as
 
   assert.notEqual(openChatStart, -1);
   assert.ok(clearBubbleIndex >= 0);
-  assert.ok(resetIndex > clearBubbleIndex);
-  assert.ok(clearChatThrottleIndex > resetIndex);
-  assert.ok(refreshGatesIndex > resetIndex);
+  assert.equal(resetIndex, -1);
+  assert.ok(refreshGatesIndex > clearBubbleIndex);
   assert.ok(clearChatThrottleIndex < dispatchIndex);
   assert.ok(dispatchIndex > refreshGatesIndex);
-  assert.equal((openChatSource.match(/petActionDispatchCoordinator\?\.reset\(\);/g) ?? []).length, 1);
-  assert.match(openChatSource, /if \(!wasVisible\) \{\s*petActionDispatchCoordinator\?\.reset\(\);\s*refreshProactiveBubbleRuntimeGates\(\);\s*\}/);
+  assert.doesNotMatch(openChatSource, /petActionDispatchCoordinator\?\.reset\(\);/);
   assert.equal((openChatSource.match(/delete lastPetActionTriggerAtByReason\./g) ?? []).length, 1);
   assert.match(openChatSource, /if \(!wasVisible\) \{[\s\S]*delete lastPetActionTriggerAtByReason\.chat_opened;[\s\S]*sendPetActionTrigger\("chat_opened", \{ supersessionPolicy: "replace_active" \}\);/);
 });

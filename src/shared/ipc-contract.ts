@@ -45,6 +45,16 @@ import type {
 
 export type { PetTelemetryEvent } from "./pet-telemetry-contract";
 
+export const P2_85_ACCEPTANCE_SCENARIO_IDS = Object.freeze([
+  "chat_opened_replace_active",
+  "reply_visible_generic_once",
+  "explicit_game_single_presentation",
+  "proactive_suppress_single_defer"
+] as const);
+
+export type P285AcceptanceScenarioId =
+  (typeof P2_85_ACCEPTANCE_SCENARIO_IDS)[number];
+
 export type PetWindowCommand =
   | { type: "pet:first-frame"; payload?: PetFirstFrameInfo }
   | { type: "pet:health"; payload: RenderHealth }
@@ -229,6 +239,8 @@ export type PetApi = {
   activateProactiveSpeechBubble(payload: ProactiveSpeechBubbleActivation): Promise<boolean>;
   injectProactiveBubbleCandidateForAcceptance(candidateId: ProactiveBubbleCandidateId): Promise<boolean>;
   getNativeWindowHandleForAcceptance(): Promise<string | null>;
+  runP285ScenarioForAcceptance(scenarioId: P285AcceptanceScenarioId): Promise<boolean>;
+  resetP285AcceptanceBaseline(): Promise<boolean>;
   onInjectWebGLContextLoss(handler: () => void): () => void;
   onWindowMotionFeedback(handler: (feedback: PetWindowMotionFeedback) => void): () => void;
   openChat(): void;

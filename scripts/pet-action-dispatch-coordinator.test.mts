@@ -5,13 +5,17 @@ import {
   type PetActionDispatchTrigger
 } from "../src/main/services/pet-action-dispatch-coordinator.ts";
 
-function createHarness(options: { createRequestId?: () => string } = {}) {
+function createHarness(options: {
+  createRequestId?: () => string;
+  onSend?: (trigger: PetActionDispatchTrigger) => void;
+} = {}) {
   let nowMs = 1_000;
   let sequence = 0;
   const sent: PetActionDispatchTrigger[] = [];
   const coordinator = createPetActionDispatchCoordinator({
     send(trigger) {
       sent.push(trigger);
+      options.onSend?.(trigger);
     },
     now: () => nowMs,
     createRequestId: options.createRequestId ?? (() => `request_${++sequence}`)
@@ -151,6 +155,91 @@ test("chat supersession is a closed policy and is forwarded only for chat open",
   }]);
 });
 
+test("chat replace_active replaces an active main request and ignores its late lifecycle", () => {
+  const { coordinator, sent } = createHarness();
+  const displaced = coordinator.dispatch("state_work");
+  assert.equal(displaced.accepted, true);
+  if (!displaced.accepted) return;
+
+  const replacement = coordinator.dispatch("chat_opened", { supersessionPolicy: "replace_active" });
+  assert.equal(replacement.accepted, true);
+  if (!replacement.accepted) return;
+
+  assert.deepEqual(coordinator.getState().activeMainRequest, {
+    requestId: replacement.requestId,
+    reason: "chat_opened"
+  });
+  assert.equal(
+    coordinator.onLifecycle({ status: "finished", reason: "state_work", requestId: displaced.requestId }),
+    "ignored"
+  );
+  assert.equal(coordinator.isBusy(), true);
+  assert.equal(
+    coordinator.onLifecycle({ status: "finished", reason: "chat_opened", requestId: replacement.requestId }),
+    "main_terminal"
+  );
+  assert.equal(coordinator.isBusy(), false);
+  assert.deepEqual(sent.map(({ reason, requestId, supersessionPolicy }) => ({ reason, requestId, supersessionPolicy })), [
+    { reason: "state_work", requestId: displaced.requestId, supersessionPolicy: undefined },
+    { reason: "chat_opened", requestId: replacement.requestId, supersessionPolicy: "replace_active" }
+  ]);
+});
+
+test("chat replace_active clears renderer-local busy without allowing its late terminal to complete chat", () => {
+  const { coordinator } = createHarness();
+  assert.equal(
+    coordinator.onLifecycle({ status: "started", reason: "click_head", actionInstanceId: "local_click" }),
+    "local_started"
+  );
+
+  const replacement = coordinator.dispatch("chat_opened", { supersessionPolicy: "replace_active" });
+  assert.equal(replacement.accepted, true);
+  if (!replacement.accepted) return;
+
+  assert.equal(
+    coordinator.onLifecycle({ status: "finished", reason: "click_head", actionInstanceId: "local_click" }),
+    "ignored"
+  );
+  assert.equal(coordinator.isBusy(), true);
+  assert.equal(
+    coordinator.onLifecycle({ status: "finished", reason: "chat_opened", requestId: replacement.requestId }),
+    "main_terminal"
+  );
+  assert.equal(coordinator.isBusy(), false);
+});
+
+test("failed chat replacement restores the displaced request and keeps the replacement id tombstoned", () => {
+  const ids = ["active_request", "replacement_request", "replacement_request"];
+  const { coordinator } = createHarness({
+    createRequestId: () => ids.shift() ?? "unused_request",
+    onSend(trigger) {
+      if (trigger.reason === "chat_opened") {
+        throw new Error("send failed");
+      }
+    }
+  });
+  const active = coordinator.dispatch("state_work");
+  assert.equal(active.accepted, true);
+  if (!active.accepted) return;
+
+  assert.deepEqual(
+    coordinator.dispatch("chat_opened", { supersessionPolicy: "replace_active" }),
+    { accepted: false, reason: "send_failed" }
+  );
+  assert.deepEqual(coordinator.getState().activeMainRequest, {
+    requestId: active.requestId,
+    reason: "state_work"
+  });
+  assert.equal(
+    coordinator.onLifecycle({ status: "finished", reason: "state_work", requestId: active.requestId }),
+    "main_terminal"
+  );
+  assert.deepEqual(coordinator.dispatch("chat_opened", { supersessionPolicy: "replace_active" }), {
+    accepted: false,
+    reason: "duplicate_request_id"
+  });
+});
+
 test("recent request id tombstones stay bounded", () => {
   let nextRequestId = "request_1";
   const { coordinator } = createHarness({ createRequestId: () => nextRequestId });
@@ -170,50 +259,6 @@ test("recent request id tombstones stay bounded", () => {
   });
   nextRequestId = "request_1";
   assert.equal(coordinator.dispatch("state_idle").accepted, true);
-});
-
-test("reset clears main and local busy so stale terminals cannot block a new request", () => {
-  const { coordinator } = createHarness();
-  const first = coordinator.dispatch("state_work");
-  assert.equal(first.accepted, true);
-  if (!first.accepted) return;
-
-  assert.equal(coordinator.onLifecycle({ status: "started", reason: "click_head", actionInstanceId: "local_click_1" }), "local_started");
-  assert.equal(coordinator.reset(), true);
-  assert.equal(coordinator.isBusy(), false);
-  assert.equal(coordinator.onLifecycle({ status: "finished", reason: "state_work", requestId: first.requestId }), "ignored");
-  assert.equal(coordinator.onLifecycle({ status: "finished", reason: "click_head", actionInstanceId: "local_click_1" }), "ignored");
-
-  const replacement = coordinator.dispatch("state_greet");
-  assert.equal(replacement.accepted, true);
-  assert.equal(coordinator.cancelActive(), true);
-  assert.equal(coordinator.isBusy(), false);
-});
-
-test("chat open reset ignores stale lifecycle while the replacement request remains active", () => {
-  const { coordinator } = createHarness();
-  const displaced = coordinator.dispatch("state_work");
-  assert.equal(displaced.accepted, true);
-  if (!displaced.accepted) return;
-
-  assert.equal(coordinator.onLifecycle({ status: "started", reason: "click_head", actionInstanceId: "local_click_2" }), "local_started");
-  assert.equal(coordinator.reset(), true);
-
-  const chatOpened = coordinator.dispatch("chat_opened");
-  assert.equal(chatOpened.accepted, true);
-  if (!chatOpened.accepted) return;
-
-  assert.equal(
-    coordinator.onLifecycle({ status: "finished", reason: "state_work", requestId: displaced.requestId }),
-    "ignored"
-  );
-  assert.equal(coordinator.onLifecycle({ status: "finished", reason: "click_head", actionInstanceId: "local_click_2" }), "ignored");
-  assert.equal(coordinator.isBusy(), true);
-  assert.equal(
-    coordinator.onLifecycle({ status: "finished", reason: "chat_opened", requestId: chatOpened.requestId }),
-    "main_terminal"
-  );
-  assert.equal(coordinator.isBusy(), false);
 });
 
 test("send runs once for an accepted request and not for a busy rejection", () => {

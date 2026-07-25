@@ -46,6 +46,64 @@ test("p2-45 runner uses real UI harness, FakeProvider isolation, acceptance tele
   }
 });
 
+test("p2-45 action settling tracks interleaved requests by requestId before reason", () => {
+  const { getActionTrackingKey: getKey, updateActiveActionKeys: updateKeys } = extractActionSettlingHelpers();
+  const event = (type: string, requestId: string) => ({
+    type,
+    payload: { requestId, reason: "same-action-reason" }
+  });
+
+  assert.equal(getKey(event("pet_interaction_action_started", "request-a")), "request:request-a");
+  let activeKeys = new Set<string>();
+  activeKeys = updateKeys(activeKeys, event("pet_interaction_action_started", "request-a"));
+  activeKeys = updateKeys(activeKeys, event("pet_interaction_action_started", "request-b"));
+  activeKeys = updateKeys(activeKeys, event("pet_interaction_action_finished", "request-a"));
+  assert.deepEqual([...activeKeys], ["request:request-b"]);
+  activeKeys = updateKeys(activeKeys, event("pet_interaction_action_skipped", "request-b"));
+  assert.equal(activeKeys.size, 0);
+});
+
+test("p2-45 action settling tracks interleaved renderer actions by actionInstanceId", () => {
+  const { getActionTrackingKey: getKey, updateActiveActionKeys: updateKeys } = extractActionSettlingHelpers();
+  const event = (type: string, actionInstanceId: string) => ({
+    type,
+    payload: { actionInstanceId, reason: "same-renderer-reason" }
+  });
+
+  assert.equal(getKey(event("pet_interaction_action_started", "instance-a")), "instance:instance-a");
+  let activeKeys = new Set<string>();
+  activeKeys = updateKeys(activeKeys, event("pet_interaction_action_started", "instance-a"));
+  activeKeys = updateKeys(activeKeys, event("pet_interaction_action_started", "instance-b"));
+  activeKeys = updateKeys(activeKeys, event("pet_interaction_action_finished", "instance-a"));
+  assert.deepEqual([...activeKeys], ["instance:instance-b"]);
+  activeKeys = updateKeys(activeKeys, event("pet_interaction_action_skipped", "instance-b"));
+  assert.equal(activeKeys.size, 0);
+});
+
+test("p2-45 action settling prefers requestId over actionInstanceId", () => {
+  const { getActionTrackingKey: getKey } = extractActionSettlingHelpers();
+  assert.equal(getKey({
+    payload: {
+      requestId: "request-primary",
+      actionInstanceId: "instance-secondary",
+      reason: "fallback-reason"
+    }
+  }), "request:request-primary");
+});
+
+test("p2-45 action settling falls back to reason when requestId and actionInstanceId are absent", () => {
+  const { getActionTrackingKey: getKey, updateActiveActionKeys: updateKeys } = extractActionSettlingHelpers();
+  const started = { type: "pet_interaction_action_started", payload: { reason: "legacy-reason" } };
+  const finished = { type: "pet_interaction_action_finished", payload: { reason: "legacy-reason" } };
+
+  assert.equal(getKey(started), "reason:legacy-reason");
+  let activeKeys = updateKeys(new Set<string>(), started);
+  assert.deepEqual([...activeKeys], ["reason:legacy-reason"]);
+  activeKeys = updateKeys(activeKeys, finished);
+  assert.equal(activeKeys.size, 0);
+  assert.equal(getKey({ payload: { reason: "" } }), null);
+});
+
 test("p2-45 safe-active fixture is acceptance-only and keeps production source paths", () => {
   assert.match(mainSource, /const isP245AcceptanceSafeActive = isAcceptanceTelemetryEnabled &&[\s\S]*AI_DESKTOP_PET_P2_45_SAFE_ACTIVE_CONTEXT/);
   assert.match(mainSource, /proactiveBubbleCoordinator\?\.updateCoarseState\(isP245AcceptanceSafeActive[\s\S]*engagement: "allowed"[\s\S]*: state\)/);
@@ -99,6 +157,76 @@ test("p2-45 waits for high-priority action terminals before releasing sourced ca
   assert.match(runnerSource, /AI_DESKTOP_PET_PROACTIVE_SPEECH_BUBBLE_IDLE_INTERVAL_MS:[\s\S]*"60000"/);
 });
 
+test("p2-45 waits for chat_reply_completed only on the memory path", () => {
+  const memorySource = extractBalancedFunctionSource("runMemoryActionLinkageCase");
+  const searchSource = extractBalancedFunctionSource("runSearchActionLinkageCase");
+  assert.equal((memorySource.match(/waitForChatReplyCompletedActionTerminal\(/g) ?? []).length, 1);
+  assert.equal((searchSource.match(/waitForChatReplyCompletedActionTerminal\(/g) ?? []).length, 0);
+  assert.match(memorySource, /await sendChatTurnAndWait\(chat,[\s\S]*?waitForChatReplyCompletedActionTerminal\([\s\S]*?releaseIndex/);
+  assert.match(runnerSource, /reason === "chat_reply_completed"/);
+  assert.match(runnerSource, /event\.payload\?\.requestId === requestId/);
+  assert.match(runnerSource, /selected\.terminal\.type === "pet_interaction_action_skipped"[\s\S]*chat_reply_completed_action_skipped/);
+  assert.match(runnerSource, /selected\.terminal\.type === "pet_interaction_action_finished"[\s\S]*return selected/);
+  assert.match(runnerSource, /chat_reply_completed_action_terminal_timeout/);
+});
+
+test("p2-45 chat reply terminal selector ignores old and mismatched request terminals", async () => {
+  const select = Function(`return (${extractBalancedFunctionSource("selectChatReplyCompletedActionTerminal")})`)() as
+    (events: Array<Record<string, any>>, options: { afterIndex: number }) => {
+      started: Record<string, any>;
+      terminal: Record<string, any> | null;
+    } | null;
+  const event = (index: number, type: string, requestId: string, reason = "chat_reply_completed") => ({
+    __index: index,
+    type,
+    payload: { requestId, reason }
+  });
+
+  const selected = select([
+    event(1, "pet_interaction_action_finished", "old-request"),
+    event(2, "pet_interaction_action_started", "new-request"),
+    event(3, "pet_interaction_action_finished", "other-request"),
+    event(4, "pet_interaction_action_finished", "new-request")
+  ], { afterIndex: 0 });
+  assert.equal(selected?.started.payload.requestId, "new-request");
+  assert.equal(selected?.terminal?.payload.requestId, "new-request");
+  assert.equal(selected?.terminal?.__index, 4);
+
+  const skipped = select([
+    event(5, "pet_interaction_action_started", "skip-request"),
+    event(6, "pet_interaction_action_skipped", "skip-request")
+  ], { afterIndex: 4 });
+  assert.equal(skipped?.terminal?.type, "pet_interaction_action_skipped");
+
+  const buildWaiter = (selection: typeof skipped) => Function(
+    "readTelemetryEvents",
+    "selectChatReplyCompletedActionTerminal",
+    "throwIfRunnerAborted",
+    "sleep",
+    `return (${extractFunctionSource("waitForChatReplyCompletedActionTerminal")});`
+  )(
+    () => [],
+    () => selection,
+    () => undefined,
+    async () => undefined
+  ) as (options: { afterIndex: number; timeoutMs: number }) => Promise<typeof selection>;
+
+  await assert.rejects(
+    buildWaiter(skipped)({ afterIndex: 4, timeoutMs: 100 }),
+    /chat_reply_completed_action_skipped/
+  );
+
+  const finished = select([
+    event(7, "pet_interaction_action_started", "finish-request"),
+    event(8, "pet_interaction_action_finished", "finish-request")
+  ], { afterIndex: 6 });
+  assert.equal(finished?.terminal?.type, "pet_interaction_action_finished");
+  assert.equal(
+    (await buildWaiter(finished)({ afterIndex: 6, timeoutMs: 100 }))?.terminal?.type,
+    "pet_interaction_action_finished"
+  );
+});
+
 test("p2-45 treats startup as readiness only and leaves startup line selection to its own contract", () => {
   assert.match(runnerSource, /waitForProductionStartupReadiness\(pet\)/);
   assert.match(runnerSource, /event\.type === "first_frame"[\s\S]*15_000/);
@@ -107,13 +235,88 @@ test("p2-45 treats startup as readiness only and leaves startup line selection t
 });
 
 test("p2-45 proves coordinator action-first ordering for conflict-free shown paths", () => {
-  assert.match(runnerSource, /waitForCandidateTerminal/);
+  assert.match(runnerSource, /waitForSourcedActionFirstLinkageTelemetry/);
+  assert.match(runnerSource, /selectSourcedActionFirstLinkage/);
   assert.match(runnerSource, /inspectCandidateActionFirst/);
   assert.match(runnerSource, /reason: "source_presence"/);
-  assert.match(runnerSource, /queuedIndex >= 0 && attemptedIndex > queuedIndex[\s\S]*actionIndex > attemptedIndex && shownIndex > actionIndex/);
   assert.match(runnerSource, /coordinatorActionFirst: observation\.coordinator\.actionFirst/);
   assert.match(runnerSource, /Object\.assign\(checks, prefixChecks\("memory", memoryResult\.checks\)\)/);
   assert.match(runnerSource, /Object\.assign\(checks, prefixChecks\("search", searchResult\.checks\)\)/);
+});
+
+test("p2-45 selects only a complete source action-first chain after early terminal candidates", () => {
+  const select = Function(`return (${extractBalancedFunctionSource("selectSourcedActionFirstLinkage")})`)() as
+    (events: Array<Record<string, unknown>>, options: Record<string, unknown>) => Record<string, { __index: number; payload: { status?: string } }> | null;
+  const expectedAction = {
+    reason: "state_memory_injected",
+    type: "quietNod",
+    stateId: "memory-injected",
+    expressionPresetId: "happy"
+  };
+  const event = (index: number, type: string, payload: Record<string, unknown>) => ({ __index: index, type, payload });
+  const events = [
+    event(1, "proactive_bubble_candidate", { candidateId: "memory_safe", status: "queued" }),
+    event(2, "proactive_bubble_candidate", { candidateId: "memory_safe", status: "skipped", skipReason: "context_chat_visible" }),
+    event(3, "proactive_bubble_candidate", { candidateId: "memory_safe", status: "queued" }),
+    event(4, "proactive_bubble_candidate", { candidateId: "memory_safe", status: "attempted" }),
+    event(5, "pet_interaction_action_started", expectedAction),
+    event(6, "proactive_speech_bubble", { status: "shown", reason: "source_presence", lineId: "idle_presence_memory_safe" }),
+    event(7, "proactive_bubble_candidate", { candidateId: "memory_safe", status: "shown" }),
+    event(8, "pet_interaction_action_finished", { reason: expectedAction.reason })
+  ];
+  const selected = select(events, {
+    candidateId: "memory_safe",
+    lineId: "idle_presence_memory_safe",
+    expectedAction,
+    afterIndex: 0
+  });
+  assert.equal(selected?.candidateTerminalEvent.__index, 7);
+  assert.equal(selected?.actionEvent.__index, 5);
+  assert.equal(selected?.actionTerminalEvent.__index, 8);
+  assert.equal(selected?.proactiveBubbleEvent.__index, 6);
+  assert.deepEqual(selected?.earlyTerminalEvents.map((item) => item.payload.status), ["skipped"]);
+
+  const wrongLifecycleOrder = select([
+    event(1, "proactive_bubble_candidate", { candidateId: "memory_safe", status: "queued" }),
+    event(2, "proactive_bubble_candidate", { candidateId: "memory_safe", status: "attempted" }),
+    event(3, "pet_interaction_action_started", expectedAction),
+    event(4, "pet_interaction_action_finished", { reason: expectedAction.reason }),
+    event(5, "proactive_speech_bubble", { status: "shown", reason: "source_presence", lineId: "idle_presence_memory_safe" }),
+    event(6, "proactive_bubble_candidate", { candidateId: "memory_safe", status: "shown" })
+  ], {
+    candidateId: "memory_safe",
+    lineId: "idle_presence_memory_safe",
+    expectedAction,
+    afterIndex: 0
+  });
+  assert.equal(wrongLifecycleOrder, null);
+
+  const rejected = select([
+    event(1, "proactive_bubble_candidate", { candidateId: "memory_safe", status: "queued" }),
+    event(2, "proactive_bubble_candidate", { candidateId: "memory_safe", status: "skipped", skipReason: "action_request_rejected" })
+  ], {
+    candidateId: "memory_safe",
+    lineId: "idle_presence_memory_safe",
+    expectedAction,
+    afterIndex: 0
+  });
+  assert.equal(rejected, null);
+});
+
+test("p2-45 normalizes the closed P2-85 context skip reasons without accepting arbitrary prefixes", () => {
+  const normalize = Function(`return (${extractFunctionSource("normalizeCandidateSkipReason")})`)() as
+    (value: unknown) => string;
+  const contextReasons = [
+    "context_affect_action_chat_visible", "context_affect_disabled", "context_affect_quiet_environment",
+    "context_chat_visible", "context_engagement_deferred", "context_engagement_suppressed",
+    "context_environment_disabled", "context_explicit_game_proactive_owns_presentation", "context_focus_suppressed",
+    "context_lifecycle_sleep", "context_lifecycle_suspended", "context_lifecycle_system_locked",
+    "context_lifecycle_unavailable", "context_model_busy", "context_presentation_busy", "context_proactive_off",
+    "context_source_disabled", "context_user_active"
+  ];
+  for (const reason of contextReasons) assert.equal(normalize(reason), reason);
+  assert.equal(normalize("context_unknown"), "none");
+  assert.equal(normalize("context_presentation_busy_extra"), "none");
 });
 
 test("p2-45 writes closed safe diagnostics before cleanup on success and failure", () => {
@@ -208,9 +411,13 @@ test("p2-45 restores the bundled fixture after every cleanup attempt even when c
 });
 
 test("p2-45 requires source action start terminal and shown ordering", () => {
-  assert.match(runnerSource, /waitForPetActionStarted/);
-  assert.match(runnerSource, /waitForPetActionTerminal/);
-  assert.match(runnerSource, /actionTerminalIndex > shownIndex/);
+  const selectorSource = extractBalancedFunctionSource("selectSourcedActionFirstLinkage");
+  assert.match(selectorSource, /pet_interaction_action_started/);
+  assert.match(selectorSource, /pet_interaction_action_finished/);
+  assert.match(selectorSource, /proactive_speech_bubble/);
+  assert.match(selectorSource, /event\.payload\?\.lineId === options\.lineId/);
+  assert.match(selectorSource, /event\.__index > actionEvent\.__index[\s\S]*event\.__index < candidateTerminalEvent\.__index/);
+  assert.match(selectorSource, /event\.__index > candidateTerminalEvent\.__index/);
   assert.match(runnerSource, /actionTerminalObserved: observation\.actionTerminal\.terminalStatus === "finished"/);
   assert.match(runnerSource, /observation\.bubble\.reason === "source_presence"/);
 });
@@ -463,6 +670,38 @@ function extractFunctionSource(name: string): string {
   const match = runnerSource.match(pattern);
   assert.ok(match, `missing function ${name}`);
   return match[0];
+}
+
+function extractActionSettlingHelpers() {
+  return Function(`
+    ${extractFunctionSource("getActionTrackingKey")}
+    ${extractFunctionSource("updateActiveActionKeys")}
+    return { getActionTrackingKey, updateActiveActionKeys };
+  `)() as {
+    getActionTrackingKey: (event: {
+      payload?: { requestId?: unknown; actionInstanceId?: unknown; reason?: unknown };
+    }) => string | null;
+    updateActiveActionKeys: (
+      activeKeys: Set<string>,
+      event: {
+        type: string;
+        payload?: { requestId?: unknown; actionInstanceId?: unknown; reason?: unknown };
+      }
+    ) => Set<string>;
+  };
+}
+
+function extractBalancedFunctionSource(name: string): string {
+  const start = runnerSource.search(new RegExp(`(?:async )?function ${escapeRegExp(name)}\\([^)]*\\) \\{`));
+  assert.notEqual(start, -1, `missing function ${name}`);
+  const bodyStart = runnerSource.indexOf("{", start);
+  let depth = 0;
+  for (let index = bodyStart; index < runnerSource.length; index += 1) {
+    if (runnerSource[index] === "{") depth += 1;
+    if (runnerSource[index] === "}") depth -= 1;
+    if (depth === 0) return runnerSource.slice(start, index + 1);
+  }
+  assert.fail(`unterminated function ${name}`);
 }
 
 function extractConstArraySource(name: string): string {

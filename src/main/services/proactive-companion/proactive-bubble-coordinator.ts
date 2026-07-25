@@ -16,6 +16,9 @@ import type {
   ProactiveBubbleCandidateClass,
   ProactiveBubbleLedgerStore
 } from "../config/proactive-bubble-ledger-store";
+import type {
+  CompanionContextArbitrationResult
+} from "../companion-context/companion-context-arbitration-policy";
 
 export { PROACTIVE_BUBBLE_CANDIDATE_IDS } from "../../../shared/proactive-speech-bubble";
 export type { ProactiveBubbleCandidateId } from "../../../shared/proactive-speech-bubble";
@@ -158,6 +161,7 @@ export function createProactiveBubbleCoordinator(options: {
   clearBubble: () => void;
   openChat: () => void;
   reportDecision?: (decision: ProactiveBubbleCoordinatorDecision) => void;
+  resolveContextGate?: (candidateId: ProactiveBubbleCandidateId) => CompanionContextArbitrationResult;
   now?: () => number;
   monotonicNow?: () => number;
   setTimeoutFn?: typeof setTimeout;
@@ -320,6 +324,10 @@ export function createProactiveBubbleCoordinator(options: {
     return null;
   }
 
+  function contextGate(candidate: Candidate): CompanionContextArbitrationResult | null {
+    return options.resolveContextGate?.(candidate.candidateId) ?? null;
+  }
+
   function processPending(): void {
     if (disposed || activeAttempt || visiblePayload || pending.length === 0) {
       return;
@@ -333,6 +341,24 @@ export function createProactiveBubbleCoordinator(options: {
     const candidate = [...pending].sort((left, right) =>
       right.priority - left.priority || left.sequence - right.sequence)[0];
     if (!candidate) {
+      return;
+    }
+    const gate = contextGate(candidate);
+    if (gate?.decision === "suppress") {
+      terminal(candidate, "skipped", `context_${gate.reason}`);
+      processPending();
+      return;
+    }
+    if (gate?.decision === "defer") {
+      if (
+        gate.replay === "existing-single-chat-close" &&
+        candidate.mayWaitForChatClose
+      ) {
+        candidate.waitedForChatClose = true;
+        return;
+      }
+      terminal(candidate, "skipped", `context_${gate.reason}`);
+      processPending();
       return;
     }
     const skipReason = runtimeSkipReason(candidate);

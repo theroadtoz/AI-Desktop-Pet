@@ -134,12 +134,12 @@ async function main(signal) {
     };
     observations.startupReadiness = { ...startupReadinessDiagnostic };
 
+    const idleStartIndex = lastTelemetryIndex();
     const startupCleared = startupOutcome.terminalStatus === "shown"
       ? await waitForBubbleHidden(signal, pet, 10_000)
       : startupBubble;
     checks.startupBubbleClears = startupCleared.state === "hidden" && startupCleared.textLength === 0;
 
-    const idleStartIndex = lastTelemetryIndex();
     const idleDecision = await waitForLowFrequencyQueuedDecision(signal, idleStartIndex, 9_000);
     const idleOutcome = await waitForCandidateTerminal(signal, "idle_presence", idleStartIndex, 9_000);
     const idleCadence = inspectCandidateActionFirst("idle_presence", idleStartIndex);

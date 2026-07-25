@@ -130,6 +130,7 @@ export function createPetActionDispatchCoordinator(
 
   function dispatch(reason: PetActionTriggerReason, policy: PetActionDispatchPolicy = {}): PetActionDispatchResult {
     const ttlMs = policy.ttlMs ?? DEFAULT_TTL_MS;
+    const replacesActive = reason === "chat_opened" && policy.supersessionPolicy === "replace_active";
     if (
       !Number.isFinite(ttlMs) ||
       ttlMs <= 0 ||
@@ -140,7 +141,7 @@ export function createPetActionDispatchCoordinator(
     }
 
     clearExpiredRequest();
-    if (activeRequest || localAction !== null) {
+    if ((activeRequest || localAction !== null) && !replacesActive) {
       return { accepted: false, reason: "busy" };
     }
 
@@ -163,7 +164,10 @@ export function createPetActionDispatchCoordinator(
       expiresAtMs: currentNow() + ttlMs
     };
     rememberRequestId(requestId);
+    const displacedRequest = activeRequest;
+    const displacedLocalAction = localAction;
     activeRequest = request;
+    localAction = null;
     try {
       dependencies.send({
         reason,
@@ -171,7 +175,8 @@ export function createPetActionDispatchCoordinator(
         ...(policy.supersessionPolicy ? { supersessionPolicy: policy.supersessionPolicy } : {})
       });
     } catch {
-      activeRequest = null;
+      activeRequest = displacedRequest;
+      localAction = displacedLocalAction;
       return { accepted: false, reason: "send_failed" };
     }
 

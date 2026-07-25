@@ -8,6 +8,10 @@ const providerSource = readFileSync(
   new URL("../src/main/services/chat/openai-compatible-provider.ts", import.meta.url),
   "utf8"
 );
+const arbitrationPolicySource = readFileSync(
+  new URL("../src/main/services/companion-context/companion-context-arbitration-policy.ts", import.meta.url),
+  "utf8"
+);
 const acceptanceSource = readFileSync(
   new URL("./p2-84-acceptance.mjs", import.meta.url),
   "utf8"
@@ -74,25 +78,49 @@ test("P2-84 settings IPC uses the authenticated chat sender and disabling return
 test("P2-84 affect actions stay behind chat-open priority and P2-83C", () => {
   assert.match(
     appSource,
-    /const attempt = requestPetActionTriggerWithResult\(resolution\.action\.reason\)/
+    /function resolveDialogueReplyActionReason\(/
   );
   assert.match(
     appSource,
-    /if \(!attempt\.coordinatorAttempted\) \{\s*return false;\s*\}\s*logDialogueAffectActionDispatch\(attempt\.result\);\s*return attempt\.result\.accepted;/
+    /const dialogueReplyActionReason = resolveDialogueReplyActionReason\(/
   );
   assert.match(
     appSource,
-    /if \(shouldRequestReplyWarmSettle\) \{\s*const affectActionRequested = requestDialogueAffectAction\(affectPresentation\);\s*if \(!affectActionRequested\) \{\s*sendPetActionTrigger\("chat_reply_completed"\)/
+    /dialogueReplyActionReason === affectPresentation\?\.action\?\.reason/
   );
-  const affectActionHelper = appSource.slice(
-    appSource.indexOf("function requestDialogueAffectAction("),
+  const completionStart = appSource.indexOf("const shouldRequestReplyWarmSettle =");
+  const completionEnd = appSource.indexOf('logTelemetry("chat_stream_completed"', completionStart);
+  const completion = appSource.slice(completionStart, completionEnd);
+  assert.equal(
+    (completion.match(/requestPetActionTriggerWithResult\(/g) ?? []).length,
+    1,
+    "reply completion must dispatch at most once"
+  );
+  assert.doesNotMatch(
+    completion,
+    /affectActionRequested|if \(!affectActionRequested\)|sendPetActionTrigger\("chat_reply_completed"/
+  );
+  const resolver = appSource.slice(
+    appSource.indexOf("function resolveDialogueReplyActionReason("),
     appSource.indexOf("function syncAutomaticPresenceLifecycle(")
   );
   assert.match(
-    affectActionHelper,
-    /currentDialogueModeId !== "default" \|\|\s*petRoleSnapshot\.chatOpen \|\|\s*isChatInteractionActive \|\|\s*activeChatRequestVersion !== null/
+    resolver,
+    /createCompanionContextArbitrationInput\("affect-action"\)/
   );
-  assert.doesNotMatch(affectActionHelper, /\.isBusy\(\)/);
+  assert.match(
+    resolver,
+    /createCompanionContextArbitrationInput\("reply-completion-action"\)/
+  );
+  assert.doesNotMatch(resolver, /requestPetActionTriggerWithResult|sendPetActionTrigger/);
+  assert.match(
+    arbitrationPolicySource,
+    /input\.channel === "affect-action"[\s\S]*input\.interaction === "chat-visible"[\s\S]*affect_action_chat_visible/
+  );
+  assert.match(
+    arbitrationPolicySource,
+    /input\.channel === "reply-completion-action"[\s\S]*return result\("allow", "allowed", "reply-completion-action"\)/
+  );
   assert.match(
     appSource,
     /function requestPetActionTriggerWithResult\([\s\S]*petActionDispatchCoordinator\.dispatch\(reason, policy\)/
@@ -222,4 +250,41 @@ test("OpenAI-compatible wire request contains the fixed emotional dialogue promp
     ),
     true
   );
+});
+test("P2-84 bundled joke acknowledgement requires the first sentence to name the teasing or joke", () => {
+  const match = acceptanceSource.match(
+    /function hasSemanticJokeAcknowledgement\(reply\) \{\s*return (\/.*\/).test\(reply\);\s*\}/
+  );
+  assert.ok(match, "joke acknowledgement helper must remain a deterministic regex");
+  const acknowledgement = new RegExp(match[1].slice(1, -1));
+
+  for (const reply of [
+    "\u539f\u6765\u662f\u5728\u5f00\u73a9\u7b11\u3002",
+    "\u4f60\u521a\u624d\u662f\u5728\u9017\u6211\u5440\u3002",
+    "\u8fd8\u597d\u53ea\u662f\u73a9\u7b11\uff0c\u5bb3\u6211\u767d\u7d27\u5f20\u4e86\u3002",
+    "\u4f60\u8fd9\u662f\u5728\u95f9\u7740\u73a9\u5427\u3002"
+  ]) {
+    assert.equal(acknowledgement.test(reply), true, reply);
+  }
+
+  for (const reply of [
+    "\u6536\u5230\u3002",
+    "\u660e\u767d\u3002",
+    "\u539f\u6765\u3002",
+    "\u8fd9\u6837\u554a\u3002",
+    "\u4f60\u628a\u6211\u5413\u4e00\u8df3\u3002",
+    "\u54c8\u54c8\uff0c\u4f60\u662f\u5728\u95f9\u7740\u73a9\u5427\u3002",
+    "\u54c8\u54c8\uff0c\u539f\u6765\u662f\u73a9\u7b11\u3002\u4f60\u8fd8\u771f\u4f1a\u9009\u65f6\u5019\u3002"
+  ]) {
+    assert.equal(acknowledgement.test(reply), false, reply);
+  }
+});
+
+test("P2-84 bundled explicit tired accepts heartache while retaining relevance and non-taskifying guards", () => {
+  const tiredCase = acceptanceSource.match(
+    /caseId: "explicit-tired",[\s\S]*?\n    \},\n    \{\n      caseId: "joke"/
+  )?.[0] ?? "";
+
+  assert.match(tiredCase, /relevant:\s*hasAny\(reply, \["累", "疲惫", "困", "歇", "休息", "安静", "陪", "听"\]\)/);
+  assert.match(tiredCase, /warmRestrained:\s*hasAny\(reply, \["陪", "听", "在", "安静", "慢慢", "歇", "心疼"\]\)\s*&&\s*!hasTaskifyingReply\(reply\)/);
 });

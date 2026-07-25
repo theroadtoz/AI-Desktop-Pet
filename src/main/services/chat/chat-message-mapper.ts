@@ -145,7 +145,7 @@ function createLocalTurnHintMessage(
   if (describesEverydayRain(latestUserMessage)) {
     hints.push("参考语气：“我真讨厌这没完没了的雨，连魔导笔记都快被雨声泡软了。窗边潮气黏着不散，我陪你听它滴答一会。”自然改写；不复述、不解释、不建议、不提问");
   } else if (describesEverydayFatigue(latestUserMessage)) {
-    hints.push("疲惫陪伴=严格2句且每句≤45字；首句我+心疼，次句陪用户趴着安静待；次句即止；禁额外段落/问句/解释/建议/任务");
+    hints.push("疲惫陪伴=严格2句且每句≤45字；首句我+心疼，且保留低落/没精神/提不起劲/难熬/不好受之一；次句陪用户趴着安静待；次句即止；禁额外段落/问句/解释/建议/任务");
   } else if (describesEverydayMoment(latestUserMessage)) {
     hints.push("仅2句。第一句必须以“我”开头表达自己的感受；第二句接具体画面或陪伴。禁止复述原句、解释、建议、问题");
   } else if (asksCasualLifeWhy(latestUserMessage)) {
@@ -153,7 +153,7 @@ function createLocalTurnHintMessage(
   }
 
   if (isPlayfulTeasing(latestUserMessage)) {
-    hints.push("玩笑=仅2句；首句以哼/哈哈/真是的开头接笑点，≤30字；次句回1句俏皮话，≤40字，次句即止；禁解释分析/列举；不编电脑/文件/屏幕/现实状态");
+    hints.push("玩笑=仅2句；首句必须先以“原来是逗我的”或“还好只是玩笑”开头，再接俏皮反应，≤30字；次句回1句俏皮话，≤40字，次句即止；禁解释分析/列举；不编电脑/文件/屏幕/现实状态");
   } else if (asksWhetherXitaWillBlindlyAgree(latestUserMessage)) {
     hints.push("分歧=3句；首句用我不会盲从/我不同意/我更喜欢开头；次句写审美理由；末句写“你可以有自己的看法，我们不必一样”；每句≤50字；禁复述/泛谈人类");
   } else if (describesUnfairTreatment(latestUserMessage)) {
@@ -419,7 +419,7 @@ function describesEverydayMoment(text: string): boolean {
   }
 
   const hasEverydayContext = /(今天|今晚|今早|刚才|这会儿|最近|外面|窗外)/.test(text);
-  const hasEverydayExperience = /(雨|雪|刮风|风吹|阴天|天阴|冷|热|闷|潮|累|困|饿|没睡好|睡不着|什么都不想做|只想.{0,8}(?:趴|躺|睡)|加班|下班)/.test(text);
+  const hasEverydayExperience = /(雨|雪|刮风|风吹|阴天|天阴|冷|热|闷|潮|累|困|饿|没睡好|睡不着|提不起劲|什么都不想做|只想.{0,8}(?:趴|躺|睡)|加班|下班)/.test(text);
 
   return hasEverydayContext && hasEverydayExperience;
 }
@@ -470,7 +470,7 @@ function describesEverydayRain(text: string): boolean {
 }
 
 function describesEverydayFatigue(text: string): boolean {
-  return describesEverydayMoment(text) && /(累|困|没睡好|睡不着|什么都不想做|只想.{0,8}(?:趴|躺|睡))/.test(text);
+  return describesEverydayMoment(text) && /(累|困|没睡好|睡不着|提不起劲|什么都不想做|只想.{0,8}(?:趴|躺|睡))/.test(text);
 }
 
 function asksCasualLifeWhy(text: string): boolean {

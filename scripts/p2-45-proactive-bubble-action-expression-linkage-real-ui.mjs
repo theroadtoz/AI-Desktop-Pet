@@ -332,6 +332,10 @@ async function runMemoryActionLinkageCase(pet) {
   await sendChatTurnAndWait(chat, "请继续保持温和、准确的桌面陪伴状态。", {
     waitForMemoryInjection: true
   });
+  await waitForChatReplyCompletedActionTerminal({
+    afterIndex: sourceStartIndex,
+    timeoutMs: 20_000
+  });
   setDiagnosticStage("memory", "memory_settle");
   await waitForHighPriorityActionsSettled(10_000);
   const releaseIndex = lastTelemetryIndex();
@@ -514,6 +518,42 @@ async function sendChatTurnAndWait(chat, text, options = {}) {
   throw new Error("chat_timeout");
 }
 
+async function waitForChatReplyCompletedActionTerminal({ afterIndex, timeoutMs }) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    throwIfRunnerAborted();
+    const selected = selectChatReplyCompletedActionTerminal(readTelemetryEvents(), { afterIndex });
+    if (selected?.terminal) {
+      if (selected.terminal.type === "pet_interaction_action_skipped") {
+        throw new Error("chat_reply_completed_action_skipped");
+      }
+      if (selected.terminal.type === "pet_interaction_action_finished") {
+        return selected;
+      }
+    }
+    await sleep(150);
+  }
+  throw new Error("chat_reply_completed_action_terminal_timeout");
+}
+
+function selectChatReplyCompletedActionTerminal(events, options) {
+  const started = events.find((event) =>
+    event.__index > options.afterIndex &&
+    event.type === "pet_interaction_action_started" &&
+    event.payload?.reason === "chat_reply_completed" &&
+    typeof event.payload?.requestId === "string" &&
+    event.payload.requestId.length > 0);
+  if (!started) return null;
+
+  const requestId = started.payload.requestId;
+  const terminal = events.find((event) =>
+    event.__index > started.__index &&
+    (event.type === "pet_interaction_action_finished" || event.type === "pet_interaction_action_skipped") &&
+    event.payload?.reason === "chat_reply_completed" &&
+    event.payload?.requestId === requestId);
+  return { started, terminal: terminal ?? null };
+}
+
 async function setChatInputValueWithoutFocus(chat, text) {
   await evaluate(chat, `
     (() => {
@@ -544,34 +584,18 @@ async function submitChatForm(chat) {
 }
 
 async function waitForSourcedActionLinkage(pet, options) {
-  const candidateTerminalEvent = await waitForCandidateTerminal({
+  const linkage = await waitForSourcedActionFirstLinkageTelemetry({
     candidateId: options.candidateId,
+    lineId: options.lineId,
+    expectedAction: options.expectedAction,
     afterIndex: options.sourceStartIndex,
     timeoutMs: 20_000
   });
-  if (candidateTerminalEvent?.payload?.status !== "shown") {
-    throw new Error("candidate_not_shown");
-  }
+  if (!linkage) throw new Error("candidate_action_first_linkage_timeout");
   const bubbleRaw = await waitForBubbleVisible(pet, {
     reason: "source_presence",
     lineId: options.lineId,
     timeoutMs: 20_000
-  });
-  const proactiveBubbleEvent = await waitForProactiveBubble({
-    status: "shown",
-    lineId: options.lineId,
-    afterIndex: options.releaseIndex,
-    timeoutMs: 2_500
-  });
-  const actionEvent = await waitForPetActionStarted({
-    ...options.expectedAction,
-    afterIndex: options.releaseIndex,
-    timeoutMs: 4_000
-  });
-  const actionTerminalEvent = await waitForPetActionTerminal({
-    reason: options.expectedAction.reason,
-    afterIndex: actionEvent?.__index ?? options.releaseIndex,
-    timeoutMs: 8_000
   });
 
   return {
@@ -580,12 +604,15 @@ async function waitForSourcedActionLinkage(pet, options) {
       candidateId: options.candidateId,
       afterIndex: options.sourceStartIndex,
       actionReason: options.expectedAction.reason,
-      candidateTerminalEvent,
-      actionTerminalEvent
+      lineId: options.lineId,
+      candidateTerminalEvent: linkage.candidateTerminalEvent,
+      actionEvent: linkage.actionEvent,
+      actionTerminalEvent: linkage.actionTerminalEvent,
+      proactiveBubbleEvent: linkage.proactiveBubbleEvent
     }),
-    proactiveBubble: summarizeProactiveBubble(proactiveBubbleEvent),
-    action: summarizePetAction(actionEvent),
-    actionTerminal: summarizePetActionTerminal(actionTerminalEvent)
+    proactiveBubble: summarizeProactiveBubble(linkage.proactiveBubbleEvent),
+    action: summarizePetAction(linkage.actionEvent),
+    actionTerminal: summarizePetActionTerminal(linkage.actionTerminalEvent)
   };
 }
 
@@ -594,17 +621,14 @@ async function waitForHighPriorityActionsSettled(timeoutMs) {
   let stableSince = null;
   while (Date.now() < deadline) {
     throwIfRunnerAborted();
-    const activeReasons = new Set();
+    let activeActionKeys = new Set();
     for (const event of readTelemetryEvents()) {
       if (!["pet_interaction_action_started", "pet_interaction_action_finished", "pet_interaction_action_skipped"].includes(event.type)) {
         continue;
       }
-      const reason = event.payload?.reason;
-      if (typeof reason !== "string") continue;
-      if (event.type === "pet_interaction_action_started") activeReasons.add(reason);
-      else activeReasons.delete(reason);
+      activeActionKeys = updateActiveActionKeys(activeActionKeys, event);
     }
-    if (activeReasons.size === 0) {
+    if (activeActionKeys.size === 0) {
       stableSince ??= Date.now();
       if (Date.now() - stableSince >= ACTION_STABLE_MS) return;
     } else {
@@ -613,6 +637,24 @@ async function waitForHighPriorityActionsSettled(timeoutMs) {
     await sleep(100);
   }
   throw new Error("action_terminal_timeout");
+}
+
+function getActionTrackingKey(event) {
+  const requestId = event?.payload?.requestId;
+  if (typeof requestId === "string" && requestId.length > 0) return `request:${requestId}`;
+  const actionInstanceId = event?.payload?.actionInstanceId;
+  if (typeof actionInstanceId === "string" && actionInstanceId.length > 0) return `instance:${actionInstanceId}`;
+  const reason = event?.payload?.reason;
+  return typeof reason === "string" && reason.length > 0 ? `reason:${reason}` : null;
+}
+
+function updateActiveActionKeys(activeKeys, event) {
+  const key = getActionTrackingKey(event);
+  if (key === null) return new Set(activeKeys);
+  const nextKeys = new Set(activeKeys);
+  if (event.type === "pet_interaction_action_started") nextKeys.add(key);
+  else if (event.type === "pet_interaction_action_finished" || event.type === "pet_interaction_action_skipped") nextKeys.delete(key);
+  return nextKeys;
 }
 
 async function waitForBubbleVisible(pet, options = {}) {
@@ -719,6 +761,67 @@ async function waitForCandidateTerminal({ candidateId, afterIndex, timeoutMs }) 
   ), timeoutMs);
 }
 
+async function waitForSourcedActionFirstLinkageTelemetry(options) {
+  const deadline = Date.now() + options.timeoutMs;
+  while (Date.now() < deadline) {
+    throwIfRunnerAborted();
+    const linkage = selectSourcedActionFirstLinkage(readTelemetryEvents(), options);
+    if (linkage) return linkage;
+    await sleep(150);
+  }
+  return null;
+}
+
+function selectSourcedActionFirstLinkage(events, options) {
+  const scopedEvents = events.filter((event) => event.__index > options.afterIndex);
+  const candidateEvents = scopedEvents.filter((event) =>
+    event.type === "proactive_bubble_candidate" && event.payload?.candidateId === options.candidateId);
+  const earlyTerminalEvents = candidateEvents.filter((event) =>
+    ["skipped", "expired"].includes(event.payload?.status));
+  const shownCandidates = candidateEvents.filter((event) => event.payload?.status === "shown");
+
+  for (const candidateTerminalEvent of shownCandidates) {
+    const attemptedEvent = [...candidateEvents].reverse().find((event) =>
+      event.payload?.status === "attempted" && event.__index < candidateTerminalEvent.__index);
+    const queuedEvent = attemptedEvent && [...candidateEvents].reverse().find((event) =>
+      event.payload?.status === "queued" && event.__index < attemptedEvent.__index);
+    if (!attemptedEvent || !queuedEvent) continue;
+
+    const actionEvent = scopedEvents.find((event) =>
+      event.type === "pet_interaction_action_started" &&
+      event.__index > attemptedEvent.__index &&
+      event.__index < candidateTerminalEvent.__index &&
+      event.payload?.reason === options.expectedAction.reason &&
+      event.payload?.type === options.expectedAction.type &&
+      event.payload?.stateId === options.expectedAction.stateId &&
+      event.payload?.expressionPresetId === options.expectedAction.expressionPresetId);
+    if (!actionEvent) continue;
+
+    const proactiveBubbleEvent = scopedEvents.find((event) =>
+      event.type === "proactive_speech_bubble" &&
+      event.payload?.status === "shown" &&
+      event.payload?.reason === "source_presence" &&
+      event.payload?.lineId === options.lineId &&
+      event.__index > actionEvent.__index &&
+      event.__index < candidateTerminalEvent.__index);
+    const actionTerminalEvent = scopedEvents.find((event) =>
+      event.type === "pet_interaction_action_finished" &&
+      event.__index > candidateTerminalEvent.__index &&
+      event.payload?.reason === options.expectedAction.reason);
+    if (!actionTerminalEvent || !proactiveBubbleEvent) continue;
+
+    return {
+      candidateTerminalEvent,
+      actionEvent,
+      actionTerminalEvent,
+      proactiveBubbleEvent,
+      earlyTerminalEvents
+    };
+  }
+
+  return null;
+}
+
 async function waitForProactiveBubble({ status, lineId, afterIndex, timeoutMs }) {
   return waitForTelemetry((event) => (
     event.__index > afterIndex &&
@@ -761,26 +864,33 @@ async function waitForTelemetry(predicate, timeoutMs) {
   return null;
 }
 
-function inspectCandidateActionFirst({ candidateId, afterIndex, actionReason, candidateTerminalEvent, actionTerminalEvent }) {
+function inspectCandidateActionFirst({ candidateId, afterIndex, actionReason, lineId, candidateTerminalEvent, actionEvent, actionTerminalEvent, proactiveBubbleEvent }) {
   const events = readTelemetryEvents().filter((event) => event.__index > afterIndex);
   const candidateEvents = events.filter((event) =>
     event.type === "proactive_bubble_candidate" && event.payload?.candidateId === candidateId);
-  const indexForStatus = (status) => candidateEvents.find((event) => event.payload?.status === status)?.__index ?? -1;
-  const queuedIndex = indexForStatus("queued");
-  const attemptedIndex = indexForStatus("attempted");
-  const shownIndex = indexForStatus("shown");
-  const actionIndex = events.find((event) =>
-    event.type === "pet_interaction_action_started" &&
-    event.payload?.reason === actionReason &&
-    event.__index > attemptedIndex && event.__index < shownIndex)?.__index ?? -1;
-  const actionTerminalIndex = actionTerminalEvent?.__index ?? -1;
+  const linkage = selectSourcedActionFirstLinkage(events, {
+    candidateId,
+    lineId,
+    expectedAction: {
+      reason: actionReason,
+      type: actionEvent?.payload?.type,
+      stateId: actionEvent?.payload?.stateId,
+      expressionPresetId: actionEvent?.payload?.expressionPresetId
+    },
+    afterIndex: -1
+  });
   return {
     candidateId,
     statuses: candidateEvents.map((event) => event.payload?.status)
       .filter((status) => ["queued", "attempted", "shown", "skipped", "expired"].includes(status)),
     terminalStatus: candidateTerminalEvent?.payload?.status ?? "missing",
-    actionFirst: queuedIndex >= 0 && attemptedIndex > queuedIndex &&
-      actionIndex > attemptedIndex && shownIndex > actionIndex && actionTerminalIndex > shownIndex
+    earlyTerminalStatuses: candidateEvents
+      .filter((event) => ["skipped", "expired"].includes(event.payload?.status))
+      .map((event) => event.payload?.status),
+    actionFirst: linkage?.candidateTerminalEvent.__index === candidateTerminalEvent?.__index &&
+      linkage.actionEvent.__index === actionEvent?.__index &&
+      linkage.actionTerminalEvent.__index === actionTerminalEvent?.__index &&
+      linkage.proactiveBubbleEvent.__index === proactiveBubbleEvent?.__index
   };
 }
 
@@ -891,6 +1001,24 @@ function normalizeCandidateSkipReason(value) {
     "chat_interaction_active",
     "chat_visible",
     "cleared",
+    "context_affect_action_chat_visible",
+    "context_affect_disabled",
+    "context_affect_quiet_environment",
+    "context_chat_visible",
+    "context_engagement_deferred",
+    "context_engagement_suppressed",
+    "context_environment_disabled",
+    "context_explicit_game_proactive_owns_presentation",
+    "context_focus_suppressed",
+    "context_lifecycle_sleep",
+    "context_lifecycle_suspended",
+    "context_lifecycle_system_locked",
+    "context_lifecycle_unavailable",
+    "context_model_busy",
+    "context_presentation_busy",
+    "context_proactive_off",
+    "context_source_disabled",
+    "context_user_active",
     "engagement_blocked",
     "high_priority_action_active",
     "interruptibility_not_allowed",

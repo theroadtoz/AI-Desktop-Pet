@@ -30,7 +30,11 @@ import type {
   PetTelemetryEvent,
   RenderHealth
 } from "../shared/ipc-contract";
-import { isChatMessage } from "../shared/ipc-contract";
+import {
+  isChatMessage,
+  P2_85_ACCEPTANCE_SCENARIO_IDS,
+  type P285AcceptanceScenarioId
+} from "../shared/ipc-contract";
 import {
   PROACTIVE_BUBBLE_CANDIDATE_IDS,
   DEFAULT_PROACTIVE_SPEECH_BUBBLE_DURATION_MS,
@@ -183,6 +187,18 @@ import {
   resolveAffectDialoguePresentation,
   type AffectDialoguePresentationResolution
 } from "./services/affect/affect-dialogue-presentation-resolver";
+import {
+  resolveCompanionContextArbitration,
+  type CompanionContextAffectBand,
+  type CompanionContextArbitrationInput,
+  type CompanionContextChannel,
+  type CompanionContextLifecycle
+} from "./services/companion-context/companion-context-arbitration-policy";
+import {
+  createP285AcceptanceScenarioController,
+  type P285AcceptanceRejectionReason,
+  type P285AcceptanceScenarioController
+} from "./services/companion-context/p2-85-acceptance-scenarios";
 import { createDesktopContextMonitor } from "./services/desktop-context/desktop-context-monitor";
 import { createWindowsDesktopContextProvider } from "./services/desktop-context/windows-desktop-context-provider";
 import {
@@ -196,6 +212,7 @@ import {
 } from "./services/automatic-situation/coarse-user-state-coordinator";
 import {
   createProactiveBubbleCoordinator,
+  type ProactiveBubbleCandidateId,
   type ProactiveBubbleCoordinator,
   type ProactiveBubbleRuntimeGates
 } from "./services/proactive-companion/proactive-bubble-coordinator";
@@ -328,7 +345,8 @@ let hasHandledStartupProactiveSpeechBubble = false;
 let proactiveSpeechBubbleTick = 0;
 let proactiveSpeechBubbleVisibleUntil = 0;
 let hasPetFirstFrame = false;
-let lastLowFrequencyCompanionEventAt: number | null = null;
+let isSynchronizingCoarseUserState = false;
+let lastLowFrequencyCompanionCandidateAttemptAt: number | null = null;
 let lastLowFrequencyCompanionEventId: LowFrequencyCompanionEvent["eventId"] | null = null;
 let pendingSourcedLowFrequencyCompanionEvents: SourcedLowFrequencyCompanionEvent[] = [];
 let petActionDispatchCoordinator: PetActionDispatchCoordinator | null = createPetActionDispatchCoordinator({
@@ -373,6 +391,13 @@ const isP284AcceptanceObservationEnabled = isAcceptanceTelemetryEnabled &&
   process.env.AI_DESKTOP_PET_P2_84_SAFE_OBSERVATION === "1";
 const isP284AcceptanceFixtureEnabled = isP284AcceptanceObservationEnabled &&
   process.env.AI_DESKTOP_PET_P2_84_SAFE_FIXTURE === "1";
+const isP285AcceptanceObservationEnabled = isAcceptanceTelemetryEnabled &&
+  process.env.AI_DESKTOP_PET_P2_85_SAFE_OBSERVATION === "1";
+const isP285AcceptanceFixtureEnabled = isP285AcceptanceObservationEnabled &&
+  process.env.AI_DESKTOP_PET_P2_85_SAFE_FIXTURE === "1";
+const isP285HardwareAccelerationDisabledForAcceptance = isP285AcceptanceFixtureEnabled &&
+  process.env.AI_DESKTOP_PET_P2_85_DISABLE_HARDWARE_ACCELERATION === "1";
+let p285AcceptanceScenarioController: P285AcceptanceScenarioController | null = null;
 const P2_84_ACCEPTANCE_MEDIUM_LOW_FIXTURE = "__p2_84_medium_low_fixture__，以后回复短一点。";
 const isP245AcceptanceSafeActive = isAcceptanceTelemetryEnabled &&
   process.env.AI_DESKTOP_PET_P2_45_SAFE_ACTIVE_CONTEXT === "1";
@@ -450,6 +475,10 @@ if (
   (!app.isPackaged || allowPackagedUserDataOverride)
 ) {
   app.setPath("userData", userDataPathOverride);
+}
+
+if (isP285HardwareAccelerationDisabledForAcceptance) {
+  app.disableHardwareAcceleration();
 }
 
 protocol.registerSchemesAsPrivileged([
@@ -1180,29 +1209,85 @@ function startBackgroundUserAffectClassification(
   });
 }
 
-function requestDialogueAffectAction(
-  resolution: AffectDialoguePresentationResolution | null
-): boolean {
-  if (
-    !currentDialogueAffectSettings.enabled ||
-    !resolution?.action ||
-    isPetLocked ||
-    currentPresenceModeId !== "default" ||
-    currentDialogueModeId !== "default" ||
-    petRoleSnapshot.chatOpen ||
-    isChatInteractionActive ||
-    activeChatRequestVersion !== null ||
-    chatEngine?.hasActiveStream()
-  ) {
-    return false;
+function getCompanionContextLifecycle(): CompanionContextLifecycle {
+  const coarseState = coarseUserStateCoordinator?.getState();
+  if (currentPresenceModeId === "sleep") return "sleep";
+  if (coarseState?.activity === "locked") return "system-locked";
+  if (coarseState?.activity === "suspended") return "suspended";
+  if (!petWindow || petWindow.isDestroyed() || !hasPetFirstFrame) return "unavailable";
+  return "ready";
+}
+
+function getCompanionContextAffectBand(): CompanionContextAffectBand {
+  const affect = xitaAffectCoordinator?.getSnapshot();
+  if (!currentDialogueAffectSettings.enabled || !affect) return "default";
+  if (affect.state === "sleepy") return "sleepy";
+  if (affect.intensity !== "low" && (
+    affect.state === "concerned" || affect.state === "serious"
+  )) {
+    return "focused";
+  }
+  if (affect.intensity !== "low" && (
+    affect.state === "happy" || affect.state === "curious" ||
+    affect.state === "playful" || affect.state === "embarrassed"
+  )) {
+    return "gentle";
+  }
+  return "default";
+}
+
+function createCompanionContextArbitrationInput(
+  channel: CompanionContextChannel,
+  dialogueSource: AutomaticSituationSnapshot["conversationSource"] = "default"
+): CompanionContextArbitrationInput {
+  const coarseState = coarseUserStateCoordinator?.getState();
+  const streamActive = activeChatRequestVersion !== null || Boolean(chatEngine?.hasActiveStream());
+  const interaction = streamActive
+    ? "model-busy"
+    : petRoleSnapshot.chatOpen || isChatVisible()
+      ? "chat-visible"
+      : isChatInteractionActive
+        ? "user-active"
+        : "idle";
+
+  return {
+    channel,
+    lifecycle: getCompanionContextLifecycle(),
+    interaction,
+    engagement: isP245AcceptanceSafeActive ? "allowed" : coarseState?.engagement ?? "unknown",
+    dialogueMode: currentDialogueModeId,
+    dialogueSource,
+    presenceMode: currentPresenceModeId,
+    affectBand: getCompanionContextAffectBand(),
+    presentationBusy: petActionDispatchCoordinator?.getState().busy ?? false,
+    proactiveCadence: currentProactiveCompanionSettings.cadence,
+    affectEnabled: currentDialogueAffectSettings.enabled,
+    relevantSourceEnabled: true,
+    environmentEnabled: currentEnvironmentActionSettings.basicEnabled ||
+      currentEnvironmentActionSettings.musicEnabled ||
+      currentEnvironmentActionSettings.explicitGameContextEnabled
+  };
+}
+
+function resolveDialogueReplyActionReason(
+  resolution: AffectDialoguePresentationResolution | null,
+  shouldRequestReplyWarmSettle: boolean
+): PetActionTriggerReason | null {
+  if (!shouldRequestReplyWarmSettle) return null;
+
+  if (resolution?.action) {
+    const affectDecision = resolveCompanionContextArbitration(
+      createCompanionContextArbitrationInput("affect-action")
+    );
+    if (affectDecision.decision === "allow") {
+      return resolution.action.reason;
+    }
   }
 
-  const attempt = requestPetActionTriggerWithResult(resolution.action.reason);
-  if (!attempt.coordinatorAttempted) {
-    return false;
-  }
-  logDialogueAffectActionDispatch(attempt.result);
-  return attempt.result.accepted;
+  const replyDecision = resolveCompanionContextArbitration(
+    createCompanionContextArbitrationInput("reply-completion-action")
+  );
+  return replyDecision.decision === "allow" ? "chat_reply_completed" : null;
 }
 
 function syncAutomaticPresenceLifecycle(): AutomaticSituationSnapshot | null {
@@ -1219,7 +1304,7 @@ function syncAutomaticPresenceLifecycle(): AutomaticSituationSnapshot | null {
 
   return automaticSituationCoordinator.updatePresenceLifecycle({
     appActive: isChatInteractionActive || activeChatRequestVersion !== null,
-    quietRequested: currentProactiveCompanionSettings.cadence === "off",
+    quietRequested: false,
     localTimeBand: getRuntimeProactiveSpeechBubbleTimeBand(),
     systemIdleMs
   });
@@ -1244,13 +1329,6 @@ function applyAutomaticSituationSnapshot(snapshot: AutomaticSituationSnapshot): 
     );
     currentPetPresentationIntent = withCurrentAccessorySelection(currentPetPresentationIntent);
     publishPetPresentation(currentPetPresentationIntent);
-    const actionState = selectPetActionStateForModeChange({
-      dialogueModeId: currentDialogueModeId,
-      presenceModeId: currentPresenceModeId
-    });
-    if (actionState && actionState.stateId !== "idle") {
-      schedulePetModeActionStateTrigger(actionState.triggerReason);
-    }
     void runtimeActionReason;
   }
 
@@ -1262,18 +1340,24 @@ function applyAutomaticSituationSnapshot(snapshot: AutomaticSituationSnapshot): 
       markProactiveSpeechBubbleHidden();
       clearSourcedLowFrequencyCompanionEvents();
     }
+  }
 
+  const dialogueChanged = previousDialogueContextId !== currentDialogueModeId;
+  const presenceChanged = previousPresenceStateId !== currentPresenceModeId;
+  if (dialogueChanged || presenceChanged) {
+    cancelPendingModeActionStateTrigger();
     const actionState = selectPetActionStateForModeChange({
       dialogueModeId: currentDialogueModeId,
       presenceModeId: currentPresenceModeId
     });
-    if (actionState && (
+    const automaticActionDecision = resolveCompanionContextArbitration(
+      createCompanionContextArbitrationInput("automatic-mode-action", snapshot.conversationSource)
+    );
+    if (automaticActionDecision.decision === "allow" && actionState && (
       actionState.stateId !== "idle" ||
       previousPresenceStateId === "sleep" && currentPresenceModeId === "default"
     )) {
       schedulePetModeActionStateTrigger(actionState.triggerReason);
-    }
-    if (currentPresenceModeId !== "sleep") {
     }
   }
 
@@ -1290,9 +1374,13 @@ function applyAutomaticSituationSnapshot(snapshot: AutomaticSituationSnapshot): 
       presenceSource: snapshot.presenceSource,
       revision: snapshot.revision
     });
-    scheduleIdleProactiveSpeechBubble();
+    if (!isSynchronizingCoarseUserState) {
+      scheduleIdleProactiveSpeechBubble();
+    }
   }
-  refreshProactiveBubbleRuntimeGates();
+  if (!isSynchronizingCoarseUserState) {
+    refreshProactiveBubbleRuntimeGates();
+  }
 }
 
 function cancelPendingModeActionStateTrigger(): void {
@@ -1601,10 +1689,10 @@ function getNextIdleProactiveSpeechBubbleDelayMs(): number | null {
   return visibleRemainingMs + cadenceIntervalMs;
 }
 
-function getLowFrequencyCompanionEventElapsedMs(now: number): number | undefined {
-  return lastLowFrequencyCompanionEventAt === null
+function getLowFrequencyCompanionCandidateAttemptElapsedMs(now: number): number | undefined {
+  return lastLowFrequencyCompanionCandidateAttemptAt === null
     ? undefined
-    : Math.max(0, now - lastLowFrequencyCompanionEventAt);
+    : Math.max(0, now - lastLowFrequencyCompanionCandidateAttemptAt);
 }
 
 function selectRuntimeLowFrequencyCompanionEvent(now: number): {
@@ -1613,7 +1701,7 @@ function selectRuntimeLowFrequencyCompanionEvent(now: number): {
   minimumIntervalMs?: number | undefined;
   skipReason?: string | undefined;
 } {
-  const elapsedSinceLastEventMs = getLowFrequencyCompanionEventElapsedMs(now);
+  const elapsedSinceLastEventMs = getLowFrequencyCompanionCandidateAttemptElapsedMs(now);
   const input = {
     dialogueModeId: currentDialogueModeId,
     presenceModeId: currentPresenceModeId,
@@ -1701,7 +1789,7 @@ function scheduleIdleProactiveSpeechBubble(): void {
       payload,
       getPetActionStateTriggerReason(actionStateId)
     );
-    lastLowFrequencyCompanionEventAt = now;
+    lastLowFrequencyCompanionCandidateAttemptAt = now;
     lastLowFrequencyCompanionEventId = selection.event.eventId;
     clearQueuedSourcedLowFrequencyCompanionEvent(selection.event.eventId);
     logLowFrequencyCompanionEventDecision("queued", selection.event, {
@@ -2491,6 +2579,7 @@ function rebuildPetWindow(recoverySource?: string): void {
   pointerController = null;
   desktopContextMonitor.setRendererReady(false);
   hasPetFirstFrame = false;
+  p285AcceptanceScenarioController?.dispose();
   petActionDispatchCoordinator?.reset();
   markProactiveSpeechBubbleHidden();
   proactiveBubbleCoordinator?.clear();
@@ -2629,6 +2718,40 @@ app.whenReady().then(async () => {
     ledger: proactiveBubbleLedgerStore,
     getRuntimeGates: getProactiveBubbleRuntimeGates,
     requestAction: requestPetActionTrigger,
+    resolveContextGate(candidateId: ProactiveBubbleCandidateId) {
+      const sourceCandidates = new Set<ProactiveBubbleCandidateId>([
+        "startup_daily",
+        "memory_safe",
+        "search_citation_safe",
+        "history_summary_safe"
+      ]);
+      const silenceCandidates = new Set<ProactiveBubbleCandidateId>([
+        "idle_presence",
+        "long_silence"
+      ]);
+      const channel = sourceCandidates.has(candidateId)
+        ? "proactive-source"
+        : silenceCandidates.has(candidateId)
+          ? "proactive-silence"
+          : "proactive-environment";
+      const relevantSourceEnabled = candidateId === "memory_safe" || candidateId === "history_summary_safe"
+        ? currentProactiveCompanionSettings.memorySourceBubbles
+        : candidateId === "search_citation_safe"
+          ? currentProactiveCompanionSettings.searchSourceBubbles
+          : true;
+      const environmentEnabled = candidateId === "explicit_game_started"
+        ? currentEnvironmentActionSettings.explicitGameContextEnabled
+        : candidateId === "music_started"
+          ? currentEnvironmentActionSettings.musicEnabled
+          : channel === "proactive-environment"
+            ? currentEnvironmentActionSettings.basicEnabled
+            : true;
+      return resolveCompanionContextArbitration({
+        ...createCompanionContextArbitrationInput(channel),
+        relevantSourceEnabled,
+        environmentEnabled
+      });
+    },
     showBubble(payload) {
       if (!petWindow || petWindow.isDestroyed()) {
         return false;
@@ -2648,6 +2771,7 @@ app.whenReady().then(async () => {
       openChatWindow();
     },
     reportDecision(decision) {
+      p285AcceptanceScenarioController?.observeProactiveDecision(decision);
       logTelemetry("proactive_bubble_candidate", {
         candidateId: decision.candidateId,
         status: decision.state,
@@ -2680,17 +2804,23 @@ app.whenReady().then(async () => {
     explicitGameContextEnabled: currentEnvironmentActionSettings.explicitGameContextEnabled
   });
   removeCoarseUserStateListener = coarseUserStateCoordinator.subscribe((state) => {
-    automaticSituationCoordinator?.updateExplicitGameContext(state.explicitGameContext === "active");
-    proactiveBubbleCoordinator?.updateCoarseState(isP245AcceptanceSafeActive
-      ? {
-          activity: "active",
-          interruptibility: "allowed",
-          media: state.media,
-          timeBand: state.timeBand,
-          explicitGameContext: state.explicitGameContext,
-          engagement: "allowed"
-        }
-      : state);
+    isSynchronizingCoarseUserState = true;
+    try {
+      automaticSituationCoordinator?.updateExplicitGameContext(state.explicitGameContext === "active");
+      proactiveBubbleCoordinator?.updateCoarseState(isP245AcceptanceSafeActive
+        ? {
+            activity: "active",
+            interruptibility: "allowed",
+            media: state.media,
+            timeBand: state.timeBand,
+            explicitGameContext: state.explicitGameContext,
+            engagement: "allowed"
+          }
+        : state);
+    } finally {
+      isSynchronizingCoarseUserState = false;
+      scheduleIdleProactiveSpeechBubble();
+    }
   });
   removeDesktopContextSnapshotListener = desktopContextMonitor.subscribe((snapshot) => {
     coarseUserStateCoordinator?.updateEnvironment(snapshot);
@@ -2812,7 +2942,6 @@ app.whenReady().then(async () => {
     markProactiveSpeechBubbleHidden();
     proactiveBubbleCoordinator?.clear();
     if (!wasVisible) {
-      petActionDispatchCoordinator?.reset();
       refreshProactiveBubbleRuntimeGates();
     }
     showChatWindow(chatWindow);
@@ -2826,6 +2955,51 @@ app.whenReady().then(async () => {
   }
 
   openChatWindowAdapter = openChatWindow;
+  if (isP285AcceptanceFixtureEnabled) {
+    p285AcceptanceScenarioController = createP285AcceptanceScenarioController({
+      dispatchAction(reason) {
+        return petActionDispatchCoordinator?.dispatch(reason) ?? { accepted: false, reason: "busy" };
+      },
+      cancelAction(requestId) {
+        if (requestId) {
+          petActionDispatchCoordinator?.cancel(requestId);
+          return;
+        }
+        petActionDispatchCoordinator?.cancelActive();
+      },
+      getActiveMainRequest() {
+        return petActionDispatchCoordinator?.getState().activeMainRequest ?? null;
+      },
+      openChatWindow,
+      async resetLiveBaseline() {
+        isChatInteractionActive = false;
+        if (chatWindow && !chatWindow.isDestroyed() && chatWindow.isVisible()) {
+          await new Promise<void>((resolve) => {
+            chatWindow?.once("hide", resolve);
+            chatWindow?.hide();
+          });
+        }
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        isChatInteractionActive = false;
+        petActionDispatchCoordinator?.cancelActive();
+        proactiveBubbleCoordinator?.clear();
+        refreshProactiveBubbleRuntimeGates();
+        return !isChatVisible() &&
+          !petActionDispatchCoordinator?.getState().busy &&
+          !isChatInteractionActive;
+      },
+      clearProactiveCandidate() {
+        proactiveBubbleCoordinator?.clear();
+      },
+      queueExplicitGameCandidate() {
+        proactiveBubbleCoordinator?.queueSafeCandidateForAcceptance("explicit_game_started");
+      },
+      resolveArbitration: resolveCompanionContextArbitration,
+      reportObservation(observation) {
+        logTelemetry("p2_85_acceptance_observation", observation);
+      }
+    });
+  }
   if (pendingChatWindowOpen) {
     pendingChatWindowOpen = false;
     openChatWindowAdapter();
@@ -3207,6 +3381,66 @@ app.whenReady().then(async () => {
     return proactiveBubbleCoordinator?.activateBubble(value) ?? false;
   });
 
+  ipcMain.handle("pet:p2-85-run-scenario", (event, scenarioId: unknown) => {
+    if (
+      !isPetSender(event) ||
+      !isP285AcceptanceFixtureEnabled ||
+      typeof scenarioId !== "string" ||
+      !P2_85_ACCEPTANCE_SCENARIO_IDS.includes(scenarioId as P285AcceptanceScenarioId)
+    ) {
+      return false;
+    }
+
+    const acceptedScenarioId = scenarioId as P285AcceptanceScenarioId;
+    try {
+      if (
+        acceptedScenarioId === "explicit_game_single_presentation" &&
+        !isP283aAcceptanceInjectionOnly
+      ) {
+        logTelemetry("p2_85_acceptance_rejection", {
+          scenarioId: acceptedScenarioId,
+          rejectionReason: "explicit_game_fixture_disabled"
+        });
+        return false;
+      }
+      const result = p285AcceptanceScenarioController?.runScenario(acceptedScenarioId) ?? {
+        accepted: false,
+        rejectionReason: "controller_unavailable" as P285AcceptanceRejectionReason
+      };
+      if (!result.accepted) {
+        logTelemetry("p2_85_acceptance_rejection", {
+          scenarioId: acceptedScenarioId,
+          rejectionReason: result.rejectionReason
+        });
+      }
+      return result.accepted;
+    } catch {
+      logTelemetry("p2_85_acceptance_rejection", {
+        scenarioId: acceptedScenarioId,
+        rejectionReason: "controller_threw"
+      });
+      p285AcceptanceScenarioController?.resetBaseline();
+      return false;
+    }
+  });
+
+  ipcMain.handle("pet:p2-85-reset-baseline", async (event) => {
+    if (!isPetSender(event) || !isP285AcceptanceFixtureEnabled) {
+      return false;
+    }
+    const result = await (p285AcceptanceScenarioController?.resetBaseline() ?? Promise.resolve({
+      accepted: false,
+      rejectionReason: "controller_unavailable" as P285AcceptanceRejectionReason
+    }));
+    if (!result.accepted) {
+      logTelemetry("p2_85_acceptance_rejection", {
+        scenarioId: "chat_opened_replace_active",
+        rejectionReason: result.rejectionReason
+      });
+    }
+    return result.accepted;
+  });
+
   ipcMain.handle("pet:p2-83a-inject-candidate", (event, candidateId: unknown) => {
     if (
       !isAcceptanceTelemetryEnabled ||
@@ -3362,6 +3596,12 @@ app.whenReady().then(async () => {
           }
         ) ?? "ignored"
         : "ignored";
+      p285AcceptanceScenarioController?.observeRendererActionLifecycle(
+        lifecycleStatus,
+        typeof actionReason === "string" ? actionReason : "",
+        lifecycleRequestId,
+        lifecycleResult
+      );
       if (isPetActionTriggerReason(actionReason)) {
         if (lifecycleResult === "main_started") {
           proactiveBubbleCoordinator?.onActionLifecycle(
@@ -3434,6 +3674,14 @@ app.whenReady().then(async () => {
 
   ipcMain.on("chat:interaction-active", (event, isActive: unknown) => {
     if (!isChatSender(event) || typeof isActive !== "boolean") {
+      return;
+    }
+
+    if (isActive && !isChatVisible()) {
+      isChatInteractionActive = false;
+      syncAutomaticPresenceLifecycle();
+      transitionPetRole({ type: "chat:interaction", active: false });
+      refreshProactiveBubbleRuntimeGates();
       return;
     }
 
@@ -3808,10 +4056,17 @@ app.whenReady().then(async () => {
         hasSearchCitation: Boolean(webSearchCitation?.citations.length),
         intensity: result.intensity
       });
-      if (shouldRequestReplyWarmSettle) {
-        const affectActionRequested = requestDialogueAffectAction(affectPresentation);
-        if (!affectActionRequested) {
-          sendPetActionTrigger("chat_reply_completed");
+      const dialogueReplyActionReason = resolveDialogueReplyActionReason(
+        affectPresentation,
+        shouldRequestReplyWarmSettle
+      );
+      if (dialogueReplyActionReason) {
+        const attempt = requestPetActionTriggerWithResult(dialogueReplyActionReason);
+        if (
+          dialogueReplyActionReason === affectPresentation?.action?.reason &&
+          attempt.coordinatorAttempted
+        ) {
+          logDialogueAffectActionDispatch(attempt.result);
         }
       }
 
@@ -4495,6 +4750,8 @@ function quiesceApp(): void {
   powerMonitor.removeListener("resume", handleSystemResume);
   removeDesktopContextSnapshotListener?.();
   removeDesktopContextSnapshotListener = null;
+  p285AcceptanceScenarioController?.dispose();
+  p285AcceptanceScenarioController = null;
   proactiveBubbleCoordinator?.dispose();
   proactiveBubbleCoordinator = null;
   petActionDispatchCoordinator?.reset();
