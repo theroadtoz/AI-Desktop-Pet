@@ -410,12 +410,13 @@ test("P2-34 production runner follows coordinator action-first cadence without s
   assert.match(runnerSource, /inspectCandidateActionFirst\([\s\S]*"startup_daily",[\s\S]*startupOutcome\.appearanceTerminalIndex/);
   assert.match(runnerSource, /startupReadinessDiagnostic = \{[\s\S]*appearanceLifecycle:[\s\S]*candidateLifecycle:/);
   assert.match(runnerSource, /startupOutcome\.terminalStatus === "shown"[\s\S]*startupShownActionFirst/);
-  assert.match(runnerSource, /startupOutcome\.terminalStatus === "skipped"[\s\S]*"engagement_blocked", "interruptibility_not_allowed", "system_unavailable"[\s\S]*startupBubble\.state === "hidden"/);
+  assert.match(runnerSource, /const safeSuppressionSkipReasons = new Set\(\[\s*"engagement_blocked",\s*"interruptibility_not_allowed",\s*"system_unavailable",\s*"context_engagement_suppressed"\s*\]\);/);
+  assert.match(runnerSource, /const startupSuppressedSafely = isSafeSuppression\(startupOutcome, startupBubble\);/);
+  assert.match(runnerSource, /function isSafeSuppression\(outcome, bubble\) \{\s*return outcome\.terminalStatus === "skipped" &&\s*safeSuppressionSkipReasons\.has\(outcome\.skipReason\) &&\s*bubble\.state === "hidden" && bubble\.textLength === 0;\s*\}/);
   assert.match(runnerSource, /inspectCandidateActionFirst\("idle_presence", idleStartIndex\)/);
   assert.match(runnerSource, /waitForCandidateTerminal\(signal, "idle_presence", idleStartIndex, 9_000\)/);
   assert.match(runnerSource, /waitForLowFrequencyQueuedDecision\(signal, idleStartIndex, 9_000\)/);
   assert.match(runnerSource, /decisionEvent\.type === "low_frequency_companion_event"[\s\S]*decisionEvent\.payload\?\.status === "queued"/);
-  assert.match(runnerSource, /"engagement_blocked", "interruptibility_not_allowed", "system_unavailable"/);
   assert.doesNotMatch(runnerSource, /setDialogueMode|setPresenceMode|expectedDialogueCases|expectedPresenceCases/);
   assert.match(runnerSource, /manualModeControlsAbsent:[\s\S]*manualModeApisAbsent:/);
   assert.match(runnerSource, /\["dialogueOpenWelcome", "listen"\]\.includes\(event\.payload\?\.type\)/);
