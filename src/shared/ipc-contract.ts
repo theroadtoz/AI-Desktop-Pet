@@ -1,6 +1,15 @@
 import type { EmotionPresentation } from "./emotion-presentation";
 import type { ChatMessage } from "./chat";
-import type { MemoryCard, MemoryCardDraft, MemoryCardUpdate, MemorySettings, MemorySummary } from "./chat-memory";
+import type {
+  MemoryCard,
+  MemoryCardDraft,
+  MemoryCardUpdate,
+  MemoryCreateResult,
+  MemoryForgetResult,
+  MemorySettings,
+  MemorySummary,
+  MemorySuppressionView
+} from "./chat-memory";
 import type { Conversation, ConversationSummary } from "./chat-history";
 import type { ChatProviderResult, ChatRequest, ChatStreamDelta } from "./chat-provider";
 import type { ProviderHealthCheckRequest, ProviderHealthResult } from "./provider-health";
@@ -119,6 +128,7 @@ export type ChatMemoryActivitySkippedReason =
   | "disabled"
   | "sensitive"
   | "no_candidate"
+  | "suppressed"
   | "capture_failed"
   | null;
 
@@ -303,10 +313,14 @@ export type MemoryApi = {
   setEnabled(enabled: boolean): Promise<MemorySettings>;
   listCards(): Promise<MemoryCard[]>;
   getCard(id: string): Promise<MemoryCard | null>;
-  createCard(draft: MemoryCardDraft): Promise<MemoryCard>;
+  createCard(draft: MemoryCardDraft): Promise<MemoryCreateResult>;
   updateCard(id: string, update: MemoryCardUpdate): Promise<MemoryCard | null>;
   deleteCard(id: string): Promise<boolean>;
+  forgetCard(id: string): Promise<MemoryForgetResult>;
   clearCards(): Promise<void>;
+  listSuppressions(): Promise<MemorySuppressionView[]>;
+  allowSuppression(id: string): Promise<boolean>;
+  clearSuppressions(): Promise<void>;
 };
 
 export type ProactiveCompanionApi = {

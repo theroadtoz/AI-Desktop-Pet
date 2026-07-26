@@ -62,7 +62,12 @@ import {
   type LowFrequencyCompanionEvent
 } from "../shared/daily-state-orchestration";
 import { isHistoryId, type HistoryMessage } from "../shared/chat-history";
-import { isMemoryId, parseMemoryCardDraft, parseMemoryCardUpdate, type MemoryCardUpdate } from "../shared/chat-memory";
+import {
+  isMemoryId,
+  parseMemoryCardDraft,
+  parseMemoryCardUpdate,
+  type MemoryCardUpdate
+} from "../shared/chat-memory";
 import type { DialogueModeId } from "../shared/dialogue-style";
 import type { PresenceModeId } from "../shared/presence-mode";
 import type { AutomaticSituationSnapshot } from "../shared/automatic-situation-context";
@@ -4499,12 +4504,44 @@ app.whenReady().then(async () => {
     return memoryStore.deleteCard(id);
   });
 
+  ipcMain.handle("memory:forget", (event, id: unknown) => {
+    if (!isChatSender(event) || !memoryStore || !isMemoryId(id)) {
+      return { status: "not_found" };
+    }
+
+    return memoryStore.forgetCard(id);
+  });
+
   ipcMain.handle("memory:clear", (event) => {
     if (!isChatSender(event) || !memoryStore) {
       throw new Error("Unauthorized memory request");
     }
 
     memoryStore.clearCards();
+  });
+
+  ipcMain.handle("memory:list-suppressions", (event) => {
+    if (!isChatSender(event) || !memoryStore) {
+      throw new Error("Unauthorized memory request");
+    }
+
+    return memoryStore.listSuppressions();
+  });
+
+  ipcMain.handle("memory:allow-suppression", (event, id: unknown) => {
+    if (!isChatSender(event) || !memoryStore || !isMemoryId(id)) {
+      return false;
+    }
+
+    return memoryStore.allowSuppression(id);
+  });
+
+  ipcMain.handle("memory:clear-suppressions", (event) => {
+    if (!isChatSender(event) || !memoryStore) {
+      throw new Error("Unauthorized memory request");
+    }
+
+    memoryStore.clearSuppressions();
   });
 
   ipcMain.handle("automaticSituation:get", (event) => {

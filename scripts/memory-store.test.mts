@@ -35,15 +35,16 @@ test("memory storage is disabled by default and validates storage versions", () 
     enabled: true
   };
 
-  assert.equal(parseMemoryStorage({ version: 1, enabled: false, cards: [] })?.version, 3);
-  assert.equal(parseMemoryStorage({ version: 2, enabled: false, cards: [] })?.version, 3);
+  assert.equal(parseMemoryStorage({ version: 1, enabled: false, cards: [] })?.version, 4);
+  assert.equal(parseMemoryStorage({ version: 2, enabled: false, cards: [] })?.version, 4);
   assert.equal(parseMemoryStorage({ version: 3, enabled: false, cards: [] })?.enabled, false);
+  assert.equal(parseMemoryStorage({ version: 4, enabled: false, cards: [], suppressions: [] })?.version, 4);
   assert.equal(parseMemoryStorage({ version: 4, enabled: false, cards: [] }), null);
   assert.equal(parseMemoryStorage({ version: 1, enabled: "yes", cards: [] }), null);
   assert.equal(parseMemoryStorage({ version: 1, enabled: true, cards: [{ ...card, enabled: "yes" }] }), null);
 });
 
-test("v1 memory storage migrates to v3 metadata without dropping cards", async () => {
+test("v1 memory storage migrates to v4 metadata without dropping cards", async () => {
   const userDataPath = await mkdtemp(join(tmpdir(), "desktop-pet-memory-"));
 
   try {
@@ -79,10 +80,12 @@ test("v1 memory storage migrates to v3 metadata without dropping cards", async (
     assert.equal(card.compressionState, "raw");
     assert.equal(card.lastInjectedAt, null);
     assert.equal(card.injectionCount, 0);
+    assert.equal(card.managedByUser, true);
 
     const migrated = JSON.parse(await readFile(memoryPath, "utf8"));
-    assert.equal(migrated.version, 3);
+    assert.equal(migrated.version, 4);
     assert.equal(migrated.cards.length, 1);
+    assert.deepEqual(migrated.suppressions, []);
   } finally {
     await rm(userDataPath, { recursive: true, force: true });
   }
@@ -97,7 +100,9 @@ test("memory cards require explicit enablement and deletion survives restart", a
     assert.equal(store.createInjection().count, 0);
 
     assert.equal(store.setEnabled(true).enabled, true);
-    const card = store.createCard(createDraft());
+    const created = store.createCard(createDraft());
+    assert.equal(created.status, "created");
+    const card = created.card;
     assert.equal(card.sourceType, "manual-chat");
     assert.equal(card.namespace, "personal");
     assert.equal(card.key, `manual-${card.id.slice(0, 8).toLowerCase()}`);
@@ -178,7 +183,11 @@ test("memory summary reports injectable zero while disabled and counts safe meta
 
   try {
     const store = createMemoryStore({ userDataPath });
-    const manualCard = store.createCard(createDraft());
+    store.setEnabled(true);
+    const created = store.createCard(createDraft());
+    assert.equal(created.status, "created");
+    const manualCard = created.card;
+    store.setEnabled(false);
     let summary = store.getSummary();
 
     assert.equal(summary.enabled, false);

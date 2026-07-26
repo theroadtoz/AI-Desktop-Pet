@@ -9,13 +9,17 @@ import {
   parseMemoryStorage,
   type MemoryCard,
   type MemoryCardDraft,
+  type MemoryCreateResult,
   type MemoryCompressionState,
+  type MemoryForgetResult,
   type MemoryImportance,
   type MemoryCardUpdate,
   type MemorySummary,
   type MemoryInjection,
   type MemorySettings,
   type MemorySourceType,
+  type MemorySuppression,
+  type MemorySuppressionView,
   type MemoryStorage
 } from "../../../shared/chat-memory";
 
@@ -41,7 +45,7 @@ export type AutoMemoryCaptureInput = {
 
 export type AutoMemoryCaptureSummary = {
   enabled: boolean;
-  skippedReason: "disabled" | "sensitive" | "no_candidate" | null;
+  skippedReason: "disabled" | "sensitive" | "no_candidate" | "suppressed" | null;
   capturedCount: number;
   keyCount: number;
   generalCount: number;
@@ -59,11 +63,15 @@ export type MemoryStore = {
   setEnabled(enabled: boolean): MemorySettings;
   listCards(): MemoryCard[];
   getCard(id: string): MemoryCard | null;
-  createCard(draft: MemoryCardDraft): MemoryCard;
+  createCard(draft: MemoryCardDraft): MemoryCreateResult;
   captureAutoMemoriesFromLatestUserMessage(input: AutoMemoryCaptureInput): AutoMemoryCaptureSummary;
   updateCard(id: string, update: MemoryCardUpdate): MemoryCard | null;
   deleteCard(id: string): boolean;
+  forgetCard(id: string): MemoryForgetResult;
   clearCards(): void;
+  listSuppressions(): MemorySuppressionView[];
+  allowSuppression(id: string): boolean;
+  clearSuppressions(): void;
   createInjection(): MemoryInjection;
   getMemoryPath(): string;
 };
@@ -71,6 +79,17 @@ export type MemoryStore = {
 export function createMemoryStore(options: { userDataPath?: string } = {}): MemoryStore {
   const userDataPath = options.userDataPath ?? app.getPath("userData");
   const memoryPath = join(userDataPath, "memory", "facts.json");
+  const suppressionIdsByTuple = new Map<string, string>();
+  const suppressionsById = new Map<string, MemorySuppression>();
+
+  function getSuppressionTupleKey(suppression: MemorySuppression): string {
+    return JSON.stringify([
+      suppression.namespace,
+      suppression.key,
+      suppression.category,
+      suppression.createdAt
+    ]);
+  }
 
   function readStorage(): MemoryStorage {
     if (!existsSync(memoryPath)) {
@@ -143,6 +162,12 @@ export function createMemoryStore(options: { userDataPath?: string } = {}): Memo
         throw new Error("Invalid memory draft");
       }
 
+      const storage = readStorage();
+
+      if (!storage.enabled) {
+        return { status: "disabled" };
+      }
+
       const now = Date.now();
       const id = crypto.randomUUID();
       const card: MemoryCard = {
@@ -161,13 +186,13 @@ export function createMemoryStore(options: { userDataPath?: string } = {}): Memo
         createdAt: now,
         updatedAt: now,
         enabled: true,
+        managedByUser: true,
         lastInjectedAt: null,
         injectionCount: 0
       };
-      const storage = readStorage();
       storage.cards.push(card);
       writeStorage(storage);
-      return card;
+      return { status: "created", card };
     },
     captureAutoMemoriesFromLatestUserMessage(input) {
       const storage = readStorage();
@@ -187,6 +212,12 @@ export function createMemoryStore(options: { userDataPath?: string } = {}): Memo
         return { ...baseSummary, skippedReason: "no_candidate" };
       }
 
+      const candidates = extraction.candidates.filter((candidate) => !isSuppressed(storage, candidate));
+
+      if (candidates.length === 0) {
+        return { ...baseSummary, skippedReason: "suppressed" };
+      }
+
       const now = Date.now();
       const sourceMessageId = isMemoryId(input.messageId) ? input.messageId : null;
       let capturedCount = 0;
@@ -194,7 +225,7 @@ export function createMemoryStore(options: { userDataPath?: string } = {}): Memo
       let deduplicatedCount = 0;
       const safeCategories = new Set<string>();
 
-      for (const candidate of extraction.candidates) {
+      for (const candidate of candidates) {
         safeCategories.add(candidate.category);
         const existing = storage.cards.find((card) => card.namespace === candidate.namespace && card.key === candidate.key);
 
@@ -218,8 +249,8 @@ export function createMemoryStore(options: { userDataPath?: string } = {}): Memo
         enabled: true,
         skippedReason: null,
         capturedCount,
-        keyCount: extraction.candidates.filter((candidate) => candidate.importance === "key").length,
-        generalCount: extraction.candidates.filter((candidate) => candidate.importance === "general").length,
+        keyCount: candidates.filter((candidate) => candidate.importance === "key").length,
+        generalCount: candidates.filter((candidate) => candidate.importance === "general").length,
         mergedCount,
         deduplicatedCount,
         compressionTriggered: compactResult.compressionTriggered,
@@ -246,7 +277,7 @@ export function createMemoryStore(options: { userDataPath?: string } = {}): Memo
         return null;
       }
 
-      Object.assign(card, parsedUpdate, { updatedAt: Date.now() });
+      Object.assign(card, parsedUpdate, { managedByUser: true, updatedAt: Date.now() });
       writeStorage(storage);
       return card;
     },
@@ -266,10 +297,93 @@ export function createMemoryStore(options: { userDataPath?: string } = {}): Memo
       writeStorage(storage);
       return true;
     },
+    forgetCard(id) {
+      if (!isMemoryId(id)) {
+        return { status: "not_found" };
+      }
+
+      const storage = readStorage();
+      const card = storage.cards.find((storedCard) => storedCard.id === id);
+
+      if (!card) {
+        return { status: "not_found" };
+      }
+
+      if (card.sourceType === "manual-chat") {
+        return { status: "manual" };
+      }
+
+      const suppression: MemorySuppression = {
+        namespace: card.namespace,
+        key: card.key,
+        category: card.category,
+        createdAt: Date.now()
+      };
+      storage.cards = storage.cards.filter((storedCard) => storedCard.id !== id);
+      storage.suppressions = storage.suppressions.filter((item) => !(item.namespace === suppression.namespace && item.key === suppression.key));
+      storage.suppressions.push(suppression);
+      writeStorage(storage);
+      return { status: "forgotten" };
+    },
     clearCards() {
       const storage = readStorage();
       storage.cards = [];
       writeStorage(storage);
+    },
+    listSuppressions() {
+      const suppressions = [...readStorage().suppressions].sort((left, right) => right.createdAt - left.createdAt);
+      const activeTupleKeys = new Set(suppressions.map(getSuppressionTupleKey));
+
+      for (const [tupleKey, id] of suppressionIdsByTuple) {
+        if (!activeTupleKeys.has(tupleKey)) {
+          suppressionIdsByTuple.delete(tupleKey);
+          suppressionsById.delete(id);
+        }
+      }
+
+      return suppressions.map((suppression) => {
+        const tupleKey = getSuppressionTupleKey(suppression);
+        const id = suppressionIdsByTuple.get(tupleKey) ?? crypto.randomUUID();
+        suppressionIdsByTuple.set(tupleKey, id);
+        suppressionsById.set(id, suppression);
+        return {
+          id,
+          category: suppression.category,
+          createdAt: suppression.createdAt
+        };
+      });
+    },
+    allowSuppression(id) {
+      const parsedSuppression = isMemoryId(id) ? suppressionsById.get(id) : undefined;
+
+      if (!parsedSuppression) {
+        return false;
+      }
+
+      const storage = readStorage();
+      const nextSuppressions = storage.suppressions.filter((item) => !(
+        item.namespace === parsedSuppression.namespace &&
+        item.key === parsedSuppression.key &&
+        item.category === parsedSuppression.category &&
+        item.createdAt === parsedSuppression.createdAt
+      ));
+
+      if (nextSuppressions.length === storage.suppressions.length) {
+        return false;
+      }
+
+      storage.suppressions = nextSuppressions;
+      writeStorage(storage);
+      suppressionIdsByTuple.delete(getSuppressionTupleKey(parsedSuppression));
+      suppressionsById.delete(id);
+      return true;
+    },
+    clearSuppressions() {
+      const storage = readStorage();
+      storage.suppressions = [];
+      writeStorage(storage);
+      suppressionIdsByTuple.clear();
+      suppressionsById.clear();
     },
     createInjection() {
       const storage = readStorage();
@@ -309,7 +423,8 @@ function emptyStorage(): MemoryStorage {
   return {
     version: MEMORY_STORAGE_VERSION,
     enabled: false,
-    cards: []
+    cards: [],
+    suppressions: []
   };
 }
 
@@ -399,9 +514,16 @@ function createAutoMemoryCard(
     createdAt: now,
     updatedAt: now,
     enabled: true,
+    managedByUser: false,
     lastInjectedAt: null,
     injectionCount: 0
   };
+}
+
+function isSuppressed(storage: MemoryStorage, candidate: Pick<AutoMemoryCandidate, "namespace" | "key">): boolean {
+  return storage.suppressions.some((suppression) => (
+    suppression.namespace === candidate.namespace && suppression.key === candidate.key
+  ));
 }
 
 function extractAutoMemoryCandidates(content: string): { candidates: AutoMemoryCandidate[]; sensitive: boolean } {
@@ -634,6 +756,16 @@ function compactMemoryStorage(storage: MemoryStorage): {
 
 function mergeMemoryCard(target: MemoryCard, incoming: MemoryCard, now: number): { mergedCount: number; deduplicatedCount: number } {
   const sameContent = target.content === incoming.content;
+
+  if (target.managedByUser) {
+    target.observedCount += incoming.observedCount;
+    target.lastObservedAt = Math.max(target.lastObservedAt, incoming.lastObservedAt);
+
+    return sameContent
+      ? { mergedCount: 0, deduplicatedCount: 1 }
+      : { mergedCount: 1, deduplicatedCount: 0 };
+  }
+
   const incomingIsNewer = incoming.updatedAt >= target.updatedAt;
 
   if (incomingIsNewer) {

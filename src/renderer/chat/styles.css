@@ -367,6 +367,18 @@ body {
   line-height: 1.4;
 }
 
+.memory-suppression-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.memory-suppression-row span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .history-layout {
   display: grid;
   grid-template-columns: minmax(130px, 0.75fr) minmax(0, 1.25fr);

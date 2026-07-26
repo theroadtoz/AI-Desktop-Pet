@@ -34,7 +34,15 @@ import type {
   DialogueAffectSettingsUpdate
 } from "../shared/dialogue-affect-settings";
 import type { Conversation, ConversationSummary, HistoryMessage } from "../shared/chat-history";
-import type { MemoryCard, MemoryCardDraft, MemoryCardUpdate, MemorySummary } from "../shared/chat-memory";
+import type {
+  MemoryCard,
+  MemoryCardDraft,
+  MemoryCardUpdate,
+  MemoryCreateResult,
+  MemoryForgetResult,
+  MemorySummary,
+  MemorySuppressionView
+} from "../shared/chat-memory";
 import type { ProviderConfig, ProviderStatus } from "../shared/provider-config";
 import type { ProviderHealthCheckRequest, ProviderHealthResult, ProviderHealthStatus } from "../shared/provider-health";
 import type { PetAccessoryId } from "../shared/pet-accessory";
@@ -1292,6 +1300,7 @@ function parseLlamaCppRuntimeSettingsUpdate(value: unknown): LlamaCppRuntimeSett
     }
     parsed.enabled = update.enabled;
   }
+
   if ("host" in update) {
     if (typeof update.host !== "string") {
       return null;
@@ -1423,7 +1432,17 @@ function parseMemoryCardUpdate(value: unknown): MemoryCardUpdate | null {
     parsed.enabled = update.enabled;
   }
 
-  return parsed;
+  if ("importance" in update) {
+    const importance = parseMemoryImportance(update.importance);
+
+    if (!importance) {
+      return null;
+    }
+
+    parsed.importance = importance;
+  }
+
+  return Object.keys(parsed).length > 0 ? parsed : null;
 }
 
 function parseMemoryCard(value: unknown): MemoryCard | null {
@@ -1469,6 +1488,7 @@ function parseMemoryCard(value: unknown): MemoryCard | null {
     lastObservedAt < card.createdAt ||
     !compressionState ||
     typeof card.enabled !== "boolean" ||
+    typeof card.managedByUser !== "boolean" ||
     !(
       lastInjectedAt === null ||
       (
@@ -1503,9 +1523,64 @@ function parseMemoryCard(value: unknown): MemoryCard | null {
     createdAt: card.createdAt,
     updatedAt: card.updatedAt,
     enabled: card.enabled,
+    managedByUser: card.managedByUser,
     lastInjectedAt,
     injectionCount
   };
+}
+
+function parseMemorySuppressionView(value: unknown): MemorySuppressionView | null {
+  if (!value || typeof value !== "object" || Array.isArray(value) || !hasExactKeys(value, ["category", "createdAt", "id"])) {
+    return null;
+  }
+
+  const suppression = value as Partial<MemorySuppressionView>;
+  const category = normalizeMemoryCategory(suppression.category);
+
+  if (
+    !isMemoryId(suppression.id) ||
+    !category ||
+    typeof suppression.createdAt !== "number" ||
+    !Number.isSafeInteger(suppression.createdAt) ||
+    suppression.createdAt <= 0
+  ) {
+    return null;
+  }
+
+  return { id: suppression.id, category, createdAt: suppression.createdAt };
+}
+
+function parseMemoryCreateResult(value: unknown): MemoryCreateResult | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  if (hasExactKeys(value, ["status"]) && (value as { status?: unknown }).status === "disabled") {
+    return { status: "disabled" };
+  }
+
+  if (hasExactKeys(value, ["card", "status"]) && (value as { status?: unknown }).status === "created") {
+    const card = parseMemoryCard((value as { card?: unknown }).card);
+    return card ? { status: "created", card } : null;
+  }
+
+  return null;
+}
+
+function parseMemoryForgetResult(value: unknown): MemoryForgetResult | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const status = (value as { status?: unknown }).status;
+  if ((status === "manual" || status === "not_found") && hasExactKeys(value, ["status"])) {
+    return { status };
+  }
+  if (status === "forgotten" && hasExactKeys(value, ["status"])) {
+    return { status };
+  }
+
+  return null;
 }
 
 function parseCountMap(value: unknown, expectedKeys?: readonly string[]): Record<string, number> | null {
@@ -1948,7 +2023,11 @@ const memoryApi: MemoryApi = {
     return summary;
   },
   async setEnabled(enabled) {
-    const settings = await ipcRenderer.invoke("memory:set-enabled", Boolean(enabled));
+    if (typeof enabled !== "boolean") {
+      throw new Error("Invalid memory enabled value");
+    }
+
+    const settings = await ipcRenderer.invoke("memory:set-enabled", enabled);
 
     if (!settings || typeof settings.enabled !== "boolean") {
       throw new Error("Invalid memory settings response");
@@ -1997,13 +2076,13 @@ const memoryApi: MemoryApi = {
       throw new Error("Invalid memory draft");
     }
 
-    const card = parseMemoryCard(await ipcRenderer.invoke("memory:create", parsedDraft));
+    const result = parseMemoryCreateResult(await ipcRenderer.invoke("memory:create", parsedDraft));
 
-    if (!card) {
-      throw new Error("Invalid memory card response");
+    if (!result) {
+      throw new Error("Invalid memory create response");
     }
 
-    return card;
+    return result;
   },
   async updateCard(id, update) {
     const parsedUpdate = parseMemoryCardUpdate(update);
@@ -2033,8 +2112,46 @@ const memoryApi: MemoryApi = {
 
     return Boolean(await ipcRenderer.invoke("memory:delete", id));
   },
+  async forgetCard(id) {
+    if (!isMemoryId(id)) {
+      return { status: "not_found" };
+    }
+
+    const result = parseMemoryForgetResult(await ipcRenderer.invoke("memory:forget", id));
+
+    if (!result) {
+      throw new Error("Invalid memory forget response");
+    }
+
+    return result;
+  },
   async clearCards() {
     await ipcRenderer.invoke("memory:clear");
+  },
+  async listSuppressions() {
+    const values: unknown = await ipcRenderer.invoke("memory:list-suppressions");
+
+    if (!Array.isArray(values)) {
+      throw new Error("Invalid memory suppression response");
+    }
+
+    const suppressions = values.map(parseMemorySuppressionView);
+
+    if (suppressions.some((suppression) => suppression === null)) {
+      throw new Error("Invalid memory suppression response");
+    }
+
+    return suppressions as MemorySuppressionView[];
+  },
+  async allowSuppression(id) {
+    if (!isMemoryId(id)) {
+      return false;
+    }
+
+    return Boolean(await ipcRenderer.invoke("memory:allow-suppression", id));
+  },
+  async clearSuppressions() {
+    await ipcRenderer.invoke("memory:clear-suppressions");
   }
 };
 

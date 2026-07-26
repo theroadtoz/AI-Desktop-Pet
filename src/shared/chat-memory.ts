@@ -21,6 +21,7 @@ export type MemoryCard = {
   createdAt: number;
   updatedAt: number;
   enabled: boolean;
+  managedByUser: boolean;
   lastInjectedAt: number | null;
   injectionCount: number;
 };
@@ -32,7 +33,28 @@ export type MemoryCardDraft = {
   sourceConversationId: string;
 };
 
-export type MemoryCardUpdate = Partial<Pick<MemoryCard, "title" | "content" | "tags" | "enabled">>;
+export type MemoryCardUpdate = Partial<Pick<MemoryCard, "title" | "content" | "tags" | "importance" | "enabled">>;
+
+export type MemoryCreateResult =
+  | { status: "created"; card: MemoryCard }
+  | { status: "disabled" };
+
+export type MemorySuppression = {
+  namespace: string;
+  key: string;
+  category: string;
+  createdAt: number;
+};
+
+export type MemorySuppressionView = {
+  id: string;
+  category: string;
+  createdAt: number;
+};
+
+export type MemoryForgetResult =
+  | { status: "forgotten" }
+  | { status: "manual" | "not_found" };
 
 export type MemorySettings = {
   enabled: boolean;
@@ -57,12 +79,13 @@ export type MemoryInjection = {
   cards: Array<Pick<MemoryCard, "id" | "title" | "content" | "tags">>;
 };
 
-export const MEMORY_STORAGE_VERSION = 3;
+export const MEMORY_STORAGE_VERSION = 4;
 
 export type MemoryStorage = {
   version: typeof MEMORY_STORAGE_VERSION;
   enabled: boolean;
   cards: MemoryCard[];
+  suppressions: MemorySuppression[];
 };
 
 const ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -239,7 +262,17 @@ export function parseMemoryCardUpdate(value: unknown): MemoryCardUpdate | null {
     parsed.enabled = update.enabled;
   }
 
-  return parsed;
+  if ("importance" in update) {
+    const importance = parseMemoryImportance(update.importance);
+
+    if (!importance) {
+      return null;
+    }
+
+    parsed.importance = importance;
+  }
+
+  return Object.keys(parsed).length > 0 ? parsed : null;
 }
 
 export function parseMemoryStorage(value: unknown): MemoryStorage | null {
@@ -247,61 +280,106 @@ export function parseMemoryStorage(value: unknown): MemoryStorage | null {
 
   if (
     !storage ||
-    (storage.version !== 1 && storage.version !== 2 && storage.version !== MEMORY_STORAGE_VERSION) ||
+    (storage.version !== 1 && storage.version !== 2 && storage.version !== 3 && storage.version !== MEMORY_STORAGE_VERSION) ||
     typeof storage.enabled !== "boolean" ||
     !Array.isArray(storage.cards)
   ) {
     return null;
   }
 
-  const cards = storage.cards.map(parseMemoryCard);
+  const cards = storage.cards.map((card) => parseMemoryCard(card, storage.version !== MEMORY_STORAGE_VERSION));
+  const suppressions = storage.version === MEMORY_STORAGE_VERSION
+    ? (Array.isArray(storage.suppressions) ? storage.suppressions.map(parseMemorySuppression) : null)
+    : [];
 
-  if (cards.some((card) => card === null)) {
+  if (cards.some((card) => card === null) || !suppressions || suppressions.some((suppression) => suppression === null)) {
     return null;
   }
 
   return {
     version: MEMORY_STORAGE_VERSION,
     enabled: storage.enabled,
-    cards: cards as MemoryCard[]
+    cards: cards as MemoryCard[],
+    suppressions: suppressions as MemorySuppression[]
   };
 }
 
-export function parseMemoryCard(value: unknown): MemoryCard | null {
+export function parseMemorySuppression(value: unknown): MemorySuppression | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const suppression = value as Partial<MemorySuppression>;
+  const keys = Object.keys(suppression).sort();
+  const namespace = normalizeMemoryNamespace(suppression.namespace);
+  const key = normalizeMemoryKey(suppression.key);
+  const category = normalizeMemoryCategory(suppression.category);
+
+  if (
+    keys.join(",") !== "category,createdAt,key,namespace" ||
+    !namespace ||
+    !key ||
+    !category ||
+    typeof suppression.createdAt !== "number" ||
+    !Number.isSafeInteger(suppression.createdAt) ||
+    suppression.createdAt <= 0
+  ) {
+    return null;
+  }
+
+  return { namespace, key, category, createdAt: suppression.createdAt };
+}
+
+export function parseMemoryCard(value: unknown, allowLegacyDefaults = false): MemoryCard | null {
   const card = value as Partial<MemoryCard> | null;
   const title = normalizeMemoryText(card?.title, MAX_TITLE_LENGTH);
   const content = normalizeMemoryText(card?.content, MAX_CONTENT_LENGTH);
   const tags = normalizeMemoryTags(card?.tags);
-  const namespace = normalizeMemoryNamespace(card?.namespace) ?? DEFAULT_MEMORY_NAMESPACE;
+  const namespace = card?.namespace === undefined && allowLegacyDefaults
+    ? DEFAULT_MEMORY_NAMESPACE
+    : normalizeMemoryNamespace(card?.namespace);
   const sourceType = parseMemorySourceType(card?.sourceType) ?? (
-    card?.sourceType === undefined ? DEFAULT_MEMORY_SOURCE_TYPE : null
+    card?.sourceType === undefined && allowLegacyDefaults ? DEFAULT_MEMORY_SOURCE_TYPE : null
   );
   const key = isMemoryId(card?.id)
-    ? normalizeMemoryKey(card?.key) ?? createDefaultMemoryKey(card.id)
+    ? (
+      card?.key === undefined && allowLegacyDefaults
+        ? createDefaultMemoryKey(card.id)
+        : normalizeMemoryKey(card?.key)
+    )
     : null;
-  const importance = parseMemoryImportance(card?.importance) ?? DEFAULT_MEMORY_IMPORTANCE;
-  const category = normalizeMemoryCategory(card?.category) ?? DEFAULT_MEMORY_CATEGORY;
+  const importance = card?.importance === undefined && allowLegacyDefaults
+    ? DEFAULT_MEMORY_IMPORTANCE
+    : parseMemoryImportance(card?.importance);
+  const category = card?.category === undefined && allowLegacyDefaults
+    ? DEFAULT_MEMORY_CATEGORY
+    : normalizeMemoryCategory(card?.category);
   const confidence = card?.confidence === undefined
-    ? DEFAULT_MEMORY_CONFIDENCE
+    ? (allowLegacyDefaults ? DEFAULT_MEMORY_CONFIDENCE : null)
     : parseMemoryConfidence(card.confidence);
   const sourceMessageId = card?.sourceMessageId === undefined
-    ? null
+    ? (allowLegacyDefaults ? null : undefined)
     : card.sourceMessageId;
   const observedCount = card?.observedCount === undefined
-    ? DEFAULT_MEMORY_OBSERVED_COUNT
+    ? (allowLegacyDefaults ? DEFAULT_MEMORY_OBSERVED_COUNT : undefined)
     : card.observedCount;
   const lastObservedAt = card?.lastObservedAt === undefined
-    ? card?.updatedAt
+    ? (allowLegacyDefaults ? card?.updatedAt : undefined)
     : card.lastObservedAt;
   const parsedObservedCount = parsePositiveInteger(observedCount);
   const parsedLastObservedAt = parsePositiveInteger(lastObservedAt);
-  const compressionState = parseMemoryCompressionState(card?.compressionState) ?? DEFAULT_MEMORY_COMPRESSION_STATE;
+  const compressionState = card?.compressionState === undefined && allowLegacyDefaults
+    ? DEFAULT_MEMORY_COMPRESSION_STATE
+    : parseMemoryCompressionState(card?.compressionState);
   const lastInjectedAt = card?.lastInjectedAt === undefined
-    ? null
+    ? (allowLegacyDefaults ? null : undefined)
     : card.lastInjectedAt;
   const injectionCount = card?.injectionCount === undefined
-    ? 0
+    ? (allowLegacyDefaults ? 0 : undefined)
     : card.injectionCount;
+  const managedByUser = card?.managedByUser === undefined
+    ? (allowLegacyDefaults ? sourceType === "manual-chat" : undefined)
+    : card.managedByUser;
 
   if (
     !card ||
@@ -314,6 +392,7 @@ export function parseMemoryCard(value: unknown): MemoryCard | null {
     !key ||
     !importance ||
     !category ||
+    !compressionState ||
     confidence === null ||
     !(sourceMessageId === null || isMemoryId(sourceMessageId)) ||
     !isMemoryId(card.sourceConversationId) ||
@@ -327,6 +406,7 @@ export function parseMemoryCard(value: unknown): MemoryCard | null {
     parsedLastObservedAt === null ||
     parsedLastObservedAt < card.createdAt ||
     typeof card.enabled !== "boolean" ||
+    typeof managedByUser !== "boolean" ||
     !(
       lastInjectedAt === null ||
       (
@@ -361,6 +441,7 @@ export function parseMemoryCard(value: unknown): MemoryCard | null {
     createdAt: card.createdAt,
     updatedAt: card.updatedAt,
     enabled: card.enabled,
+    managedByUser,
     lastInjectedAt,
     injectionCount
   };

@@ -2,7 +2,7 @@ import "./styles.css";
 import type { ChatMessage, ChatRole } from "../../shared/chat";
 import type { Conversation, ConversationSummary } from "../../shared/chat-history";
 import type { ChatContextTransparencyPayload, ChatMemoryActivityPayload } from "../../shared/ipc-contract";
-import type { MemoryCard, MemorySummary } from "../../shared/chat-memory";
+import type { MemoryCard, MemorySummary, MemorySuppressionView } from "../../shared/chat-memory";
 import {
   LOCAL_PROVIDER_PRESETS,
   RECOMMENDED_LOCAL_PROVIDER_CONFIG,
@@ -221,17 +221,24 @@ const historyFeedback = document.querySelector<HTMLElement>("#history-feedback")
 const conversationList = document.querySelector<HTMLOListElement>("#conversation-list");
 const historyDetail = document.querySelector<HTMLElement>("#history-detail");
 const enableMemoryButton = document.querySelector<HTMLButtonElement>("#enable-memory-button");
+const newMemoryButton = document.querySelector<HTMLButtonElement>("#new-memory-button");
 const clearMemoryButton = document.querySelector<HTMLButtonElement>("#clear-memory-button");
 const clearMemoryConfirmation = document.querySelector<HTMLElement>("#clear-memory-confirmation");
 const cancelClearMemoryButton = document.querySelector<HTMLButtonElement>("#cancel-clear-memory-button");
 const confirmClearMemoryButton = document.querySelector<HTMLButtonElement>("#confirm-clear-memory-button");
 const memoryFeedback = document.querySelector<HTMLElement>("#memory-feedback");
+const memoryCreateNote = document.querySelector<HTMLElement>("#memory-create-note");
 const memoryOverviewStatus = document.querySelector<HTMLElement>("#memory-overview-status");
 const memoryNextInjectionStatus = document.querySelector<HTMLElement>("#memory-next-injection-status");
 const memorySafeStats = document.querySelector<HTMLElement>("#memory-safe-stats");
 const memoryFilterTabs = [...document.querySelectorAll<HTMLButtonElement>("[data-memory-filter]")];
 const memorySearch = document.querySelector<HTMLInputElement>("#memory-search");
 const memoryList = document.querySelector<HTMLElement>("#memory-list");
+const memorySuppressions = document.querySelector<HTMLElement>("#memory-suppressions");
+const clearMemorySuppressionsButton = document.querySelector<HTMLButtonElement>("#clear-memory-suppressions-button");
+const clearMemorySuppressionsConfirmation = document.querySelector<HTMLElement>("#clear-memory-suppressions-confirmation");
+const cancelClearMemorySuppressionsButton = document.querySelector<HTMLButtonElement>("#cancel-clear-memory-suppressions-button");
+const confirmClearMemorySuppressionsButton = document.querySelector<HTMLButtonElement>("#confirm-clear-memory-suppressions-button");
 const userWelcomePanel = document.querySelector<HTMLElement>("#user-welcome-panel");
 const welcomeUserDisplayName = document.querySelector<HTMLInputElement>("#welcome-user-display-name");
 const welcomeUserPreferredName = document.querySelector<HTMLInputElement>("#welcome-user-preferred-name");
@@ -270,8 +277,10 @@ if (
   !memoryPage || !chatSessionNote || !memoryDraftPanel || !memoryDraftTitle || !memoryDraftContent || !memoryDraftTags ||
   !cancelMemoryDraftButton || !saveMemoryDraftButton || !newConversationButton || !clearHistoryButton || !clearHistoryConfirmation ||
   !cancelClearHistoryButton || !confirmClearHistoryButton || !historyFeedback || !conversationList || !historyDetail ||
-  !enableMemoryButton || !clearMemoryButton || !clearMemoryConfirmation || !cancelClearMemoryButton ||
+  !enableMemoryButton || !newMemoryButton || !clearMemoryButton || !clearMemoryConfirmation || !cancelClearMemoryButton ||
   !confirmClearMemoryButton || !memoryFeedback || !memoryOverviewStatus || !memoryNextInjectionStatus || !memorySafeStats || !memorySearch || !memoryList || !userWelcomePanel ||
+  !memoryCreateNote || !memorySuppressions || !clearMemorySuppressionsButton || !clearMemorySuppressionsConfirmation ||
+  !cancelClearMemorySuppressionsButton || !confirmClearMemorySuppressionsButton ||
   !welcomeUserDisplayName || !welcomeUserPreferredName || !welcomeSaveUserProfileButton || !userWelcomeFeedback
 ) {
   throw new Error("chat elements missing");
@@ -407,16 +416,23 @@ const historyFeedbackBox = historyFeedback;
 const conversationListElement = conversationList;
 const historyDetailElement = historyDetail;
 const enableMemoryAction = enableMemoryButton;
+const newMemoryAction = newMemoryButton;
 const clearMemoryAction = clearMemoryButton;
 const clearMemoryConfirmationBox = clearMemoryConfirmation;
 const cancelClearMemoryAction = cancelClearMemoryButton;
 const confirmClearMemoryAction = confirmClearMemoryButton;
 const memoryFeedbackBox = memoryFeedback;
+const memoryCreateNoteBox = memoryCreateNote;
 const memoryOverviewStatusBox = memoryOverviewStatus;
 const memoryNextInjectionStatusBox = memoryNextInjectionStatus;
 const memorySafeStatsBox = memorySafeStats;
 const memorySearchField = memorySearch;
 const memoryListElement = memoryList;
+const memorySuppressionsElement = memorySuppressions;
+const clearMemorySuppressionsAction = clearMemorySuppressionsButton;
+const clearMemorySuppressionsConfirmationBox = clearMemorySuppressionsConfirmation;
+const cancelClearMemorySuppressionsAction = cancelClearMemorySuppressionsButton;
+const confirmClearMemorySuppressionsAction = confirmClearMemorySuppressionsButton;
 const userWelcomePanelBox = userWelcomePanel;
 const welcomeUserDisplayNameField = welcomeUserDisplayName;
 const welcomeUserPreferredNameField = welcomeUserPreferredName;
@@ -508,6 +524,7 @@ let selectedMemoryCardId: string | null = null;
 let providerContextEnabled = true;
 let memoryCards: MemoryCard[] = [];
 let memorySummary: MemorySummary | null = null;
+let memorySuppressionsState: MemorySuppressionView[] = [];
 let memoryEnabled = false;
 let activeMemoryFilter: MemoryFilter = "all";
 let memoryDraftSourceMessage: ChatMessage | null = null;
@@ -1695,14 +1712,14 @@ function parseTagsInput(value: string): string[] {
     .slice(0, 8);
 }
 
-function openMemoryDraft(message: ChatMessage): void {
+function openMemoryDraft(message?: ChatMessage): void {
   if (chatTurnState.isReplying) {
     return;
   }
 
-  memoryDraftSourceMessage = message;
-  memoryDraftTitleField.value = message.content.trim().slice(0, 36) || "新的事实";
-  memoryDraftContentField.value = message.content.trim();
+  memoryDraftSourceMessage = message ?? null;
+  memoryDraftTitleField.value = message?.content.trim().slice(0, 36) || "新的事实";
+  memoryDraftContentField.value = message?.content.trim() ?? "";
   memoryDraftTagsField.value = "";
   memoryDraftPanelBox.hidden = false;
   memoryDraftTitleField.focus();
@@ -1723,27 +1740,34 @@ async function refreshMemory(): Promise<void> {
   }
 
   try {
-    const [settings, summary, cards] = await Promise.all([
+    const [settings, summary, cards, suppressions] = await Promise.all([
       window.memoryApi.getSettings(),
       window.memoryApi.getSummary(),
-      window.memoryApi.listCards()
+      window.memoryApi.listCards(),
+      window.memoryApi.listSuppressions()
     ]);
     memoryEnabled = settings.enabled;
     memorySummary = summary;
     memoryCards = cards;
+    memorySuppressionsState = suppressions;
     enableMemoryAction.textContent = memoryEnabled ? "关闭记忆" : "开启记忆";
+    newMemoryAction.disabled = !memoryEnabled;
+    memoryCreateNoteBox.textContent = memoryEnabled
+      ? "手动新建的事实卡由你维护，不会被自动提取覆盖。"
+      : "记忆关闭时不能新建；关闭会停止采集和使用，但不会删除已有本地内容。";
     renderMemoryOverview();
     renderMemoryInjectionPreview();
     renderMemorySafeStats();
     renderMemoryFilterTabs();
     renderMemoryList();
+    renderMemorySuppressions();
     renderMemoryDetail();
     setMemoryFeedback(
       memoryEnabled
         ? summary.injectableCount > 0
           ? `记忆已开启；本机会从最新用户消息提取短事实，下次最多带入 ${summary.injectableCount} 条。`
           : "记忆已开启；当前没有已启用事实卡，发送时不会加入记忆。"
-        : "记忆默认关闭；关闭时不会自动生成事实卡。"
+        : "记忆关闭；关闭会停止采集和使用，但不会删除已有本地内容。"
     );
     renderLatestMemoryActivityFeedback();
   } catch {
@@ -1843,6 +1867,46 @@ function getMemoryCategoryLabel(card: MemoryCard): string {
   return labels[card.category] ?? card.category;
 }
 
+function renderMemorySuppressions(): void {
+  memorySuppressionsElement.replaceChildren();
+  clearMemorySuppressionsAction.disabled = memorySuppressionsState.length === 0;
+
+  if (memorySuppressionsState.length === 0) {
+    const note = document.createElement("p");
+    note.className = "selection-note";
+    note.textContent = "当前没有已忘记类型。";
+    memorySuppressionsElement.append(note);
+    return;
+  }
+
+  memorySuppressionsState.forEach((suppression) => {
+    const item = document.createElement("div");
+    item.className = "status-box memory-suppression-row";
+    const label = document.createElement("span");
+    label.textContent = `类型：${getMemorySuppressionLabel(suppression.category)}`;
+    const allow = document.createElement("button");
+    allow.className = "button-light";
+    allow.type = "button";
+    allow.textContent = "重新允许";
+    allow.addEventListener("click", () => {
+      void allowMemorySuppression(suppression.id);
+    });
+    item.append(label, allow);
+    memorySuppressionsElement.append(item);
+  });
+}
+
+function getMemorySuppressionLabel(category: string): string {
+  const labels: Record<string, string> = {
+    addressing: "称呼",
+    language: "语言",
+    interaction: "互动",
+    pet_presentation: "桌宠显示",
+    project_preference: "项目偏好"
+  };
+  return labels[category] ?? category;
+}
+
 function getMemoryCompressionLabel(card: MemoryCard): string {
   const labels: Record<MemoryCard["compressionState"], string> = {
     raw: "原始",
@@ -1868,6 +1932,14 @@ function createMemoryCardElement(card: MemoryCard): HTMLElement {
   content.value = card.content;
   const tags = document.createElement("input");
   tags.value = card.tags.join("，");
+  const importanceSelect = document.createElement("select");
+  for (const [value, label] of [["key", "关键"], ["general", "一般"]] as const) {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = label;
+    importanceSelect.append(option);
+  }
+  importanceSelect.value = card.importance;
   const meta = document.createElement("div");
   meta.className = "memory-card-meta selection-note";
   const status = document.createElement("span");
@@ -1903,7 +1975,8 @@ function createMemoryCardElement(card: MemoryCard): HTMLElement {
     void updateMemoryCard(card.id, {
       title: title.value,
       content: content.value,
-      tags: parseTagsInput(tags.value)
+      tags: parseTagsInput(tags.value),
+      importance: importanceSelect.value === "general" ? "general" : "key"
     });
   });
   const toggleButton = document.createElement("button");
@@ -1942,7 +2015,33 @@ function createMemoryCardElement(card: MemoryCard): HTMLElement {
     confirmation.hidden = false;
   });
   actions.append(saveButton, toggleButton, detailButton, deleteButton);
-  item.append(title, content, tags, meta, actions, confirmation);
+
+  if (card.sourceType !== "manual-chat") {
+    const forgetButton = document.createElement("button");
+    forgetButton.className = "button-danger";
+    forgetButton.type = "button";
+    forgetButton.textContent = "忘记此类";
+    const forgetConfirmation = document.createElement("div");
+    forgetConfirmation.className = "status-box delete-confirmation";
+    forgetConfirmation.hidden = true;
+    forgetConfirmation.append("会删除此卡并阻止同类自动重建，是否继续？");
+    const confirmForget = document.createElement("button");
+    confirmForget.className = "button-danger";
+    confirmForget.type = "button";
+    confirmForget.textContent = "确认忘记";
+    confirmForget.addEventListener("click", () => {
+      void forgetMemoryCard(card.id);
+    });
+    forgetConfirmation.append(confirmForget);
+    forgetButton.addEventListener("click", () => {
+      forgetConfirmation.hidden = false;
+    });
+    actions.append(forgetButton);
+    item.append(title, content, tags, importanceSelect, meta, actions, confirmation, forgetConfirmation);
+    return item;
+  }
+
+  item.append(title, content, tags, importanceSelect, meta, actions, confirmation);
   return item;
 }
 
@@ -1996,6 +2095,32 @@ async function deleteMemoryCard(id: string): Promise<void> {
     await refreshMemory();
   } catch {
     setMemoryFeedback("无法删除事实卡，请稍后重试。");
+  }
+}
+
+async function forgetMemoryCard(id: string): Promise<void> {
+  try {
+    const result = await window.memoryApi?.forgetCard(id);
+    setMemoryFeedback(
+      result?.status === "forgotten"
+        ? "已忘记此类；未来不会自动重建，直到你重新允许。"
+        : result?.status === "manual"
+          ? "手动事实卡只能删除，不能设为自动遗忘。"
+          : "该事实卡已不存在。"
+    );
+    await refreshMemory();
+  } catch {
+    setMemoryFeedback("无法忘记该类型，请稍后重试。");
+  }
+}
+
+async function allowMemorySuppression(id: string): Promise<void> {
+  try {
+    const allowed = await window.memoryApi?.allowSuppression(id);
+    setMemoryFeedback(allowed ? "已重新允许；未来相同类型可以再次自动提取。" : "该已忘记类型已不存在。");
+    await refreshMemory();
+  } catch {
+    setMemoryFeedback("无法重新允许该类型，请稍后重试。");
   }
 }
 
@@ -3255,27 +3380,29 @@ cancelMemoryDraftAction.addEventListener("click", () => {
 });
 
 saveMemoryDraftAction.addEventListener("click", () => {
-  if (!memoryDraftSourceMessage || !window.memoryApi || chatTurnState.isReplying) {
+  const memoryApi = window.memoryApi;
+
+  if (!memoryApi || chatTurnState.isReplying) {
     return;
   }
 
   void (async () => {
     try {
-      const settings = await window.memoryApi?.getSettings();
-
-      if (!settings?.enabled) {
-        setChatSessionNote("记忆未开启；请先在记忆页显式开启后再保存事实卡。", "fallback");
-        return;
-      }
-
-      await window.memoryApi?.createCard({
+      const result = await memoryApi.createCard({
         title: memoryDraftTitleField.value,
         content: memoryDraftContentField.value,
         tags: parseTagsInput(memoryDraftTagsField.value),
         sourceConversationId: conversationId
       });
+
+      if (result.status === "disabled") {
+        setMemoryFeedback("记忆已关闭；不能新建事实卡。已有本地内容仍会保留。");
+        await refreshMemory();
+        return;
+      }
+
       closeMemoryDraft();
-      setChatSessionNote("事实卡已保存到本机记忆。", "ready");
+      setMemoryFeedback("事实卡已保存到本机记忆。");
       await refreshMemory();
     } catch {
       setChatSessionNote("无法保存事实卡，请检查标题和正文。", "error");
@@ -3328,6 +3455,15 @@ enableMemoryAction.addEventListener("click", () => {
   })();
 });
 
+newMemoryAction.addEventListener("click", () => {
+  if (!memoryEnabled || chatTurnState.isReplying) {
+    setMemoryFeedback("记忆关闭时不能新建；请先开启记忆。");
+    return;
+  }
+
+  openMemoryDraft();
+});
+
 clearMemoryAction.addEventListener("click", () => {
   if (!chatTurnState.isReplying) {
     clearMemoryConfirmationBox.hidden = false;
@@ -3351,6 +3487,35 @@ confirmClearMemoryAction.addEventListener("click", () => {
       await refreshMemory();
     } catch {
       setMemoryFeedback("无法清空记忆，请稍后重试。");
+    }
+  })();
+});
+
+clearMemorySuppressionsAction.addEventListener("click", () => {
+  if (!chatTurnState.isReplying && memorySuppressionsState.length > 0) {
+    clearMemorySuppressionsConfirmationBox.hidden = false;
+  }
+});
+
+cancelClearMemorySuppressionsAction.addEventListener("click", () => {
+  clearMemorySuppressionsConfirmationBox.hidden = true;
+});
+
+confirmClearMemorySuppressionsAction.addEventListener("click", () => {
+  const memoryApi = window.memoryApi;
+
+  if (!memoryApi || chatTurnState.isReplying) {
+    return;
+  }
+
+  void (async () => {
+    try {
+      await memoryApi.clearSuppressions();
+      clearMemorySuppressionsConfirmationBox.hidden = true;
+      setMemoryFeedback("已清空已忘记类型；事实卡与历史均未删除。");
+      await refreshMemory();
+    } catch {
+      setMemoryFeedback("无法清空已忘记类型，请稍后重试。");
     }
   })();
 });

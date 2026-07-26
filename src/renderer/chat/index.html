@@ -31,25 +31,6 @@
         </section>
         <section id="messages" class="messages" aria-live="polite"></section>
         <p id="chat-session-note" class="selection-note" data-state="fallback" hidden aria-live="polite">新会话将仅在本地保存；发送时只包含当前消息。</p>
-        <section id="memory-draft-panel" class="memory-draft-panel content-stack" hidden aria-label="保存事实卡">
-          <p class="selection-note">确认后才会保存到本机记忆；可随时在设置的记忆页停用或删除。</p>
-          <label class="field-label">
-            标题
-            <input id="memory-draft-title" type="text" maxlength="80" />
-          </label>
-          <label class="field-label">
-            正文
-            <textarea id="memory-draft-content" maxlength="800"></textarea>
-          </label>
-          <label class="field-label">
-            标签
-            <input id="memory-draft-tags" type="text" placeholder="用逗号分隔，可留空" />
-          </label>
-          <div class="settings-actions">
-            <button id="cancel-memory-draft-button" class="button-light" type="button">取消</button>
-            <button id="save-memory-draft-button" class="button" type="button">保存事实卡</button>
-          </div>
-        </section>
         <form id="chat-form" class="composer">
           <input id="chat-input" type="text" autocomplete="off" placeholder="和她说点什么..." aria-label="聊天输入" />
           <button id="send-button" class="button" type="submit">发送</button>
@@ -155,9 +136,30 @@
           <section id="memory-page" class="settings-page memory-page content-stack" hidden aria-label="本地记忆">
             <div class="memory-actions">
               <button id="enable-memory-button" class="button" type="button">开启记忆</button>
+              <button id="new-memory-button" class="button-light" type="button">新建记忆</button>
               <button id="clear-memory-button" class="button-danger" type="button">清空全部记忆</button>
             </div>
-            <p id="memory-feedback" class="selection-note" aria-live="polite">记忆默认关闭；开启后才会在本机提取短事实，已启用事实卡会在聊天时临时给她参考。</p>
+            <p id="memory-feedback" class="selection-note" aria-live="polite">记忆默认关闭；关闭会停止采集和使用，但不会删除已有本地内容。</p>
+            <p id="memory-create-note" class="selection-note" aria-live="polite">开启记忆后才可以手动新建事实卡。</p>
+            <section id="memory-draft-panel" class="memory-draft-panel content-stack" hidden aria-label="新建事实卡">
+              <p class="selection-note">确认后才会保存到本机记忆；可随时在这里编辑、停用或删除。</p>
+              <label class="field-label">
+                标题
+                <input id="memory-draft-title" type="text" maxlength="80" />
+              </label>
+              <label class="field-label">
+                正文
+                <textarea id="memory-draft-content" maxlength="800"></textarea>
+              </label>
+              <label class="field-label">
+                标签
+                <input id="memory-draft-tags" type="text" placeholder="用逗号分隔，可留空" />
+              </label>
+              <div class="settings-actions">
+                <button id="cancel-memory-draft-button" class="button-light" type="button">取消</button>
+                <button id="save-memory-draft-button" class="button" type="button">保存事实卡</button>
+              </div>
+            </section>
             <p id="memory-overview-status" class="status-box" data-state="fallback" aria-live="polite">记忆关闭；她这轮轻装陪着。</p>
             <p id="memory-next-injection-status" class="status-box" data-state="fallback" aria-live="polite">下次发送她不会带入记忆。</p>
             <div id="memory-safe-stats" class="memory-safe-stats status-box" data-state="fallback" aria-live="polite"></div>
@@ -177,6 +179,21 @@
                 <button id="confirm-clear-memory-button" class="button-danger" type="button">确认清空</button>
               </span>
             </div>
+            <section class="content-stack" aria-labelledby="memory-suppressions-title">
+              <h3 id="memory-suppressions-title" class="settings-section-title">已忘记类型</h3>
+              <p class="selection-note">这些仅保存安全分类名；不会保留事实正文。重新允许后，未来相同类型才可再次自动提取。</p>
+              <div id="memory-suppressions" class="content-stack"></div>
+              <div class="settings-actions">
+                <button id="clear-memory-suppressions-button" class="button-danger" type="button">清空已忘记类型</button>
+              </div>
+              <div id="clear-memory-suppressions-confirmation" class="status-box delete-confirmation" hidden>
+                <span>只会清空已忘记类型，不会删除事实卡，是否继续？</span>
+                <span class="inline-actions">
+                  <button id="cancel-clear-memory-suppressions-button" class="button-light" type="button">取消</button>
+                  <button id="confirm-clear-memory-suppressions-button" class="button-danger" type="button">确认清空</button>
+                </span>
+              </div>
+            </section>
             <label class="field-label">
               搜索记忆
               <input id="memory-search" type="search" placeholder="标题、正文或标签" />
