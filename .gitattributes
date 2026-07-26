@@ -1,1 +1,2 @@
 .agents/skills/record-live2d-motion/** text eol=lf
+resources/models/witch/motions/*.motion3.json -text
