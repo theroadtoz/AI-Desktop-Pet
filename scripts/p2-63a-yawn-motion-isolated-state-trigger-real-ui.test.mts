@@ -577,7 +577,7 @@ test("isolated transforms bind yawn only on the state_sleep path for the real du
 });
 
 test("player and frame transforms structurally observe bounded start and independent runtime watchdogs", () => {
-  const playerSource = readFileSync("src/renderer/pet/interaction-action-player.ts", "utf8");
+  const playerSource = readFileSync("src/renderer/pet/interaction-action-player.ts", "utf8").replace(/\r\n/gu, "\n");
   assert.deepEqual(inspectPlayerWatchdogStructure(playerSource), {
     playbackPhases: ["loading", "queued", "started"],
     startWatchdog: {

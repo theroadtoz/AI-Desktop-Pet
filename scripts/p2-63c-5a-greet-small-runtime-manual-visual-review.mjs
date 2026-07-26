@@ -260,6 +260,7 @@ export function readCandidateDraft(candidatePath, workspaceRoot = ROOT) {
 }
 
 function replaceExactlyOnce(source, marker, replacement, label) {
+  source = source.replace(/\r\n/gu, "\n");
   const first = source.indexOf(marker);
   if (first < 0 || source.indexOf(marker, first + marker.length) >= 0) {
     throw new Error(`expected exactly one ${label} marker`);
