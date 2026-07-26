@@ -282,7 +282,7 @@ test("P2-84 bundled joke acknowledgement requires the first sentence to name the
 
 test("P2-84 bundled explicit tired accepts heartache while retaining relevance and non-taskifying guards", () => {
   const tiredCase = acceptanceSource.match(
-    /caseId: "explicit-tired",[\s\S]*?\n    \},\n    \{\n      caseId: "joke"/
+    /caseId: "explicit-tired",[\s\S]*?\r?\n    \},\r?\n    \{\r?\n      caseId: "joke"/
   )?.[0] ?? "";
 
   assert.match(tiredCase, /relevant:\s*hasAny\(reply, \["累", "疲惫", "困", "歇", "休息", "安静", "陪", "听"\]\)/);
