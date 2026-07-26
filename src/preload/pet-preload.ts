@@ -486,6 +486,16 @@ const api: PetApi = {
     const result = await ipcRenderer.invoke("pet:p2-85-reset-baseline");
     return result === true;
   },
+  async resetP285AcceptanceBaselineAndRunScenario(scenarioId: P285AcceptanceScenarioId) {
+    if (!P2_85_ACCEPTANCE_SCENARIO_IDS.includes(scenarioId)) {
+      return false;
+    }
+    const result = await ipcRenderer.invoke(
+      "pet:p2-85-reset-baseline-and-run-scenario",
+      scenarioId
+    );
+    return result === true;
+  },
   onInjectWebGLContextLoss(handler: () => void) {
     const listener = (): void => {
       handler();

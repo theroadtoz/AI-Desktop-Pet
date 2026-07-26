@@ -8,12 +8,15 @@ import {
   P2_85_RUNTIME_BOUNDARIES,
   REQUIRED_ACCEPTANCE_HOOKS,
   assertSafeP285Observation,
+  assertSafeP285AcceptanceTelemetryEvent,
   createP285FailureDiagnostics,
   getP285AcceptanceEnvironment,
   getP285ElectronArgs,
   inspectP285AcceptanceHooks,
   readP285SafeRejection,
   resolveP285RenderMode,
+  runP285WithCleanup,
+  selectP285EvidenceEvents,
   validateScenarioObservation
 } from "./p2-85-context-emotion-proactive-real-ui.mjs";
 
@@ -60,10 +63,12 @@ test("P2-85 runner reports a safe startup failure category without serializing e
 
 test("P2-85 runner reads only a closed rejection reason for a known scenario", () => {
   assert.equal(readP285SafeRejection([{
+    timestamp: "2026-07-25T00:00:00.000Z",
     type: "p2_85_acceptance_rejection",
     payload: { scenarioId: "reply_visible_generic_once", rejectionReason: "reply_dispatch_rejected" }
   }], "reply_visible_generic_once"), "reply_dispatch_rejected");
   assert.equal(readP285SafeRejection([{
+    timestamp: "2026-07-25T00:00:00.000Z",
     type: "p2_85_acceptance_rejection",
     payload: { scenarioId: "reply_visible_generic_once", rejectionReason: "private_detail" }
   }], "reply_visible_generic_once"), null);
@@ -112,6 +117,7 @@ test("P2-85 runner fails closed until every triple-gated fixture hook exists", (
       p285AcceptanceScenarioController?.observeRendererActionLifecycle();
       p285AcceptanceScenarioController?.observeProactiveDecision();
       ipcMain.handle("pet:p2-85-run-scenario", (event) => isPetSender(event));
+      ipcMain.handle("pet:p2-85-reset-baseline-and-run-scenario", (event) => isPetSender(event));
       runP285AcceptanceScenario("proactive_suppress_single_defer");
       p2_85_acceptance_observation;
     `,
@@ -125,8 +131,8 @@ test("P2-85 runner fails closed until every triple-gated fixture hook exists", (
         actionAttempted: false
       };
     `,
-    petPreloadSource: "runP285ScenarioForAcceptance() {}",
-    ipcContractSource: "runP285ScenarioForAcceptance(): Promise<boolean>;"
+    petPreloadSource: "runP285ScenarioForAcceptance() {} resetP285AcceptanceBaselineAndRunScenario() {}",
+    ipcContractSource: "runP285ScenarioForAcceptance(): Promise<boolean>; resetP285AcceptanceBaselineAndRunScenario(): Promise<boolean>;"
   });
   assert.equal(ready.ready, true);
   assert.deepEqual(ready.missing, []);
@@ -141,44 +147,120 @@ test("P2-85 runner fails closed until every triple-gated fixture hook exists", (
     scenarioSource: `function runP285AcceptanceScenario() {}
       function createP285AcceptanceScenarioController() { return { resetBaseline() {} }; }
       const observation = { scenarioId: "safe", runtimeBoundary: "deterministic_main_module_contract", actionAttempted: false };`,
-    petPreloadSource: "runP285ScenarioForAcceptance() {}",
-    ipcContractSource: "runP285ScenarioForAcceptance(): Promise<boolean>;"
+    petPreloadSource: "runP285ScenarioForAcceptance() {} resetP285AcceptanceBaselineAndRunScenario() {}",
+    ipcContractSource: "runP285ScenarioForAcceptance(): Promise<boolean>; resetP285AcceptanceBaselineAndRunScenario(): Promise<boolean>;"
   });
   assert.equal(syntheticLifecycle.ready, false);
 
   const missingScenarioSchema = inspectP285AcceptanceHooks({
-    appSource: "AI_DESKTOP_PET_ACCEPTANCE_TELEMETRY AI_DESKTOP_PET_P2_85_SAFE_OBSERVATION AI_DESKTOP_PET_P2_85_SAFE_FIXTURE isP283aAcceptanceInjectionOnly ipcMain.handle(\"pet:p2-85-run-scenario\", (event) => isPetSender(event)); p2_85_acceptance_observation; createP285AcceptanceScenarioController; p285AcceptanceScenarioController?.observeRendererActionLifecycle(); p285AcceptanceScenarioController?.observeProactiveDecision();",
+    appSource: "AI_DESKTOP_PET_ACCEPTANCE_TELEMETRY AI_DESKTOP_PET_P2_85_SAFE_OBSERVATION AI_DESKTOP_PET_P2_85_SAFE_FIXTURE isP283aAcceptanceInjectionOnly ipcMain.handle(\"pet:p2-85-run-scenario\", (event) => isPetSender(event)); ipcMain.handle(\"pet:p2-85-reset-baseline-and-run-scenario\", (event) => isPetSender(event)); p2_85_acceptance_observation; createP285AcceptanceScenarioController; p285AcceptanceScenarioController?.observeRendererActionLifecycle(); p285AcceptanceScenarioController?.observeProactiveDecision();",
     scenarioSource: "type P285AcceptanceObservation = { scenarioId: string };",
-    petPreloadSource: "runP285ScenarioForAcceptance() {}",
-    ipcContractSource: "runP285ScenarioForAcceptance(): Promise<boolean>;"
+    petPreloadSource: "runP285ScenarioForAcceptance() {} resetP285AcceptanceBaselineAndRunScenario() {}",
+    ipcContractSource: "runP285ScenarioForAcceptance(): Promise<boolean>; resetP285AcceptanceBaselineAndRunScenario(): Promise<boolean>;"
   });
   assert.equal(missingScenarioSchema.ready, false);
   assert.deepEqual(missingScenarioSchema.missing, ["safe_observation"]);
 });
 
-test("P2-85 runner rejects forbidden observation fields and validates bounded lifecycle evidence", () => {
-  assert.deepEqual(assertSafeP285Observation({ scenarioId: "safe", actionAttempted: true }), {
+test("P2-86 runner accepts only exact P2-85 telemetry schemas and bounded lifecycle evidence", async () => {
+  const timestamp = "2026-07-25T00:00:00.000Z";
+  const requestId = "0123456789abcdef0123456789abcdef";
+  const chatObservation = {
+    scenarioId: "chat_opened_replace_active",
+    runtimeBoundary: "live_renderer_chain",
+    actionAttempted: true,
+    requestId,
+    replacedRequestId: "fedcba9876543210fedcba9876543210",
+    replacementAccepted: true,
+    lateLifecycleIgnored: true,
+    terminalObserved: true
+  };
+  assert.deepEqual(assertSafeP285Observation(chatObservation), {
     ok: true,
     reason: null
   });
-  assert.equal(assertSafeP285Observation({ scenarioId: "safe", text: "private" }).ok, false);
-  assert.equal(assertSafeP285Observation({ scenarioId: "safe", affectKind: "low" }).ok, false);
+  for (const invalid of [
+    { ...chatObservation, text: "private" },
+    { ...chatObservation, debugMeta: {} },
+    { ...chatObservation, requestId: "bad" }
+  ]) {
+    assert.deepEqual(assertSafeP285Observation(invalid), {
+      ok: false,
+      reason: "p2_85_telemetry_schema_invalid"
+    });
+  }
+  const replyObservation = {
+    scenarioId: "reply_visible_generic_once",
+    runtimeBoundary: "live_renderer_chain",
+    actionAttempted: true,
+    requestId,
+    terminalObserved: true,
+    affectActionAttempted: false,
+    genericReplyActionAttempted: true,
+    actionRequestCount: 1,
+    streamCompleted: true
+  };
+  assert.equal(assertSafeP285Observation({ ...replyObservation, actionRequestCount: Number.NaN }).ok, false);
+  assert.equal(assertSafeP285Observation({ ...replyObservation, actionRequestCount: Number.POSITIVE_INFINITY }).ok, false);
+  assert.equal(assertSafeP285Observation({
+    scenarioId: "explicit_game_single_presentation",
+    runtimeBoundary: "live_global_p2_83a_fixture",
+    actionAttempted: false,
+    proactiveCandidateId: "explicit_game_started",
+    proactiveCandidateCount: 1,
+    proactiveCandidateOutcome: "untrusted",
+    automaticModeActionCount: 0
+  }).ok, false);
+  assert.deepEqual(assertSafeP285AcceptanceTelemetryEvent({
+    timestamp,
+    type: "p2_85_acceptance_observation",
+    payload: chatObservation
+  }), { ok: true, reason: null });
+  assert.deepEqual(assertSafeP285AcceptanceTelemetryEvent({
+    timestamp,
+    type: "p2_85_unknown",
+    payload: {}
+  }), { ok: false, reason: "p2_85_telemetry_schema_invalid" });
+  assert.deepEqual(assertSafeP285AcceptanceTelemetryEvent({
+    timestamp,
+    type: "unrelated_event",
+    payload: { text: "private" }
+  }), { ok: false, ignored: true, reason: "p2_85_telemetry_ignored" });
+  const selection = selectP285EvidenceEvents([
+    { timestamp, type: "unrelated_event", payload: { text: "private" } },
+    { type: "pet_interaction_action_finished", payload: { requestId } },
+    { timestamp, type: "p2_85_acceptance_observation", payload: chatObservation }
+  ]);
+  assert.equal(selection.ok, true);
+  assert.deepEqual(selection.events.map((event) => event.type), [
+    "pet_interaction_action_finished",
+    "p2_85_acceptance_observation"
+  ]);
+  assert.equal(selectP285EvidenceEvents([{
+    timestamp,
+    type: "p2_85_unknown",
+    payload: {}
+  }]).ok, false);
 
-  const requestId = "0123456789abcdef0123456789abcdef";
   const lifecycle = [{
     type: "pet_interaction_action_finished",
     payload: { requestId }
   }];
   assert.equal(validateScenarioObservation("chat_opened_replace_active", {
+    scenarioId: "chat_opened_replace_active",
     requestId,
+    replacedRequestId: "fedcba9876543210fedcba9876543210",
     runtimeBoundary: "live_renderer_chain",
+    actionAttempted: true,
     replacementAccepted: true,
     lateLifecycleIgnored: true,
     terminalObserved: true
   }, lifecycle).ok, true);
   assert.equal(validateScenarioObservation("reply_visible_generic_once", {
+    scenarioId: "reply_visible_generic_once",
     requestId,
     runtimeBoundary: "live_renderer_chain",
+    actionAttempted: true,
     terminalObserved: true,
     affectActionAttempted: false,
     genericReplyActionAttempted: true,
@@ -186,21 +268,33 @@ test("P2-85 runner rejects forbidden observation fields and validates bounded li
     streamCompleted: true
   }, lifecycle).ok, true);
   assert.equal(validateScenarioObservation("explicit_game_single_presentation", {
+    scenarioId: "explicit_game_single_presentation",
     runtimeBoundary: "live_global_p2_83a_fixture",
+    actionAttempted: false,
     proactiveCandidateId: "explicit_game_started",
     proactiveCandidateCount: 1,
+    proactiveCandidateOutcome: "shown",
     automaticModeActionCount: 0
   }, []).ok, true);
   assert.equal(validateScenarioObservation("proactive_suppress_single_defer", {
+    scenarioId: "proactive_suppress_single_defer",
     runtimeBoundary: "deterministic_main_module_contract",
+    actionAttempted: false,
     suppressedTerminal: true,
     deferredOnce: true,
     deferredReplayed: false,
-    ttlExtended: false
+    ttlExtended: false,
+    deferQueuedAtMs: 1000,
+    originalExpiresAtMs: 2000,
+    firstBeyondOriginalTtlTickAtMs: 2001,
+    terminalAtMs: 2001,
+    tickCount: 4
   }, []).ok, true);
   assert.equal(validateScenarioObservation("reply_visible_generic_once", {
+    scenarioId: "reply_visible_generic_once",
     requestId,
     runtimeBoundary: "live_global_p2_83a_fixture",
+    actionAttempted: true,
     terminalObserved: true,
     affectActionAttempted: false,
     genericReplyActionAttempted: true,
@@ -208,20 +302,44 @@ test("P2-85 runner rejects forbidden observation fields and validates bounded li
     streamCompleted: true
   }, lifecycle).ok, false);
   assert.equal(validateScenarioObservation("reply_visible_generic_once", {
+    scenarioId: "reply_visible_generic_once",
     requestId,
     runtimeBoundary: "live_renderer_chain",
+    actionAttempted: true,
     affectActionAttempted: false,
     genericReplyActionAttempted: true,
     actionRequestCount: 1,
     streamCompleted: true
   }, lifecycle).ok, false);
   assert.equal(validateScenarioObservation("reply_visible_generic_once", {
+    scenarioId: "reply_visible_generic_once",
     requestId,
     runtimeBoundary: "live_renderer_chain",
+    actionAttempted: true,
     terminalObserved: true,
     affectActionAttempted: false,
     genericReplyActionAttempted: true,
     actionRequestCount: 1,
     streamCompleted: true
   }, [...lifecycle, lifecycle[0]]).ok, false);
+
+  const primaryFailure = new Error("primary");
+  await assert.rejects(runP285WithCleanup(
+    async () => { throw primaryFailure; },
+    async () => { throw new Error("cleanup"); }
+  ), (error: Error & { p285CleanupFailureDiagnostics?: unknown }) =>
+    error === primaryFailure && Boolean(error.p285CleanupFailureDiagnostics));
+
+  for (const primary of ["primary-string", undefined, null, Object.freeze(new Error("primary-frozen"))]) {
+    const errorName = primary instanceof Error ? primary.name : typeof primary;
+    await assert.rejects(runP285WithCleanup(
+      async () => { throw primary; },
+      async () => { throw new Error("cleanup"); }
+    ), (error: Error & {
+      p285PrimaryFailureDiagnostics?: { errorName?: string };
+      p285CleanupFailureDiagnostics?: unknown;
+    }) => error.message === "p2_85_cleanup_failed_after_primary" &&
+      error.p285PrimaryFailureDiagnostics?.errorName === errorName &&
+      Boolean(error.p285CleanupFailureDiagnostics));
+  }
 });

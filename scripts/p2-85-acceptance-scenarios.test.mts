@@ -4,7 +4,12 @@ import { createRequire } from "node:module";
 import test from "node:test";
 
 const require = createRequire(import.meta.url);
-const { createP285AcceptanceScenarioController, runP285AcceptanceScenario } = require(
+const {
+  createP285AcceptanceScenarioController,
+  isP285AcceptanceObservation,
+  isP285AcceptanceRejectionReason,
+  runP285AcceptanceScenario
+} = require(
   "../dist/main/services/companion-context/p2-85-acceptance-scenarios.js"
 ) as typeof import("../src/main/services/companion-context/p2-85-acceptance-scenarios");
 const { validateScenarioObservation } = await import("./p2-85-context-emotion-proactive-real-ui.mjs");
@@ -182,6 +187,118 @@ test("P2-85 baseline acknowledgement blocks scenarios until the close-and-rechec
   controller.dispose();
 });
 
+test("P2-86 atomic baseline-and-scenario operation dispatches without a renderer IPC gap", async () => {
+  let resolveBaseline: ((value: boolean) => void) | undefined;
+  let active = false;
+  const executionOrder: string[] = [];
+  const controller = createP285AcceptanceScenarioController({
+    dispatchAction() {
+      executionOrder.push("dispatch");
+      if (active) return { accepted: false, reason: "busy" };
+      active = true;
+      return { accepted: true, requestId: "00000000000000000000000000000001" };
+    },
+    cancelAction() {
+      active = false;
+    },
+    getActiveMainRequest() {
+      return null;
+    },
+    openChatWindow() {},
+    resetLiveBaseline() {
+      executionOrder.push("reset");
+      return new Promise<boolean>((resolve) => {
+        resolveBaseline = resolve;
+      });
+    },
+    clearProactiveCandidate() {},
+    queueExplicitGameCandidate() {},
+    resolveArbitration(input: { channel: string }) {
+      return {
+        decision: input.channel === "affect-action" ? "suppress" : "allow",
+        reason: "allowed",
+        replay: "never",
+        actionIntent: "none",
+        priority: 0
+      };
+    },
+    reportObservation() {}
+  });
+
+  const operation = controller.resetBaselineAndRunScenario("reply_visible_generic_once");
+  assert.deepEqual(controller.runScenario("reply_visible_generic_once"), {
+    accepted: false,
+    rejectionReason: "baseline_pending"
+  });
+  assert.ok(resolveBaseline);
+  resolveBaseline(true);
+  assert.deepEqual(await operation, { accepted: true, rejectionReason: null });
+  assert.deepEqual(executionOrder, ["reset", "dispatch"]);
+  assert.deepEqual(controller.runScenario("reply_visible_generic_once"), {
+    accepted: false,
+    rejectionReason: "pending_observation"
+  });
+  controller.dispose();
+});
+
+test("P2-86 baseline failures are closed and always release the pending gate", async () => {
+  let cancelThrows = true;
+  const controller = createP285AcceptanceScenarioController({
+    dispatchAction() {
+      return { accepted: true, requestId: "00000000000000000000000000000001" };
+    },
+    cancelAction() {
+      if (cancelThrows) throw new Error("private cancel failure");
+    },
+    getActiveMainRequest() {
+      return null;
+    },
+    openChatWindow() {},
+    async resetLiveBaseline() {
+      throw new Error("private adapter failure");
+    },
+    clearProactiveCandidate() {},
+    queueExplicitGameCandidate() {},
+    resolveArbitration(input: { channel: string }) {
+      return { decision: input.channel === "affect-action" ? "suppress" : "allow", reason: "allowed", replay: "never", actionIntent: "none", priority: 0 };
+    },
+    reportObservation() {}
+  });
+
+  assert.equal(controller.runScenario("reply_visible_generic_once").accepted, true);
+  assert.deepEqual(await controller.resetBaseline(), {
+    accepted: false,
+    rejectionReason: "baseline_reset_failed"
+  });
+  cancelThrows = false;
+  assert.equal(controller.runScenario("reply_visible_generic_once").accepted, true);
+  assert.deepEqual(await controller.resetBaseline(), {
+    accepted: false,
+    rejectionReason: "baseline_reset_failed"
+  });
+  assert.equal(controller.runScenario("reply_visible_generic_once").accepted, true);
+  controller.dispose();
+});
+
+test("P2-86 acceptance telemetry guards accept only exact P2-85 payload schemas", () => {
+  const chatObservation = {
+    scenarioId: "chat_opened_replace_active",
+    runtimeBoundary: "live_renderer_chain",
+    actionAttempted: true,
+    requestId: "00000000000000000000000000000001",
+    replacedRequestId: "00000000000000000000000000000002",
+    replacementAccepted: true,
+    lateLifecycleIgnored: true,
+    terminalObserved: true
+  };
+  assert.equal(isP285AcceptanceObservation(chatObservation), true);
+  assert.equal(isP285AcceptanceObservation({ ...chatObservation, debugMeta: {} }), false);
+  assert.equal(isP285AcceptanceObservation({ ...chatObservation, requestId: "not-a-request-id" }), false);
+  assert.equal(isP285AcceptanceObservation({ ...chatObservation, actionRequestCount: Number.NaN }), false);
+  assert.equal(isP285AcceptanceRejectionReason("baseline_reset_failed"), true);
+  assert.equal(isP285AcceptanceRejectionReason("private failure"), false);
+});
+
 test("P2-85 scenario rejections stay in the closed safe reason set", () => {
   const controller = createP285AcceptanceScenarioController({
     dispatchAction() {
@@ -225,4 +342,11 @@ test("P2-85 module cannot reintroduce the reviewed false-pass patterns", () => {
   assert.doesNotMatch(scenarioSource, /createPetActionDispatchCoordinator/u);
   assert.match(scenarioSource, /tickAt\(originalExpiresAtMs \+ 1\)/u);
   assert.match(scenarioSource, /explicitTerminal\.atMs > firstBeyondOriginalTtlTickAtMs/u);
+  assert.match(scenarioSource, /async resetBaselineAndRunScenario\(scenarioId\)/u);
+  const atomicStart = scenarioSource.indexOf("async resetBaselineAndRunScenario(scenarioId)");
+  const atomicEnd = scenarioSource.indexOf("observeRendererActionLifecycle", atomicStart);
+  const atomicOperation = scenarioSource.slice(atomicStart, atomicEnd);
+  assert.match(atomicOperation, /await resetBaseline\(\)/u);
+  assert.match(atomicOperation, /runScenario\(scenarioId\)/u);
+  assert.doesNotMatch(atomicOperation, /setTimeout|retry|sleep/u);
 });

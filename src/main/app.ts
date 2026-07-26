@@ -196,6 +196,8 @@ import {
 } from "./services/companion-context/companion-context-arbitration-policy";
 import {
   createP285AcceptanceScenarioController,
+  isP285AcceptanceObservation,
+  isP285AcceptanceRejectionReason,
   type P285AcceptanceRejectionReason,
   type P285AcceptanceScenarioController
 } from "./services/companion-context/p2-85-acceptance-scenarios";
@@ -2954,6 +2956,14 @@ app.whenReady().then(async () => {
     }
   }
 
+  const reportP285AcceptanceRejection = (
+    scenarioId: P285AcceptanceScenarioId,
+    rejectionReason: unknown
+  ): void => {
+    if (!isP285AcceptanceRejectionReason(rejectionReason)) return;
+    logTelemetry("p2_85_acceptance_rejection", { scenarioId, rejectionReason });
+  };
+
   openChatWindowAdapter = openChatWindow;
   if (isP285AcceptanceFixtureEnabled) {
     p285AcceptanceScenarioController = createP285AcceptanceScenarioController({
@@ -2996,7 +3006,9 @@ app.whenReady().then(async () => {
       },
       resolveArbitration: resolveCompanionContextArbitration,
       reportObservation(observation) {
-        logTelemetry("p2_85_acceptance_observation", observation);
+        if (isP285AcceptanceObservation(observation)) {
+          logTelemetry("p2_85_acceptance_observation", observation);
+        }
       }
     });
   }
@@ -3397,10 +3409,7 @@ app.whenReady().then(async () => {
         acceptedScenarioId === "explicit_game_single_presentation" &&
         !isP283aAcceptanceInjectionOnly
       ) {
-        logTelemetry("p2_85_acceptance_rejection", {
-          scenarioId: acceptedScenarioId,
-          rejectionReason: "explicit_game_fixture_disabled"
-        });
+        reportP285AcceptanceRejection(acceptedScenarioId, "explicit_game_fixture_disabled");
         return false;
       }
       const result = p285AcceptanceScenarioController?.runScenario(acceptedScenarioId) ?? {
@@ -3408,18 +3417,45 @@ app.whenReady().then(async () => {
         rejectionReason: "controller_unavailable" as P285AcceptanceRejectionReason
       };
       if (!result.accepted) {
-        logTelemetry("p2_85_acceptance_rejection", {
-          scenarioId: acceptedScenarioId,
-          rejectionReason: result.rejectionReason
-        });
+        reportP285AcceptanceRejection(acceptedScenarioId, result.rejectionReason);
       }
       return result.accepted;
     } catch {
-      logTelemetry("p2_85_acceptance_rejection", {
-        scenarioId: acceptedScenarioId,
-        rejectionReason: "controller_threw"
-      });
-      p285AcceptanceScenarioController?.resetBaseline();
+      reportP285AcceptanceRejection(acceptedScenarioId, "controller_threw");
+      void p285AcceptanceScenarioController?.resetBaseline().catch(() => undefined);
+      return false;
+    }
+  });
+
+  ipcMain.handle("pet:p2-85-reset-baseline-and-run-scenario", async (event, scenarioId: unknown) => {
+    if (
+      !isPetSender(event) ||
+      !isP285AcceptanceFixtureEnabled ||
+      typeof scenarioId !== "string" ||
+      !P2_85_ACCEPTANCE_SCENARIO_IDS.includes(scenarioId as P285AcceptanceScenarioId)
+    ) {
+      return false;
+    }
+
+    const acceptedScenarioId = scenarioId as P285AcceptanceScenarioId;
+    try {
+      if (
+        acceptedScenarioId === "explicit_game_single_presentation" &&
+        !isP283aAcceptanceInjectionOnly
+      ) {
+        reportP285AcceptanceRejection(acceptedScenarioId, "explicit_game_fixture_disabled");
+        return false;
+      }
+      const result = await (p285AcceptanceScenarioController?.resetBaselineAndRunScenario(acceptedScenarioId) ?? Promise.resolve({
+        accepted: false,
+        rejectionReason: "controller_unavailable" as P285AcceptanceRejectionReason
+      }));
+      if (!result.accepted) {
+        reportP285AcceptanceRejection(acceptedScenarioId, result.rejectionReason);
+      }
+      return result.accepted;
+    } catch {
+      reportP285AcceptanceRejection(acceptedScenarioId, "controller_threw");
       return false;
     }
   });
@@ -3428,15 +3464,20 @@ app.whenReady().then(async () => {
     if (!isPetSender(event) || !isP285AcceptanceFixtureEnabled) {
       return false;
     }
-    const result = await (p285AcceptanceScenarioController?.resetBaseline() ?? Promise.resolve({
-      accepted: false,
-      rejectionReason: "controller_unavailable" as P285AcceptanceRejectionReason
-    }));
+    let result;
+    try {
+      result = await (p285AcceptanceScenarioController?.resetBaseline() ?? Promise.resolve({
+        accepted: false,
+        rejectionReason: "controller_unavailable" as P285AcceptanceRejectionReason
+      }));
+    } catch {
+      result = {
+        accepted: false,
+        rejectionReason: "baseline_reset_failed" as P285AcceptanceRejectionReason
+      };
+    }
     if (!result.accepted) {
-      logTelemetry("p2_85_acceptance_rejection", {
-        scenarioId: "chat_opened_replace_active",
-        rejectionReason: result.rejectionReason
-      });
+      reportP285AcceptanceRejection("chat_opened_replace_active", result.rejectionReason);
     }
     return result.accepted;
   });

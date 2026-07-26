@@ -58,6 +58,7 @@ export const P2_85_ACCEPTANCE_REJECTION_REASONS = [
   "pending_observation",
   "baseline_pending",
   "baseline_not_closed",
+  "baseline_reset_failed",
   "state_listen_rejected",
   "chat_open_failed",
   "chat_open_replacement_missing",
@@ -71,6 +72,107 @@ export const P2_85_ACCEPTANCE_REJECTION_REASONS = [
 
 export type P285AcceptanceRejectionReason =
   (typeof P2_85_ACCEPTANCE_REJECTION_REASONS)[number];
+
+const P2_85_ACCEPTANCE_SCENARIO_IDS = [
+  "chat_opened_replace_active",
+  "reply_visible_generic_once",
+  "explicit_game_single_presentation",
+  "proactive_suppress_single_defer"
+] as const satisfies readonly P285AcceptanceScenarioId[];
+
+const SAFE_REQUEST_ID = /^[a-f0-9]{32}$/u;
+const PROACTIVE_CANDIDATE_STATES = [
+  "queued",
+  "attempted",
+  "shown",
+  "skipped",
+  "expired"
+] as const satisfies readonly ProactiveBubbleCoordinatorDecision["state"][];
+
+function hasExactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
+  const actual = Object.keys(value).sort();
+  const expected = [...keys].sort();
+  return actual.length === expected.length && actual.every((key, index) => key === expected[index]);
+}
+
+function isFiniteNonNegativeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
+function isBoolean(value: unknown): value is boolean {
+  return typeof value === "boolean";
+}
+
+export function isP285AcceptanceRejectionReason(value: unknown): value is P285AcceptanceRejectionReason {
+  return typeof value === "string" &&
+    (P2_85_ACCEPTANCE_REJECTION_REASONS as readonly string[]).includes(value);
+}
+
+/** Acceptance-only allowlist for the two P2-85 main telemetry payloads. */
+export function isP285AcceptanceObservation(value: unknown): value is P285AcceptanceObservation {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const observation = value as Record<string, unknown>;
+  const scenarioId = observation.scenarioId;
+  if (typeof scenarioId !== "string" || !P2_85_ACCEPTANCE_SCENARIO_IDS.includes(scenarioId as P285AcceptanceScenarioId)) {
+    return false;
+  }
+
+  if (scenarioId === "chat_opened_replace_active") {
+    return hasExactKeys(observation, [
+      "scenarioId", "runtimeBoundary", "actionAttempted", "requestId", "replacedRequestId",
+      "replacementAccepted", "lateLifecycleIgnored", "terminalObserved"
+    ]) && observation.runtimeBoundary === "live_renderer_chain" &&
+      isBoolean(observation.actionAttempted) && typeof observation.requestId === "string" &&
+      SAFE_REQUEST_ID.test(observation.requestId) && typeof observation.replacedRequestId === "string" &&
+      SAFE_REQUEST_ID.test(observation.replacedRequestId) &&
+      isBoolean(observation.replacementAccepted) && isBoolean(observation.lateLifecycleIgnored) &&
+      isBoolean(observation.terminalObserved);
+  }
+
+  if (scenarioId === "reply_visible_generic_once") {
+    return hasExactKeys(observation, [
+      "scenarioId", "runtimeBoundary", "actionAttempted", "requestId", "terminalObserved",
+      "affectActionAttempted", "genericReplyActionAttempted", "actionRequestCount", "streamCompleted"
+    ]) && observation.runtimeBoundary === "live_renderer_chain" &&
+      isBoolean(observation.actionAttempted) && typeof observation.requestId === "string" &&
+      SAFE_REQUEST_ID.test(observation.requestId) &&
+      isBoolean(observation.terminalObserved) && isBoolean(observation.affectActionAttempted) &&
+      isBoolean(observation.genericReplyActionAttempted) &&
+      isFiniteNonNegativeInteger(observation.actionRequestCount) && isBoolean(observation.streamCompleted);
+  }
+
+  if (scenarioId === "explicit_game_single_presentation") {
+    return hasExactKeys(observation, [
+      "scenarioId", "runtimeBoundary", "actionAttempted", "proactiveCandidateId", "proactiveCandidateCount",
+      "proactiveCandidateOutcome", "automaticModeActionCount"
+    ]) && observation.runtimeBoundary === "live_global_p2_83a_fixture" &&
+      isBoolean(observation.actionAttempted) && observation.proactiveCandidateId === "explicit_game_started" &&
+      isFiniteNonNegativeInteger(observation.proactiveCandidateCount) &&
+      typeof observation.proactiveCandidateOutcome === "string" &&
+      PROACTIVE_CANDIDATE_STATES.includes(observation.proactiveCandidateOutcome as ProactiveBubbleCoordinatorDecision["state"]) &&
+      isFiniteNonNegativeInteger(observation.automaticModeActionCount);
+  }
+
+  const optionalTerminalAtMs = Object.hasOwn(observation, "terminalAtMs");
+  return hasExactKeys(observation, optionalTerminalAtMs
+    ? [
+        "scenarioId", "runtimeBoundary", "actionAttempted", "suppressedTerminal", "deferredOnce",
+        "deferredReplayed", "ttlExtended", "deferQueuedAtMs", "originalExpiresAtMs",
+        "firstBeyondOriginalTtlTickAtMs", "terminalAtMs", "tickCount"
+      ]
+    : [
+        "scenarioId", "runtimeBoundary", "actionAttempted", "suppressedTerminal", "deferredOnce",
+        "deferredReplayed", "ttlExtended", "deferQueuedAtMs", "originalExpiresAtMs",
+        "firstBeyondOriginalTtlTickAtMs", "tickCount"
+      ]) && observation.runtimeBoundary === "deterministic_main_module_contract" &&
+    isBoolean(observation.actionAttempted) && isBoolean(observation.suppressedTerminal) &&
+    isBoolean(observation.deferredOnce) && isBoolean(observation.deferredReplayed) &&
+    isBoolean(observation.ttlExtended) && isFiniteNonNegativeInteger(observation.deferQueuedAtMs) &&
+    isFiniteNonNegativeInteger(observation.originalExpiresAtMs) &&
+    isFiniteNonNegativeInteger(observation.firstBeyondOriginalTtlTickAtMs) &&
+    (!optionalTerminalAtMs || isFiniteNonNegativeInteger(observation.terminalAtMs)) &&
+    isFiniteNonNegativeInteger(observation.tickCount);
+}
 
 export type P285AcceptanceScenarioStartResult = Readonly<{
   accepted: boolean;
@@ -92,6 +194,7 @@ export type P285AcceptanceScenarioAdapters = Readonly<{
 export type P285AcceptanceScenarioController = Readonly<{
   runScenario(scenarioId: P285AcceptanceScenarioId): P285AcceptanceScenarioStartResult;
   resetBaseline(): Promise<P285AcceptanceScenarioStartResult>;
+  resetBaselineAndRunScenario(scenarioId: P285AcceptanceScenarioId): Promise<P285AcceptanceScenarioStartResult>;
   observeRendererActionLifecycle(
     status: "started" | "finished" | "skipped",
     reason: string,
@@ -396,26 +499,36 @@ export function createP285AcceptanceScenarioController(
     return accepted();
   }
 
-  return {
-    runScenario(scenarioId) {
-      if (baselineResetPending) return rejected("baseline_pending");
-      if (pending) return rejected("pending_observation");
-      if (scenarioId === "proactive_suppress_single_defer") {
-        adapters.reportObservation(runProactiveSuppressSingleDefer().observation);
-        return accepted();
-      }
-      if (scenarioId === "chat_opened_replace_active") return startChatOpenedReplaceActive();
-      if (scenarioId === "reply_visible_generic_once") return startReplyVisibleGenericOnce();
-      return startExplicitGameSinglePresentation();
-    },
-    async resetBaseline() {
+  function runScenario(scenarioId: P285AcceptanceScenarioId): P285AcceptanceScenarioStartResult {
+    if (baselineResetPending) return rejected("baseline_pending");
+    if (pending) return rejected("pending_observation");
+    if (scenarioId === "proactive_suppress_single_defer") {
+      adapters.reportObservation(runProactiveSuppressSingleDefer().observation);
+      return accepted();
+    }
+    if (scenarioId === "chat_opened_replace_active") return startChatOpenedReplaceActive();
+    if (scenarioId === "reply_visible_generic_once") return startReplyVisibleGenericOnce();
+    return startExplicitGameSinglePresentation();
+  }
+
+  async function resetBaseline(): Promise<P285AcceptanceScenarioStartResult> {
+    baselineResetPending = true;
+    try {
       expirePending();
-      baselineResetPending = true;
-      try {
-        return (await adapters.resetLiveBaseline()) ? accepted() : rejected("baseline_not_closed");
-      } finally {
-        baselineResetPending = false;
-      }
+      return (await adapters.resetLiveBaseline()) ? accepted() : rejected("baseline_not_closed");
+    } catch {
+      return rejected("baseline_reset_failed");
+    } finally {
+      baselineResetPending = false;
+    }
+  }
+
+  return {
+    runScenario,
+    resetBaseline,
+    async resetBaselineAndRunScenario(scenarioId) {
+      const baseline = await resetBaseline();
+      return baseline.accepted ? runScenario(scenarioId) : baseline;
     },
     observeRendererActionLifecycle(status, reason, requestId, lifecycleResult) {
       if (status === "started" || requestId === undefined) return;

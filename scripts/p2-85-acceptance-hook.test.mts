@@ -27,6 +27,10 @@ test("P2-85 preload bridge exposes only the closed scenario and baseline contrac
     /runP285ScenarioForAcceptance\(scenarioId: P285AcceptanceScenarioId\): Promise<boolean>/u
   );
   assert.match(contract, /resetP285AcceptanceBaseline\(\): Promise<boolean>/u);
+  assert.match(
+    contract,
+    /resetP285AcceptanceBaselineAndRunScenario\(scenarioId: P285AcceptanceScenarioId\): Promise<boolean>/u
+  );
 
   for (const scenarioId of scenarioIds) {
     assert.match(contract, new RegExp(`"${scenarioId}"`, "u"));
@@ -46,6 +50,11 @@ test("P2-85 preload bridge exposes only the closed scenario and baseline contrac
   );
   assert.match(preload, /async resetP285AcceptanceBaseline\(\)/u);
   assert.match(preload, /ipcRenderer\.invoke\("pet:p2-85-reset-baseline"\)/u);
+  assert.match(preload, /async resetP285AcceptanceBaselineAndRunScenario\(scenarioId: P285AcceptanceScenarioId\)/u);
+  assert.match(
+    preload,
+    /ipcRenderer\.invoke\(\s*"pet:p2-85-reset-baseline-and-run-scenario",\s*scenarioId\s*\)/su
+  );
   assert.doesNotMatch(
     preload,
     /runP285ScenarioForAcceptance\([^)]*Record<string, unknown>/u
@@ -65,6 +74,7 @@ test("P2-85 built preload has no shared runtime import and rejects unknown scena
 
   let petApi: {
     runP285ScenarioForAcceptance(scenarioId: string): Promise<boolean>;
+    resetP285AcceptanceBaselineAndRunScenario(scenarioId: string): Promise<boolean>;
   } | undefined;
   const invocations: unknown[][] = [];
   const contextBridge = {
@@ -92,6 +102,7 @@ test("P2-85 built preload has no shared runtime import and rejects unknown scena
 
   assert.ok(petApi);
   assert.equal(await petApi.runP285ScenarioForAcceptance("unknown"), false);
+  assert.equal(await petApi.resetP285AcceptanceBaselineAndRunScenario("unknown"), false);
   assert.deepEqual(invocations, []);
 });
 
@@ -121,7 +132,11 @@ test("P2-85 main hook imports the acceptance controller and keeps the triple gat
   assert.match(app, /typeof scenarioId !== "string"/u);
   assert.match(
     app,
-    /P2_85_ACCEPTANCE_SCENARIO_IDS\.includes\(scenarioId as P285AcceptanceScenarioId\)/u
+      /P2_85_ACCEPTANCE_SCENARIO_IDS\.includes\(scenarioId as P285AcceptanceScenarioId\)/u
+  );
+  assert.match(
+    app,
+    /ipcMain\.handle\("pet:p2-85-reset-baseline-and-run-scenario", async \(event, scenarioId: unknown\) => \{/u
   );
 });
 
@@ -151,7 +166,7 @@ test("P2-85 pre-ready hardware fallback requires all four acceptance gates and s
 
 test("P2-85 app retains only gated bridges, lifecycle forwarding, adapters and telemetry", () => {
   const handlerStart = app.indexOf('ipcMain.handle("pet:p2-85-run-scenario"');
-  const handlerEnd = app.indexOf('ipcMain.handle("pet:p2-83a-inject-candidate"');
+  const handlerEnd = app.indexOf('ipcMain.handle("pet:p2-85-reset-baseline-and-run-scenario"');
   const handler = app.slice(handlerStart, handlerEnd);
 
   assert.ok(handlerStart >= 0 && handlerEnd > handlerStart);
@@ -168,11 +183,29 @@ test("P2-85 app retains only gated bridges, lifecycle forwarding, adapters and t
   assert.match(app, /p285AcceptanceScenarioController\?\.observeRendererActionLifecycle\(/u);
   assert.match(app, /reportDecision\(decision\)\s*\{\s*p285AcceptanceScenarioController\?\.observeProactiveDecision\(decision\);/su);
   assert.match(app, /queueExplicitGameCandidate\(\)\s*\{\s*proactiveBubbleCoordinator\?\.queueSafeCandidateForAcceptance\("explicit_game_started"\);/su);
-  assert.match(app, /reportObservation\(observation\)\s*\{\s*logTelemetry\("p2_85_acceptance_observation", observation\);/su);
+  assert.match(app, /reportObservation\(observation\)\s*\{\s*if \(isP285AcceptanceObservation\(observation\)\) \{\s*logTelemetry\("p2_85_acceptance_observation", observation\);/su);
+  assert.match(app, /void p285AcceptanceScenarioController\?\.resetBaseline\(\)\.catch\(\(\) => undefined\);/u);
+  assert.match(app, /rejectionReason: "baseline_reset_failed" as P285AcceptanceRejectionReason/u);
   assert.doesNotMatch(app, /function startP285ChatOpenedReplaceActiveObservation/u);
   assert.doesNotMatch(app, /function observeP285RendererActionLifecycle/u);
   assert.doesNotMatch(app, /function runP285AcceptanceScenario/u);
   assert.doesNotMatch(handler, /scenarioId ===/u);
+});
+
+test("P2-86 atomic handler is trusted, fixture-gated, and does not relax the busy coordinator", () => {
+  const handlerStart = app.indexOf('ipcMain.handle("pet:p2-85-reset-baseline-and-run-scenario"');
+  const handlerEnd = app.indexOf('ipcMain.handle("pet:p2-85-reset-baseline"', handlerStart);
+  const handler = app.slice(handlerStart, handlerEnd);
+
+  assert.ok(handlerStart >= 0 && handlerEnd > handlerStart);
+  assert.match(handler, /!isPetSender\(event\)/u);
+  assert.match(handler, /!isP285AcceptanceFixtureEnabled/u);
+  assert.match(handler, /typeof scenarioId !== "string"/u);
+  assert.match(handler, /P2_85_ACCEPTANCE_SCENARIO_IDS\.includes\(scenarioId as P285AcceptanceScenarioId\)/u);
+  assert.match(handler, /p285AcceptanceScenarioController\?\.resetBaselineAndRunScenario\(acceptedScenarioId\)/u);
+  assert.doesNotMatch(handler, /\.runScenario\(acceptedScenarioId\)/u);
+  assert.doesNotMatch(handler, /setTimeout|retry|sleep|dispatchAction/u);
+  assert.match(app, /ipcMain\.handle\("pet:p2-85-reset-baseline", async \(event\) => \{/u);
 });
 
 test("P2-85 closed baseline bridge uses the production chat hide lifecycle", () => {

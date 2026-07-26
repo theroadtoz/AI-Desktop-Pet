@@ -241,6 +241,7 @@ export type PetApi = {
   getNativeWindowHandleForAcceptance(): Promise<string | null>;
   runP285ScenarioForAcceptance(scenarioId: P285AcceptanceScenarioId): Promise<boolean>;
   resetP285AcceptanceBaseline(): Promise<boolean>;
+  resetP285AcceptanceBaselineAndRunScenario(scenarioId: P285AcceptanceScenarioId): Promise<boolean>;
   onInjectWebGLContextLoss(handler: () => void): () => void;
   onWindowMotionFeedback(handler: (feedback: PetWindowMotionFeedback) => void): () => void;
   openChat(): void;

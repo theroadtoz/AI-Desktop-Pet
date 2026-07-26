@@ -95,12 +95,12 @@ export const REQUIRED_ACCEPTANCE_HOOKS = Object.freeze([
   })
 ]);
 
-const FORBIDDEN_TELEMETRY_KEY = /(?:^|_)(?:text|body|content|prompt|raw|raw_snapshot|raw_environment|environment_snapshot|window|window_title|process|process_name|path|url|query|kind|affect_kind|emotion_kind)(?:$|_)/iu;
 const SAFE_REQUEST_ID = /^[a-f0-9]{32}$/u;
 const P2_85_ACCEPTANCE_REJECTION_REASONS = new Set([
   "pending_observation",
   "baseline_pending",
   "baseline_not_closed",
+  "baseline_reset_failed",
   "state_listen_rejected",
   "chat_open_failed",
   "chat_open_replacement_missing",
@@ -111,6 +111,38 @@ const P2_85_ACCEPTANCE_REJECTION_REASONS = new Set([
   "controller_unavailable",
   "controller_threw"
 ]);
+const P2_85_PROACTIVE_CANDIDATE_STATES = new Set(["queued", "attempted", "shown", "skipped", "expired"]);
+const P2_85_SHARED_LIFECYCLE_EVENT_TYPES = new Set([
+  "pet_interaction_action_started",
+  "pet_interaction_action_finished",
+  "pet_interaction_action_skipped"
+]);
+
+function schemaInvalid() {
+  return { ok: false, reason: "p2_85_telemetry_schema_invalid" };
+}
+
+function telemetryIgnored() {
+  return { ok: false, ignored: true, reason: "p2_85_telemetry_ignored" };
+}
+
+function hasExactKeys(value, keys) {
+  const actual = Object.keys(value).sort();
+  const expected = [...keys].sort();
+  return actual.length === expected.length && actual.every((key, index) => key === expected[index]);
+}
+
+function isFiniteNonNegativeInteger(value) {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
+function isBoolean(value) {
+  return typeof value === "boolean";
+}
+
+function isSafeTelemetryTimestamp(value) {
+  return typeof value === "string" && Number.isFinite(Date.parse(value));
+}
 
 export function inspectP285AcceptanceHooks({ appSource, scenarioSource, petPreloadSource, ipcContractSource }) {
   const missing = [];
@@ -120,10 +152,13 @@ export function inspectP285AcceptanceHooks({ appSource, scenarioSource, petPrelo
   if (!hasTripleGate) missing.push("triple_gate");
 
   const hasTrustedScenarioHandler = /ipcMain\.handle\(\s*["']pet:p2-85-run-scenario["']/u.test(appSource) &&
+    /ipcMain\.handle\(\s*["']pet:p2-85-reset-baseline-and-run-scenario["']/u.test(appSource) &&
     /isPetSender\(event\)/u.test(appSource) &&
     /AI_DESKTOP_PET_P2_85_SAFE_FIXTURE/u.test(appSource);
-  const hasPreloadBridge = /runP285ScenarioForAcceptance/u.test(petPreloadSource);
-  const hasTypedBridge = /runP285ScenarioForAcceptance/u.test(ipcContractSource);
+  const hasPreloadBridge = /runP285ScenarioForAcceptance/u.test(petPreloadSource) &&
+    /resetP285AcceptanceBaselineAndRunScenario/u.test(petPreloadSource);
+  const hasTypedBridge = /runP285ScenarioForAcceptance/u.test(ipcContractSource) &&
+    /resetP285AcceptanceBaselineAndRunScenario/u.test(ipcContractSource);
   if (!hasTrustedScenarioHandler || !hasPreloadBridge || !hasTypedBridge) {
     missing.push("trusted_pet_scenario_ipc");
   }
@@ -150,25 +185,107 @@ export function inspectP285AcceptanceHooks({ appSource, scenarioSource, petPrelo
 
 export function assertSafeP285Observation(payload) {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-    return { ok: false, reason: "missing_payload" };
+    return schemaInvalid();
   }
-  const stack = [["payload", payload]];
-  while (stack.length > 0) {
-    const [path, value] = stack.pop();
-    if (Array.isArray(value)) {
-      value.forEach((item, index) => stack.push([`${path}[${index}]`, item]));
+  if (payload.scenarioId === "chat_opened_replace_active") {
+    return hasExactKeys(payload, [
+      "scenarioId", "runtimeBoundary", "actionAttempted", "requestId", "replacedRequestId",
+      "replacementAccepted", "lateLifecycleIgnored", "terminalObserved"
+    ]) && payload.runtimeBoundary === "live_renderer_chain" && isBoolean(payload.actionAttempted) &&
+      SAFE_REQUEST_ID.test(payload.requestId) && SAFE_REQUEST_ID.test(payload.replacedRequestId) &&
+      isBoolean(payload.replacementAccepted) && isBoolean(payload.lateLifecycleIgnored) &&
+      isBoolean(payload.terminalObserved)
+      ? { ok: true, reason: null }
+      : schemaInvalid();
+  }
+  if (payload.scenarioId === "reply_visible_generic_once") {
+    return hasExactKeys(payload, [
+      "scenarioId", "runtimeBoundary", "actionAttempted", "requestId", "terminalObserved",
+      "affectActionAttempted", "genericReplyActionAttempted", "actionRequestCount", "streamCompleted"
+    ]) && payload.runtimeBoundary === "live_renderer_chain" && isBoolean(payload.actionAttempted) &&
+      SAFE_REQUEST_ID.test(payload.requestId) && isBoolean(payload.terminalObserved) &&
+      isBoolean(payload.affectActionAttempted) && isBoolean(payload.genericReplyActionAttempted) &&
+      isFiniteNonNegativeInteger(payload.actionRequestCount) && isBoolean(payload.streamCompleted)
+      ? { ok: true, reason: null }
+      : schemaInvalid();
+  }
+  if (payload.scenarioId === "explicit_game_single_presentation") {
+    return hasExactKeys(payload, [
+      "scenarioId", "runtimeBoundary", "actionAttempted", "proactiveCandidateId", "proactiveCandidateCount",
+      "proactiveCandidateOutcome", "automaticModeActionCount"
+    ]) && payload.runtimeBoundary === "live_global_p2_83a_fixture" && isBoolean(payload.actionAttempted) &&
+      payload.proactiveCandidateId === "explicit_game_started" &&
+      isFiniteNonNegativeInteger(payload.proactiveCandidateCount) &&
+      P2_85_PROACTIVE_CANDIDATE_STATES.has(payload.proactiveCandidateOutcome) &&
+      isFiniteNonNegativeInteger(payload.automaticModeActionCount)
+      ? { ok: true, reason: null }
+      : schemaInvalid();
+  }
+  if (payload.scenarioId !== "proactive_suppress_single_defer") return schemaInvalid();
+  const hasTerminalAt = Object.hasOwn(payload, "terminalAtMs");
+  const keys = hasTerminalAt
+    ? [
+        "scenarioId", "runtimeBoundary", "actionAttempted", "suppressedTerminal", "deferredOnce",
+        "deferredReplayed", "ttlExtended", "deferQueuedAtMs", "originalExpiresAtMs",
+        "firstBeyondOriginalTtlTickAtMs", "terminalAtMs", "tickCount"
+      ]
+    : [
+        "scenarioId", "runtimeBoundary", "actionAttempted", "suppressedTerminal", "deferredOnce",
+        "deferredReplayed", "ttlExtended", "deferQueuedAtMs", "originalExpiresAtMs",
+        "firstBeyondOriginalTtlTickAtMs", "tickCount"
+      ];
+  return hasExactKeys(payload, keys) && payload.runtimeBoundary === "deterministic_main_module_contract" &&
+    isBoolean(payload.actionAttempted) && isBoolean(payload.suppressedTerminal) &&
+    isBoolean(payload.deferredOnce) && isBoolean(payload.deferredReplayed) && isBoolean(payload.ttlExtended) &&
+    isFiniteNonNegativeInteger(payload.deferQueuedAtMs) && isFiniteNonNegativeInteger(payload.originalExpiresAtMs) &&
+    isFiniteNonNegativeInteger(payload.firstBeyondOriginalTtlTickAtMs) &&
+    (!hasTerminalAt || isFiniteNonNegativeInteger(payload.terminalAtMs)) &&
+    isFiniteNonNegativeInteger(payload.tickCount)
+    ? { ok: true, reason: null }
+    : schemaInvalid();
+}
+
+export function assertSafeP285AcceptanceTelemetryEvent(event) {
+  if (!event || typeof event !== "object" || Array.isArray(event)) return schemaInvalid();
+  if (event.type === "p2_85_acceptance_rejection") {
+    return hasExactKeys(event, ["timestamp", "type", "payload"]) && isSafeTelemetryTimestamp(event.timestamp) && event.payload &&
+      typeof event.payload === "object" && !Array.isArray(event.payload) &&
+      hasExactKeys(event.payload, ["scenarioId", "rejectionReason"]) &&
+      P2_85_SCENARIO_IDS.includes(event.payload.scenarioId) &&
+      P2_85_ACCEPTANCE_REJECTION_REASONS.has(event.payload.rejectionReason)
+      ? { ok: true, reason: null }
+      : schemaInvalid();
+  }
+  if (event.type === "p2_85_acceptance_observation") {
+    return hasExactKeys(event, ["timestamp", "type", "payload"]) && isSafeTelemetryTimestamp(event.timestamp)
+      ? assertSafeP285Observation(event.payload)
+      : schemaInvalid();
+  }
+  return typeof event.type === "string" && !event.type.startsWith("p2_85_")
+    ? telemetryIgnored()
+    : schemaInvalid();
+}
+
+function isP285SharedLifecycleEvent(event) {
+  return Boolean(event && typeof event === "object" && !Array.isArray(event) &&
+    P2_85_SHARED_LIFECYCLE_EVENT_TYPES.has(event.type));
+}
+
+export function selectP285EvidenceEvents(events) {
+  const selected = [];
+  for (const event of events) {
+    if (isP285SharedLifecycleEvent(event)) {
+      selected.push(event);
       continue;
     }
-    if (!value || typeof value !== "object") continue;
-    for (const [key, nested] of Object.entries(value)) {
-      const normalizedKey = key.replace(/([a-z])([A-Z])/gu, "$1_$2").toLowerCase();
-      if (FORBIDDEN_TELEMETRY_KEY.test(normalizedKey)) {
-        return { ok: false, reason: `forbidden_key:${key}` };
-      }
-      stack.push([`${path}.${key}`, nested]);
+    const safety = assertSafeP285AcceptanceTelemetryEvent(event);
+    if (safety.ok) {
+      selected.push(event);
+      continue;
     }
+    if (!safety.ignored) return { ok: false, events: selected };
   }
-  return { ok: true, reason: null };
+  return { ok: true, events: selected };
 }
 
 export function validateScenarioObservation(scenarioId, payload, lifecycleEvents) {
@@ -239,7 +356,11 @@ export function readP285Telemetry(context) {
 export async function waitForP285Observation(context, startIndex, scenarioId) {
   const deadline = Date.now() + 12_000;
   while (Date.now() < deadline) {
-    const events = readP285Telemetry(context).slice(startIndex);
+    const selection = selectP285EvidenceEvents(readP285Telemetry(context).slice(startIndex));
+    if (!selection.ok) {
+      throw new Error("p2_85_telemetry_schema_invalid");
+    }
+    const { events } = selection;
     const observation = events.find((event) =>
       event.type === "p2_85_acceptance_observation" && event.payload?.scenarioId === scenarioId
     );
@@ -253,6 +374,7 @@ export function readP285SafeRejection(events, scenarioId) {
   const event = events.find((item) =>
     item.type === "p2_85_acceptance_rejection" && item.payload?.scenarioId === scenarioId
   );
+  if (event && !assertSafeP285AcceptanceTelemetryEvent(event).ok) return null;
   const rejectionReason = event?.payload?.rejectionReason;
   return typeof rejectionReason === "string" && P2_85_ACCEPTANCE_REJECTION_REASONS.has(rejectionReason)
     ? rejectionReason
@@ -262,16 +384,64 @@ export function readP285SafeRejection(events, scenarioId) {
 export async function resetP285AcceptanceBaseline(pet, context) {
   const startIndex = context ? readP285Telemetry(context).length : 0;
   const accepted = await evaluate(pet, "window.petApi.resetP285AcceptanceBaseline()")
+  const selection = context
+    ? selectP285EvidenceEvents(readP285Telemetry(context).slice(startIndex))
+    : { ok: true, events: [] };
+  if (!selection.ok) {
+    throw new Error("p2_85_telemetry_schema_invalid");
+  }
+  const { events } = selection;
   if (accepted === true) return;
   const rejectionReason = context
     ? readP285SafeRejection(
-      readP285Telemetry(context).slice(startIndex),
+      events,
       "chat_opened_replace_active"
     ) ?? "missing_safe_rejection_reason"
     : "missing_safe_rejection_reason";
   const error = new Error("p2_85_baseline_reset_rejected");
   error.p285RejectionReason = rejectionReason;
   throw error;
+}
+
+export async function runP285WithCleanup(run, cleanup) {
+  let primaryFailure;
+  let hasPrimaryFailure = false;
+  try {
+    return await run();
+  } catch (error) {
+    primaryFailure = error;
+    hasPrimaryFailure = true;
+    throw error;
+  } finally {
+    try {
+      await cleanup();
+    } catch (cleanupError) {
+      const cleanupFailureDiagnostics = createP285FailureDiagnostics({
+        stage: "cleanup",
+        error: cleanupError,
+        renderMode: resolveP285RenderMode()
+      });
+      if (hasPrimaryFailure && primaryFailure !== null &&
+        (typeof primaryFailure === "object" || typeof primaryFailure === "function") &&
+        Object.isExtensible(primaryFailure)) {
+        primaryFailure.p285CleanupFailureDiagnostics = cleanupFailureDiagnostics;
+      } else if (hasPrimaryFailure) {
+        const error = new Error("p2_85_cleanup_failed_after_primary");
+        error.p285PrimaryFailureDiagnostics = createP285FailureDiagnostics({
+          stage: "primary",
+          error: primaryFailure,
+          renderMode: resolveP285RenderMode()
+        });
+        error.p285CleanupFailureDiagnostics = cleanupFailureDiagnostics;
+        throw error;
+      } else {
+        const error = new Error("p2_85_cleanup_failed");
+        error.p285FailureDiagnostics = cleanupFailureDiagnostics;
+        error.p285CleanupFailureDiagnostics = cleanupFailureDiagnostics;
+        throw error;
+      }
+    }
+  }
 }
 
 async function runProductionEvidence() {
@@ -284,24 +454,21 @@ async function runProductionEvidence() {
   });
   context.electronArgs = getP285ElectronArgs(renderMode);
   const observations = [];
-  let cleanup = { electronStopped: false, runnerTmpRemoved: false };
   let stage = "electron_start";
-  try {
+  return runP285WithCleanup(async () => {
     startElectron(context);
     stage = "cdp_connect";
     await connectToElectron(context, 30_000);
     stage = "pet_window";
     const pet = await waitForWindow(context, "renderer/pet/index.html", 30_000);
     stage = "pet_preload";
-    await waitFor(pet, "Boolean(window.petApi?.runP285ScenarioForAcceptance)", { timeoutMs: 15_000 });
+    await waitFor(pet, "Boolean(window.petApi?.resetP285AcceptanceBaselineAndRunScenario)", { timeoutMs: 15_000 });
     for (const scenarioId of P2_85_SCENARIO_IDS) {
-      stage = `scenario:${scenarioId}:baseline_reset`;
-      await resetP285AcceptanceBaseline(pet, context);
-      stage = `scenario:${scenarioId}:invoke`;
+      stage = `scenario:${scenarioId}:baseline_and_invoke`;
       const startIndex = readP285Telemetry(context).length;
       const accepted = await evaluate(
         pet,
-        `window.petApi.runP285ScenarioForAcceptance(${JSON.stringify(scenarioId)})`
+        `window.petApi.resetP285AcceptanceBaselineAndRunScenario(${JSON.stringify(scenarioId)})`
       );
       if (accepted !== true) {
         const error = new Error(`scenario_rejected:${scenarioId}`);
@@ -327,8 +494,10 @@ async function runProductionEvidence() {
       evidenceBoundary: P2_85_EVIDENCE_BOUNDARY_SUMMARY,
       observations
     };
-  } catch (error) {
-    if (error && typeof error === "object") {
+  }, async () => {
+    await cleanupP285ProductionContext(context);
+  }).catch((error) => {
+    if (error && typeof error === "object" && !error.p285FailureDiagnostics) {
       error.p285FailureDiagnostics = createP285FailureDiagnostics({
         stage,
         error,
@@ -337,9 +506,7 @@ async function runProductionEvidence() {
       });
     }
     throw error;
-  } finally {
-    cleanup = await cleanupP285ProductionContext(context);
-  }
+  });
 }
 
 function readElectronStderr(context) {
@@ -420,6 +587,8 @@ async function main() {
       evidenceBoundary: P2_85_EVIDENCE_BOUNDARY_SUMMARY,
       ...diagnostics
       ,
+      primaryFailure: error?.p285PrimaryFailureDiagnostics,
+      cleanupFailure: error?.p285CleanupFailureDiagnostics,
       rejectionReason: typeof error?.p285RejectionReason === "string"
         ? error.p285RejectionReason
         : undefined
