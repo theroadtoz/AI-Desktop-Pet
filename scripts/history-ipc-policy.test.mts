@@ -10,9 +10,11 @@ test("history, memory, automatic situation and user profile IPC are restricted a
   assert.match(appSource, /ipcMain\.handle\("history:list", \(event\) => \{\s+if \(!isChatSender\(event\) \|\| !historyStore\)/);
   assert.match(appSource, /ipcMain\.handle\("history:get", \(event, id: unknown\) => \{\s+if \(!isChatSender\(event\) \|\| !historyStore \|\| !isHistoryId\(id\)\)/);
   assert.match(appSource, /ipcMain\.handle\("history:clear", \(event\) => \{\s+if \(!isChatSender\(event\) \|\| !historyStore\)/);
+  assert.match(appSource, /ipcMain\.handle\("history:get-retention", \(event\) => \{\s+if \(!isChatSender\(event\) \|\| !historyStore\)/);
+  assert.match(appSource, /ipcMain\.handle\("history:set-retention", \(event, limit: unknown\) => \{\s+if \(!isChatSender\(event\) \|\| !historyStore \|\| !isHistoryRetentionLimit\(limit\)\)/);
   assert.match(appSource, /ipcMain\.handle\("memory:list", \(event\) => \{\s+if \(!isChatSender\(event\) \|\| !memoryStore\)/);
   assert.match(appSource, /ipcMain\.handle\("memory:create", \(event, draft: unknown\) => \{\s+const parsedDraft = parseMemoryCardDraft\(draft\);/);
-  assert.match(appSource, /ipcMain\.handle\("memory:clear", \(event\) => \{\s+if \(!isChatSender\(event\) \|\| !memoryStore\)/);
+  assert.match(appSource, /ipcMain\.handle\("memory:clear", \(event\) => \{\s+if \(!isChatSender\(event\) \|\| !memoryStore \|\| !memoryReviewStore\)/);
   assert.match(appSource, /ipcMain\.handle\("userProfile:get", \(event\) => \{\s+if \(!isChatSender\(event\) \|\| !userProfileStore\)/);
   assert.match(appSource, /ipcMain\.handle\("userProfile:save", \(event, profile: unknown\) => \{\s+if \(!isChatSender\(event\) \|\| !userProfileStore\)/);
   assert.match(appSource, /ipcMain\.handle\("userProfile:clear", \(event\) => \{\s+if \(!isChatSender\(event\) \|\| !userProfileStore\)/);
@@ -21,6 +23,8 @@ test("history, memory, automatic situation and user profile IPC are restricted a
   assert.match(appSource, /event\.sender\.send\("chat:context-transparency", createChatContextTransparencyPayload\(\{/);
   assert.match(appSource, /event\.sender\.send\("chat:memory-activity", createChatMemoryActivityPayload\(\{/);
   assert.match(preloadSource, /exposeInMainWorld\("historyApi", historyApi\)/);
+  assert.match(preloadSource, /ipcRenderer\.invoke\("history:get-retention"\)/);
+  assert.match(preloadSource, /ipcRenderer\.invoke\("history:set-retention", parsedLimit\)/);
   assert.match(preloadSource, /exposeInMainWorld\("memoryApi", memoryApi\)/);
   assert.match(preloadSource, /exposeInMainWorld\("userProfileApi", userProfileApi\)/);
   assert.doesNotMatch(preloadSource, /exposeInMainWorld\("(?:dialogue|presence)ModeApi"/);
@@ -36,6 +40,7 @@ test("history, memory, automatic situation and user profile IPC are restricted a
   assert.match(preloadSource, /hasExactKeys\(autoCapture, \[[\s\S]*"injectionBudget"[\s\S]*\]\)/);
   assert.doesNotMatch(preloadSource, /exposeInMainWorld\("ipcRenderer"/);
   assert.doesNotMatch(preloadSource, /historyPath|memoryPath|profilePath|presenceModePath|readFile|writeFile/);
+  assert.doesNotMatch(preloadSource, /history:get-retention[\s\S]{0,900}(content|summary|messages|prompt|providerMessages|apiKey|historyPath)/);
   assert.doesNotMatch(preloadSource, /chat:context-transparency[\s\S]{0,900}(content|cards|prompt|providerMessages|safeQuery|snippet|apiKey|memoryPath)/);
   assert.doesNotMatch(preloadSource, /chat:memory-activity[\s\S]{0,800}(content|cards|prompt|providerMessages|apiKey|memoryPath)/);
 });

@@ -1,6 +1,6 @@
 import "./styles.css";
 import type { ChatMessage, ChatRole } from "../../shared/chat";
-import type { Conversation, ConversationSummary } from "../../shared/chat-history";
+import type { Conversation, ConversationSummary, HistoryRetentionLimit } from "../../shared/chat-history";
 import type { ChatContextTransparencyPayload, ChatMemoryActivityPayload } from "../../shared/ipc-contract";
 import type { MemoryCard, MemoryReviewCandidate, MemorySummary, MemorySuppressionView } from "../../shared/chat-memory";
 import {
@@ -218,6 +218,8 @@ const clearHistoryConfirmation = document.querySelector<HTMLElement>("#clear-his
 const cancelClearHistoryButton = document.querySelector<HTMLButtonElement>("#cancel-clear-history-button");
 const confirmClearHistoryButton = document.querySelector<HTMLButtonElement>("#confirm-clear-history-button");
 const historyFeedback = document.querySelector<HTMLElement>("#history-feedback");
+const historyRetentionLimit = document.querySelector<HTMLSelectElement>("#history-retention-limit");
+const saveHistoryRetentionButton = document.querySelector<HTMLButtonElement>("#save-history-retention-button");
 const conversationList = document.querySelector<HTMLOListElement>("#conversation-list");
 const historyDetail = document.querySelector<HTMLElement>("#history-detail");
 const enableMemoryButton = document.querySelector<HTMLButtonElement>("#enable-memory-button");
@@ -277,7 +279,7 @@ if (
   !shelfAccessoryButton || !shelfScaleButton || !shelfLockButton || !shelfActionEcho || !historyPage ||
   !memoryPage || !chatSessionNote || !memoryDraftPanel || !memoryDraftTitle || !memoryDraftContent || !memoryDraftTags ||
   !cancelMemoryDraftButton || !saveMemoryDraftButton || !newConversationButton || !clearHistoryButton || !clearHistoryConfirmation ||
-  !cancelClearHistoryButton || !confirmClearHistoryButton || !historyFeedback || !conversationList || !historyDetail ||
+  !cancelClearHistoryButton || !confirmClearHistoryButton || !historyFeedback || !historyRetentionLimit || !saveHistoryRetentionButton || !conversationList || !historyDetail ||
   !enableMemoryButton || !newMemoryButton || !clearMemoryButton || !clearMemoryConfirmation || !cancelClearMemoryButton ||
   !confirmClearMemoryButton || !memoryFeedback || !memoryOverviewStatus || !memoryNextInjectionStatus || !memorySafeStats || !memorySearch || !memoryList || !memoryReviews || !userWelcomePanel ||
   !memoryCreateNote || !memorySuppressions || !clearMemorySuppressionsButton || !clearMemorySuppressionsConfirmation ||
@@ -415,6 +417,8 @@ const clearHistoryConfirmationBox = clearHistoryConfirmation;
 const cancelClearHistoryAction = cancelClearHistoryButton;
 const confirmClearHistoryAction = confirmClearHistoryButton;
 const historyFeedbackBox = historyFeedback;
+const historyRetentionLimitField = historyRetentionLimit;
+const saveHistoryRetentionAction = saveHistoryRetentionButton;
 const conversationListElement = conversationList;
 const historyDetailElement = historyDetail;
 const enableMemoryAction = enableMemoryButton;
@@ -2357,7 +2361,11 @@ async function refreshHistoryList(): Promise<void> {
   }
 
   try {
-    const conversations = await window.historyApi.listConversations();
+    const [conversations, retentionLimit] = await Promise.all([
+      window.historyApi.listConversations(),
+      window.historyApi.getRetentionLimit()
+    ]);
+    historyRetentionLimitField.value = String(retentionLimit);
 
     if (!conversations.some((conversation) => conversation.id === selectedHistoryConversation?.id)) {
       selectedHistoryConversation = null;
@@ -2367,6 +2375,31 @@ async function refreshHistoryList(): Promise<void> {
     renderHistoryList(conversations);
   } catch {
     setHistoryFeedback("无法读取本地历史，请稍后重试。");
+  }
+}
+
+function parseHistoryRetentionLimit(value: string): HistoryRetentionLimit | null {
+  return value === "100" ? 100 : value === "500" ? 500 : value === "1000" ? 1_000 : null;
+}
+
+async function saveHistoryRetentionLimit(): Promise<void> {
+  if (!window.historyApi || chatTurnState.isReplying) {
+    return;
+  }
+
+  const limit = parseHistoryRetentionLimit(historyRetentionLimitField.value);
+  if (!limit) {
+    setHistoryFeedback("历史保留上限不可用。");
+    return;
+  }
+
+  try {
+    const savedLimit = await window.historyApi.setRetentionLimit(limit);
+    historyRetentionLimitField.value = String(savedLimit);
+    setHistoryFeedback(`已保存本地历史上限：${savedLimit.toLocaleString("en-US")} 个会话。`);
+    await refreshHistoryList();
+  } catch {
+    setHistoryFeedback("无法保存历史保留上限，请稍后重试。");
   }
 }
 
@@ -2416,13 +2449,19 @@ function startNewConversation(): void {
     return;
   }
 
+  resetCurrentConversation();
+  setChatSessionNote("已新建本地会话；下一条消息将携带当前会话上下文发送给当前 Provider。", "ready");
+  setActivePage("chat");
+}
+
+function resetCurrentConversation(): void {
   conversationId = crypto.randomUUID();
   chatHistory.splice(0, chatHistory.length);
+  activeReplyMessage = null;
+  activeReplyElement = null;
   providerContextEnabled = true;
   renderCurrentConversation();
-  setChatSessionNote("已新建本地会话；下一条消息将携带当前会话上下文发送给当前 Provider。", "ready");
   setMemorySessionStatus(null);
-  setActivePage("chat");
 }
 
 async function deleteSelectedHistoryConversation(): Promise<void> {
@@ -3485,6 +3524,10 @@ newConversationAction.addEventListener("click", () => {
   startNewConversation();
 });
 
+saveHistoryRetentionAction.addEventListener("click", () => {
+  void saveHistoryRetentionLimit();
+});
+
 cancelMemoryDraftAction.addEventListener("click", () => {
   closeMemoryDraft();
 });
@@ -3539,9 +3582,11 @@ confirmClearHistoryAction.addEventListener("click", () => {
     try {
       await window.historyApi?.clearConversations();
       selectedHistoryConversation = null;
+      resetCurrentConversation();
       clearHistoryConfirmationBox.hidden = true;
       renderHistoryDetail();
       setHistoryFeedback("全部本地历史已清空，无法恢复。");
+      setChatSessionNote("历史已清空；当前本地会话已重置，下一条消息不会携带已清空内容。", "ready");
       await refreshHistoryList();
     } catch {
       setHistoryFeedback("无法清空本地历史，请稍后重试。");
@@ -3593,7 +3638,7 @@ confirmClearMemoryAction.addEventListener("click", () => {
     try {
       await window.memoryApi?.clearCards();
       clearMemoryConfirmationBox.hidden = true;
-      setMemoryFeedback("全部事实卡已清空，无法恢复。");
+      setMemoryFeedback("全部事实卡和待复核候选已清空；聊天历史与已忘记类型仍保留。");
       await refreshMemory();
     } catch {
       setMemoryFeedback("无法清空记忆，请稍后重试。");

@@ -13,7 +13,7 @@ import type {
   MemorySummary,
   MemorySuppressionView
 } from "./chat-memory";
-import type { Conversation, ConversationSummary } from "./chat-history";
+import type { Conversation, ConversationSummary, HistoryRetentionLimit } from "./chat-history";
 import type { ChatProviderResult, ChatRequest, ChatStreamDelta } from "./chat-provider";
 import type { ProviderHealthCheckRequest, ProviderHealthResult } from "./provider-health";
 import type { AutomaticSituationSnapshot } from "./automatic-situation-context";
@@ -308,6 +308,8 @@ export type HistoryApi = {
   getConversation(id: string): Promise<Conversation | null>;
   deleteConversation(id: string): Promise<boolean>;
   clearConversations(): Promise<void>;
+  getRetentionLimit(): Promise<HistoryRetentionLimit>;
+  setRetentionLimit(limit: HistoryRetentionLimit): Promise<HistoryRetentionLimit>;
 };
 
 export type MemoryApi = {

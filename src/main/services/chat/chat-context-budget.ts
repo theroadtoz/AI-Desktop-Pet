@@ -77,7 +77,7 @@ export type BundledSemanticHistoryTarget = {
 };
 
 export type BundledSemanticHistoryResult =
-  | { status: "created"; content: string }
+  | { status: "created" | "reused"; content: string }
   | { status: "not_available" | "failed" };
 
 const SEMANTIC_SUMMARY_SYSTEM_PROMPT = [

@@ -33,7 +33,7 @@ import type {
   DialogueAffectSettings,
   DialogueAffectSettingsUpdate
 } from "../shared/dialogue-affect-settings";
-import type { Conversation, ConversationSummary, HistoryMessage } from "../shared/chat-history";
+import type { Conversation, ConversationSummary, HistoryMessage, HistoryRetentionLimit } from "../shared/chat-history";
 import type {
   MemoryCard,
   MemoryCardDraft,
@@ -1765,6 +1765,10 @@ function isConversationSummary(value: unknown): value is ConversationSummary {
   );
 }
 
+function parseHistoryRetentionLimit(value: unknown): HistoryRetentionLimit | null {
+  return value === 100 || value === 500 || value === 1_000 ? value : null;
+}
+
 function isWebSearchSettings(value: unknown): value is WebSearchSettings {
   const settings = value as Partial<WebSearchSettings> | null;
 
@@ -2066,7 +2070,27 @@ const historyApi: HistoryApi = {
     return Boolean(await ipcRenderer.invoke("history:delete", id));
   },
   async clearConversations() {
-    await ipcRenderer.invoke("history:clear");
+    if (await ipcRenderer.invoke("history:clear") !== true) {
+      throw new Error("History clear rejected");
+    }
+  },
+  async getRetentionLimit() {
+    const limit = parseHistoryRetentionLimit(await ipcRenderer.invoke("history:get-retention"));
+    if (!limit) {
+      throw new Error("Invalid history retention response");
+    }
+    return limit;
+  },
+  async setRetentionLimit(limit) {
+    const parsedLimit = parseHistoryRetentionLimit(limit);
+    if (!parsedLimit) {
+      throw new Error("Invalid history retention request");
+    }
+    const savedLimit = parseHistoryRetentionLimit(await ipcRenderer.invoke("history:set-retention", parsedLimit));
+    if (!savedLimit) {
+      throw new Error("Invalid history retention response");
+    }
+    return savedLimit;
   }
 };
 

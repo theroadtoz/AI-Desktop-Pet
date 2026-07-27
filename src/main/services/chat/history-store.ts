@@ -3,12 +3,17 @@ import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileS
 import { dirname, join } from "node:path";
 import {
   HISTORY_STORAGE_VERSION,
+  DEFAULT_HISTORY_RETENTION_LIMIT,
   isHistoryId,
   isHistoryMessage,
+  isHistoryRetentionLimit,
+  isSafeHistorySemanticSummary,
+  migrateHistoryStorage,
   parseHistoryStorage,
   toConversationSummary,
   type Conversation,
   type ConversationSummary,
+  type HistoryRetentionLimit,
   type HistoryMessage,
   type HistoryStorage
 } from "../../../shared/chat-history";
@@ -18,23 +23,31 @@ export type HistoryStore = {
   getConversation(id: string): Conversation | null;
   appendMessage(conversationId: string, message: HistoryMessage): boolean;
   deleteConversation(id: string): boolean;
-  clearConversations(): void;
+  clearConversations(): boolean;
+  getRetentionLimit(): HistoryRetentionLimit;
+  setRetentionLimit(limit: HistoryRetentionLimit): HistoryRetentionLimit | null;
+  getSemanticSummary(conversationId: string, sourceMessageIds: readonly string[]): string | null;
+  saveSemanticSummary(conversationId: string, sourceMessageIds: readonly string[], content: string): boolean;
   getHistoryPath(): string;
 };
 
-export function createHistoryStore(options: { userDataPath?: string } = {}): HistoryStore {
+export function createHistoryStore(options: { userDataPath?: string; writeFileSync?: typeof writeFileSync } = {}): HistoryStore {
   const userDataPath = options.userDataPath ?? app.getPath("userData");
   const historyPath = join(userDataPath, "history", "conversations.json");
+  const writeHistoryFile = options.writeFileSync ?? writeFileSync;
 
-  function readStorage(): HistoryStorage {
+  function readStorage(): { storage: HistoryStorage; canWrite: boolean } {
     if (!existsSync(historyPath)) {
-      return emptyStorage();
+      return { storage: emptyStorage(), canWrite: true };
     }
 
     try {
-      return parseHistoryStorage(JSON.parse(readFileSync(historyPath, "utf8"))) ?? emptyStorage();
+      const parsed = parseHistoryStorage(JSON.parse(readFileSync(historyPath, "utf8")));
+      return parsed
+        ? { storage: migrateHistoryStorage(parsed), canWrite: true }
+        : { storage: emptyStorage(), canWrite: false };
     } catch {
-      return emptyStorage();
+      return { storage: emptyStorage(), canWrite: false };
     }
   }
 
@@ -43,7 +56,7 @@ export function createHistoryStore(options: { userDataPath?: string } = {}): His
     const temporaryPath = `${historyPath}.${process.pid}.${Date.now()}.tmp`;
 
     try {
-      writeFileSync(temporaryPath, `${JSON.stringify(storage, null, 2)}\n`, "utf8");
+      writeHistoryFile(temporaryPath, `${JSON.stringify(storage, null, 2)}\n`, "utf8");
       renameSync(temporaryPath, historyPath);
     } finally {
       if (existsSync(temporaryPath)) {
@@ -54,7 +67,7 @@ export function createHistoryStore(options: { userDataPath?: string } = {}): His
 
   return {
     listConversations() {
-      return readStorage().conversations
+      return readStorage().storage.conversations
         .map(toConversationSummary)
         .sort((left, right) => right.updatedAt - left.updatedAt);
     },
@@ -63,14 +76,16 @@ export function createHistoryStore(options: { userDataPath?: string } = {}): His
         return null;
       }
 
-      return readStorage().conversations.find((conversation) => conversation.id === id) ?? null;
+      return readStorage().storage.conversations.find((conversation) => conversation.id === id) ?? null;
     },
     appendMessage(conversationId, message) {
       if (!isHistoryId(conversationId) || !isHistoryMessage(message)) {
         throw new Error("Invalid history message");
       }
 
-      const storage = readStorage();
+      const read = readStorage();
+      if (!read.canWrite) return false;
+      const storage = read.storage;
       const existingConversation = storage.conversations.find((conversation) => conversation.id === conversationId);
 
       if (existingConversation) {
@@ -90,15 +105,17 @@ export function createHistoryStore(options: { userDataPath?: string } = {}): His
         });
       }
 
-      writeStorage(storage);
-      return true;
+      applyRetention(storage);
+      return tryWriteStorage(storage);
     },
     deleteConversation(id) {
       if (!isHistoryId(id)) {
         return false;
       }
 
-      const storage = readStorage();
+      const read = readStorage();
+      if (!read.canWrite) return false;
+      const storage = read.storage;
       const nextConversations = storage.conversations.filter((conversation) => conversation.id !== id);
 
       if (nextConversations.length === storage.conversations.length) {
@@ -106,20 +123,106 @@ export function createHistoryStore(options: { userDataPath?: string } = {}): His
       }
 
       storage.conversations = nextConversations;
-      writeStorage(storage);
-      return true;
+      storage.semanticSummaries = storage.semanticSummaries.filter((summary) => summary.conversationId !== id);
+      return tryWriteStorage(storage);
     },
     clearConversations() {
-      writeStorage(emptyStorage());
+      const read = readStorage();
+      return read.canWrite && tryWriteStorage({
+        ...emptyStorage(),
+        retentionLimit: read.storage.retentionLimit
+      });
+    },
+    getRetentionLimit() {
+      return readStorage().storage.retentionLimit;
+    },
+    setRetentionLimit(limit) {
+      if (!isHistoryRetentionLimit(limit)) {
+        return readStorage().storage.retentionLimit;
+      }
+
+      const read = readStorage();
+      if (!read.canWrite) return null;
+      const storage = read.storage;
+      storage.retentionLimit = limit;
+      applyRetention(storage);
+      return tryWriteStorage(storage) ? storage.retentionLimit : null;
+    },
+    getSemanticSummary(conversationId, sourceMessageIds) {
+      if (!isHistoryId(conversationId) || !isValidMessageIdList(sourceMessageIds)) {
+        return null;
+      }
+
+      const summary = readStorage().storage.semanticSummaries.find((candidate) =>
+        candidate.conversationId === conversationId && sameIds(candidate.sourceMessageIds, sourceMessageIds)
+      );
+      return summary?.content ?? null;
+    },
+    saveSemanticSummary(conversationId, sourceMessageIds, content) {
+      if (!isHistoryId(conversationId) || !isValidMessageIdList(sourceMessageIds) || !isSafeHistorySemanticSummary(content)) {
+        return false;
+      }
+
+      const read = readStorage();
+      if (!read.canWrite) return false;
+      const storage = read.storage;
+      const conversation = storage.conversations.find((candidate) => candidate.id === conversationId);
+      if (!conversation || !sourceMessageIds.every((id) => conversation.messages.some((message) => message.id === id))) {
+        return false;
+      }
+
+      storage.semanticSummaries = storage.semanticSummaries.filter((summary) => summary.conversationId !== conversationId);
+      storage.semanticSummaries.push({
+        conversationId,
+        sourceMessageIds: [...sourceMessageIds],
+        content,
+        updatedAt: Date.now()
+      });
+      return tryWriteStorage(storage);
     },
     getHistoryPath() {
       return historyPath;
     }
   };
+
+  function tryWriteStorage(storage: HistoryStorage): boolean {
+    try {
+      writeStorage(storage);
+      return true;
+    } catch {
+      return false;
+    }
+  }
 }
 
 function emptyStorage(): HistoryStorage {
-  return { version: HISTORY_STORAGE_VERSION, conversations: [] };
+  return {
+    version: HISTORY_STORAGE_VERSION,
+    retentionLimit: DEFAULT_HISTORY_RETENTION_LIMIT,
+    conversations: [],
+    semanticSummaries: []
+  };
+}
+
+function applyRetention(storage: HistoryStorage): void {
+  const excess = storage.conversations.length - storage.retentionLimit;
+  if (excess <= 0) return;
+
+  const expiredIds = new Set(storage.conversations
+    .slice()
+    .sort((left, right) => left.updatedAt - right.updatedAt || left.createdAt - right.createdAt)
+    .slice(0, excess)
+    .map((conversation) => conversation.id));
+  storage.conversations = storage.conversations.filter((conversation) => !expiredIds.has(conversation.id));
+  storage.semanticSummaries = storage.semanticSummaries.filter((summary) => !expiredIds.has(summary.conversationId));
+}
+
+function isValidMessageIdList(value: readonly string[]): boolean {
+  return value.length > 0 && value.every(isHistoryId) && new Set(value).size === value.length;
+}
+
+function sameIds(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((id, index) => id === right[index]);
 }
 
 function createConversationTitle(message: HistoryMessage): string {

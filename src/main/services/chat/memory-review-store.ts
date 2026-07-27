@@ -17,12 +17,16 @@ type MemoryReviewStorage = {
   candidates: MemoryReviewCandidate[];
 };
 
+const PENDING_REVIEW_RETENTION_MS = 30 * 24 * 60 * 60 * 1_000;
+
 export type MemoryReviewStore = {
   enqueue(draft: MemoryReviewCandidateDraft, status?: Extract<MemoryReviewStatus, "pending-review" | "blocked">): MemoryReviewCandidate;
   listCandidates(): MemoryReviewCandidate[];
   getCandidate(id: string): MemoryReviewCandidate | null;
   updatePendingCandidate(id: string, update: MemoryReviewDecisionDraft): MemoryReviewCandidate | null;
   setStatus(id: string, status: Exclude<MemoryReviewStatus, "pending-review">): MemoryReviewCandidate | null;
+  pruneExpiredPendingCandidates(now?: number): number;
+  clearPendingCandidates(): number;
   getReviewPath(): string;
 };
 
@@ -72,21 +76,35 @@ export function createMemoryReviewStore(options: { userDataPath?: string } = {})
       return candidate;
     },
     listCandidates() {
-      return readStorage().candidates.sort((left, right) => right.updatedAt - left.updatedAt);
+      const storage = readStorage();
+      const removed = removeExpiredPendingCandidates(storage, Date.now());
+      if (removed > 0) writeStorage(storage);
+      return storage.candidates.sort((left, right) => right.updatedAt - left.updatedAt);
     },
     getCandidate(id) {
-      return isMemoryId(id) ? readStorage().candidates.find((candidate) => candidate.id === id) ?? null : null;
+      if (!isMemoryId(id)) return null;
+      const storage = readStorage();
+      const removed = removeExpiredPendingCandidates(storage, Date.now());
+      if (removed > 0) writeStorage(storage);
+      return storage.candidates.find((candidate) => candidate.id === id) ?? null;
     },
     updatePendingCandidate(id, update) {
       const parsed = parseMemoryReviewDecisionDraft(update);
       if (!isMemoryId(id) || !parsed) return null;
       const storage = readStorage();
+      const removed = removeExpiredPendingCandidates(storage, Date.now());
       const candidate = storage.candidates.find((item) => item.id === id);
-      if (!candidate || candidate.status !== "pending-review") return null;
+      if (!candidate || candidate.status !== "pending-review") {
+        if (removed > 0) writeStorage(storage);
+        return null;
+      }
       const nextTitle = parsed.title ?? candidate.title;
       const nextContent = parsed.content ?? candidate.content;
       const nextTags = parsed.tags ?? candidate.tags;
-      if (containsSensitiveMemoryMaterial(`${nextTitle}\n${nextContent}\n${nextTags.join("\n")}`)) return null;
+      if (containsSensitiveMemoryMaterial(`${nextTitle}\n${nextContent}\n${nextTags.join("\n")}`)) {
+        if (removed > 0) writeStorage(storage);
+        return null;
+      }
       Object.assign(candidate, parsed, { updatedAt: Date.now() });
       writeStorage(storage);
       return candidate;
@@ -94,17 +112,49 @@ export function createMemoryReviewStore(options: { userDataPath?: string } = {})
     setStatus(id, status) {
       if (!isMemoryId(id)) return null;
       const storage = readStorage();
+      const removed = removeExpiredPendingCandidates(storage, Date.now());
       const candidate = storage.candidates.find((item) => item.id === id);
-      if (!candidate || candidate.status !== "pending-review") return null;
+      if (!candidate || candidate.status !== "pending-review") {
+        if (removed > 0) writeStorage(storage);
+        return null;
+      }
       candidate.status = status;
       candidate.updatedAt = Date.now();
       writeStorage(storage);
       return candidate;
     },
+    pruneExpiredPendingCandidates(now = Date.now()) {
+      if (!Number.isSafeInteger(now) || now <= 0) return 0;
+      const storage = readStorage();
+      const removed = removeExpiredPendingCandidates(storage, now);
+      if (removed > 0) {
+        writeStorage(storage);
+      }
+      return removed;
+    },
+    clearPendingCandidates() {
+      const storage = readStorage();
+      const nextCandidates = storage.candidates.filter((candidate) => candidate.status !== "pending-review");
+      const removed = storage.candidates.length - nextCandidates.length;
+      if (removed > 0) {
+        storage.candidates = nextCandidates;
+        writeStorage(storage);
+      }
+      return removed;
+    },
     getReviewPath() {
       return reviewPath;
     }
   };
+}
+
+function removeExpiredPendingCandidates(storage: MemoryReviewStorage, now: number): number {
+  const nextCandidates = storage.candidates.filter((candidate) =>
+    candidate.status !== "pending-review" || now - candidate.createdAt <= PENDING_REVIEW_RETENTION_MS
+  );
+  const removed = storage.candidates.length - nextCandidates.length;
+  storage.candidates = nextCandidates;
+  return removed;
 }
 
 function parseStorage(value: unknown): MemoryReviewStorage | null {

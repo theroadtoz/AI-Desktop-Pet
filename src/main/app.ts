@@ -61,7 +61,7 @@ import {
   type LowFrequencyCompanionEventId,
   type LowFrequencyCompanionEvent
 } from "../shared/daily-state-orchestration";
-import { isHistoryId, type HistoryMessage } from "../shared/chat-history";
+import { isHistoryId, isHistoryRetentionLimit, type HistoryMessage } from "../shared/chat-history";
 import {
   isMemoryId,
   parseMemoryCardDraft,
@@ -2667,6 +2667,7 @@ app.whenReady().then(async () => {
   historyStore = createHistoryStore();
   memoryStore = createMemoryStore();
   memoryReviewStore = createMemoryReviewStore();
+  memoryReviewStore.pruneExpiredPendingCandidates();
   localMemoryExtractor = createLocalMemoryExtractor({
     getTarget() {
       const config = bundledLlamaCppProviderConfig;
@@ -4092,8 +4093,14 @@ app.whenReady().then(async () => {
       let mappedContextBudget = mapStructuredContextBudget(structuredContext);
       const selectedMessageIds = new Set(structuredContext.messages.map((message) => message.id));
       const omittedOlderHistory = request.messages.filter((message) => !selectedMessageIds.has(message.id));
-      const semanticSummary = omittedOlderHistory.length > 0
-        ? await summarizeOlderHistoryWithBundledRuntime({
+      const omittedMessageIds = omittedOlderHistory.map((message) => message.id);
+      const persistedSemanticSummary = omittedMessageIds.length > 0
+        ? historyStoreForRequest.getSemanticSummary(request.conversationId, omittedMessageIds)
+        : null;
+      const semanticSummary = persistedSemanticSummary
+        ? { status: "reused" as const, content: persistedSemanticSummary }
+        : omittedOlderHistory.length > 0
+          ? await summarizeOlderHistoryWithBundledRuntime({
           history: omittedOlderHistory,
           getTarget() {
             const config = bundledLlamaCppProviderConfig;
@@ -4110,9 +4117,12 @@ app.whenReady().then(async () => {
               localPresetId: "embedded-llama-cpp"
             };
           }
-        })
-        : { status: "not_available" as const };
+          })
+          : { status: "not_available" as const };
       if (semanticSummary.status === "created") {
+        historyStoreForRequest.saveSemanticSummary(request.conversationId, omittedMessageIds, semanticSummary.content);
+      }
+      if (semanticSummary.status === "created" || semanticSummary.status === "reused") {
         const withSemanticSummary = [
           { role: "system" as const, content: `context_summary_kind=bundled_semantic_v1\n${semanticSummary.content}` },
           ...selectedProviderMessages
@@ -4554,7 +4564,23 @@ app.whenReady().then(async () => {
       throw new Error("Unauthorized history request");
     }
 
-    historyStore.clearConversations();
+    return historyStore.clearConversations();
+  });
+
+  ipcMain.handle("history:get-retention", (event) => {
+    if (!isChatSender(event) || !historyStore) {
+      throw new Error("Unauthorized history request");
+    }
+
+    return historyStore.getRetentionLimit();
+  });
+
+  ipcMain.handle("history:set-retention", (event, limit: unknown) => {
+    if (!isChatSender(event) || !historyStore || !isHistoryRetentionLimit(limit)) {
+      throw new Error("Invalid history retention request");
+    }
+
+    return historyStore.setRetentionLimit(limit);
   });
 
   ipcMain.handle("memory:get-settings", (event) => {
@@ -4634,11 +4660,12 @@ app.whenReady().then(async () => {
   });
 
   ipcMain.handle("memory:clear", (event) => {
-    if (!isChatSender(event) || !memoryStore) {
+    if (!isChatSender(event) || !memoryStore || !memoryReviewStore) {
       throw new Error("Unauthorized memory request");
     }
 
     memoryStore.clearCards();
+    memoryReviewStore.clearPendingCandidates();
   });
 
   ipcMain.handle("memory:list-suppressions", (event) => {
@@ -4679,6 +4706,7 @@ app.whenReady().then(async () => {
       return { status: "not_found" as const };
     }
 
+    memoryReviewStore.pruneExpiredPendingCandidates();
     const candidate = parsedUpdate
       ? memoryReviewStore.updatePendingCandidate(id, parsedUpdate)
       : memoryReviewStore.getCandidate(id);
