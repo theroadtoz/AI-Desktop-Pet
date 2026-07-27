@@ -23,7 +23,6 @@ import {
   createRealUiRunContext,
   evaluate,
   findScreenshotResidue,
-  setPresenceMode,
   sleep,
   stopElectron,
   waitFor,
@@ -49,7 +48,6 @@ export const YAWN_SEMANTIC_ALLOWLIST = Object.freeze([
 ]);
 const PROTECTED_PATHS = [
   "resources/models/witch/model-manifest.json",
-  "model/yawn.motion3.json",
   "model/yawn-once.motion3.json",
   "src/shared/pet-motion-presets.ts",
   "src/shared/pet-motion-catalog.ts",
@@ -83,7 +81,7 @@ export const P2_63B2_RUN_TIMEOUT_MS = 90_000;
 export const P2_63B2_MIN_CHANGED_PIXEL_RATIO = 0.002;
 export const P2_63B2_MIN_CHANGED_PAIR_COVERAGE = 0.5;
 export const P2_63B2_MAX_STATIC_RUN_FRAMES = 6;
-const P2_63B2_RESTORE_TAIL_MS = 300;
+const P2_63B2_RESTORE_TAIL_MS = 450;
 const P2_63B2_MODEL_CANDIDATE_SHA256 = "eca4ad06bb4665c3d4ae2a619a1d6528360044935508d08b06310ea3125b52b4";
 const P2_63B2_MIN_PARAMETER_SAMPLES = 30;
 const P2_63B2_MAX_CHECKPOINT_DISTANCE_MS = 120;
@@ -530,9 +528,9 @@ export const PET_MOTION_PRESETS: readonly ModelMotionPreset[] = Object.freeze(
 }
 
 export function injectIsolatedStateSleepPath(source, timing, runId = "p2-63a-test-run") {
-  const actionMarker = `  interactionActionPlayer.playAction(
+  const actionMarker = `  interactionActionPlayer.playMainAction(
     getPetInteractionAction(actionType),
-    trigger.reason,`;
+    trigger,`;
   const actionReplacement = `  const action = getPetInteractionAction(actionType);
   const isolatedAction = trigger.reason === "state_sleep"
     ? { ...action, durationMs: ${timing.durationMs}, motionPresetId: "${YAWN_PRESET_ID}" as const }
@@ -543,11 +541,58 @@ export function injectIsolatedStateSleepPath(source, timing, runId = "p2-63a-tes
     events.push({ stage: "state_sleep_trigger", atMs: Math.round(performance.now()), runId: ${JSON.stringify(runId)} });
     target.__P2_63B2_YAWN_PROBE__ = events;
   }
-  interactionActionPlayer.playAction(
+  interactionActionPlayer.playMainAction(
     isolatedAction,
-    trigger.reason,`;
+    trigger,`;
 
   return replaceExactlyOnce(source, actionMarker, actionReplacement, "isolated state_sleep action path");
+}
+
+export function injectIsolatedPresenceOverride(source) {
+  const ipcMainRef = source.includes("electron_1.ipcMain.handle") ? "electron_1.ipcMain" : "ipcMain";
+  const typeSuffix = ipcMainRef === "ipcMain" ? ": unknown" : "";
+  const marker = `  ${ipcMainRef}.handle("automaticSituation:get", (event) => {`;
+  const replacement = `  ${ipcMainRef}.handle("__p2_63a:set-presence", (event, value${typeSuffix}) => {
+    const modeId = value === "default" || value === "sleep" ? value : null;
+    if (!isChatSender(event) || !automaticSituationCoordinator || !modeId) return false;
+    const snapshot = automaticSituationCoordinator.getSnapshot();
+    applyAutomaticSituationSnapshot({
+      ...snapshot,
+      presenceStateId: modeId,
+      presenceSource: modeId === "sleep" ? "deterministic-sleep" : "default",
+      revision: snapshot.revision + 1,
+      updatedAtMs: Date.now(),
+      expiresAtMs: null
+    });
+    if (modeId === "sleep" && petWindow && !petWindow.isDestroyed()) {
+      petWindow.webContents.send("pet:action-trigger", { reason: "state_sleep" });
+    }
+    return true;
+  });
+
+${marker}`;
+  return replaceExactlyOnce(source, marker, replacement, "isolated presence override");
+}
+
+export function injectIsolatedPresenceBridge(source) {
+  const contextBridgeRef = source.includes("electron_1.contextBridge") ? "electron_1.contextBridge" : "contextBridge";
+  const ipcRendererRef = source.includes("electron_1.ipcRenderer") ? "electron_1.ipcRenderer" : "ipcRenderer";
+  const typeSuffix = ipcRendererRef === "ipcRenderer" ? ": unknown" : "";
+  const marker = `${contextBridgeRef}.exposeInMainWorld("chatApi", api);`;
+  const replacement = `${contextBridgeRef}.exposeInMainWorld("__p2_63a", {
+  setPresenceMode: (modeId${typeSuffix}) => ${ipcRendererRef}.invoke("__p2_63a:set-presence", modeId)
+});
+${marker}`;
+  return replaceExactlyOnce(source, marker, replacement, "isolated presence bridge");
+}
+
+export async function setIsolatedPresenceMode(page, modeId) {
+  const changed = await evaluate(page, `(async () => {
+    const api = window.__p2_63a;
+    if (!api?.setPresenceMode) return false;
+    return Boolean(await api.setPresenceMode(${JSON.stringify(modeId)}));
+  })()`);
+  if (!changed) throw new Error(`isolated presence override unavailable: ${modeId}`);
 }
 
 function probeReporterSource(runId) {
@@ -1224,8 +1269,8 @@ export function summarizeLifecycleEvidence(probeEvents, timeoutControl = false) 
   });
   const terminalStatus = timeoutControl ? "timed_out" : "completed";
   const orderedStages = timeoutControl
-    ? [["queued"], ["native_started"], ["player_start_watchdog_armed"], ["player_runtime_watchdog_armed"], ["player_runtime_watchdog_fired"], ["terminal_status", "timed_out"], ["stop_all_motions"], ["restore_started"], ["restore_completed"]]
-    : [["queued"], ["native_started"], ["player_start_watchdog_armed"], ["player_runtime_watchdog_armed"], ["handle_finished_after_update"], ["terminal_status", "completed"], ["restore_started"], ["restore_completed"]];
+    ? [["player_start_watchdog_armed"], ["queued"], ["native_started"], ["player_runtime_watchdog_armed"], ["player_runtime_watchdog_fired"], ["terminal_status", "timed_out"], ["stop_all_motions"], ["restore_started"], ["restore_completed"]]
+    : [["player_start_watchdog_armed"], ["queued"], ["native_started"], ["player_runtime_watchdog_armed"], ["handle_finished_after_update"], ["terminal_status", "completed"], ["restore_started"], ["restore_completed"]];
   const indices = orderedStages.map(([stage, status]) => firstIndex(stage, status));
   const strictOrder = indices.every((index, position) => index >= 0 && (position === 0 || index > indices[position - 1]));
   const counts = makeCounts(targetEvents);
@@ -1246,6 +1291,11 @@ export function summarizeLifecycleEvidence(probeEvents, timeoutControl = false) 
     targetMotionPresetId: YAWN_PRESET_ID,
     terminalStatus,
     strictOrder,
+    targetStageSequence: targetEvents.map((event) => ({
+      stage: event.stage,
+      status: event.status ?? null,
+      atMs: event.atMs
+    })),
     counts,
     observedGlobalCounts,
     passed
@@ -1510,7 +1560,7 @@ async function main() {
     sourceMode = sourceModeForRunnerArgs(runnerArgs);
     if (runnerArgs.mode === "explicit-draft") {
       source = readExplicitDraftFromUserData(runnerArgs.sourceUserDataRoot);
-    } else if (runnerArgs.mode === "model-candidate") {
+    } else {
       source = readModelCandidateFromRoot(ROOT);
     }
   } catch (error) {
@@ -1524,37 +1574,6 @@ async function main() {
     ));
     process.exitCode = 1;
     return;
-  }
-
-  if (runnerArgs.mode === "default") {
-    let sourceGate;
-    try {
-      sourceGate = readCurrentYawnSourceGate();
-    } catch {
-      sourceGate = {
-        status: "blocked",
-        summary: {
-          safeSummaryOnly: true,
-          status: "blocked",
-          sourceVersion: null,
-          outputVersion: null,
-          sourceCurveCount: 0,
-          sourceSegmentCount: 0,
-          sourcePointCount: 0,
-          retainedCurveCount: 0,
-          retainedSegmentCount: 0,
-          retainedPointCount: 0,
-          consistencyCheck: false,
-          blockers: ["source-motion-gate-unavailable"]
-        }
-      };
-    }
-    if (sourceGate.status !== "canonicalized") {
-      const summary = createSourceGateBlockedSummary(sourceGate.summary, Date.now() - startedAt);
-      console.log(JSON.stringify(summary, null, 2));
-      process.exitCode = 1;
-      return;
-    }
   }
 
   const protectedBefore = hashProtectedPaths();
@@ -1611,8 +1630,12 @@ async function main() {
     await evaluate(pet, "window.petApi?.openChat()");
     const chat = await waitForWindow(context, "renderer/chat/index.html", 20_000);
     await waitFor(chat, "Boolean(document.querySelector('#chat-page'))", { timeoutMs: 15_000 });
-    await setPresenceMode(chat, "default");
-    await sleep(2_000);
+    await setIsolatedPresenceMode(chat, "default");
+    const startupAppearanceFinished = await waitForTelemetry(context, (event) => (
+      event.type === "pet_interaction_action_finished" && event.payload?.type === "appearance"
+    ), 12_000, runController.signal);
+    if (!startupAppearanceFinished) throw new Error("startup-appearance-timeout");
+    await sleep(500);
     runController.signal.throwIfAborted();
     const preTriggerProbeEvents = await readProbeEvents(pet);
     assertNoPreTriggerYawnLoad(preTriggerProbeEvents);
@@ -1624,7 +1647,7 @@ async function main() {
     cleanup.screencastStopped = false;
     cleanup.screencastUnsubscribed = false;
     cleanup.screencastAcksSettled = false;
-    await setPresenceMode(chat, "sleep");
+    await setIsolatedPresenceMode(chat, "sleep");
 
     const stateEvent = await waitForTelemetry(context, (event) => (
       event.__index > telemetryStartIndex &&
@@ -1695,7 +1718,7 @@ async function main() {
     };
     await setPetPointerInputIsolation(pet, false);
     pointerInputIsolated = false;
-    await setPresenceMode(chat, "default");
+    await setIsolatedPresenceMode(chat, "default");
     await sleep(300);
     runtimeDiagnostics = readRuntimeDiagnostics(context);
     summary = {
@@ -1774,7 +1797,14 @@ async function main() {
         cleanup.artifactsRetained = true;
         return;
       }
-      cleanup.tmpRemoved = removeCurrentRunArtifacts(context);
+      for (let attempt = 0; attempt < 3 && !cleanup.tmpRemoved; attempt += 1) {
+        try {
+          cleanup.tmpRemoved = removeCurrentRunArtifacts(context);
+        } catch (error) {
+          if (attempt === 2) throw error;
+          await sleep(300);
+        }
+      }
       if (!cleanup.tmpRemoved) throw new Error("run temp directory remained");
     });
     await runCleanupStep(cleanup, "protected-paths", async () => {
@@ -1810,7 +1840,7 @@ async function main() {
 }
 
 export function prepareIsolatedApp(fixtureRoot, runId, source = null, timeoutControl = false) {
-  const sourceYawnPath = source?.sourcePath ?? join(ROOT, "model", "yawn.motion3.json");
+  const sourceYawnPath = source?.sourcePath ?? join(ROOT, ...MODEL_CANDIDATE_RELATIVE_PATH);
   const sourceBytes = source?.sourceBytes ?? readFileSync(sourceYawnPath);
   const sourceHashBefore = createHash("sha256").update(sourceBytes).digest("hex");
   const displayInfo = JSON.parse(readFileSync(join(ROOT, "model", "魔女.cdi3.json"), "utf8"));
@@ -1827,7 +1857,7 @@ export function prepareIsolatedApp(fixtureRoot, runId, source = null, timeoutCon
   for (const entry of ["dist", "public", "resources", "src"]) {
     cpSync(join(ROOT, entry), join(fixtureRoot, entry), { recursive: true });
   }
-  for (const file of ["package.json", "vite.config.ts", "tsconfig.base.json", "tsconfig.renderer.json"]) {
+  for (const file of ["package.json", "vite.config.ts", "tsconfig.base.json", "tsconfig.renderer.json", "tsconfig.main.json", "tsconfig.preload.json"]) {
     cpSync(join(ROOT, file), join(fixtureRoot, file));
   }
   symlinkSync(join(ROOT, "node_modules"), join(fixtureRoot, "node_modules"), "junction");
@@ -1835,7 +1865,7 @@ export function prepareIsolatedApp(fixtureRoot, runId, source = null, timeoutCon
 
   const sourceHashAfter = createHash("sha256").update(readFileSync(sourceYawnPath)).digest("hex");
   if (sourceHashBefore !== sourceHashAfter) {
-    throw new Error("source yawn hash changed during canonicalization");
+    throw new Error("source motion hash changed during fixture preparation");
   }
   const canonicalization = {
     ...canonicalResult.summary,
@@ -1871,6 +1901,8 @@ export function prepareIsolatedApp(fixtureRoot, runId, source = null, timeoutCon
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
 
   patchFile(join(fixtureRoot, "src", "shared", "pet-motion-presets.ts"), (source) => injectIsolatedMotionPreset(source, timing, timeoutControl));
+  patchFile(join(fixtureRoot, "dist", "main", "app.js"), injectIsolatedPresenceOverride);
+  patchFile(join(fixtureRoot, "dist", "preload", "chat-preload.js"), injectIsolatedPresenceBridge);
   patchFile(join(fixtureRoot, "src", "renderer", "pet", "main.ts"), (source) => injectIsolatedStateSleepPath(source, timing, runId));
   patchFile(join(fixtureRoot, "src", "renderer", "pet", "live2d", "cubism-motion.ts"), (source) => injectNativeLifecycleProbe(source, runId));
   patchFile(join(fixtureRoot, "src", "renderer", "pet", "interaction-action-player.ts"), (source) => injectPlayerLifecycleProbe(source, runId));
@@ -1892,7 +1924,7 @@ export function removeCurrentRunArtifacts(context) {
 export function createPublicArtifactSummary(context, fixtureRoot, continuousIndex, anchorPaths = []) {
   return {
     runDirectory: relative(ROOT, context.runDir).split(sep).join("/"),
-    fixturePath: relative(context.runDir, join(fixtureRoot, "model-fixture", "yawn.motion3.json")).split(sep).join("/"),
+    fixturePath: relative(context.runDir, join(fixtureRoot, "model-fixture", "yawn-once.motion3.json")).split(sep).join("/"),
     continuousFrameCount: continuousIndex.length,
     continuousFormat: "png",
     timeIndex: "continuous-frame-index.json",
@@ -1927,15 +1959,9 @@ function createValidatedDraftFixture(motion, modelParameterIds) {
   };
 }
 
-function readCurrentYawnSourceGate() {
-  const sourceMotion = JSON.parse(readFileSync(join(ROOT, "model", "yawn.motion3.json"), "utf8"));
-  const displayInfo = JSON.parse(readFileSync(join(ROOT, "model", "魔女.cdi3.json"), "utf8"));
-  return createIsolatedMotionFixture(sourceMotion, displayInfo.Parameters.map(({ Id }) => Id));
-}
-
 function createModelFixture(sourceRoot, targetRoot) {
   for (const entry of readdirSync(sourceRoot, { withFileTypes: true })) {
-    if (entry.name === "yawn.motion3.json" || entry.name === "model.zip") {
+    if (entry.name === "model.zip") {
       continue;
     }
     const sourcePath = join(sourceRoot, entry.name);
@@ -1961,6 +1987,7 @@ export function buildIsolatedRenderer(fixtureRoot, context) {
   context.buildChild = child;
   return waitForChild(child, context, "isolated-renderer-build");
 }
+
 
 export function startIsolatedElectron(context, fixtureRoot) {
   const electronExe = join(ROOT, "node_modules", "electron", "dist", "electron.exe");

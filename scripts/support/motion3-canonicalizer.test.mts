@@ -1,6 +1,4 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import test from "node:test";
 import {
   canonicalizeMotion3,
@@ -44,18 +42,15 @@ function validCandidate(overrides: Record<string, unknown> = {}): Record<string,
   };
 }
 
-function readJson(path: string): Record<string, unknown> {
-  return JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
-}
-
-test("canonicalizer blocks the current yawn fixture's inconsistent source Meta without mutating it", () => {
-  const repositoryRoot = resolve(import.meta.dirname, "..", "..");
-  const candidate = readJson(resolve(repositoryRoot, "model", "yawn.motion3.json"));
-  const displayInfo = readJson(resolve(repositoryRoot, "model", "魔女.cdi3.json"));
-  const modelParameterIds = (displayInfo.Parameters as Array<{ Id: string }>).map(({ Id }) => Id);
+test("canonicalizer blocks a deterministic fixture with inconsistent source Meta without mutating it", () => {
+  const candidate = validCandidate();
+  candidate.Meta = {
+    ...(candidate.Meta as Record<string, unknown>),
+    CurveCount: 2
+  };
   const before = JSON.stringify(candidate);
 
-  const result = canonicalizeMotion3(candidate, modelParameterIds, ALLOWLIST);
+  const result = canonicalizeMotion3(candidate, ["ParamAngleX"], ["ParamAngleX"]);
 
   assert.equal(result.status, "blocked");
   assert.deepEqual(result.summary, {
@@ -63,9 +58,9 @@ test("canonicalizer blocks the current yawn fixture's inconsistent source Meta w
     status: "blocked",
     sourceVersion: 0,
     outputVersion: null,
-    sourceCurveCount: 237,
-    sourceSegmentCount: 3361,
-    sourcePointCount: 10320,
+    sourceCurveCount: 1,
+    sourceSegmentCount: 1,
+    sourcePointCount: 2,
     retainedCurveCount: 0,
     retainedSegmentCount: 0,
     retainedPointCount: 0,

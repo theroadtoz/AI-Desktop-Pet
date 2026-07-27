@@ -45,7 +45,6 @@ test("motion asset audit verifies all 14 production presets, target hashes, meta
     [
       "model/Scene1.motion3.json",
       "model/yawn-once.motion3.json",
-      "model/yawn.motion3.json",
       ...PRODUCT_MOTION_EXPECTATIONS.map(([, path]) => `resources/models/witch/${path}`)
     ].sort()
   );

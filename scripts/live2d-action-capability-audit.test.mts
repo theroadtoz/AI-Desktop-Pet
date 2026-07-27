@@ -51,8 +51,7 @@ test("action capability audit reports the approved motion catalog without crossi
 
   assert.deepEqual(audit.model3DeclaredMotionGroups, []);
   assert.deepEqual(audit.physicalMotionFiles.filter((path) => path !== ISOLATED_YAWN_CANDIDATE_PATH), [
-    "model/Scene1.motion3.json",
-    "model/yawn.motion3.json"
+    "model/Scene1.motion3.json"
   ]);
   assert.equal(
     audit.physicalMotionFiles.filter((path) => path === ISOLATED_YAWN_CANDIDATE_PATH).length <= 1,
@@ -70,10 +69,6 @@ test("action capability audit reports the approved motion catalog without crossi
   assert.equal(
     audit.targetActions.filter((entry) => entry.supportLevel === "native-motion").length,
     expectedNativeMotionsByAction.length
-  );
-  assert.equal(
-    audit.targetActions.some((entry) => entry.nativeMotions.some((motion) => motion.path === "model/yawn.motion3.json")),
-    false
   );
   assert.equal(
     audit.targetActions.some((entry) =>

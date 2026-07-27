@@ -19,6 +19,9 @@ import {
   diagnoseStateSleepFailure,
   injectFramePipelineProbe,
   injectIsolatedMotionPreset,
+  injectIsolatedPresenceBridge,
+  injectIsolatedPresenceOverride,
+  injectIsolatedStateSleepPath,
   injectNativeLifecycleProbe,
   injectPlayerLifecycleProbe,
   inspectPlayerWatchdogStructure,
@@ -62,12 +65,13 @@ import {
 const RUN_ID = "unit-run";
 const TIMING = deriveYawnProbeTiming(4.986);
 const CANONICALIZATION = {
-  sourceVersion: 0,
+  explicitDraftMode: true,
+  sourceVersion: 3,
   outputVersion: 3,
-  sourceCurveCount: 237,
+  sourceCurveCount: 9,
   retainedCurveCount: 9,
-  retainedSegmentCount: 106,
-  retainedPointCount: 327,
+  retainedSegmentCount: 9,
+  retainedPointCount: 18,
   consistencyCheck: true,
   semanticMotionVariation: true,
   variedParameterCount: 3,
@@ -81,27 +85,15 @@ const CLEANUP_OK = {
   errors: []
 };
 
-test("strict source Meta gate blocks the current yawn before it becomes a canonical candidate", () => {
-  const source = JSON.parse(readFileSync("model/yawn.motion3.json", "utf8"));
-  const displayInfo = JSON.parse(readFileSync("model/魔女.cdi3.json", "utf8"));
-  const result = createIsolatedMotionFixture(source, displayInfo.Parameters.map(({ Id }: { Id: string }) => Id));
+test("synthetic legacy Version 0 and Meta mismatch remain blocked before canonicalization", () => {
+  const source = structuredClone(makeExplicitDraft());
+  source.Version = 0;
+  source.Meta.TotalPointCount += 1;
+  const result = createIsolatedMotionFixture(source, [...YAWN_SEMANTIC_ALLOWLIST]);
 
   assert.equal(result.status, "blocked");
-  assert.deepEqual(result.summary, {
-    safeSummaryOnly: true,
-    status: "blocked",
-    sourceVersion: 0,
-    outputVersion: null,
-    sourceCurveCount: 237,
-    sourceSegmentCount: 3361,
-    sourcePointCount: 10320,
-    retainedCurveCount: 0,
-    retainedSegmentCount: 0,
-    retainedPointCount: 0,
-    consistencyCheck: false,
-    blockers: ["source-meta-count-mismatch"]
-  });
-  assert.equal(source.Version, 0);
+  assert.equal(result.summary.sourceVersion, 0);
+  assert.deepEqual(result.summary.blockers, ["source-meta-count-mismatch"]);
 });
 
 test("blocked source summary routes to VTS recorder without a real UI launch or renderer probe", () => {
@@ -112,7 +104,7 @@ test("blocked source summary routes to VTS recorder without a real UI launch or 
     sourcePointCount: 10320,
     blockers: ["source-meta-count-mismatch", "E:\\private\\motion", '{"Curves":[]}'],
     rawSource: { Curves: ["must-not-leak"] },
-    sourcePath: "E:\\private\\yawn.motion3.json"
+    sourcePath: "E:\\private\\legacy-motion.motion3.json"
   }, 12);
 
   assert.equal(summary.status, "blocked");
@@ -127,22 +119,14 @@ test("blocked source summary routes to VTS recorder without a real UI launch or 
   assert.doesNotMatch(serialized, /must-not-leak|E:\\\\private|Curves/u);
 });
 
-test("runner exits at the source gate with a sanitized truthful blocked summary", () => {
-  const run = spawnSync(process.execPath, [
-    "--no-warnings",
-    "scripts/p2-63a-yawn-motion-isolated-state-trigger-real-ui.mjs"
-  ], { cwd: process.cwd(), encoding: "utf8" });
-
-  assert.equal(run.status, 1);
-  assert.equal(run.stderr, "");
-  const summary = JSON.parse(run.stdout);
-  assert.equal(summary.status, "blocked");
-  assert.equal(summary.acceptance, "source-meta-count-mismatch");
-  assert.equal(summary.realUi.launchAttempted, false);
-  assert.equal(summary.rendererProbe.created, false);
-  assert.deepEqual(summary.rendererProbe.events, []);
-  assert.equal(summary.fallback.status, "vts-recorder-required");
-  assert.doesNotMatch(run.stdout, /[A-Z]:[\\/]|"Curves"|"Segments"/u);
+test("default source is the pinned model candidate, which fails closed when unavailable", () => {
+  const missingRoot = mkdtempSync(join(tmpdir(), "p2-63a-default-candidate-missing-"));
+  try {
+    mkdirSync(join(missingRoot, "model"));
+    assert.throws(() => readModelCandidateFromRoot(missingRoot), /model-candidate-file-missing/u);
+  } finally {
+    rmSync(missingRoot, { recursive: true, force: true });
+  }
 });
 
 test("source-user-data CLI is narrow and requires an absolute root", () => {
@@ -446,7 +430,7 @@ test("retained artifact summaries and diagnostics never expose absolute paths", 
 
   assert.deepEqual(summary, {
     runDirectory: ".tmp/p2-63a-runner/retained-run",
-    fixturePath: "isolated-app/model-fixture/yawn.motion3.json",
+    fixturePath: "isolated-app/model-fixture/yawn-once.motion3.json",
     continuousFrameCount: 2,
     continuousFormat: "png",
     timeIndex: "continuous-frame-index.json",
@@ -517,9 +501,18 @@ test("isolated transforms bind yawn only on the state_sleep path for the real du
   const mainSource = readFileSync("src/renderer/pet/main.ts", "utf8");
   const triggerSource = readFileSync("src/shared/pet-action-trigger.ts", "utf8");
   const appSource = readFileSync("src/main/app.ts", "utf8");
+  const chatPreloadSource = readFileSync("src/preload/chat-preload.ts", "utf8");
+  const compiledAppSource = readFileSync("dist/main/app.js", "utf8");
+  const compiledChatPreloadSource = readFileSync("dist/preload/chat-preload.js", "utf8");
   const interactionSource = readFileSync("src/renderer/pet/interaction-actions.ts", "utf8");
   const cubismSource = readFileSync("src/renderer/pet/live2d/cubism-motion.ts", "utf8");
+  const runnerSource = readFileSync("scripts/p2-63a-yawn-motion-isolated-state-trigger-real-ui.mjs", "utf8");
   const patchedPreset = injectIsolatedMotionPreset(presetSource, TIMING);
+  const patchedMain = injectIsolatedStateSleepPath(mainSource, TIMING, RUN_ID);
+  const patchedApp = injectIsolatedPresenceOverride(appSource);
+  const patchedChatPreload = injectIsolatedPresenceBridge(chatPreloadSource);
+  const patchedCompiledApp = injectIsolatedPresenceOverride(compiledAppSource);
+  const patchedCompiledChatPreload = injectIsolatedPresenceBridge(compiledChatPreloadSource);
 
   assert.match(patchedPreset, /const isolatedYawnPresetCount = APPROVED_MOTION_PRESETS\.filter\(\(preset\) => preset\.id === "yawn-once"\)\.length;/u);
   assert.match(patchedPreset, /APPROVED_MOTION_PRESETS\.map\(\(preset\) => \([\s\S]*preset\.id === "yawn-once"[\s\S]*id: "yawn-once"[\s\S]*path: "motions\/yawn-once\.motion3\.json"[\s\S]*semanticKind: "sleep"[\s\S]*durationHintSeconds: 4\.986[\s\S]*loop: false/u);
@@ -532,6 +525,18 @@ test("isolated transforms bind yawn only on the state_sleep path for the real du
     /interactionActionPlayer\.playMainAction\([\s\S]*getPetInteractionAction\(actionType\),[\s\S]*trigger,/u
   );
   assert.doesNotMatch(actionTriggerHandlers[0] ?? "", /interactionActionPlayer\.playAction\(/u);
+  assert.match(patchedApp, /ipcMain\.handle\("__p2_63a:set-presence"/u);
+  assert.match(patchedApp, /applyAutomaticSituationSnapshot\(/u);
+  assert.match(patchedApp, /webContents\.send\("pet:action-trigger", \{ reason: "state_sleep" \}\)/u);
+  assert.match(patchedChatPreload, /exposeInMainWorld\("__p2_63a"/u);
+  assert.match(patchedChatPreload, /ipcRenderer\.invoke\("__p2_63a:set-presence", modeId\)/u);
+  assert.match(patchedCompiledApp, /electron_1\.ipcMain\.handle\("__p2_63a:set-presence"/u);
+  assert.match(patchedCompiledChatPreload, /electron_1\.contextBridge\.exposeInMainWorld\("__p2_63a"/u);
+  assert.doesNotMatch(runnerSource, /buildIsolatedMainAndPreload/u);
+  assert.match(
+    patchedMain,
+    /interactionActionPlayer\.playMainAction\(\s*isolatedAction,\s*trigger,/u
+  );
   const stateSleepSelections = [...triggerSource.matchAll(/state_sleep:\s*"([A-Za-z][A-Za-z0-9]*)"/gu)];
   assert.equal(stateSleepSelections.length, 1);
   const stateSleepActionType = stateSleepSelections[0]?.[1];
@@ -660,9 +665,9 @@ test("normal lifecycle requires natural completion and forbids watchdog fire and
   const evidence = summarizeLifecycleEvidence([
     event("restore_started", 1, { motionPresetId: "wave-once" }),
     event("restore_completed", 2, { motionPresetId: "wave-once" }),
+    event("player_start_watchdog_armed", 9),
     event("queued", 10),
     event("native_started", 20),
-    event("player_start_watchdog_armed", 21),
     event("player_runtime_watchdog_armed", 22),
     event("handle_finished_after_update", 5_120),
     event("terminal_status", 5_121, { status: "completed" }),
@@ -678,21 +683,21 @@ test("normal lifecycle requires natural completion and forbids watchdog fire and
   assert.equal(evidence.counts.restoreCompleted, 1);
   assert.equal(evidence.observedGlobalCounts.restoreCompleted, 2);
   assert.equal(summarizeLifecycleEvidence([
-    event("queued", 10), event("native_started", 20), event("player_start_watchdog_armed", 21), event("player_runtime_watchdog_armed", 22),
+    event("player_start_watchdog_armed", 9), event("queued", 10), event("native_started", 20), event("player_runtime_watchdog_armed", 22),
     event("handle_finished_after_update", 5_120), event("terminal_status", 5_121, { status: "completed" }),
     event("restore_started", 5_122), event("restore_completed", 5_123), event("restore_completed", 5_124)
   ]).passed, false);
   assert.equal(summarizeLifecycleEvidence([
-    event("queued", 10), event("native_started", 20), event("player_start_watchdog_armed", 21), event("player_runtime_watchdog_armed", 22),
+    event("player_start_watchdog_armed", 9), event("queued", 10), event("native_started", 20), event("player_runtime_watchdog_armed", 22),
     event("player_runtime_watchdog_fired", 5_620), event("stop_all_motions", 5_621)
   ]).passed, false);
 });
 
 test("timeout control proves started to watchdog to timed_out to stop to restore without completed", () => {
   const evidence = summarizeLifecycleEvidence([
+    event("player_start_watchdog_armed", 9),
     event("queued", 10),
     event("native_started", 20),
-    event("player_start_watchdog_armed", 21),
     event("player_runtime_watchdog_armed", 22),
     event("player_runtime_watchdog_fired", 5_620),
     event("terminal_status", 5_621, { status: "timed_out" }),
@@ -971,7 +976,7 @@ test("screencast selection filters by absolute target lifecycle time and extract
 test("pointer input isolation brackets the target action window before sleep", () => {
   const runnerSource = readFileSync("scripts/p2-63a-yawn-motion-isolated-state-trigger-real-ui.mjs", "utf8");
   const installAt = runnerSource.indexOf("await setPetPointerInputIsolation(pet, true)");
-  const sleepAt = runnerSource.indexOf('await setPresenceMode(chat, "sleep")');
+  const sleepAt = runnerSource.indexOf('await setIsolatedPresenceMode(chat, "sleep")');
   const restoreAt = runnerSource.indexOf("await setPetPointerInputIsolation(pet, false)", sleepAt);
 
   assert.ok(installAt >= 0 && installAt < sleepAt);
@@ -1291,7 +1296,7 @@ test("state event, successful probe chain and strict 4.986s timing are correlate
   assert.equal(outcome.watchdogStop.elapsedMs, 4_965);
   assert.equal(outcome.watchdogStop.bounded, true);
   assert.equal(outcome.restored.timely, true);
-  assert.equal(outcome.fixture.sourceVersion, 0);
+  assert.equal(outcome.fixture.sourceVersion, 3);
   assert.equal(outcome.fixture.outputVersion, 3);
   assert.equal(outcome.fixture.cubismConsistencyCheck, true);
   assert.equal(classifyProbeOutcome(outcome, {}, CLEANUP_OK).code, "native-started-visual-unproven");

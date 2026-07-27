@@ -160,7 +160,7 @@ async function waitFor(cdp, expression, timeoutMs = 10_000) {
 function launchElectron() {
   const electronExe = join(root, "node_modules", "electron", "dist", "electron.exe");
   const electronCmd = existsSync(electronExe) ? electronExe : join(root, "node_modules", ".bin", "electron.cmd");
-  const child = spawn(electronCmd, [".", `--remote-debugging-port=${port}`], {
+  const child = spawn(electronCmd, ["--disable-gpu", `--remote-debugging-port=${port}`, "."], {
     cwd: root,
     env: {
       ...process.env,
@@ -222,22 +222,32 @@ async function saveWelcomeProfile(cdp) {
 }
 
 async function sendMessage(cdp, message, abort = false) {
-  await evaluate(cdp, `
+  const submitState = await evaluate(cdp, `
     (() => {
       const input = document.querySelector("#chat-input");
       const form = document.querySelector("#chat-form");
       input.value = ${JSON.stringify(message)};
       input.dispatchEvent(new Event("input", { bubbles: true }));
       form.requestSubmit();
+      const send = document.querySelector("#send-button");
+      const abortButton = document.querySelector("#abort-button");
+      return {
+        sendShowsStop: send?.textContent.includes("停止") === true,
+        sendEnabled: send?.disabled === false,
+        abortHidden: abortButton?.hidden === true
+      };
     })()
   `);
-  await waitFor(cdp, "document.querySelector('#send-button')?.textContent.includes('停止')");
+  if (!submitState?.sendShowsStop || !submitState.sendEnabled || !submitState.abortHidden) {
+    throw new Error(`Send state was not synchronously visible: ${JSON.stringify(submitState)}`);
+  }
 
   if (abort) {
     await click(cdp, "#send-button");
   }
 
   await waitFor(cdp, "document.querySelector('#chat-input')?.disabled === false", 20_000);
+  return submitState;
 }
 
 async function setViewport(cdp, width, height) {
