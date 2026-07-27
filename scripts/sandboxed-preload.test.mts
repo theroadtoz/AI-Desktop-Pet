@@ -163,3 +163,59 @@ test("pet preload sends only finite nonnegative exact overlay regions", async ()
     ["pet:bubble-hit-region-change", null]
   ]);
 });
+
+test("memory review preload keeps strict candidate and decision boundaries", async () => {
+  const preload = await readFile(join(process.cwd(), "dist", "preload", "chat-preload.js"), "utf8");
+  let memoryApi: {
+    listReviews(): Promise<unknown>;
+    confirmReview(id: string, update?: unknown): Promise<{ status: string }>;
+  } | undefined;
+  let invokeCount = 0;
+  const contextBridge = {
+    exposeInMainWorld(name: string, value: unknown) {
+      if (name === "memoryApi") memoryApi = value as typeof memoryApi;
+    }
+  };
+  const ipcRenderer = {
+    invoke(channel: string) {
+      invokeCount += 1;
+      assert.equal(channel, "memory:list-reviews");
+      return Promise.resolve([{
+        id: crypto.randomUUID(),
+        action: "create",
+        status: "pending-review",
+        title: "候选",
+        content: "本地候选",
+        tags: [],
+        namespace: "personal",
+        key: "language-preference",
+        importance: "key",
+        category: "language",
+        confidence: 0.91,
+        sourceConversationId: crypto.randomUUID(),
+        sourceMessageId: crypto.randomUUID(),
+        createdAt: 1_700_000_000_000,
+        updatedAt: 1_700_000_000_000,
+        extra: true
+      }]);
+    },
+    on() {},
+    removeListener() {}
+  };
+  const module = { exports: {} };
+  new Function("require", "exports", "module", preload)(
+    (id: string) => {
+      assert.equal(id, "electron");
+      return { contextBridge, ipcRenderer };
+    },
+    module.exports,
+    module
+  );
+
+  assert.ok(memoryApi);
+  await assert.rejects(memoryApi.listReviews(), /Invalid memory review response/);
+  assert.equal(invokeCount, 1);
+  const result = await memoryApi.confirmReview("not-a-uuid", { content: "ignored" });
+  assert.deepEqual(result, { status: "not_found" });
+  assert.equal(invokeCount, 1);
+});

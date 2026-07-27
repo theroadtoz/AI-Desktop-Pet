@@ -163,6 +163,11 @@
             <p id="memory-overview-status" class="status-box" data-state="fallback" aria-live="polite">记忆关闭；她这轮轻装陪着。</p>
             <p id="memory-next-injection-status" class="status-box" data-state="fallback" aria-live="polite">下次发送她不会带入记忆。</p>
             <div id="memory-safe-stats" class="memory-safe-stats status-box" data-state="fallback" aria-live="polite"></div>
+            <section class="content-stack" aria-labelledby="memory-reviews-title">
+              <h3 id="memory-reviews-title" class="settings-section-title">待复核候选</h3>
+              <p class="selection-note">本地模型候选不会自动保存或带入对话；请逐条确认、编辑或拒绝。</p>
+              <div id="memory-reviews" class="memory-list content-stack" aria-live="polite"></div>
+            </section>
             <nav id="memory-filter-nav" class="subpage-nav" aria-label="记忆筛选">
               <button class="subpage-tab is-active" type="button" data-memory-filter="all">全部</button>
               <button class="subpage-tab" type="button" data-memory-filter="key">关键</button>

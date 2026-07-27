@@ -40,6 +40,9 @@ import type {
   MemoryCardUpdate,
   MemoryCreateResult,
   MemoryForgetResult,
+  MemoryReviewCandidate,
+  MemoryReviewDecisionDraft,
+  MemoryReviewDecisionResult,
   MemorySummary,
   MemorySuppressionView
 } from "../shared/chat-memory";
@@ -1583,6 +1586,70 @@ function parseMemoryForgetResult(value: unknown): MemoryForgetResult | null {
   return null;
 }
 
+function parseMemoryReviewCandidate(value: unknown): MemoryReviewCandidate | null {
+  if (!value || typeof value !== "object" || Array.isArray(value) || !hasExactKeys(value, [
+    "action", "category", "confidence", "content", "createdAt", "id", "importance", "key", "namespace",
+    "sourceConversationId", "sourceMessageId", "status", "tags", "title", "updatedAt"
+  ])) return null;
+  const candidate = value as Partial<MemoryReviewCandidate>;
+  const title = normalizeMemoryText(candidate.title, 80);
+  const content = normalizeMemoryText(candidate.content, 800);
+  const tags = normalizeMemoryTags(candidate.tags);
+  const namespace = normalizeMemoryNamespace(candidate.namespace);
+  const key = normalizeMemoryKey(candidate.key);
+  const category = normalizeMemoryCategory(candidate.category);
+  const confidence = parseMemoryConfidence(candidate.confidence);
+  const createdAt = parsePositiveInteger(candidate.createdAt);
+  const updatedAt = parsePositiveInteger(candidate.updatedAt);
+  const action = candidate.action === "create" || candidate.action === "update-suggestion" || candidate.action === "revoke-suggestion" || candidate.action === "ignore"
+    ? candidate.action
+    : null;
+  const status = candidate.status === "pending-review" || candidate.status === "confirmed" || candidate.status === "rejected" || candidate.status === "blocked"
+    ? candidate.status
+    : null;
+  if (
+    !title || !content || !tags || !namespace || !key || !category || confidence === null || confidence < 0.7 || !action || !status ||
+    (candidate.importance !== "key" && candidate.importance !== "general") || !isMemoryId(candidate.id) ||
+    !isMemoryId(candidate.sourceConversationId) || !isMemoryId(candidate.sourceMessageId) ||
+    createdAt === null || updatedAt === null || updatedAt < createdAt
+  ) return null;
+  return { ...candidate, title, content, tags, namespace, key, category, confidence, action, status } as MemoryReviewCandidate;
+}
+
+function parseMemoryReviewDecisionDraft(value: unknown): MemoryReviewDecisionDraft | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const update = value as MemoryReviewDecisionDraft;
+  const parsed: MemoryReviewDecisionDraft = {};
+  if ("title" in update) {
+    const title = normalizeMemoryText(update.title, 80);
+    if (!title) return null;
+    parsed.title = title;
+  }
+  if ("content" in update) {
+    const content = normalizeMemoryText(update.content, 800);
+    if (!content) return null;
+    parsed.content = content;
+  }
+  if ("tags" in update) {
+    const tags = normalizeMemoryTags(update.tags);
+    if (!tags) return null;
+    parsed.tags = tags;
+  }
+  if ("importance" in update) {
+    if (update.importance !== "key" && update.importance !== "general") return null;
+    parsed.importance = update.importance;
+  }
+  return Object.keys(parsed).length > 0 ? parsed : null;
+}
+
+function parseMemoryReviewDecisionResult(value: unknown): MemoryReviewDecisionResult | null {
+  if (!value || typeof value !== "object" || Array.isArray(value) || !hasExactKeys(value, ["status"])) return null;
+  const status = (value as Partial<MemoryReviewDecisionResult>).status;
+  return status === "confirmed" || status === "rejected" || status === "blocked" || status === "disabled" || status === "not_found"
+    ? { status }
+    : null;
+}
+
 function parseCountMap(value: unknown, expectedKeys?: readonly string[]): Record<string, number> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return null;
@@ -2152,6 +2219,27 @@ const memoryApi: MemoryApi = {
   },
   async clearSuppressions() {
     await ipcRenderer.invoke("memory:clear-suppressions");
+  },
+  async listReviews() {
+    const values: unknown = await ipcRenderer.invoke("memory:list-reviews");
+    if (!Array.isArray(values)) throw new Error("Invalid memory review list response");
+    const reviews = values.map(parseMemoryReviewCandidate);
+    if (reviews.some((review) => review === null)) throw new Error("Invalid memory review response");
+    return reviews as MemoryReviewCandidate[];
+  },
+  async confirmReview(id, update) {
+    if (!isMemoryId(id)) return { status: "not_found" };
+    const parsedUpdate = update === undefined ? undefined : parseMemoryReviewDecisionDraft(update);
+    if (update !== undefined && !parsedUpdate) return { status: "not_found" };
+    const result = parseMemoryReviewDecisionResult(await ipcRenderer.invoke("memory:confirm-review", id, parsedUpdate));
+    if (!result) throw new Error("Invalid memory review response");
+    return result;
+  },
+  async rejectReview(id) {
+    if (!isMemoryId(id)) return { status: "not_found" };
+    const result = parseMemoryReviewDecisionResult(await ipcRenderer.invoke("memory:reject-review", id));
+    if (!result) throw new Error("Invalid memory review response");
+    return result;
   }
 };
 

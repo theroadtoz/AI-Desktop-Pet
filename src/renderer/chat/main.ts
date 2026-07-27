@@ -2,7 +2,7 @@ import "./styles.css";
 import type { ChatMessage, ChatRole } from "../../shared/chat";
 import type { Conversation, ConversationSummary } from "../../shared/chat-history";
 import type { ChatContextTransparencyPayload, ChatMemoryActivityPayload } from "../../shared/ipc-contract";
-import type { MemoryCard, MemorySummary, MemorySuppressionView } from "../../shared/chat-memory";
+import type { MemoryCard, MemoryReviewCandidate, MemorySummary, MemorySuppressionView } from "../../shared/chat-memory";
 import {
   LOCAL_PROVIDER_PRESETS,
   RECOMMENDED_LOCAL_PROVIDER_CONFIG,
@@ -234,6 +234,7 @@ const memorySafeStats = document.querySelector<HTMLElement>("#memory-safe-stats"
 const memoryFilterTabs = [...document.querySelectorAll<HTMLButtonElement>("[data-memory-filter]")];
 const memorySearch = document.querySelector<HTMLInputElement>("#memory-search");
 const memoryList = document.querySelector<HTMLElement>("#memory-list");
+const memoryReviews = document.querySelector<HTMLElement>("#memory-reviews");
 const memorySuppressions = document.querySelector<HTMLElement>("#memory-suppressions");
 const clearMemorySuppressionsButton = document.querySelector<HTMLButtonElement>("#clear-memory-suppressions-button");
 const clearMemorySuppressionsConfirmation = document.querySelector<HTMLElement>("#clear-memory-suppressions-confirmation");
@@ -278,7 +279,7 @@ if (
   !cancelMemoryDraftButton || !saveMemoryDraftButton || !newConversationButton || !clearHistoryButton || !clearHistoryConfirmation ||
   !cancelClearHistoryButton || !confirmClearHistoryButton || !historyFeedback || !conversationList || !historyDetail ||
   !enableMemoryButton || !newMemoryButton || !clearMemoryButton || !clearMemoryConfirmation || !cancelClearMemoryButton ||
-  !confirmClearMemoryButton || !memoryFeedback || !memoryOverviewStatus || !memoryNextInjectionStatus || !memorySafeStats || !memorySearch || !memoryList || !userWelcomePanel ||
+  !confirmClearMemoryButton || !memoryFeedback || !memoryOverviewStatus || !memoryNextInjectionStatus || !memorySafeStats || !memorySearch || !memoryList || !memoryReviews || !userWelcomePanel ||
   !memoryCreateNote || !memorySuppressions || !clearMemorySuppressionsButton || !clearMemorySuppressionsConfirmation ||
   !cancelClearMemorySuppressionsButton || !confirmClearMemorySuppressionsButton ||
   !welcomeUserDisplayName || !welcomeUserPreferredName || !welcomeSaveUserProfileButton || !userWelcomeFeedback
@@ -311,6 +312,7 @@ const settingsRootTabs = {
 };
 const settingsModelDetailAction = settingsModelDetailButton;
 const memoryDetailElement = memoryDetail;
+const memoryReviewsElement = memoryReviews;
 const providerIdField = providerIdSelect;
 const displayNameField = displayNameInput;
 const openAIFieldsContainer = openAIFields;
@@ -523,6 +525,7 @@ let selectedHistoryConversation: Conversation | null = null;
 let selectedMemoryCardId: string | null = null;
 let providerContextEnabled = true;
 let memoryCards: MemoryCard[] = [];
+let memoryReviewCandidates: MemoryReviewCandidate[] = [];
 let memorySummary: MemorySummary | null = null;
 let memorySuppressionsState: MemorySuppressionView[] = [];
 let memoryEnabled = false;
@@ -1740,16 +1743,18 @@ async function refreshMemory(): Promise<void> {
   }
 
   try {
-    const [settings, summary, cards, suppressions] = await Promise.all([
+    const [settings, summary, cards, suppressions, reviews] = await Promise.all([
       window.memoryApi.getSettings(),
       window.memoryApi.getSummary(),
       window.memoryApi.listCards(),
-      window.memoryApi.listSuppressions()
+      window.memoryApi.listSuppressions(),
+      window.memoryApi.listReviews()
     ]);
     memoryEnabled = settings.enabled;
     memorySummary = summary;
     memoryCards = cards;
     memorySuppressionsState = suppressions;
+    memoryReviewCandidates = reviews;
     enableMemoryAction.textContent = memoryEnabled ? "关闭记忆" : "开启记忆";
     newMemoryAction.disabled = !memoryEnabled;
     memoryCreateNoteBox.textContent = memoryEnabled
@@ -1758,6 +1763,7 @@ async function refreshMemory(): Promise<void> {
     renderMemoryOverview();
     renderMemoryInjectionPreview();
     renderMemorySafeStats();
+    renderMemoryReviews();
     renderMemoryFilterTabs();
     renderMemoryList();
     renderMemorySuppressions();
@@ -1765,7 +1771,7 @@ async function refreshMemory(): Promise<void> {
     setMemoryFeedback(
       memoryEnabled
         ? summary.injectableCount > 0
-          ? `记忆已开启；本机会从最新用户消息提取短事实，下次最多带入 ${summary.injectableCount} 条。`
+          ? `记忆已开启；已确认的本地事实下次最多带入 ${summary.injectableCount} 条。`
           : "记忆已开启；当前没有已启用事实卡，发送时不会加入记忆。"
         : "记忆关闭；关闭会停止采集和使用，但不会删除已有本地内容。"
     );
@@ -1820,6 +1826,110 @@ function renderMemoryList(): void {
   }
 }
 
+function renderMemoryReviews(): void {
+  memoryReviewsElement.replaceChildren();
+  const pending = memoryReviewCandidates.filter((candidate) => candidate.status === "pending-review");
+
+  if (pending.length === 0) {
+    const note = document.createElement("p");
+    note.className = "selection-note";
+    note.textContent = memoryReviewCandidates.some((candidate) => candidate.status === "blocked")
+      ? "当前没有待复核候选；冲突候选已阻断，未写入事实卡。"
+      : "当前没有待复核候选。";
+    memoryReviewsElement.append(note);
+    return;
+  }
+
+  pending.forEach((candidate) => {
+    memoryReviewsElement.append(createMemoryReviewElement(candidate));
+  });
+}
+
+function createMemoryReviewElement(candidate: MemoryReviewCandidate): HTMLElement {
+  const item = document.createElement("section");
+  item.className = "memory-card fold-body";
+  const title = document.createElement("input");
+  title.className = "memory-title-input";
+  title.value = candidate.title;
+  const content = document.createElement("textarea");
+  content.value = candidate.content;
+  const tags = document.createElement("input");
+  tags.value = candidate.tags.join("，");
+  const importance = document.createElement("select");
+  for (const [value, label] of [["key", "关键"], ["general", "一般"]] as const) {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = label;
+    importance.append(option);
+  }
+  importance.value = candidate.importance;
+  const note = document.createElement("p");
+  note.className = "selection-note";
+  note.textContent = `待复核 · ${getMemoryReviewActionLabel(candidate.action)} · ${getMemoryCategoryLabel(candidate)} · 置信度 ${formatMemoryConfidence(candidate)}`;
+  const actions = document.createElement("div");
+  actions.className = "history-detail-actions";
+  const confirm = document.createElement("button");
+  confirm.className = "button";
+  confirm.type = "button";
+  confirm.textContent = "确认并保存";
+  confirm.addEventListener("click", () => {
+    void confirmMemoryReview(candidate.id, {
+      title: title.value,
+      content: content.value,
+      tags: parseTagsInput(tags.value),
+      importance: importance.value === "general" ? "general" : "key"
+    });
+  });
+  const reject = document.createElement("button");
+  reject.className = "button-danger";
+  reject.type = "button";
+  reject.textContent = "拒绝";
+  reject.addEventListener("click", () => {
+    void rejectMemoryReview(candidate.id);
+  });
+  actions.append(confirm, reject);
+  item.append(title, content, tags, importance, note, actions);
+  return item;
+}
+
+function getMemoryReviewActionLabel(action: MemoryReviewCandidate["action"]): string {
+  const labels: Record<MemoryReviewCandidate["action"], string> = {
+    create: "新建建议",
+    "update-suggestion": "更新建议",
+    "revoke-suggestion": "撤回建议",
+    ignore: "忽略建议"
+  };
+  return labels[action];
+}
+
+async function confirmMemoryReview(id: string, update: { title: string; content: string; tags: string[]; importance: "key" | "general" }): Promise<void> {
+  try {
+    const result = await window.memoryApi?.confirmReview(id, update);
+    setMemoryFeedback(
+      result?.status === "confirmed"
+        ? "候选已确认；只有新建建议会保存为本地事实卡。"
+        : result?.status === "blocked"
+          ? "该候选与现有记忆冲突，未保存。"
+          : result?.status === "disabled"
+            ? "记忆已关闭；候选仍等待你的复核。"
+            : "该候选已不可用。"
+    );
+    await refreshMemory();
+  } catch {
+    setMemoryFeedback("无法确认该候选，请检查内容后重试。");
+  }
+}
+
+async function rejectMemoryReview(id: string): Promise<void> {
+  try {
+    const result = await window.memoryApi?.rejectReview(id);
+    setMemoryFeedback(result?.status === "rejected" ? "候选已拒绝，不会保存为事实卡。" : "该候选已不可用。");
+    await refreshMemory();
+  } catch {
+    setMemoryFeedback("无法拒绝该候选，请稍后重试。");
+  }
+}
+
 function matchesMemoryFilter(card: MemoryCard): boolean {
   switch (activeMemoryFilter) {
     case "key":
@@ -1854,7 +1964,7 @@ function getMemoryImportanceLabel(card: MemoryCard): string {
   return card.importance === "key" ? "关键" : "一般";
 }
 
-function getMemoryCategoryLabel(card: MemoryCard): string {
+function getMemoryCategoryLabel(card: Pick<MemoryCard, "category">): string {
   const labels: Record<string, string> = {
     addressing: "称呼",
     language: "语言",
@@ -1918,7 +2028,7 @@ function getMemoryCompressionLabel(card: MemoryCard): string {
   return labels[card.compressionState];
 }
 
-function formatMemoryConfidence(card: MemoryCard): string {
+function formatMemoryConfidence(card: Pick<MemoryCard, "confidence">): string {
   return `${Math.round(card.confidence * 100)}%`;
 }
 

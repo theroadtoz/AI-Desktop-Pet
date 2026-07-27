@@ -79,6 +79,36 @@ export type MemoryInjection = {
   cards: Array<Pick<MemoryCard, "id" | "title" | "content" | "tags" | "importance" | "sourceType" | "managedByUser">>;
 };
 
+export type MemoryReviewAction = "create" | "update-suggestion" | "revoke-suggestion" | "ignore";
+export type MemoryReviewStatus = "pending-review" | "confirmed" | "rejected" | "blocked";
+
+export type MemoryReviewCandidateDraft = {
+  action: MemoryReviewAction;
+  title: string;
+  content: string;
+  tags: string[];
+  namespace: string;
+  key: string;
+  importance: MemoryImportance;
+  category: string;
+  confidence: number;
+  sourceConversationId: string;
+  sourceMessageId: string;
+};
+
+export type MemoryReviewCandidate = MemoryReviewCandidateDraft & {
+  id: string;
+  status: MemoryReviewStatus;
+  createdAt: number;
+  updatedAt: number;
+};
+
+export type MemoryReviewDecisionDraft = Partial<Pick<MemoryReviewCandidateDraft, "title" | "content" | "tags" | "importance">>;
+
+export type MemoryReviewDecisionResult = {
+  status: "confirmed" | "rejected" | "blocked" | "disabled" | "not_found";
+};
+
 export const MEMORY_STORAGE_VERSION = 4;
 
 export type MemoryStorage = {
@@ -119,6 +149,19 @@ export function normalizeMemoryText(value: unknown, maxLength: number): string |
 
   const normalized = value.trim().replace(/\s+/g, " ");
   return normalized.length > 0 ? normalized.slice(0, maxLength) : null;
+}
+
+export function containsSensitiveMemoryMaterial(value: string): boolean {
+  return [
+    /sk-[A-Za-z0-9_-]{8,}/u,
+    /(api[-_\s]?key|密钥|token|password|密码|secret)/iu,
+    /\b(?:\d[ -]*?){13,19}\b/u,
+    /\b1[3-9]\d{9}\b/u,
+    /\b\d{15}(?:\d{2}[0-9xX])?\b/u,
+    /(?:身份证|银行卡|手机号|住址|详细地址|家庭住址|医疗|诊断|病历|法律咨询|投资建议|财务状况)/u,
+    /\b[\w.+-]+@[\w.-]+\.[a-z]{2,}\b/iu,
+    /(```|完整\s*prompt|系统提示词|请求正文|provider request body)/iu
+  ].some((pattern) => pattern.test(value));
 }
 
 export function normalizeMemoryTags(value: unknown): string[] | null {
@@ -269,6 +312,93 @@ export function parseMemoryCardUpdate(value: unknown): MemoryCardUpdate | null {
       return null;
     }
 
+    parsed.importance = importance;
+  }
+
+  return Object.keys(parsed).length > 0 ? parsed : null;
+}
+
+export function parseMemoryReviewCandidateDraft(value: unknown): MemoryReviewCandidateDraft | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const candidate = value as Partial<MemoryReviewCandidateDraft>;
+  const keys = Object.keys(candidate).sort();
+  const title = normalizeMemoryText(candidate.title, MAX_TITLE_LENGTH);
+  const content = normalizeMemoryText(candidate.content, MAX_CONTENT_LENGTH);
+  const tags = normalizeMemoryTags(candidate.tags);
+  const namespace = normalizeMemoryNamespace(candidate.namespace);
+  const key = normalizeMemoryKey(candidate.key);
+  const importance = parseMemoryImportance(candidate.importance);
+  const category = normalizeMemoryCategory(candidate.category);
+  const confidence = parseMemoryConfidence(candidate.confidence);
+  const action = candidate.action === "create" ||
+    candidate.action === "update-suggestion" ||
+    candidate.action === "revoke-suggestion" ||
+    candidate.action === "ignore"
+    ? candidate.action
+    : null;
+
+  if (
+    keys.join(",") !== "action,category,confidence,content,importance,key,namespace,sourceConversationId,sourceMessageId,tags,title" ||
+    !action ||
+    !title ||
+    !content ||
+    !tags ||
+    !namespace ||
+    !key ||
+    !importance ||
+    !category ||
+    confidence === null ||
+    confidence < 0.7 ||
+    !isMemoryId(candidate.sourceConversationId) ||
+    !isMemoryId(candidate.sourceMessageId)
+  ) {
+    return null;
+  }
+
+  return {
+    action,
+    title,
+    content,
+    tags,
+    namespace,
+    key,
+    importance,
+    category,
+    confidence,
+    sourceConversationId: candidate.sourceConversationId,
+    sourceMessageId: candidate.sourceMessageId
+  };
+}
+
+export function parseMemoryReviewDecisionDraft(value: unknown): MemoryReviewDecisionDraft | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const update = value as MemoryReviewDecisionDraft;
+  const parsed: MemoryReviewDecisionDraft = {};
+
+  if ("title" in update) {
+    const title = normalizeMemoryText(update.title, MAX_TITLE_LENGTH);
+    if (!title) return null;
+    parsed.title = title;
+  }
+  if ("content" in update) {
+    const content = normalizeMemoryText(update.content, MAX_CONTENT_LENGTH);
+    if (!content) return null;
+    parsed.content = content;
+  }
+  if ("tags" in update) {
+    const tags = normalizeMemoryTags(update.tags);
+    if (!tags) return null;
+    parsed.tags = tags;
+  }
+  if ("importance" in update) {
+    const importance = parseMemoryImportance(update.importance);
+    if (!importance) return null;
     parsed.importance = importance;
   }
 

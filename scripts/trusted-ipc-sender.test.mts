@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import test from "node:test";
 import { pathToFileURL } from "node:url";
@@ -89,4 +90,16 @@ test("rejects stale, destroyed, or mismatched window capabilities", () => {
   assert.equal(isTrustedIpcSender(current.event, current.window, "chat", rendererRoot), false);
 
   assert.equal(isTrustedIpcSender(current.event, null, "chat", rendererRoot), false);
+});
+
+test("memory review IPC routes retain the trusted chat sender gate", async () => {
+  const appSource = await readFile(resolve("src", "main", "app.ts"), "utf8");
+
+  for (const channel of ["memory:list-reviews", "memory:confirm-review", "memory:reject-review"]) {
+    const handlerStart = appSource.indexOf(`ipcMain.handle("${channel}"`);
+    assert.notEqual(handlerStart, -1, channel);
+    const handlerEnd = appSource.indexOf("ipcMain.handle(", handlerStart + 1);
+    const handler = appSource.slice(handlerStart, handlerEnd === -1 ? undefined : handlerEnd);
+    assert.match(handler, /isChatSender\(event\)/, channel);
+  }
 });

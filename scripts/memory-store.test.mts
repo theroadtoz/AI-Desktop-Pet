@@ -213,19 +213,19 @@ test("memory summary reports injectable zero while disabled and counts safe meta
     summary = store.getSummary();
 
     assert.equal(summary.enabled, true);
-    assert.equal(summary.totalCards, 3);
-    assert.equal(summary.enabledCards, 2);
+    assert.equal(summary.totalCards, 1);
+    assert.equal(summary.enabledCards, 0);
     assert.equal(summary.disabledCards, 1);
-    assert.equal(summary.injectableCount, 2);
+    assert.equal(summary.injectableCount, 0);
     assert.equal(summary.sourceTypeCounts["manual-chat"], 1);
-    assert.equal(summary.sourceTypeCounts["auto-local-heuristic"], 2);
+    assert.equal(summary.sourceTypeCounts["auto-local-heuristic"], 0);
     assert.equal(summary.sourceTypeCounts["auto-local-model"], 0);
-    assert.equal(summary.importanceCounts.key, 2);
-    assert.equal(summary.importanceCounts.general, 1);
-    assert.equal(summary.compressionStateCounts.raw, 3);
+    assert.equal(summary.importanceCounts.key, 1);
+    assert.equal(summary.importanceCounts.general, 0);
+    assert.equal(summary.compressionStateCounts.raw, 1);
     assert.equal(summary.categoryCounts.manual, 1);
-    assert.equal(summary.categoryCounts.language, 1);
-    assert.equal(summary.categoryCounts.interaction, 1);
+    assert.equal(summary.categoryCounts.language, undefined);
+    assert.equal(summary.categoryCounts.interaction, undefined);
   } finally {
     await rm(userDataPath, { recursive: true, force: true });
   }
@@ -259,7 +259,7 @@ test("auto heuristic memory is gated by the memory switch and skips sensitive me
   }
 });
 
-test("auto heuristic memory stores short facts without full user text", async () => {
+test("legacy automatic capture is now a no-write gate before review", async () => {
   const userDataPath = await mkdtemp(join(tmpdir(), "desktop-pet-memory-"));
 
   try {
@@ -272,21 +272,10 @@ test("auto heuristic memory stores short facts without full user text", async ()
       messageId,
       content: "以后请叫我P214C小夏，这整句话不应该被完整保存"
     });
-    assert.equal(summary.capturedCount, 1);
-    assert.equal(summary.keyCount, 1);
-    assert.deepEqual(summary.safeCategories, ["addressing"]);
-
-    const [card] = store.listCards();
-    assert.equal(card?.sourceType, "auto-local-heuristic");
-    assert.equal(card?.importance, "key");
-    assert.equal(card?.category, "addressing");
-    assert.equal(card?.sourceMessageId, messageId);
-    assert.equal(card?.observedCount, 1);
-    assert.equal(card?.compressionState, "raw");
-    assert.equal(card?.content.includes("这整句话"), false);
-
-    const rawStorage = await readFile(store.getMemoryPath(), "utf8");
-    assert.equal(rawStorage.includes("这整句话不应该被完整保存"), false);
+    assert.equal(summary.skippedReason, "no_candidate");
+    assert.equal(summary.capturedCount, 0);
+    assert.equal(store.listCards().length, 0);
+    assert.equal((await readFile(store.getMemoryPath(), "utf8")).includes("这整句话不应该被完整保存"), false);
   } finally {
     await rm(userDataPath, { recursive: true, force: true });
   }
@@ -323,7 +312,7 @@ test("auto heuristic memory summary stays safe for activity feedback", async () 
       "skippedReason",
       "totalCards"
     ]);
-    assert.equal(summary.capturedCount, 1);
+    assert.equal(summary.capturedCount, 0);
     assert.equal(sensitive.skippedReason, "sensitive");
     assert.doesNotMatch(JSON.stringify([summary, sensitive]), /完整原文|sk-p227-memory-activity-secret|content|title|tags|prompt|providerMessages/);
   } finally {
@@ -331,7 +320,7 @@ test("auto heuristic memory summary stays safe for activity feedback", async () 
   }
 });
 
-test("auto heuristic memory distinguishes key and general facts", async () => {
+test("legacy automatic capture cannot create, classify, or merge cards", async () => {
   const userDataPath = await mkdtemp(join(tmpdir(), "desktop-pet-memory-"));
 
   try {
@@ -349,37 +338,7 @@ test("auto heuristic memory distinguishes key and general facts", async () => {
       content: "我希望桌宠贴近屏幕右侧"
     });
 
-    const cards = store.listCards();
-    assert.equal(cards.some((card) => card.importance === "key" && card.category === "language"), true);
-    assert.equal(cards.some((card) => card.importance === "general" && card.category === "pet_presentation"), true);
-  } finally {
-    await rm(userDataPath, { recursive: true, force: true });
-  }
-});
-
-test("auto heuristic memory merges duplicates deterministically", async () => {
-  const userDataPath = await mkdtemp(join(tmpdir(), "desktop-pet-memory-"));
-
-  try {
-    const store = createMemoryStore({ userDataPath });
-    const conversationId = crypto.randomUUID();
-    store.setEnabled(true);
-    store.captureAutoMemoriesFromLatestUserMessage({
-      conversationId,
-      messageId: crypto.randomUUID(),
-      content: "请用简体中文回复我"
-    });
-    const duplicate = store.captureAutoMemoriesFromLatestUserMessage({
-      conversationId,
-      messageId: crypto.randomUUID(),
-      content: "以后请用简体中文回复我"
-    });
-
-    const cards = store.listCards();
-    assert.equal(cards.length, 1);
-    assert.equal(cards[0]?.observedCount, 2);
-    assert.equal(cards[0]?.compressionState, "deduplicated");
-    assert.equal(duplicate.deduplicatedCount, 1);
+    assert.equal(store.listCards().length, 0);
   } finally {
     await rm(userDataPath, { recursive: true, force: true });
   }

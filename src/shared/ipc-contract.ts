@@ -6,6 +6,9 @@ import type {
   MemoryCardUpdate,
   MemoryCreateResult,
   MemoryForgetResult,
+  MemoryReviewCandidate,
+  MemoryReviewDecisionDraft,
+  MemoryReviewDecisionResult,
   MemorySettings,
   MemorySummary,
   MemorySuppressionView
@@ -321,6 +324,9 @@ export type MemoryApi = {
   listSuppressions(): Promise<MemorySuppressionView[]>;
   allowSuppression(id: string): Promise<boolean>;
   clearSuppressions(): Promise<void>;
+  listReviews(): Promise<MemoryReviewCandidate[]>;
+  confirmReview(id: string, update?: MemoryReviewDecisionDraft): Promise<MemoryReviewDecisionResult>;
+  rejectReview(id: string): Promise<MemoryReviewDecisionResult>;
 };
 
 export type ProactiveCompanionApi = {

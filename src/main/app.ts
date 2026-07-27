@@ -66,6 +66,7 @@ import {
   isMemoryId,
   parseMemoryCardDraft,
   parseMemoryCardUpdate,
+  parseMemoryReviewDecisionDraft,
   type MemoryCardUpdate
 } from "../shared/chat-memory";
 import type { DialogueModeId } from "../shared/dialogue-style";
@@ -153,6 +154,8 @@ import {
 } from "./services/pet-action-runtime-policy";
 import { createHistoryStore, type HistoryStore } from "./services/chat/history-store";
 import { createMemoryStore, type AutoMemoryCaptureSummary, type MemoryStore } from "./services/chat/memory-store";
+import { createMemoryReviewStore, type MemoryReviewStore } from "./services/chat/memory-review-store";
+import { createLocalMemoryExtractor, type LocalMemoryExtractor } from "./services/chat/local-memory-extractor";
 import { createChatProviderFromConfig } from "./services/chat/provider-factory";
 import { checkProviderHealth } from "./services/chat/provider-health";
 import {
@@ -311,6 +314,8 @@ let petPresentationStore: PetPresentationStore | null = null;
 let petPresentationPersistence: PetPresentationPersistence | null = null;
 let historyStore: HistoryStore | null = null;
 let memoryStore: MemoryStore | null = null;
+let memoryReviewStore: MemoryReviewStore | null = null;
+let localMemoryExtractor: LocalMemoryExtractor | null = null;
 let webSearchSettingsStore: WebSearchSettingsStore | null = null;
 let proactiveCompanionSettingsStore: ProactiveCompanionSettingsStore | null = null;
 let proactiveBubbleLedgerStore: ProactiveBubbleLedgerStore | null = null;
@@ -2661,6 +2666,24 @@ app.whenReady().then(async () => {
   petPresentationPersistence = createPetPresentationPersistence(petPresentationStore);
   historyStore = createHistoryStore();
   memoryStore = createMemoryStore();
+  memoryReviewStore = createMemoryReviewStore();
+  localMemoryExtractor = createLocalMemoryExtractor({
+    getTarget() {
+      const config = bundledLlamaCppProviderConfig;
+      if (
+        bundledLlamaCppRuntime?.getStatus().status !== "ready" ||
+        !config ||
+        config.localPresetId !== "embedded-llama-cpp"
+      ) {
+        return null;
+      }
+      return {
+        baseURL: config.baseURL,
+        model: config.model,
+        localPresetId: "embedded-llama-cpp"
+      };
+    }
+  });
   webSearchSettingsStore = createWebSearchSettingsStore({
     userDataPath: app.getPath("userData")
   });
@@ -3799,20 +3822,22 @@ app.whenReady().then(async () => {
   });
 
   async function handleChatSend(event: IpcMainEvent, request: unknown): Promise<void> {
-    if (!isChatSender(event) || !isChatSendRequest(request) || !chatEngine || !historyStore || !memoryStore) {
+    if (!isChatSender(event) || !isChatSendRequest(request) || !chatEngine || !historyStore || !memoryStore || !memoryReviewStore || !localMemoryExtractor) {
       return;
     }
 
     automaticSituationCoordinator?.cancelPendingClassification();
     await waitForStartupLocalModelProviderIfPending();
 
-    if (!chatEngine || !historyStore || !memoryStore) {
+    if (!chatEngine || !historyStore || !memoryStore || !memoryReviewStore || !localMemoryExtractor) {
       return;
     }
 
     const chatEngineForRequest = chatEngine;
     const historyStoreForRequest = historyStore;
     const memoryStoreForRequest = memoryStore;
+    const memoryReviewStoreForRequest = memoryReviewStore;
+    const localMemoryExtractorForRequest = localMemoryExtractor;
     const providerId = chatEngineForRequest.getProviderId();
     const startedAt = Date.now();
     let replyLength = 0;
@@ -3889,23 +3914,38 @@ app.whenReady().then(async () => {
           content: submittedMessage.content
         });
         autoMemoryCaptureForActivity = toChatMemoryActivityAutoCapture(autoMemoryCapture);
+        if (autoMemoryCapture.enabled && autoMemoryCapture.skippedReason === "no_candidate") {
+          const extraction = await localMemoryExtractorForRequest.extract({
+            content: submittedMessage.content,
+            conversationId: request.conversationId,
+            messageId: submittedMessage.id
+          });
+          if (extraction.status === "created" || extraction.status === "blocked") {
+            const review = memoryReviewStoreForRequest.enqueue(extraction.candidate);
+            autoMemoryCaptureForActivity = {
+              ...autoMemoryCaptureForActivity,
+              skippedReason: null,
+              capturedCount: 1,
+              keyCount: review.importance === "key" ? 1 : 0,
+              generalCount: review.importance === "general" ? 1 : 0
+            };
+          }
+        }
         logTelemetry("memory_auto_capture", {
-          enabled: autoMemoryCapture.enabled,
-          skippedReason: autoMemoryCapture.skippedReason,
-          capturedCount: autoMemoryCapture.capturedCount,
-          keyCount: autoMemoryCapture.keyCount,
-          generalCount: autoMemoryCapture.generalCount,
-          mergedCount: autoMemoryCapture.mergedCount,
-          deduplicatedCount: autoMemoryCapture.deduplicatedCount,
-          compressionTriggered: autoMemoryCapture.compressionTriggered,
-          totalCards: autoMemoryCapture.totalCards,
-          injectionBudget: autoMemoryCapture.injectionBudget,
-          safeCategories: autoMemoryCapture.safeCategories
+          enabled: autoMemoryCaptureForActivity.enabled,
+          skippedReason: autoMemoryCaptureForActivity.skippedReason,
+          capturedCount: autoMemoryCaptureForActivity.capturedCount,
+          keyCount: autoMemoryCaptureForActivity.keyCount,
+          generalCount: autoMemoryCaptureForActivity.generalCount,
+          mergedCount: autoMemoryCaptureForActivity.mergedCount,
+          deduplicatedCount: autoMemoryCaptureForActivity.deduplicatedCount,
+          compressionTriggered: autoMemoryCaptureForActivity.compressionTriggered,
+          totalCards: autoMemoryCaptureForActivity.totalCards,
+          injectionBudget: autoMemoryCaptureForActivity.injectionBudget
         });
       } catch {
         autoMemoryCaptureForActivity = createFailedMemoryActivityAutoCapture(memoryStoreForRequest);
         logTelemetry("memory_auto_capture_failed", {
-          conversationId: request.conversationId,
           errorType: "failed"
         });
       }
@@ -4623,6 +4663,54 @@ app.whenReady().then(async () => {
     }
 
     memoryStore.clearSuppressions();
+  });
+
+  ipcMain.handle("memory:list-reviews", (event) => {
+    if (!isChatSender(event) || !memoryReviewStore) {
+      throw new Error("Unauthorized memory review request");
+    }
+
+    return memoryReviewStore.listCandidates();
+  });
+
+  ipcMain.handle("memory:confirm-review", (event, id: unknown, update: unknown) => {
+    const parsedUpdate = update === undefined ? undefined : parseMemoryReviewDecisionDraft(update);
+    if (!isChatSender(event) || !memoryStore || !memoryReviewStore || !isMemoryId(id) || (update !== undefined && !parsedUpdate)) {
+      return { status: "not_found" as const };
+    }
+
+    const candidate = parsedUpdate
+      ? memoryReviewStore.updatePendingCandidate(id, parsedUpdate)
+      : memoryReviewStore.getCandidate(id);
+    if (!candidate || candidate.status !== "pending-review") {
+      return { status: "not_found" as const };
+    }
+
+    if (candidate.action !== "create") {
+      memoryReviewStore.setStatus(id, "confirmed");
+      return { status: "confirmed" as const };
+    }
+
+    const result = memoryStore.confirmReviewedCandidate(candidate);
+    if (result.status === "created") {
+      memoryReviewStore.setStatus(id, "confirmed");
+      return { status: "confirmed" as const };
+    }
+    if (result.status === "blocked") {
+      memoryReviewStore.setStatus(id, "blocked");
+      return { status: "blocked" as const };
+    }
+    return { status: "disabled" as const };
+  });
+
+  ipcMain.handle("memory:reject-review", (event, id: unknown) => {
+    if (!isChatSender(event) || !memoryReviewStore || !isMemoryId(id)) {
+      return { status: "not_found" as const };
+    }
+
+    return memoryReviewStore.setStatus(id, "rejected")
+      ? { status: "rejected" as const }
+      : { status: "not_found" as const };
   });
 
   ipcMain.handle("automaticSituation:get", (event) => {
