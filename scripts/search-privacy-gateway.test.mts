@@ -1110,7 +1110,11 @@ test("app and settings UI wire the safe verification prompt and enabled compatib
   assert.match(appSource, /BAIDU_SEARCH_VERIFICATION_REQUIRED_ERROR/);
   assert.match(appSource, /getWebSearchFailurePrompt\(webSearchResolution\.errorType\)/);
   assert.match(appSource, /webSearchErrorType:\s*webSearchResolution\.errorType/);
-  assert.match(appSource, /providerMessages:\s*\[\s*\.\.\.contextBudget\.providerMessages/);
+  assert.match(appSource, /reselectStructuredContextUntilWithinBudget\(\{[\s\S]*?webSearchContext:\s*webSearchResolution\.context/);
+  assert.match(appSource, /measureMappedContextBudget\(mapChatMessagesToOpenAICompatible\(/);
+  assert.match(appSource, /providerMessages:\s*selectedProviderMessages/);
+  assert.match(appSource, /if \(!mappedContextBudget\.withinBudget\) \{\s*throw new Error\("P2-87C context budget exceeded"\);/);
+  assert.doesNotMatch(appSource, /providerMessages:\s*\[\s*\.\.\.contextBudget\.providerMessages/);
   assert.match(preloadSource, /DEFAULT_WEB_SEARCH_SETTINGS[\s\S]*?enabled:\s*true,[\s\S]*?bundled-baidu-search/);
   assert.match(settingsHtml, /class="selection-note"[^>]*>内置 MCP 搜索默认开启，使用百度网页兼容适配器。/);
   assert.match(settingsHtml, /<select id="web-search-profile">[\s\S]*?内置百度网页搜索（兼容适配器）/);

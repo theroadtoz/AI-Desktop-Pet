@@ -12,6 +12,7 @@ import {
 } from "./chat-message-mapper";
 import { classifyEmotion } from "./emotion-classifier";
 import { classifySearchQuery } from "../search/search-query-classifier";
+import { measureMappedContextBudget } from "./chat-context-budget";
 
 type ProviderErrorType =
   | "provider_auth_failed"
@@ -20,7 +21,8 @@ type ProviderErrorType =
   | "provider_timeout"
   | "provider_model_missing"
   | "provider_incompatible_response"
-  | "provider_network_error";
+  | "provider_network_error"
+  | "provider_context_budget_exceeded";
 
 type TelemetryLogger = (type: string, payload?: TelemetryPayload) => void;
 
@@ -251,25 +253,30 @@ async function streamChatCompletions(input: {
       headers.Authorization = `Bearer ${input.options.apiKey}`;
     }
 
+    const mappedMessages = mapChatMessagesToOpenAICompatible(
+      getProviderMessages(input.request),
+      input.request.memoryContext,
+      input.request.dialogueStyleContext,
+      input.request.userProfileContext,
+      getPromptTemplateProfile(providerId),
+      input.request.runtimeContext,
+      input.request.webSearchContext,
+      input.request.emotionalDialogueContextId
+    );
+    const finalContextBudget = measureMappedContextBudget(mappedMessages, providerId === "local-openai-compatible"
+      ? undefined
+      : { totalBudget: 4_096, replyReserve: 320 }
+    );
+    if (!finalContextBudget.withinBudget) {
+      throw createProviderError("provider_context_budget_exceeded");
+    }
+
     const response = await fetch(createChatCompletionsURL(input.options.baseURL), {
       method: "POST",
       headers,
       body: JSON.stringify({
         model: input.options.model,
-        messages: normalizeMessagesForLocalModel(
-          mapChatMessagesToOpenAICompatible(
-            getProviderMessages(input.request),
-            input.request.memoryContext,
-            input.request.dialogueStyleContext,
-            input.request.userProfileContext,
-            getPromptTemplateProfile(providerId),
-            input.request.runtimeContext,
-            input.request.webSearchContext,
-            input.request.emotionalDialogueContextId
-          ),
-          providerId,
-          input.options.model
-        ),
+        messages: normalizeMessagesForLocalModel(mappedMessages, providerId, input.options.model),
         temperature: input.options.temperature,
         max_tokens: input.options.maxTokens,
         stream: true,
@@ -834,7 +841,8 @@ function getProviderErrorType(error: unknown): ProviderErrorType {
       error.name === "provider_timeout" ||
       error.name === "provider_model_missing" ||
       error.name === "provider_incompatible_response" ||
-      error.name === "provider_network_error"
+      error.name === "provider_network_error" ||
+      error.name === "provider_context_budget_exceeded"
     ) {
       return error.name;
     }

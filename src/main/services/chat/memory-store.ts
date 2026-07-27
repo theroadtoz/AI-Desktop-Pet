@@ -393,7 +393,15 @@ export function createMemoryStore(options: { userDataPath?: string } = {}): Memo
         : [];
       const cards = enabledCards
         .slice(0, MEMORY_INJECTION_BUDGET)
-        .map(({ id, title, content, tags }) => ({ id, title, content, tags }));
+        .map(({ id, title, content, tags, importance, sourceType, managedByUser }) => ({
+          id,
+          title,
+          content,
+          tags,
+          importance,
+          sourceType,
+          managedByUser
+        }));
 
       if (cards.length > 0 || compactResult.changed) {
         const now = Date.now();

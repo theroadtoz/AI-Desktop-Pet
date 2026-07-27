@@ -76,7 +76,7 @@ export type MemorySummary = {
 
 export type MemoryInjection = {
   count: number;
-  cards: Array<Pick<MemoryCard, "id" | "title" | "content" | "tags">>;
+  cards: Array<Pick<MemoryCard, "id" | "title" | "content" | "tags" | "importance" | "sourceType" | "managedByUser">>;
 };
 
 export const MEMORY_STORAGE_VERSION = 4;

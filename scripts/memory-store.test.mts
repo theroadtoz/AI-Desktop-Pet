@@ -411,6 +411,35 @@ test("memory injection applies deterministic budget sorting when context crosses
   }
 });
 
+test("memory injection retains only the P2-87C selection metadata projection", async () => {
+  const userDataPath = await mkdtemp(join(tmpdir(), "desktop-pet-memory-"));
+
+  try {
+    const store = createMemoryStore({ userDataPath });
+    store.setEnabled(true);
+    const created = store.createCard(createDraft());
+    assert.equal(created.status, "created");
+
+    const injection = store.createInjection();
+    const [card] = injection.cards;
+
+    assert.deepEqual(Object.keys(card ?? {}).sort(), [
+      "content",
+      "id",
+      "importance",
+      "managedByUser",
+      "sourceType",
+      "tags",
+      "title"
+    ]);
+    assert.equal(card?.importance, "key");
+    assert.equal(card?.sourceType, "manual-chat");
+    assert.equal(card?.managedByUser, true);
+  } finally {
+    await rm(userDataPath, { recursive: true, force: true });
+  }
+});
+
 test("corrupted memory storage falls back without exposing cards", async () => {
   const userDataPath = await mkdtemp(join(tmpdir(), "desktop-pet-memory-"));
 

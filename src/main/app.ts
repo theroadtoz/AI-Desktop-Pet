@@ -137,7 +137,15 @@ import {
   type PetActionStateId
 } from "../shared/pet-action-state-machine";
 import { ChatEngineBusyError, createChatEngine, type ChatEngine } from "./services/chat/chat-engine";
-import { budgetChatContext } from "./services/chat/chat-context-budget";
+import {
+  budgetChatContext,
+  getFinalContextBudgetOptions,
+  measureMappedContextBudget,
+  reselectStructuredContextUntilWithinBudget,
+  selectStructuredContext,
+  summarizeOlderHistoryWithBundledRuntime
+} from "./services/chat/chat-context-budget";
+import { mapChatMessagesToOpenAICompatible } from "./services/chat/chat-message-mapper";
 import { createChatReplySustainTriggerController } from "./services/chat/chat-reply-sustain-trigger";
 import {
   createPetActionRuntimePolicy,
@@ -3956,7 +3964,7 @@ app.whenReady().then(async () => {
       });
     }
 
-    void resolveWebSearchForLatestMessage(submittedMessage.content).then((webSearchResolution) => {
+    void resolveWebSearchForLatestMessage(submittedMessage.content).then(async (webSearchResolution) => {
       const affectPresentation = affectTurnResolution.presentation;
       const dialogueStyleContext = {
         modeId: situationSnapshotForRequest.conversationContextId,
@@ -4013,24 +4021,97 @@ app.whenReady().then(async () => {
       });
 
       const webSearchFailurePrompt = getWebSearchFailurePrompt(webSearchResolution.errorType);
+      const promptTemplateProfile = providerId === "local-openai-compatible" ? "local-small-model" : "cloud-chat";
+      const finalBudgetOptions = getFinalContextBudgetOptions(providerId);
+      const mapStructuredContextBudget = (candidate: ReturnType<typeof selectStructuredContext>) => {
+        const candidateProviderMessages = [
+          ...budgetChatContext(candidate.messages).providerMessages,
+          ...(webSearchFailurePrompt ? [{ role: "system" as const, content: webSearchFailurePrompt }] : [])
+        ];
+        return measureMappedContextBudget(mapChatMessagesToOpenAICompatible(
+          candidateProviderMessages,
+          candidate.memoryContext,
+          dialogueStyleContext,
+          userProfileContext,
+          promptTemplateProfile,
+          runtimeContext,
+          candidate.webSearchContext,
+          affectPresentation?.dialogueContextId
+        ), finalBudgetOptions);
+      };
+      const structuredContext = reselectStructuredContextUntilWithinBudget({
+        messages: request.messages,
+        memoryContext,
+        ...(webSearchResolution.context ? { webSearchContext: webSearchResolution.context } : {}),
+        totalBudget: 900
+      }, (candidate) => mapStructuredContextBudget(candidate).withinBudget);
+      let selectedProviderMessages = [
+        ...budgetChatContext(structuredContext.messages).providerMessages,
+        ...(webSearchFailurePrompt ? [{ role: "system" as const, content: webSearchFailurePrompt }] : [])
+      ];
+      let mappedContextBudget = mapStructuredContextBudget(structuredContext);
+      const selectedMessageIds = new Set(structuredContext.messages.map((message) => message.id));
+      const omittedOlderHistory = request.messages.filter((message) => !selectedMessageIds.has(message.id));
+      const semanticSummary = omittedOlderHistory.length > 0
+        ? await summarizeOlderHistoryWithBundledRuntime({
+          history: omittedOlderHistory,
+          getTarget() {
+            const config = bundledLlamaCppProviderConfig;
+            if (
+              bundledLlamaCppRuntime?.getStatus().status !== "ready" ||
+              !config ||
+              config.localPresetId !== "embedded-llama-cpp"
+            ) {
+              return null;
+            }
+            return {
+              baseURL: config.baseURL,
+              model: config.model,
+              localPresetId: "embedded-llama-cpp"
+            };
+          }
+        })
+        : { status: "not_available" as const };
+      if (semanticSummary.status === "created") {
+        const withSemanticSummary = [
+          { role: "system" as const, content: `context_summary_kind=bundled_semantic_v1\n${semanticSummary.content}` },
+          ...selectedProviderMessages
+        ];
+        const measuredWithSemanticSummary = measureMappedContextBudget(mapChatMessagesToOpenAICompatible(
+          withSemanticSummary,
+          structuredContext.memoryContext,
+          dialogueStyleContext,
+          userProfileContext,
+          promptTemplateProfile,
+          runtimeContext,
+          structuredContext.webSearchContext,
+          affectPresentation?.dialogueContextId
+        ), finalBudgetOptions);
+        if (measuredWithSemanticSummary.withinBudget) {
+          selectedProviderMessages = withSemanticSummary;
+          mappedContextBudget = measuredWithSemanticSummary;
+        }
+      }
+      logTelemetry("chat_context_semantic_summary", {
+        status: semanticSummary.status,
+        withinBudget: mappedContextBudget.withinBudget
+      });
+      if (!mappedContextBudget.withinBudget) {
+        throw new Error("P2-87C context budget exceeded");
+      }
       const providerRequest: ChatRequest = {
         requestVersion: request.requestVersion,
         conversationId: request.conversationId,
         messages: request.messages,
-        providerMessages: [
-          ...contextBudget.providerMessages,
-          ...(webSearchFailurePrompt
-            ? [{ role: "system" as const, content: webSearchFailurePrompt }]
-            : [])
-        ],
+        providerMessages: selectedProviderMessages,
         contextBudget: contextBudget.summary,
-        memoryContext,
+        ...(structuredContext.memoryContext ? { memoryContext: structuredContext.memoryContext } : {}),
         dialogueStyleContext,
         ...(affectPresentation?.dialogueContextId
           ? { emotionalDialogueContextId: affectPresentation.dialogueContextId }
           : {}),
         runtimeContext,
-        ...(webSearchResolution.context ? { webSearchContext: webSearchResolution.context } : {}),
+        ...(structuredContext.webSearchContext ? { webSearchContext: structuredContext.webSearchContext } : {}),
         ...(webSearchResolution.errorType ? { webSearchErrorType: webSearchResolution.errorType } : {}),
         ...(userProfileContext ? { userProfileContext } : {})
       };
