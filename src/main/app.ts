@@ -206,6 +206,7 @@ import {
   resolveAffectDialoguePresentation,
   type AffectDialoguePresentationResolution
 } from "./services/affect/affect-dialogue-presentation-resolver";
+import { createDeterministicXitaInteractionCueShadowObservation } from "./services/affect/deterministic-xita-interaction-cue";
 import { createReplyCompletionAffectActionController } from "./services/affect/reply-completion-affect-action-controller";
 import { createReplyCompletionAffectRetryScheduler } from "./services/affect/reply-completion-affect-retry-scheduler";
 import {
@@ -4080,6 +4081,13 @@ app.whenReady().then(async () => {
           errorType: "failed"
         });
         return;
+      }
+      const shadowObservation = createDeterministicXitaInteractionCueShadowObservation(
+        submittedMessage.content,
+        currentDialogueAffectSettings.enabled
+      );
+      if (shadowObservation) {
+        logTelemetry("xita_interaction_cue_shadow_observed", shadowObservation);
       }
       affectTurnResolution = resolveDialogueAffectForMessage(
         request.conversationId,
