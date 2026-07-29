@@ -19,11 +19,12 @@ test("P2-85 reply action resolution selects one intent before dispatch", () => {
   assert.match(appSource, /resolveCompanionContextArbitration/);
 
   const resolver = functionBody("resolveDialogueReplyActionReason", "syncAutomaticPresenceLifecycle");
-  assert.match(resolver, /createCompanionContextArbitrationInput\("affect-action"\)/);
+  assert.match(resolver, /createCompanionContextArbitrationInput\("reply-completion-affect-action"\)/);
   assert.match(resolver, /createCompanionContextArbitrationInput\("reply-completion-action"\)/);
   assert.doesNotMatch(resolver, /requestPetActionTriggerWithResult|sendPetActionTrigger/);
-  assert.match(resolver, /resolution\?\.action/);
-  assert.match(resolver, /return resolution\.action\.reason/);
+  assert.match(resolver, /resolution\?\.replyAction === "suppressed"/);
+  assert.match(resolver, /resolution\?\.replyAction === "affect"/);
+  assert.match(resolver, /return resolution\.action\?\.reason \?\? null/);
   assert.match(resolver, /return replyDecision\.decision === "allow" \? "chat_reply_completed" : null/);
 
   const completionStart = appSource.indexOf("const shouldRequestReplyWarmSettle =");
@@ -39,13 +40,13 @@ test("P2-85 reply action resolution selects one intent before dispatch", () => {
   assert.match(completion, /attempt\.coordinatorAttempted/);
 });
 
-test("P2-85 keeps chat-visible generic reply behavior while affect remains policy-gated", () => {
+test("P2-85 keeps chat-visible reply behavior through distinct affect and generic policy gates", () => {
   const input = functionBody("createCompanionContextArbitrationInput", "resolveDialogueReplyActionReason");
   assert.match(input, /petRoleSnapshot\.chatOpen \|\| isChatVisible\(\)/);
   assert.match(input, /activeChatRequestVersion !== null \|\| Boolean\(chatEngine\?\.hasActiveStream\(\)\)/);
 
   const resolver = functionBody("resolveDialogueReplyActionReason", "syncAutomaticPresenceLifecycle");
-  assert.match(resolver, /createCompanionContextArbitrationInput\("affect-action"\)/);
+  assert.match(resolver, /createCompanionContextArbitrationInput\("reply-completion-affect-action"\)/);
   assert.match(resolver, /createCompanionContextArbitrationInput\("reply-completion-action"\)/);
 });
 

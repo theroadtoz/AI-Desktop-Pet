@@ -7,6 +7,8 @@ import {
 import type { PetMotionPresetId } from "../../shared/pet-motion-presets.ts";
 import type { CubismTemporaryAccessoryId } from "./live2d/cubism-accessory-controller";
 import type { PresenceModeId } from "../../shared/presence-mode";
+import { PET_INTERACTION_GLOBAL_COOLDOWN_MS } from "../../shared/pet-interaction-cooldown.ts";
+export { PET_INTERACTION_GLOBAL_COOLDOWN_MS } from "../../shared/pet-interaction-cooldown.ts";
 
 export const PET_INTERACTION_ACTION_TYPES = [
   "appearance",
@@ -99,7 +101,6 @@ type ClickActionSchedulerOptions = {
   clearTimeoutFn?: (handle: TimeoutHandle) => void;
 };
 
-export const PET_INTERACTION_GLOBAL_COOLDOWN_MS = 450;
 export const PET_INTERACTION_HEAD_PAT_COOLDOWN_MS = 20_000;
 export const PET_INTERACTION_STRONG_ACTION_COOLDOWN_MS = 4_500;
 export const PET_WINDOW_SHAKE_LIGHT_FEEDBACK_COOLDOWN_MS = 10_000;

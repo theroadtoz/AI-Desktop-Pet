@@ -543,7 +543,7 @@ test("ordinary pet action sends retain the 700ms per-reason throttle", async () 
   assert.notEqual(dispatchStart, -1);
   assert.notEqual(wrapperStart, -1);
   assert.notEqual(wrapperEnd, -1);
-  assert.match(source, /const PET_ACTION_TRIGGER_THROTTLE_MS = 700;/);
+  assert.match(source, /const PET_ACTION_TRIGGER_THROTTLE_MS = PET_ACTION_TRIGGER_SAME_REASON_THROTTLE_MS;/);
   assert.match(dispatchSource, /const lastTriggeredAt = lastPetActionTriggerAtByReason\[reason\] \?\? 0;/);
   assert.match(dispatchSource, /if \(now - lastTriggeredAt < PET_ACTION_TRIGGER_THROTTLE_MS\) \{/);
   assert.match(dispatchSource, /lastPetActionTriggerAtByReason\[reason\] = now;/);
@@ -595,7 +595,7 @@ test("completed chat streams clear the sustain trigger timer before done is sent
 
   assert.notEqual(completedIndex, -1);
   assert.notEqual(doneIndex, -1);
-  assert.match(source.slice(completedIndex, doneIndex), /if \(activeChatRequestVersion === request\.requestVersion\) \{\s*activeChatRequestVersion = null;\s*syncAutomaticPresenceLifecycle\(\);\s*clearChatReplySustainTimer\(\);\s*\}/);
+  assert.match(source.slice(completedIndex, doneIndex), /if \(activeChatRequestVersion === request\.requestVersion\) \{\s*activeChatRequestVersion = null;\s*latestCompletedChatRequestVersion = request\.requestVersion;\s*syncAutomaticPresenceLifecycle\(\);\s*clearChatReplySustainTimer\(\);\s*\}/);
 });
 
 test("slow chat streams trigger the fixed reply sustain reason while still streaming", async (t) => {

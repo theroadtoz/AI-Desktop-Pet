@@ -29,6 +29,13 @@ const CANDIDATE_ID = "search_citation_safe";
 const PROACTIVE_REASON = "state_search_cited";
 const CHAT_REASON = "chat_opened";
 const RENDERER_LOCAL_REASON = "click_head";
+const NATIVE_POINTER_RECEIPT_READER = "__p283cReadNativePointerReceipt";
+const SAFE_NATIVE_TELEMETRY_TYPES = [
+  "pet_interaction_action_started",
+  "pet_interaction_action_finished",
+  "pet_interaction_action_skipped"
+];
+const SAFE_NATIVE_TELEMETRY_REASONS = [RENDERER_LOCAL_REASON];
 const SAFE_CLEANUP_STAGES = new Set([
   "connection_close", "owned_process_snapshot", "native_cursor_neutralize",
   "owned_process_kill", "owned_process_wait", "hwnd_invalidation", "spawned_child_fallback",
@@ -38,6 +45,24 @@ const SAFE_CLEANUP_REASONS = new Set([
   "connection_close_failed", "owned_process_snapshot_failed", "native_cursor_neutralize_failed",
   "owned_process_kill_failed", "owned_process_wait_failed", "hwnd_invalidation_failed", "spawned_child_fallback_failed",
   "user_data_removal_failed"
+]);
+const SAFE_FINAL_ERROR_CODES = new Set([
+  ...SAFE_CLEANUP_REASONS,
+  "runner_total_timeout",
+  "safe_candidate_injection_rejected",
+  "telemetry_wait_timeout",
+  "appearance_terminal_timeout",
+  "native_pointer_observation_gate_missing",
+  "native_pointer_observation_unavailable",
+  "arbitration_observation_failed",
+  "proactive_candidate_terminal_before_action",
+  "native_input_owned_root_mismatch",
+  "windows_sendinput_evidence_invalid",
+  "native_window_target_unavailable",
+  "native_input_rejected",
+  "gpu_child_crash_before_first_frame",
+  "pet_preload_shared_module_unavailable",
+  "runner_error"
 ]);
 const RUNNER_TOTAL_TIMEOUT_MS = Math.min(
   120_000,
@@ -74,13 +99,26 @@ if (process.argv.includes("--test-early-capture-cleanup")) {
   }
 }
 
+if (process.argv.includes("--test-native-pointer-receipt-summary")) {
+  const result = runNativePointerReceiptSummarySelfTest();
+  process.stdout.write(`${JSON.stringify(result)}\n`);
+  process.exit(0);
+}
+
+if (process.argv.includes("--test-final-summary-projection")) {
+  const result = runFinalSummaryProjectionSelfTest();
+  process.stdout.write(`${JSON.stringify(result)}\n`);
+  process.exit(0);
+}
+
 const context = createRealUiRunContext({
   runName: "p2-83c-companion-presentation-arbitration",
   port: await selectAvailableCdpPort(),
   env: {
     AI_DESKTOP_PET_PROVIDER: "fake",
     AI_DESKTOP_PET_ACCEPTANCE_TELEMETRY: "1",
-    AI_DESKTOP_PET_P2_83A_SAFE_INJECTION: "1"
+    AI_DESKTOP_PET_P2_83A_SAFE_INJECTION: "1",
+    AI_DESKTOP_PET_P2_45_SAFE_ACTIVE_CONTEXT: "1"
   },
   tmpResiduePatterns: [/^p2-83c-companion-presentation-arbitration-/i]
 });
@@ -116,7 +154,6 @@ const observation = {
 };
 let failed = false;
 let errorCode = null;
-let failureDetail = null;
 let totalTimeout = null;
 
 try {
@@ -128,15 +165,11 @@ try {
 } catch (error) {
   captureCandidateDecisionObservation(context);
   refreshLifecycleObservations(context);
-  if (observation.stage === "renderer_local_action" && observation.nativeInput) {
-    const rendererEvents = readTelemetryEvents(context);
-    observation.nativeInput.rendererEventCountAfter = rendererEvents.length;
-    observation.nativeInput.rendererLifecycleEventCountAfter = rendererEvents.filter((event) =>
-      isActionLifecycleEvent(event) && event.payload?.reason === RENDERER_LOCAL_REASON).length;
+  if (observation.nativeInput) {
+    await captureNativeInputObservation(context, context.p283cPetPage);
   }
   failed = true;
   errorCode = classifyError(error, context);
-  failureDetail = error instanceof Error ? error.message : "runner_error";
 } finally {
   clearTimeout(totalTimeout);
   try {
@@ -145,18 +178,14 @@ try {
   } catch (error) {
     failed = true;
     errorCode ??= classifyError(error, context);
-    failureDetail ??= error instanceof Error ? error.message : "runner_error";
   }
 }
 
-process.stdout.write(`${JSON.stringify({
-  ok: !failed,
-  runtimePath: "production_electron",
-  evidenceBoundary: "closed_safe_fixture",
+process.stdout.write(`${JSON.stringify(createFinalRunnerSummary({
+  failed,
   errorCode,
-  failureDetail,
   observation
-}, null, 2)}\n`);
+}), null, 2)}\n`);
 if (failed) process.exitCode = 1;
 
 async function runScenario() {
@@ -174,6 +203,7 @@ async function runScenario() {
   await connectToElectron(context);
   observation.stage = "pet_window";
   const pet = await waitForWindow(context, "renderer/pet/index.html");
+  context.p283cPetPage = pet;
   observation.stage = "pet_preload";
   await waitFor(pet, "Boolean(window.petApi)");
   context.p283cNativeHwnd = await evaluate(pet, "window.petApi.getNativeWindowHandleForAcceptance()");
@@ -186,16 +216,12 @@ async function runScenario() {
 
   observation.stage = "renderer_local_action";
   const rendererLocalStart = readTelemetryEvents(context).length;
-  const nativeTarget = await readWindowsNativeHeadTarget(context, pet, rendererLocalStart);
-  observation.nativeInput = createNativeInputObservation(nativeTarget);
-  const nativePreflight = prepareWindowsNativeClick(context, nativeTarget);
-  observation.nativeInput.preflightScreenPoint = nativePreflight.screenPoint;
-  observation.nativeInput.preflightVirtualScreen = nativePreflight.virtualScreen;
-  observation.nativeInput.preflightNeutralPoint = nativePreflight.chosenNeutralPoint;
-  const nativeResult = dispatchWindowsNativeClick(context, nativeTarget);
-  observation.nativeInput.screenPoint = nativeResult.screenPoint;
-  observation.nativeInput.virtualScreen = nativeResult.virtualScreen;
-  observation.nativeInput.chosenNeutralPoint = nativeResult.chosenNeutralPoint;
+  context.p283cRendererLocalStart = rendererLocalStart;
+  await installNativePointerReceiptObservation(context, pet);
+  const nativeTarget = await readWindowsNativeHeadTarget(context, pet);
+  observation.nativeInput = createEmptyNativeInputSummary();
+  prepareWindowsNativeClick(context, nativeTarget);
+  dispatchWindowsNativeClick(context, nativeTarget);
   const rendererLocalStarted = await waitForTelemetryAfter(context, rendererLocalStart, (event) =>
     event.type === "pet_interaction_action_started" &&
     event.payload?.reason === RENDERER_LOCAL_REASON &&
@@ -211,6 +237,7 @@ async function runScenario() {
     event.payload?.actionInstanceId === rendererLocalActionInstanceId, 10_000);
   observation.rendererLocalTerminal = true;
   observation.rendererLocalLifecycleObserved = true;
+  await captureNativeInputObservation(context, pet);
 
   observation.stage = "local_gate_release";
   // Local busy clears on the terminal telemetry; the renderer cooldown lasts 450 ms.
@@ -422,7 +449,276 @@ async function selectAvailableCdpPort() {
   });
 }
 
-async function readWindowsNativeHeadTarget(context, pet, rendererEventCountBefore) {
+async function installNativePointerReceiptObservation(context, pet) {
+  const env = context.env ?? {};
+  const allAcceptanceGatesEnabled =
+    env.AI_DESKTOP_PET_ACCEPTANCE_TELEMETRY === "1" &&
+    env.AI_DESKTOP_PET_P2_83A_SAFE_INJECTION === "1" &&
+    env.AI_DESKTOP_PET_P2_45_SAFE_ACTIVE_CONTEXT === "1";
+  if (!allAcceptanceGatesEnabled) throw new Error("native_pointer_observation_gate_missing");
+  const installed = await evaluate(pet, `(() => {
+    const canvas = document.querySelector("#pet-canvas");
+    if (!canvas) return false;
+    let pointerDownReceiptCount = 0;
+    let pointerUpReceiptCount = 0;
+    Object.defineProperty(window, ${JSON.stringify(NATIVE_POINTER_RECEIPT_READER)}, {
+      configurable: true,
+      writable: false,
+      value: () => ({ pointerDownReceiptCount, pointerUpReceiptCount })
+    });
+    canvas.addEventListener("pointerdown", () => {
+      pointerDownReceiptCount += 1;
+    }, { capture: true });
+    canvas.addEventListener("pointerup", () => {
+      pointerUpReceiptCount += 1;
+    }, { capture: true });
+    return true;
+  })()`);
+  if (installed !== true) throw new Error("native_pointer_observation_unavailable");
+}
+
+async function captureNativeInputObservation(context, pet) {
+  if (!observation.nativeInput) return;
+  let receipt = { pointerDownReceiptCount: 0, pointerUpReceiptCount: 0 };
+  if (pet) {
+    try {
+      const value = await evaluate(
+        pet,
+        `window[${JSON.stringify(NATIVE_POINTER_RECEIPT_READER)}]?.() ?? null`
+      );
+      receipt = {
+        pointerDownReceiptCount: normalizeSafeCount(value?.pointerDownReceiptCount),
+        pointerUpReceiptCount: normalizeSafeCount(value?.pointerUpReceiptCount)
+      };
+    } catch {
+      // A closed renderer is safely represented as no receipt.
+    }
+  }
+  const startIndex = context.p283cRendererLocalStart;
+  const rendererEvents = readTelemetryEvents(context);
+  const clickEvents = rendererEvents.slice(Number.isSafeInteger(startIndex) ? startIndex : 0);
+  const summary = summarizeNativeInputReceipt(receipt, clickEvents);
+  observation.nativeInput = projectNativeInputSummary(summary);
+}
+
+function summarizeNativeInputReceipt(receipt, events) {
+  const pointerDownReceiptCount = normalizeSafeCount(receipt?.pointerDownReceiptCount);
+  const pointerUpReceiptCount = normalizeSafeCount(receipt?.pointerUpReceiptCount);
+  const safeTelemetryTypeCounts = Object.fromEntries(
+    SAFE_NATIVE_TELEMETRY_TYPES.map((type) => [
+      type,
+      events.filter((event) => event?.type === type).length
+    ])
+  );
+  const safeTelemetryReasonCounts = Object.fromEntries(
+    SAFE_NATIVE_TELEMETRY_REASONS.map((reason) => [
+      reason,
+      events.filter((event) =>
+        SAFE_NATIVE_TELEMETRY_TYPES.includes(event?.type) &&
+        event?.payload?.reason === reason
+      ).length
+    ])
+  );
+  const rendererLifecycleEventCountAfter = safeTelemetryReasonCounts[RENDERER_LOCAL_REASON];
+  const rendererReceiptObserved = pointerDownReceiptCount > 0 || pointerUpReceiptCount > 0;
+  const inputDeliveryClassification = rendererLifecycleEventCountAfter > 0
+    ? "renderer_lifecycle_observed"
+    : rendererReceiptObserved
+      ? "renderer_received_no_lifecycle"
+      : "os_input_not_received_by_renderer";
+  return {
+    pointerDownReceived: pointerDownReceiptCount > 0,
+    pointerUpReceived: pointerUpReceiptCount > 0,
+    pointerDownReceiptCount,
+    pointerUpReceiptCount,
+    rendererReceiptObserved,
+    rendererLifecycleEventCountAfter,
+    safeTelemetryTypeCounts,
+    safeTelemetryReasonCounts,
+    inputDeliveryClassification
+  };
+}
+
+function normalizeSafeCount(value) {
+  return Number.isSafeInteger(value) && value >= 0 ? Math.min(value, 1_000_000) : 0;
+}
+
+function projectNativeInputSummary(value) {
+  const inputDeliveryClassification = [
+    "os_input_not_received_by_renderer",
+    "renderer_received_no_lifecycle",
+    "renderer_lifecycle_observed"
+  ].includes(value?.inputDeliveryClassification)
+    ? value.inputDeliveryClassification
+    : "os_input_not_received_by_renderer";
+  return {
+    pointerDownReceived: value?.pointerDownReceived === true,
+    pointerUpReceived: value?.pointerUpReceived === true,
+    pointerDownReceiptCount: normalizeSafeCount(value?.pointerDownReceiptCount),
+    pointerUpReceiptCount: normalizeSafeCount(value?.pointerUpReceiptCount),
+    rendererReceiptObserved: value?.rendererReceiptObserved === true,
+    safeTelemetryTypeCounts: {
+      pet_interaction_action_started: normalizeSafeCount(
+        value?.safeTelemetryTypeCounts?.pet_interaction_action_started
+      ),
+      pet_interaction_action_finished: normalizeSafeCount(
+        value?.safeTelemetryTypeCounts?.pet_interaction_action_finished
+      ),
+      pet_interaction_action_skipped: normalizeSafeCount(
+        value?.safeTelemetryTypeCounts?.pet_interaction_action_skipped
+      )
+    },
+    safeTelemetryReasonCounts: {
+      click_head: normalizeSafeCount(value?.safeTelemetryReasonCounts?.click_head)
+    },
+    inputDeliveryClassification
+  };
+}
+
+function createFinalRunnerSummary({ failed, errorCode, observation: source }) {
+  return {
+    ok: failed !== true,
+    runtimePath: "production_electron",
+    evidenceBoundary: "closed_safe_fixture",
+    errorCode: errorCode === null
+      ? null
+      : SAFE_FINAL_ERROR_CODES.has(errorCode)
+        ? errorCode
+        : "runner_error",
+    observation: {
+      rendererLocalStarted: source?.rendererLocalStarted === true,
+      rendererLocalTerminal: source?.rendererLocalTerminal === true,
+      rendererLocalActionInstanceSafe: source?.rendererLocalActionInstanceSafe === true,
+      rendererLocalLifecycleObserved: source?.rendererLocalLifecycleObserved === true,
+      actionFirstStarted: source?.actionFirstStarted === true,
+      proactiveRequestIdSafe: source?.proactiveRequestIdSafe === true,
+      proactiveBubbleShown: source?.proactiveBubbleShown === true,
+      proactiveTerminalBeforeChatStarted: source?.proactiveTerminalBeforeChatStarted === true,
+      proactiveSingleTerminal: source?.proactiveSingleTerminal === true,
+      noProactiveRestartAfterChat: source?.noProactiveRestartAfterChat === true,
+      noSecondProactiveTerminalAfterChat: source?.noSecondProactiveTerminalAfterChat === true,
+      chatOpenedStarted: source?.chatOpenedStarted === true,
+      chatRequestIdSafe: source?.chatRequestIdSafe === true,
+      requestIdsDiffer: source?.requestIdsDiffer === true,
+      bubbleHiddenAfterChat: source?.bubbleHiddenAfterChat === true,
+      noConcurrentActiveRequests: source?.noConcurrentActiveRequests === true,
+      proactiveLifecycleCount: normalizeSafeCount(source?.proactiveLifecycleCount),
+      chatLifecycleCount: normalizeSafeCount(source?.chatLifecycleCount),
+      candidateInjectionAccepted: source?.candidateInjectionAccepted === true,
+      candidateDecisionStatus: typeof source?.candidateDecisionStatus === "string"
+        ? source.candidateDecisionStatus
+        : null,
+      candidateSkipReason: typeof source?.candidateSkipReason === "string"
+        ? source.candidateSkipReason
+        : null,
+      startupPresentationLifecycle: typeof source?.startupPresentationLifecycle === "string"
+        ? source.startupPresentationLifecycle
+        : null,
+      chatTerminalObserved: source?.chatTerminalObserved === true,
+      nativeInput: source?.nativeInput ? projectNativeInputSummary(source.nativeInput) : null,
+      stage: typeof source?.stage === "string" ? source.stage : "startup",
+      cleanupCompleted: source?.cleanupCompleted === true
+    }
+  };
+}
+
+function runNativePointerReceiptSummarySelfTest() {
+  const noReceipt = summarizeNativeInputReceipt(
+    { pointerDownReceiptCount: 0, pointerUpReceiptCount: 0 },
+    []
+  );
+  const rendererReceipt = summarizeNativeInputReceipt(
+    { pointerDownReceiptCount: 1, pointerUpReceiptCount: 1 },
+    []
+  );
+  const lifecycle = summarizeNativeInputReceipt(
+    { pointerDownReceiptCount: 1, pointerUpReceiptCount: 1 },
+    [{
+      type: "pet_interaction_action_started",
+      payload: { reason: RENDERER_LOCAL_REASON }
+    }]
+  );
+  return {
+    ok: true,
+    mode: "native-pointer-receipt-summary",
+    outcomes: [
+      noReceipt.inputDeliveryClassification,
+      rendererReceipt.inputDeliveryClassification,
+      lifecycle.inputDeliveryClassification
+    ],
+    lifecycleTypeCount: lifecycle.safeTelemetryTypeCounts.pet_interaction_action_started,
+    lifecycleReasonCount: lifecycle.safeTelemetryReasonCounts[RENDERER_LOCAL_REASON],
+    inputAttempted: false
+  };
+}
+
+function runFinalSummaryProjectionSelfTest() {
+  const stderrSentinel = "RAW_STDERR_SENTINEL:C:\\private\\window-target";
+  const forbiddenNativeDetail = {
+    expectedHwnd: stderrSentinel,
+    ownerPid: 999,
+    clientPoint: { x: 1, y: 2 },
+    screenPoint: "1,2",
+    windowRect: { left: 1 },
+    canvasRect: { left: 1 },
+    preflightVirtualScreen: { left: 1 },
+    chosenNeutralPoint: { x: 1, y: 2 },
+    rendererEventCountBefore: 9,
+    rendererEventCountAfter: 10,
+    sendInputDispatched: true,
+    stderr: stderrSentinel
+  };
+  const lifecycle = summarizeNativeInputReceipt(
+    { pointerDownReceiptCount: 1, pointerUpReceiptCount: 1 },
+    [{
+      type: "pet_interaction_action_started",
+      payload: { reason: RENDERER_LOCAL_REASON }
+    }]
+  );
+  const receiptNoLifecycle = summarizeNativeInputReceipt(
+    { pointerDownReceiptCount: 1, pointerUpReceiptCount: 1 },
+    []
+  );
+  const noReceipt = summarizeNativeInputReceipt(
+    { pointerDownReceiptCount: 0, pointerUpReceiptCount: 0 },
+    []
+  );
+  return {
+    ok: true,
+    mode: "final-summary-projection",
+    inputAttempted: false,
+    passLifecycle: createFinalRunnerSummary({
+      failed: false,
+      errorCode: null,
+      observation: {
+        nativeInput: { ...lifecycle, ...forbiddenNativeDetail },
+        stage: "assertions",
+        cleanupCompleted: true
+      }
+    }),
+    receiptNoLifecycle: createFinalRunnerSummary({
+      failed: true,
+      errorCode: "telemetry_wait_timeout",
+      observation: {
+        nativeInput: { ...receiptNoLifecycle, ...forbiddenNativeDetail },
+        stage: "renderer_local_action",
+        cleanupCompleted: true
+      }
+    }),
+    sendInputFailure: createFinalRunnerSummary({
+      failed: true,
+      errorCode: "native_input_rejected",
+      rawFailureMessage: stderrSentinel,
+      observation: {
+        nativeInput: { ...noReceipt, ...forbiddenNativeDetail },
+        stage: "renderer_local_action",
+        cleanupCompleted: true
+      }
+    })
+  };
+}
+
+async function readWindowsNativeHeadTarget(context, pet) {
   const point = await evaluate(pet, `
     (() => {
       const canvas = document.querySelector("#pet-canvas");
@@ -474,7 +770,7 @@ async function readWindowsNativeHeadTarget(context, pet, rendererEventCountBefor
     !Number.isSafeInteger(expectedPid) || expectedPid <= 0) {
     throw new Error("native_window_target_unavailable");
   }
-  return { ...point, expectedHwnd, expectedPid, rendererEventCountBefore };
+  return { ...point, expectedHwnd, expectedPid };
 }
 
 function prepareWindowsNativeClick(context, target) {
@@ -516,8 +812,7 @@ function runWindowsNativeMouse(context, target, extraArgs) {
     timeout: 10_000
   });
   if (result.status !== 0) {
-    const safeFailure = String(result.stderr || "unknown").trim().slice(0, 180);
-    throw new Error(`windows_sendinput_failed: ${safeFailure}`);
+    throw new Error("windows_sendinput_failed");
   }
   const output = JSON.parse(result.stdout);
   if (output?.ok !== true || typeof output.screenPoint !== "string") {
@@ -694,23 +989,20 @@ function parseIntegerTuple(value, length) {
   return items.length === length && items.every(Number.isSafeInteger) ? items : null;
 }
 
-function createNativeInputObservation(target) {
+function createEmptyNativeInputSummary() {
   return {
-    clientPoint: { x: target.clientX, y: target.clientY },
-    screenPointFromWindowRect: target.screenPointFromWindowRect,
-    preflightScreenPoint: null,
-    preflightVirtualScreen: null,
-    preflightNeutralPoint: null,
-    screenPoint: null,
-    virtualScreen: null,
-    chosenNeutralPoint: null,
-    expectedHwnd: target.expectedHwnd,
-    ownerPid: target.expectedPid,
-    windowRect: target.windowRect,
-    canvasRect: target.canvasRect,
-    rendererEventCountBefore: target.rendererEventCountBefore,
-    rendererEventCountAfter: null,
-    rendererLifecycleEventCountAfter: null
+    pointerDownReceived: false,
+    pointerUpReceived: false,
+    pointerDownReceiptCount: 0,
+    pointerUpReceiptCount: 0,
+    rendererReceiptObserved: false,
+    safeTelemetryTypeCounts: Object.fromEntries(
+      SAFE_NATIVE_TELEMETRY_TYPES.map((type) => [type, 0])
+    ),
+    safeTelemetryReasonCounts: Object.fromEntries(
+      SAFE_NATIVE_TELEMETRY_REASONS.map((reason) => [reason, 0])
+    ),
+    inputDeliveryClassification: "os_input_not_received_by_renderer"
   };
 }
 
@@ -919,10 +1211,11 @@ function classifyError(error, context) {
     return "pet_preload_shared_module_unavailable";
   }
   const message = error instanceof Error ? error.message : "runner_error";
-  if (message.startsWith("windows_sendinput_failed:")) return "native_input_rejected";
+  if (message === "windows_sendinput_failed") return "native_input_rejected";
   return [
     "runner_total_timeout", "safe_candidate_injection_rejected", "telemetry_wait_timeout",
     "appearance_terminal_timeout",
+    "native_pointer_observation_gate_missing", "native_pointer_observation_unavailable",
     "arbitration_observation_failed", "proactive_candidate_terminal_before_action",
     "native_input_owned_root_mismatch",
     "windows_sendinput_evidence_invalid", "native_window_target_unavailable"

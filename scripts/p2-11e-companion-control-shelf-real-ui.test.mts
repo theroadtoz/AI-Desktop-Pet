@@ -58,6 +58,17 @@ test("p2-11e runner preserves privacy, action echo, and other shelf gates", () =
   }
 });
 
+test("p2-11e keeps software WebGL acceptance flags local to this runner", () => {
+  const contextIndex = runnerSource.indexOf("const context = createRealUiRunContext(");
+  const flagsIndex = runnerSource.indexOf("context.electronArgs = [", contextIndex);
+  const startIndex = runnerSource.indexOf("startElectron(context)", contextIndex);
+  assert.ok(contextIndex >= 0);
+  assert.ok(flagsIndex > contextIndex);
+  assert.ok(startIndex > flagsIndex);
+  assert.match(runnerSource, /"--use-angle=swiftshader"/u);
+  assert.match(runnerSource, /"--enable-unsafe-swiftshader"/u);
+});
+
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 }

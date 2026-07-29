@@ -131,6 +131,9 @@ import {
   type PetActionTriggerReason
 } from "../shared/pet-action-trigger";
 import {
+  PET_ACTION_TRIGGER_SAME_REASON_THROTTLE_MS
+} from "../shared/pet-interaction-cooldown";
+import {
   getPetActionStateActionType,
   getPetActionStateTriggerReason,
   selectPetActionStateForModeChange,
@@ -203,6 +206,8 @@ import {
   resolveAffectDialoguePresentation,
   type AffectDialoguePresentationResolution
 } from "./services/affect/affect-dialogue-presentation-resolver";
+import { createReplyCompletionAffectActionController } from "./services/affect/reply-completion-affect-action-controller";
+import { createReplyCompletionAffectRetryScheduler } from "./services/affect/reply-completion-affect-retry-scheduler";
 import {
   resolveCompanionContextArbitration,
   type CompanionContextAffectBand,
@@ -348,6 +353,7 @@ let isChatInteractionActive = false;
 let petRoleSnapshot: PetRoleSnapshot = INITIAL_PET_ROLE_SNAPSHOT;
 let currentPetPresentationIntent: PetPresentationIntent = createPetPresentationIntent(petRoleSnapshot);
 let activeChatRequestVersion: number | null = null;
+let latestCompletedChatRequestVersion: number | null = null;
 let currentDialogueModeId: DialogueModeId = "default";
 let currentPresenceModeId: PresenceModeId = "default";
 let currentProactiveCompanionSettings: ProactiveCompanionSettings = DEFAULT_PROACTIVE_COMPANION_SETTINGS;
@@ -362,6 +368,11 @@ let pendingModeActionStateTriggerTimer: NodeJS.Timeout | null = null;
 let startupProactiveSpeechBubbleTimer: NodeJS.Timeout | null = null;
 let idleProactiveSpeechBubbleTimer: NodeJS.Timeout | null = null;
 let hasHandledStartupProactiveSpeechBubble = false;
+
+function cancelReplyCompletionAffectAction(): void {
+  replyCompletionAffectActionController.cancel();
+  replyCompletionAffectRetryScheduler.cancel();
+}
 let proactiveSpeechBubbleTick = 0;
 let proactiveSpeechBubbleVisibleUntil = 0;
 let hasPetFirstFrame = false;
@@ -380,6 +391,8 @@ let petActionDispatchCoordinator: PetActionDispatchCoordinator | null = createPe
   now: () => Date.now(),
   createRequestId: () => randomUUID().replaceAll("-", "")
 });
+const replyCompletionAffectActionController = createReplyCompletionAffectActionController();
+const replyCompletionAffectRetryScheduler = createReplyCompletionAffectRetryScheduler();
 
 type SourcedLowFrequencyCompanionEvent = {
   eventId: LowFrequencyCompanionEventId;
@@ -395,7 +408,7 @@ const STARTUP_LOCAL_FALLBACK_PROVIDER_CONFIG: ProviderConfig = {
   displayName: "本地即时对话"
 };
 const PET_WINDOW_TITLE = "Desktop Pet";
-const PET_ACTION_TRIGGER_THROTTLE_MS = 700;
+const PET_ACTION_TRIGGER_THROTTLE_MS = PET_ACTION_TRIGGER_SAME_REASON_THROTTLE_MS;
 const XITA_AFFECT_TICK_INTERVAL_MS = 60_000;
 const MAX_USER_AFFECT_CONVERSATIONS = 32;
 const PET_MODE_ACTION_STATE_TRIGGER_DELAY_MS = 2_000;
@@ -411,6 +424,8 @@ const isP284AcceptanceObservationEnabled = isAcceptanceTelemetryEnabled &&
   process.env.AI_DESKTOP_PET_P2_84_SAFE_OBSERVATION === "1";
 const isP284AcceptanceFixtureEnabled = isP284AcceptanceObservationEnabled &&
   process.env.AI_DESKTOP_PET_P2_84_SAFE_FIXTURE === "1";
+const isP288bAcceptanceFixtureEnabled = isAcceptanceTelemetryEnabled &&
+  process.env.AI_DESKTOP_PET_P2_88B_SAFE_FIXTURE === "1";
 const isP285AcceptanceObservationEnabled = isAcceptanceTelemetryEnabled &&
   process.env.AI_DESKTOP_PET_P2_85_SAFE_OBSERVATION === "1";
 const isP285AcceptanceFixtureEnabled = isP285AcceptanceObservationEnabled &&
@@ -419,6 +434,7 @@ const isP285HardwareAccelerationDisabledForAcceptance = isP285AcceptanceFixtureE
   process.env.AI_DESKTOP_PET_P2_85_DISABLE_HARDWARE_ACCELERATION === "1";
 let p285AcceptanceScenarioController: P285AcceptanceScenarioController | null = null;
 const P2_84_ACCEPTANCE_MEDIUM_LOW_FIXTURE = "__p2_84_medium_low_fixture__，以后回复短一点。";
+const P2_88B_ACCEPTANCE_MEDIUM_HAPPY_FIXTURE = "__p2_88b_medium_happy_fixture__，以后回复短一点。";
 const isP245AcceptanceSafeActive = isAcceptanceTelemetryEnabled &&
   process.env.AI_DESKTOP_PET_P2_45_SAFE_ACTIVE_CONTEXT === "1";
 const p283aAcceptanceScenario = isP283aAcceptanceInjectionOnly
@@ -1090,6 +1106,8 @@ function logP284AcceptanceObservation(
 
 function resetDialogueAffectToCalm(): void {
   cancelUserAffectClassification();
+  cancelReplyCompletionAffectAction();
+  latestCompletedChatRequestVersion = null;
   userAffectTrackerRegistry?.clear();
   xitaAffectCoordinator?.applyUserAffect(
     createUnknownUserAffect(Date.now(), "user-correction")
@@ -1138,6 +1156,18 @@ function resolveDialogueAffectForMessage(
         needsInference: false,
         correctedKinds: []
       }
+    : isP288bAcceptanceFixtureEnabled &&
+      text === P2_88B_ACCEPTANCE_MEDIUM_HAPPY_FIXTURE
+      ? {
+          affect: {
+            kind: "positive",
+            confidence: "medium",
+            source: "conversational-inference",
+            observedAtMs: Date.now()
+          } as const,
+          needsInference: false,
+          correctedKinds: []
+        }
     : tracker.perceiveText(text);
   if (!decision.needsInference) {
     const snapshot = coordinator.applyUserAffect(decision.affect);
@@ -1295,13 +1325,33 @@ function resolveDialogueReplyActionReason(
 ): PetActionTriggerReason | null {
   if (!shouldRequestReplyWarmSettle) return null;
 
-  if (resolution?.action) {
-    const affectDecision = resolveCompanionContextArbitration(
+  if (resolution?.replyAction === "suppressed") {
+    return null;
+  }
+
+  if (resolution?.replyAction === "affect") {
+    const legacyDecision = resolveCompanionContextArbitration(
       createCompanionContextArbitrationInput("affect-action")
     );
-    if (affectDecision.decision === "allow") {
-      return resolution.action.reason;
+    const affectDecision = legacyDecision.decision === "suppress" &&
+      legacyDecision.reason === "affect_action_chat_visible"
+      ? resolveCompanionContextArbitration(
+        createCompanionContextArbitrationInput("reply-completion-affect-action")
+      )
+      : legacyDecision;
+    if (isP288bAcceptanceFixtureEnabled) {
+      const dispatchState = petActionDispatchCoordinator?.getState();
+      logTelemetry("p2_88b_affect_reply_action_gate", {
+        decision: affectDecision.decision,
+        reason: affectDecision.reason,
+        activeMainReason: dispatchState?.activeMainRequest?.reason ?? null,
+        localBusyReason: dispatchState?.localBusyReason ?? null
+      });
     }
+    if (affectDecision.decision === "allow") {
+      return resolution.action?.reason ?? null;
+    }
+    return null;
   }
 
   const replyDecision = resolveCompanionContextArbitration(
@@ -1327,6 +1377,112 @@ function syncAutomaticPresenceLifecycle(): AutomaticSituationSnapshot | null {
     quietRequested: false,
     localTimeBand: getRuntimeProactiveSpeechBubbleTimeBand(),
     systemIdleMs
+  });
+}
+
+function deferReplyCompletionAffectActionIfEligible(
+  resolution: AffectDialoguePresentationResolution | null,
+  shouldRequestReplyWarmSettle: boolean,
+  requestVersion: number
+): void {
+  if (
+    !shouldRequestReplyWarmSettle ||
+    resolution?.replyAction !== "affect" ||
+    resolution.action?.reason !== "state_idle"
+  ) {
+    return;
+  }
+
+  const legacyDecision = resolveCompanionContextArbitration(
+    createCompanionContextArbitrationInput("affect-action")
+  );
+  const decision = legacyDecision.decision === "suppress" &&
+    legacyDecision.reason === "affect_action_chat_visible"
+    ? resolveCompanionContextArbitration(
+      createCompanionContextArbitrationInput("reply-completion-affect-action")
+    )
+    : legacyDecision;
+  const activeRequest = petActionDispatchCoordinator?.getState().activeMainRequest;
+  if (
+    decision.decision === "suppress" &&
+    decision.reason === "presentation_busy" &&
+    (activeRequest?.reason === "chat_reply_waiting" || activeRequest?.reason === "state_local_model_busy")
+  ) {
+    replyCompletionAffectActionController.defer({
+      blockerRequestId: activeRequest.requestId,
+      blockerReason: activeRequest.reason,
+      requestVersion,
+      reason: "state_idle"
+    });
+  }
+}
+
+function dispatchDeferredReplyCompletionAffectAction(input: {
+  lifecycleResult: "main_started" | "main_terminal" | "local_started" | "local_terminal" | "ignored";
+  requestId: string | undefined;
+  reason: string;
+}): void {
+  const deferred = replyCompletionAffectActionController.consumeAfterLifecycle(input);
+  const affect = xitaAffectCoordinator?.getSnapshot();
+  if (
+    deferred === null ||
+    deferred.requestVersion !== latestCompletedChatRequestVersion ||
+    activeChatRequestVersion !== null ||
+    chatEngine?.hasActiveStream() ||
+    !currentDialogueAffectSettings.enabled ||
+    affect?.state !== "happy" ||
+    affect.intensity !== "medium"
+  ) {
+    return;
+  }
+
+  const legacyDecision = resolveCompanionContextArbitration(
+    createCompanionContextArbitrationInput("affect-action")
+  );
+  const decision = legacyDecision.decision === "suppress" &&
+    legacyDecision.reason === "affect_action_chat_visible"
+    ? resolveCompanionContextArbitration(
+      createCompanionContextArbitrationInput("reply-completion-affect-action")
+    )
+    : legacyDecision;
+  if (decision.decision !== "allow") {
+    return;
+  }
+
+  const attempt = requestPetActionTriggerWithResult(deferred.reason);
+  if (attempt.coordinatorAttempted) {
+    logDialogueAffectActionDispatch(attempt.result);
+    if (attempt.result.accepted) {
+      replyCompletionAffectActionController.trackAccepted({
+        requestId: attempt.result.requestId,
+        requestVersion: deferred.requestVersion,
+        reason: "state_idle"
+      });
+    }
+  }
+}
+
+function scheduleReplyCompletionAffectGlobalCooldownRetry(input: {
+  requestId: string;
+  requestVersion: number;
+  reason: "state_idle";
+}): void {
+  replyCompletionAffectRetryScheduler.schedule(() => {
+    const affect = xitaAffectCoordinator?.getSnapshot();
+    if (
+      latestCompletedChatRequestVersion !== input.requestVersion ||
+      activeChatRequestVersion !== null ||
+      chatEngine?.hasActiveStream() ||
+      !currentDialogueAffectSettings.enabled ||
+      affect?.state !== "happy" ||
+      affect.intensity !== "medium"
+    ) return;
+    const legacy = resolveCompanionContextArbitration(createCompanionContextArbitrationInput("affect-action"));
+    if (legacy.decision !== "suppress" || legacy.reason !== "affect_action_chat_visible") return;
+    const reply = resolveCompanionContextArbitration(createCompanionContextArbitrationInput("reply-completion-affect-action"));
+    if (reply.decision !== "allow") return;
+    const attempt = requestPetActionTriggerWithResult(input.reason);
+    if (attempt.coordinatorAttempted) logDialogueAffectActionDispatch(attempt.result);
   });
 }
 
@@ -2601,6 +2757,8 @@ function rebuildPetWindow(recoverySource?: string): void {
   hasPetFirstFrame = false;
   p285AcceptanceScenarioController?.dispose();
   petActionDispatchCoordinator?.reset();
+  cancelReplyCompletionAffectAction();
+  latestCompletedChatRequestVersion = null;
   markProactiveSpeechBubbleHidden();
   proactiveBubbleCoordinator?.clear();
 
@@ -2915,6 +3073,8 @@ app.whenReady().then(async () => {
   setTimeout(warmUpWebSearchMcpConnection, 1_500);
   function handleChatWindowInactive(): void {
     isChatInteractionActive = false;
+    cancelReplyCompletionAffectAction();
+    latestCompletedChatRequestVersion = null;
     if (activeChatRequestVersion !== null) {
       chatEngine?.abortActiveStream();
       transitionPetRole({ type: "request:cancelled", requestVersion: activeChatRequestVersion });
@@ -3029,6 +3189,8 @@ app.whenReady().then(async () => {
         await new Promise<void>((resolve) => setImmediate(resolve));
         isChatInteractionActive = false;
         petActionDispatchCoordinator?.cancelActive();
+        cancelReplyCompletionAffectAction();
+        latestCompletedChatRequestVersion = null;
         proactiveBubbleCoordinator?.clear();
         refreshProactiveBubbleRuntimeGates();
         return !isChatVisible() &&
@@ -3674,6 +3836,21 @@ app.whenReady().then(async () => {
           }
         ) ?? "ignored"
         : "ignored";
+      dispatchDeferredReplyCompletionAffectAction({
+        lifecycleResult,
+        requestId: lifecycleRequestId,
+        reason: typeof actionReason === "string" ? actionReason : ""
+      });
+      if (petTelemetryEvent.type === "pet_interaction_action_skipped") {
+        const retry = replyCompletionAffectActionController.consumeGlobalCooldownSkip({
+          requestId: lifecycleRequestId,
+          reason: typeof actionReason === "string" ? actionReason : "",
+          skipReason: typeof petTelemetryEvent.payload?.skipReason === "string"
+            ? petTelemetryEvent.payload.skipReason
+            : undefined
+        });
+        if (retry) scheduleReplyCompletionAffectGlobalCooldownRetry(retry);
+      }
       p285AcceptanceScenarioController?.observeRendererActionLifecycle(
         lifecycleStatus,
         typeof actionReason === "string" ? actionReason : "",
@@ -3864,6 +4041,8 @@ app.whenReady().then(async () => {
     if (!submittedMessage || !transitionPetRole({ type: "request:started", requestVersion: request.requestVersion })) {
       return;
     }
+    cancelReplyCompletionAffectAction();
+    latestCompletedChatRequestVersion = null;
     const classificationIdentity = userAffectClassificationRunner?.beginRequest(
       request.requestVersion,
       request.conversationId
@@ -4198,6 +4377,7 @@ app.whenReady().then(async () => {
         transitionPetRole({ type: "request:failed", requestVersion: request.requestVersion });
         if (activeChatRequestVersion === request.requestVersion) {
           activeChatRequestVersion = null;
+          latestCompletedChatRequestVersion = null;
           syncAutomaticPresenceLifecycle();
         }
         event.sender.send("chat:stream-error", {
@@ -4221,6 +4401,7 @@ app.whenReady().then(async () => {
       });
       if (activeChatRequestVersion === request.requestVersion) {
         activeChatRequestVersion = null;
+        latestCompletedChatRequestVersion = request.requestVersion;
         syncAutomaticPresenceLifecycle();
         clearChatReplySustainTimer();
       }
@@ -4240,12 +4421,30 @@ app.whenReady().then(async () => {
       if (dialogueReplyActionReason) {
         const attempt = requestPetActionTriggerWithResult(dialogueReplyActionReason);
         if (
-          dialogueReplyActionReason === affectPresentation?.action?.reason &&
-          attempt.coordinatorAttempted
+          dialogueReplyActionReason === affectPresentation?.action?.reason
         ) {
-          logDialogueAffectActionDispatch(attempt.result);
+          if (attempt.coordinatorAttempted) {
+            logDialogueAffectActionDispatch(attempt.result);
+            if (attempt.result.accepted && dialogueReplyActionReason === "state_idle") {
+              replyCompletionAffectActionController.trackAccepted({
+                requestId: attempt.result.requestId,
+                requestVersion: request.requestVersion,
+                reason: "state_idle"
+              });
+            }
+          } else if (isP288bAcceptanceFixtureEnabled) {
+            logTelemetry("dialogue_affect_action_dispatch", {
+              status: "suppressed",
+              reason: attempt.reason
+            });
+          }
         }
       }
+      deferReplyCompletionAffectActionIfEligible(
+        affectPresentation,
+        shouldRequestReplyWarmSettle,
+        request.requestVersion
+      );
 
       logTelemetry("chat_stream_completed", {
         providerId,
@@ -4287,6 +4486,7 @@ app.whenReady().then(async () => {
       });
       if (activeChatRequestVersion === request.requestVersion) {
         activeChatRequestVersion = null;
+        latestCompletedChatRequestVersion = null;
         syncAutomaticPresenceLifecycle();
       }
       clearChatReplySustainTimer();
@@ -4321,6 +4521,8 @@ app.whenReady().then(async () => {
     }
 
     if (chatEngine.abortActiveStream() && activeChatRequestVersion !== null) {
+      cancelReplyCompletionAffectAction();
+      latestCompletedChatRequestVersion = null;
       transitionPetRole({ type: "request:cancelled", requestVersion: activeChatRequestVersion });
       activeChatRequestVersion = null;
       syncAutomaticPresenceLifecycle();
@@ -4405,6 +4607,8 @@ app.whenReady().then(async () => {
 
     currentDialogueAffectSettings = dialogueAffectSettingsStore.saveSettings(update);
     if (!currentDialogueAffectSettings.enabled) {
+      cancelReplyCompletionAffectAction();
+      latestCompletedChatRequestVersion = null;
       resetDialogueAffectToCalm();
     }
     logDialogueAffectDecision(
@@ -5009,6 +5213,8 @@ function quiesceApp(): void {
   openChatWindowAdapter = null;
   pendingChatWindowOpen = false;
   cancelUserAffectClassification();
+  cancelReplyCompletionAffectAction();
+  latestCompletedChatRequestVersion = null;
   if (activeChatRequestVersion !== null) {
     chatEngine?.abortActiveStream();
     transitionPetRole({ type: "request:cancelled", requestVersion: activeChatRequestVersion });

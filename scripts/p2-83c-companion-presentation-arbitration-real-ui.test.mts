@@ -9,8 +9,9 @@ const nativeClickSource = readFileSync("scripts/p2-83a-sendinput-click.ps1", "ut
 
 test("P2-83C runner stays a single closed-fixture production Electron conflict scenario", () => {
   assert.match(source, /CANDIDATE_ID = "search_citation_safe"/);
-  assert.match(source, /AI_DESKTOP_PET_P2_83A_SAFE_INJECTION: "1"/);
   assert.match(source, /AI_DESKTOP_PET_ACCEPTANCE_TELEMETRY: "1"/);
+  assert.match(source, /AI_DESKTOP_PET_P2_83A_SAFE_INJECTION: "1"/);
+  assert.match(source, /AI_DESKTOP_PET_P2_45_SAFE_ACTIVE_CONTEXT: "1"/);
   assert.match(source, /runtimePath: "production_electron"/);
   assert.match(source, /evidenceBoundary: "closed_safe_fixture"/);
   assert.match(source, /startElectron\(context\)/);
@@ -18,7 +19,11 @@ test("P2-83C runner stays a single closed-fixture production Electron conflict s
   assert.match(source, /injectProactiveBubbleCandidateForAcceptance/);
   assert.match(source, /window\.petApi\.openChat\(\)/);
   assert.match(source, /chatUiSelectors\.chat\.input/);
-  assert.doesNotMatch(source, /P2_83A_CASE|allCases|\.click\s*\(/);
+  assert.doesNotMatch(
+    source,
+    /P2_83A_CASE|allCases|\.click\s*\(|ledger.{0,24}(reset|clear)|cooldown.{0,24}(override|disable)|auto.{0,12}retry/i
+  );
+  assert.doesNotMatch(source, /Input\.dispatchMouseEvent|new PointerEvent|HTMLElement\.prototype\.click/);
 });
 
 test("P2-83C locks the reachable local-to-proactive-to-chat arbitration sequence", () => {
@@ -34,7 +39,7 @@ test("P2-83C locks the reachable local-to-proactive-to-chat arbitration sequence
   assert.match(source, /noProactiveRestartAfterChat/);
   assert.match(source, /noSecondProactiveTerminalAfterChat/);
   assert.match(source, /hasAtMostOneActiveRequest\(lifecycleEvents\)/);
-  assert.match(source, /readWindowsNativeHeadTarget\(context, pet, rendererLocalStart\)/);
+  assert.match(source, /readWindowsNativeHeadTarget\(context, pet\)/);
   assert.match(source, /const headRegion = \{/);
   assert.match(source, /dispatchWindowsNativeClick\(context, nativeTarget\)/);
   assert.match(source, /p2-83a-sendinput-click\.ps1/);
@@ -44,8 +49,7 @@ test("P2-83C locks the reachable local-to-proactive-to-chat arbitration sequence
   assert.match(source, /screenPointFromWindowRect/);
   assert.match(source, /windowRect/);
   assert.match(source, /canvasRect/);
-  assert.match(source, /rendererEventCountBefore/);
-  assert.match(source, /rendererEventCountAfter/);
+  assert.match(source, /context\.p283cRendererLocalStart = rendererLocalStart/);
   assert.match(source, /candidateInjectionAccepted/);
   assert.match(source, /candidateDecisionStatus/);
   assert.match(source, /candidateSkipReason/);
@@ -66,12 +70,10 @@ test("P2-83C locks the reachable local-to-proactive-to-chat arbitration sequence
   assert.match(source, /observed\.x != candidate\.x \|\| observed\.y != candidate\.y/);
   assert.match(source, /TargetsControlledWindow\(observed, expectedHwnd, expectedPid\)/);
   assert.match(source, /No verified neutral point exists inside SystemInformation\.VirtualScreen/);
-  assert.match(source, /preflightVirtualScreen/);
-  assert.match(source, /preflightNeutralPoint/);
-  assert.match(source, /virtualScreen: null/);
-  assert.match(source, /chosenNeutralPoint: null/);
+  assert.match(source, /parseWindowsNativeMouseEvidence/);
   assert.doesNotMatch(source, /1920|1080|2560|1440/);
   assert.doesNotMatch(source, /Input\.dispatchMouseEvent|new PointerEvent/);
+  assert.doesNotMatch(source, /dispatchEvent|preventDefault|stopPropagation|stopImmediatePropagation/);
   assert.match(nativeClickSource, /SetProcessDpiAwarenessContext/);
   assert.match(nativeClickSource, /ClientToScreen/);
   assert.match(nativeClickSource, /WindowFromPoint/);
@@ -80,6 +82,18 @@ test("P2-83C locks the reachable local-to-proactive-to-chat arbitration sequence
   assert.match(nativeClickSource, /AssertPointTarget\(clientPoint, expectedHwnd, expectedPid, "before SendInput"\)/);
   assert.match(nativeClickSource, /SendInput/);
   assert.match(source, /RENDERER_LOCAL_REASON/);
+  assert.match(source, /installNativePointerReceiptObservation\(context, pet\)/);
+  assert.match(source, /AI_DESKTOP_PET_ACCEPTANCE_TELEMETRY[\s\S]*AI_DESKTOP_PET_P2_83A_SAFE_INJECTION[\s\S]*AI_DESKTOP_PET_P2_45_SAFE_ACTIVE_CONTEXT/);
+  assert.match(source, /canvas\.addEventListener\("pointerdown"/);
+  assert.match(source, /canvas\.addEventListener\("pointerup"/);
+  assert.match(source, /pointerDownReceiptCount/);
+  assert.match(source, /pointerUpReceiptCount/);
+  assert.match(source, /safeTelemetryTypeCounts/);
+  assert.match(source, /safeTelemetryReasonCounts/);
+  assert.match(source, /"os_input_not_received_by_renderer"/);
+  assert.match(source, /"renderer_received_no_lifecycle"/);
+  assert.match(source, /"renderer_lifecycle_observed"/);
+  assert.match(source, /captureNativeInputObservation\(context/);
   assert.match(source, /await waitForTelemetryAfter\(context, rendererLocalStart[\s\S]*rendererLocalActionInstanceId/);
   assert.match(source, /observation\.proactiveTerminalBeforeChatStarted && observation\.proactiveSingleTerminal/);
   assert.doesNotMatch(source, /lateProactiveTerminalObserved|chatGateHeldAfterLateTerminal|rendererLocalCompletedMainRequest|bubbleShownAfterChat/);
@@ -162,6 +176,110 @@ test("P2-83C generated Windows helper compiles without moving the cursor or send
     mode: "compile-only",
     inputAttempted: false
   });
+});
+
+test("P2-83C native pointer receipt summary distinguishes the three safe outcomes without input", () => {
+  assert.match(source, /--test-native-pointer-receipt-summary/);
+  const result = spawnSync(process.execPath, [
+    "--no-warnings",
+    "scripts/p2-83c-companion-presentation-arbitration-real-ui.mjs",
+    "--test-native-pointer-receipt-summary"
+  ], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+    timeout: 30_000
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout.trim()), {
+    ok: true,
+    mode: "native-pointer-receipt-summary",
+    outcomes: [
+      "os_input_not_received_by_renderer",
+      "renderer_received_no_lifecycle",
+      "renderer_lifecycle_observed"
+    ],
+    lifecycleTypeCount: 1,
+    lifecycleReasonCount: 1,
+    inputAttempted: false
+  });
+});
+
+test("P2-83C final runner JSON uses an exact-key safe projection", () => {
+  assert.match(source, /--test-final-summary-projection/);
+  assert.match(source, /createFinalRunnerSummary/);
+  assert.match(source, /projectNativeInputSummary/);
+  assert.doesNotMatch(source, /failureDetail/);
+  assert.doesNotMatch(source, /safeFailure[\s\S]*result\.stderr/);
+
+  const result = spawnSync(process.execPath, [
+    "--no-warnings",
+    "scripts/p2-83c-companion-presentation-arbitration-real-ui.mjs",
+    "--test-final-summary-projection"
+  ], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+    timeout: 30_000
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const output = JSON.parse(result.stdout.trim());
+  assert.deepEqual(Object.keys(output), [
+    "ok", "mode", "inputAttempted", "passLifecycle", "receiptNoLifecycle", "sendInputFailure"
+  ]);
+  assert.equal(output.inputAttempted, false);
+
+  const finalSummaryKeys = ["ok", "runtimePath", "evidenceBoundary", "errorCode", "observation"];
+  const observationKeys = [
+    "rendererLocalStarted", "rendererLocalTerminal", "rendererLocalActionInstanceSafe",
+    "rendererLocalLifecycleObserved", "actionFirstStarted", "proactiveRequestIdSafe",
+    "proactiveBubbleShown", "proactiveTerminalBeforeChatStarted", "proactiveSingleTerminal",
+    "noProactiveRestartAfterChat", "noSecondProactiveTerminalAfterChat", "chatOpenedStarted",
+    "chatRequestIdSafe", "requestIdsDiffer", "bubbleHiddenAfterChat", "noConcurrentActiveRequests",
+    "proactiveLifecycleCount", "chatLifecycleCount", "candidateInjectionAccepted",
+    "candidateDecisionStatus", "candidateSkipReason", "startupPresentationLifecycle",
+    "chatTerminalObserved", "nativeInput", "stage", "cleanupCompleted"
+  ];
+  const nativeInputKeys = [
+    "pointerDownReceived", "pointerUpReceived", "pointerDownReceiptCount",
+    "pointerUpReceiptCount", "rendererReceiptObserved", "safeTelemetryTypeCounts",
+    "safeTelemetryReasonCounts", "inputDeliveryClassification"
+  ];
+  for (const summary of [
+    output.passLifecycle,
+    output.receiptNoLifecycle,
+    output.sendInputFailure
+  ]) {
+    assert.deepEqual(Object.keys(summary), finalSummaryKeys);
+    assert.deepEqual(Object.keys(summary.observation), observationKeys);
+    assert.deepEqual(Object.keys(summary.observation.nativeInput), nativeInputKeys);
+    assert.deepEqual(Object.keys(summary.observation.nativeInput.safeTelemetryTypeCounts), [
+      "pet_interaction_action_started",
+      "pet_interaction_action_finished",
+      "pet_interaction_action_skipped"
+    ]);
+    assert.deepEqual(Object.keys(summary.observation.nativeInput.safeTelemetryReasonCounts), [
+      "click_head"
+    ]);
+  }
+  assert.equal(output.passLifecycle.ok, true);
+  assert.equal(
+    output.passLifecycle.observation.nativeInput.inputDeliveryClassification,
+    "renderer_lifecycle_observed"
+  );
+  assert.equal(output.receiptNoLifecycle.ok, false);
+  assert.equal(
+    output.receiptNoLifecycle.observation.nativeInput.inputDeliveryClassification,
+    "renderer_received_no_lifecycle"
+  );
+  assert.equal(output.sendInputFailure.ok, false);
+  assert.equal(output.sendInputFailure.errorCode, "native_input_rejected");
+  assert.equal(
+    output.sendInputFailure.observation.nativeInput.inputDeliveryClassification,
+    "os_input_not_received_by_renderer"
+  );
+  assert.doesNotMatch(
+    JSON.stringify(output),
+    /RAW_STDERR_SENTINEL|expectedHwnd|ownerPid|clientPoint|screenPoint|windowRect|canvasRect|preflight|neutralPoint|rendererEventCount|sendInputDispatched|stderr/i
+  );
 });
 
 test("P2-83C selects an isolated CDP port and retains SwiftShader only for its Electron child", () => {

@@ -8,6 +8,7 @@ import type { ProactiveCompanionCadence } from "../../../shared/proactive-compan
 export type CompanionContextChannel =
   | "dialogue-tone"
   | "affect-action"
+  | "reply-completion-affect-action"
   | "reply-completion-action"
   | "automatic-mode-action"
   | "proactive-source"
@@ -141,6 +142,16 @@ export function resolveCompanionContextArbitration(
     if (input.interaction === "model-busy") return result("suppress", "model_busy");
     if (input.interaction === "chat-visible") return result("suppress", "affect_action_chat_visible");
     if (input.interaction === "user-active") return result("suppress", "user_active");
+    if (input.dialogueMode === "work" || input.dialogueMode === "reading" || input.presenceMode === "focus") {
+      return result("suppress", "focus_suppressed");
+    }
+    return result("allow", "allowed", "affect-action");
+  }
+
+  if (input.channel === "reply-completion-affect-action") {
+    if (!input.affectEnabled) return result("suppress", "affect_disabled");
+    if (input.presentationBusy) return result("suppress", "presentation_busy");
+    if (input.interaction === "model-busy") return result("suppress", "model_busy");
     if (input.dialogueMode === "work" || input.dialogueMode === "reading" || input.presenceMode === "focus") {
       return result("suppress", "focus_suppressed");
     }

@@ -21,6 +21,7 @@ export type AffectDialoguePresentationResolution = Readonly<{
   dialogueContextId?: AffectDialogueContextId;
   expression: EmotionPresentation;
   action: Readonly<{ reason: PetActionTriggerReason }> | null;
+  replyAction: "generic" | "affect" | "suppressed";
 }>;
 
 const NEUTRAL_EXPRESSION: EmotionPresentation = {
@@ -35,39 +36,28 @@ const LIGHT_HAPPY_EXPRESSION: EmotionPresentation = {
   mode: "micro"
 };
 
-const LIGHT_CURIOUS_EXPRESSION: EmotionPresentation = {
-  emotion: "confused",
-  intensity: "low",
-  mode: "micro"
-};
-
 export function resolveAffectDialoguePresentation(
   input: AffectDialoguePresentationInput
 ): AffectDialoguePresentationResolution {
   if (input.intensity === "high") {
     return withDialogueContextId(createDialogueContextId(input.state), {
       expression: NEUTRAL_EXPRESSION,
-      action: null
+      action: null,
+      replyAction: "suppressed"
     });
   }
 
   if (input.state === "calm") {
-    return { expression: NEUTRAL_EXPRESSION, action: null };
+    return { expression: NEUTRAL_EXPRESSION, action: null, replyAction: "generic" };
   }
 
   if (input.state === "happy") {
+    const isMedium = input.intensity === "medium";
     return {
       dialogueContextId: createDialogueContextId(input.state)!,
       expression: LIGHT_HAPPY_EXPRESSION,
-      action: null
-    };
-  }
-
-  if (input.state === "curious") {
-    return {
-      dialogueContextId: createDialogueContextId(input.state)!,
-      expression: LIGHT_CURIOUS_EXPRESSION,
-      action: { reason: "state_listen" }
+      action: isMedium ? { reason: "state_idle" } : null,
+      replyAction: isMedium ? "affect" : "suppressed"
     };
   }
 
@@ -75,7 +65,8 @@ export function resolveAffectDialoguePresentation(
     return {
       dialogueContextId: createDialogueContextId(input.state)!,
       expression: NEUTRAL_EXPRESSION,
-      action: { reason: "state_listen" }
+      action: { reason: "state_listen" },
+      replyAction: "affect"
     };
   }
 
@@ -83,25 +74,12 @@ export function resolveAffectDialoguePresentation(
     return {
       dialogueContextId: createDialogueContextId(input.state)!,
       expression: NEUTRAL_EXPRESSION,
-      action: { reason: "state_think" }
+      action: { reason: "state_think" },
+      replyAction: "affect"
     };
   }
 
-  if (input.state === "sleepy") {
-    return input.isSleepEligible
-      ? {
-          dialogueContextId: createDialogueContextId(input.state)!,
-          expression: NEUTRAL_EXPRESSION,
-          action: { reason: "state_sleep" }
-        }
-      : { expression: NEUTRAL_EXPRESSION, action: null };
-  }
-
-  const isPlayfulOrEmbarrassedActionAllowed = input.hasExplicitEvidence && input.isDefaultPresence;
-  return withDialogueContextId(createDialogueContextId(input.state), {
-    expression: isPlayfulOrEmbarrassedActionAllowed ? LIGHT_HAPPY_EXPRESSION : NEUTRAL_EXPRESSION,
-    action: isPlayfulOrEmbarrassedActionAllowed ? { reason: "state_flustered" } : null
-  });
+  return { expression: NEUTRAL_EXPRESSION, action: null, replyAction: "suppressed" };
 }
 
 function withDialogueContextId(
@@ -116,28 +94,12 @@ function createDialogueContextId(state: AffectDialogueState): AffectDialogueCont
     return "warm-positive";
   }
 
-  if (state === "curious") {
-    return "gentle-curious";
-  }
-
   if (state === "concerned") {
     return "quiet-support";
   }
 
   if (state === "serious") {
     return "steady-serious";
-  }
-
-  if (state === "playful") {
-    return "light-playful";
-  }
-
-  if (state === "embarrassed") {
-    return "gentle-embarrassed";
-  }
-
-  if (state === "sleepy") {
-    return "slow-sleepy";
   }
 
   return undefined;

@@ -14,35 +14,30 @@ test("affect resolver keeps strong affect to dialogue tone only", () => {
   assert.equal(resolution.dialogueContextId, "quiet-support");
   assert.deepEqual(resolution.expression, { emotion: "neutral", intensity: "low", mode: "neutral" });
   assert.equal(resolution.action, null);
+  assert.equal(resolution.replyAction, "suppressed");
 });
 
-test("affect resolver only suggests existing safe presentation reasons", () => {
-  assert.deepEqual(resolveAffectDialoguePresentation({ state: "curious", intensity: "low" }), {
-    dialogueContextId: "gentle-curious",
-    expression: { emotion: "confused", intensity: "low", mode: "micro" },
-    action: { reason: "state_listen" }
-  });
+test("affect resolver limits actions to the frozen presentation subset", () => {
   assert.deepEqual(resolveAffectDialoguePresentation({ state: "serious", intensity: "medium" }).action, {
     reason: "state_think"
   });
-  assert.deepEqual(resolveAffectDialoguePresentation({
-    state: "playful",
-    intensity: "low",
-    hasExplicitEvidence: true,
-    isDefaultPresence: true
-  }).action, { reason: "state_flustered" });
+  assert.deepEqual(resolveAffectDialoguePresentation({ state: "concerned", intensity: "low" }).action, {
+    reason: "state_listen"
+  });
+  assert.deepEqual(resolveAffectDialoguePresentation({ state: "happy", intensity: "medium" }).action, {
+    reason: "state_idle"
+  });
+  assert.deepEqual(resolveAffectDialoguePresentation({ state: "happy", intensity: "low" }).action, null);
 });
 
-test("affect resolver never derives sleepy presentation without an existing sleep eligibility", () => {
-  assert.deepEqual(resolveAffectDialoguePresentation({ state: "sleepy", intensity: "low" }), {
-    expression: { emotion: "neutral", intensity: "low", mode: "neutral" },
-    action: null
-  });
-  assert.deepEqual(resolveAffectDialoguePresentation({
-    state: "sleepy",
-    intensity: "low",
-    isSleepEligible: true
-  }).action, { reason: "state_sleep" });
+test("affect resolver never derives sleepy or unapproved affect presentation", () => {
+  for (const state of ["curious", "playful", "embarrassed", "sleepy"] as const) {
+    assert.deepEqual(resolveAffectDialoguePresentation({ state, intensity: "low" }), {
+      expression: { emotion: "neutral", intensity: "low", mode: "neutral" },
+      action: null,
+      replyAction: "suppressed"
+    });
+  }
 });
 
 test("mapper maps only a closed dialogue context id to fixed system text", () => {

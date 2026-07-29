@@ -29,6 +29,7 @@ const context = createRealUiRunContext({
   runName: "p2-11e-companion-control-shelf-real-ui",
   port: Number(process.env.P2_11E_CDP_PORT || 9534)
 });
+context.electronArgs = ["--use-angle=swiftshader", "--enable-unsafe-swiftshader"];
 const { runParentDir, runDir, appDataDir, resultPath, port } = context;
 const forbiddenTexts = [
   "sk-",
