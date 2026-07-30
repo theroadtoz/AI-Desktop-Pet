@@ -4,6 +4,68 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(fileURLToPath(new URL("../..", import.meta.url)));
+const TARGET_COUNT_CAP = 8;
+
+export class TargetDiscoveryError extends Error {
+  constructor(code, metadata) {
+    super(code);
+    this.name = "TargetDiscoveryError";
+    this.code = code;
+    this.metadata = metadata;
+  }
+}
+
+function emptyTargetMetadata() {
+  return {
+    listReadable: false,
+    pageTargetCount: 0,
+    petTargetCount: 0,
+    chatTargetCount: 0,
+    otherPageTargetCount: 0,
+    invalidTargetCount: 0,
+    matchingCandidateCount: 0,
+    attemptedCandidateCount: 0,
+    attachPhase: null,
+    attachFailureKind: null
+  };
+}
+
+function capTargetCount(value) {
+  return Math.min(TARGET_COUNT_CAP, value);
+}
+
+function inspectTargetList(targets, urlPart) {
+  if (!Array.isArray(targets)) {
+    throw new TargetDiscoveryError("target_list_shape_invalid", emptyTargetMetadata());
+  }
+
+  const metadata = { ...emptyTargetMetadata(), listReadable: true };
+  const matchingTargets = [];
+  for (const target of targets) {
+    if (!target || typeof target !== "object" || Array.isArray(target) || typeof target.type !== "string") {
+      metadata.invalidTargetCount = capTargetCount(metadata.invalidTargetCount + 1);
+      continue;
+    }
+    if (target.type !== "page") continue;
+    if (typeof target.url !== "string" || typeof target.webSocketDebuggerUrl !== "string") {
+      metadata.invalidTargetCount = capTargetCount(metadata.invalidTargetCount + 1);
+      continue;
+    }
+    metadata.pageTargetCount = capTargetCount(metadata.pageTargetCount + 1);
+    if (target.url.includes("renderer/pet/index.html")) {
+      metadata.petTargetCount = capTargetCount(metadata.petTargetCount + 1);
+    } else if (target.url.includes("renderer/chat/index.html")) {
+      metadata.chatTargetCount = capTargetCount(metadata.chatTargetCount + 1);
+    } else {
+      metadata.otherPageTargetCount = capTargetCount(metadata.otherPageTargetCount + 1);
+    }
+    if (target.url.includes(urlPart) && matchingTargets.length < TARGET_COUNT_CAP) {
+      matchingTargets.push(target);
+      metadata.matchingCandidateCount = capTargetCount(metadata.matchingCandidateCount + 1);
+    }
+  }
+  return { metadata, matchingTargets };
+}
 
 export function sleep(ms) {
   return new Promise((resolveSleep) => setTimeout(resolveSleep, ms));
@@ -54,28 +116,43 @@ export function log(context, message) {
   writeFileSync(context.progressPath, `${line}\n`, { flag: "a" });
 }
 
-async function fetchJson(url) {
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`${url} -> ${response.status}`);
-  }
-  return response.json();
-}
-
-async function waitForJson(url, timeoutMs) {
-  const deadline = Date.now() + timeoutMs;
+export async function waitForJsonWithDependencies(url, timeoutMs, dependencies = {}) {
+  const now = dependencies.now ?? Date.now;
+  const fetchImpl = dependencies.fetchImpl ?? fetch;
+  const sleepForRetry = dependencies.sleep ?? sleep;
+  const deadline = now() + timeoutMs;
   let lastError = null;
 
-  while (Date.now() < deadline) {
+  while (now() < deadline) {
     try {
-      return await fetchJson(url);
+      const remainingMs = Math.max(1, deadline - now());
+      const response = await fetchImpl(url, { signal: AbortSignal.timeout(remainingMs) });
+      if (!response.ok) throw new Error(`${url} -> ${response.status}`);
+      return await response.json();
     } catch (error) {
       lastError = error;
-      await sleep(300);
+      const retryDelayMs = Math.min(300, Math.max(0, deadline - now()));
+      if (retryDelayMs > 0) await sleepForRetry(retryDelayMs);
     }
   }
 
   throw lastError ?? new Error(`Timed out waiting for ${url}`);
+}
+
+async function waitForJson(url, timeoutMs) {
+  return waitForJsonWithDependencies(url, timeoutMs);
+}
+
+export class CdpClientError extends Error {
+  constructor(code) {
+    super(code);
+    this.name = "CdpClientError";
+    this.code = code;
+  }
+}
+
+function isSocketClosingOrClosed(socket) {
+  return !socket || socket.readyState === 2 || socket.readyState === 3;
 }
 
 export class CdpClient {
@@ -84,23 +161,62 @@ export class CdpClient {
     this.nextId = 1;
     this.pending = new Map();
     this.listeners = new Map();
+    this.disconnectError = null;
+    this.commandTimeoutMs = 15_000;
   }
 
-  async open() {
-    this.socket = new WebSocket(this.webSocketUrl);
+  async open(timeoutMs = this.commandTimeoutMs) {
+    try {
+      this.socket = new WebSocket(this.webSocketUrl);
+    } catch {
+      throw new CdpClientError("transport_error");
+    }
     this.socket.addEventListener("message", (event) => this.onMessage(event));
-    this.socket.addEventListener("close", () => this.onDisconnect(new Error("CDP socket closed")));
+    this.socket.addEventListener("close", () => this.onDisconnect("session_closed"));
     this.socket.addEventListener("error", (event) => {
-      this.onDisconnect(event?.error instanceof Error ? event.error : new Error("CDP socket error"));
+      this.onDisconnect("transport_error");
     });
     await new Promise((resolveOpen, rejectOpen) => {
-      this.socket.addEventListener("open", resolveOpen, { once: true });
-      this.socket.addEventListener("error", rejectOpen, { once: true });
+      let opened = false;
+      let openTimeout;
+      const rejectBeforeOpen = (fallbackError) => {
+        clearTimeout(openTimeout);
+        rejectOpen(this.disconnectError ?? fallbackError);
+      };
+      this.socket.addEventListener("open", () => {
+        opened = true;
+        clearTimeout(openTimeout);
+        resolveOpen();
+      }, { once: true });
+      this.socket.addEventListener("close", () => {
+        if (!opened) rejectBeforeOpen(new CdpClientError("session_closed"));
+      }, { once: true });
+      this.socket.addEventListener("error", () => {
+        if (!opened) rejectBeforeOpen(new CdpClientError("transport_error"));
+      }, { once: true });
+      if (timeoutMs <= 0) {
+        this.onDisconnect("command_timeout");
+        this.close();
+        rejectBeforeOpen(new CdpClientError("command_timeout"));
+        return;
+      }
+      openTimeout = setTimeout(() => {
+        if (opened) return;
+        this.onDisconnect("command_timeout");
+        this.close();
+        rejectBeforeOpen(new CdpClientError("command_timeout"));
+      }, timeoutMs);
     });
   }
 
   onMessage(event) {
-    const message = JSON.parse(String(event.data));
+    let message;
+    try {
+      message = JSON.parse(String(event.data));
+    } catch {
+      this.onDisconnect("protocol_error");
+      return;
+    }
     if (message.id === undefined) {
       if (message.method) {
         for (const listener of this.listeners.get(message.method) ?? []) {
@@ -118,8 +234,9 @@ export class CdpClient {
     }
 
     this.pending.delete(message.id);
+    clearTimeout(pending.timeout);
     if (message.error) {
-      pending.reject(new Error(message.error.message));
+      pending.reject(new CdpClientError("protocol_error"));
       return;
     }
     pending.resolve(message.result ?? {});
@@ -140,27 +257,42 @@ export class CdpClient {
     }
   }
 
-  onDisconnect(error) {
+  onDisconnect(code) {
+    if (!this.disconnectError) this.disconnectError = new CdpClientError(code);
     for (const pending of this.pending.values()) {
-      pending.reject(error);
+      clearTimeout(pending.timeout);
+      pending.reject(this.disconnectError);
     }
     this.pending.clear();
     this.listeners.clear();
   }
 
-  send(method, params = {}) {
+  send(method, params = {}, timeoutMs = this.commandTimeoutMs) {
+    if (this.disconnectError) return Promise.reject(this.disconnectError);
+    if (isSocketClosingOrClosed(this.socket)) {
+      this.onDisconnect("session_closed");
+      return Promise.reject(this.disconnectError);
+    }
+    if (timeoutMs <= 0) {
+      this.onDisconnect("command_timeout");
+      this.close();
+      return Promise.reject(this.disconnectError);
+    }
     const id = this.nextId++;
-    this.socket.send(JSON.stringify({ id, method, params }));
-
     return new Promise((resolveSend, rejectSend) => {
-      this.pending.set(id, { resolve: resolveSend, reject: rejectSend });
-      setTimeout(() => {
+      const timeout = setTimeout(() => {
         if (!this.pending.has(id)) {
           return;
         }
         this.pending.delete(id);
-        rejectSend(new Error(`CDP timeout: ${method}`));
-      }, 15_000).unref();
+        rejectSend(new CdpClientError("command_timeout"));
+      }, timeoutMs).unref();
+      this.pending.set(id, { resolve: resolveSend, reject: rejectSend, timeout });
+      try {
+        this.socket.send(JSON.stringify({ id, method, params }));
+      } catch (error) {
+        this.onDisconnect("transport_error");
+      }
     });
   }
 
@@ -208,23 +340,92 @@ export async function connectToElectron(context, timeoutMs = 30_000) {
   return waitForJson(`http://127.0.0.1:${context.port}/json/version`, timeoutMs);
 }
 
-export async function getPageByUrlPart(context, urlPart, timeoutMs = 30_000) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    const targets = await waitForJson(`http://127.0.0.1:${context.port}/json/list`, 10_000);
-    const target = targets.find((entry) => entry.type === "page" && entry.url.includes(urlPart));
-    if (target) {
-      const cdp = new CdpClient(target.webSocketDebuggerUrl);
-      await cdp.open();
-      await cdp.send("Runtime.enable");
-      await cdp.send("Page.enable");
-      const page = { target, cdp };
-      context.pages.push(page);
-      return page;
+export async function getPageByUrlPartWithDependencies(context, urlPart, timeoutMs = 30_000, dependencies = {}) {
+  const now = dependencies.now ?? Date.now;
+  const sleepForRetry = dependencies.sleep ?? sleep;
+  const listTargets = dependencies.listTargets ?? ((remainingMs) => (
+    waitForJson(`http://127.0.0.1:${context.port}/json/list`, Math.min(10_000, remainingMs))
+  ));
+  const createCdp = dependencies.createCdp ?? ((webSocketDebuggerUrl) => new CdpClient(webSocketDebuggerUrl));
+  const deadline = now() + timeoutMs;
+  let lastReadableMetadata = null;
+  let sessionClosedListRetryUsed = false;
+  while (now() < deadline) {
+    let targets;
+    try {
+      targets = await listTargets(Math.max(1, deadline - now()));
+    } catch {
+      if (now() < deadline) await sleepForRetry(Math.min(300, Math.max(0, deadline - now())));
+      continue;
     }
-    await sleep(300);
+    const { metadata, matchingTargets } = inspectTargetList(targets, urlPart);
+    lastReadableMetadata = metadata;
+    let attemptedCandidateCount = 0;
+    let attachPhase = null;
+    let attachFailureKind = null;
+    let allCandidatesSessionClosed = matchingTargets.length > 0;
+    for (const matchingTarget of matchingTargets) {
+      attemptedCandidateCount = capTargetCount(attemptedCandidateCount + 1);
+      const cdp = createCdp(matchingTarget.webSocketDebuggerUrl);
+      try {
+        attachPhase = "open";
+        await cdp.open(deadline - now());
+        if (now() > deadline) throw new CdpClientError("command_timeout");
+        const commandTimeoutMs = cdp.commandTimeoutMs ?? 15_000;
+        attachPhase = "runtime";
+        let remainingMs = deadline - now();
+        if (remainingMs <= 0) throw new CdpClientError("command_timeout");
+        await cdp.send("Runtime.enable", {}, Math.min(commandTimeoutMs, remainingMs));
+        if (now() > deadline) throw new CdpClientError("command_timeout");
+        attachPhase = "page";
+        remainingMs = deadline - now();
+        if (remainingMs <= 0) throw new CdpClientError("command_timeout");
+        await cdp.send("Page.enable", {}, Math.min(commandTimeoutMs, remainingMs));
+        if (now() > deadline) throw new CdpClientError("command_timeout");
+        const page = { target: matchingTarget, cdp };
+        context.pages.push(page);
+        return page;
+      } catch (error) {
+        attachFailureKind = error instanceof CdpClientError ? error.code : "unknown";
+        allCandidatesSessionClosed &&= attachFailureKind === "session_closed";
+        try {
+          cdp.close?.();
+        } catch {}
+        if (attachFailureKind !== "session_closed") {
+          throw new TargetDiscoveryError("cdp_attach_failed", {
+            ...metadata,
+            attemptedCandidateCount,
+            attachPhase,
+            attachFailureKind
+          });
+        }
+      }
+    }
+    if (allCandidatesSessionClosed && !sessionClosedListRetryUsed && now() < deadline) {
+      sessionClosedListRetryUsed = true;
+      continue;
+    }
+    if (attemptedCandidateCount > 0) {
+      throw new TargetDiscoveryError("cdp_attach_failed", {
+        ...metadata,
+        attemptedCandidateCount,
+        attachPhase,
+        attachFailureKind
+      });
+    }
+    if (metadata.invalidTargetCount > 0) {
+      throw new TargetDiscoveryError("target_entry_shape_invalid", metadata);
+    }
+    await sleepForRetry(Math.min(300, Math.max(0, deadline - now())));
   }
-  throw new Error(`Target not found: ${urlPart}`);
+  throw new TargetDiscoveryError(
+    lastReadableMetadata ? "target_not_found" : "target_list_unreadable",
+    lastReadableMetadata ?? emptyTargetMetadata()
+  );
+}
+
+export async function getPageByUrlPart(context, urlPart, timeoutMs = 30_000) {
+  return getPageByUrlPartWithDependencies(context, urlPart, timeoutMs);
 }
 
 export const waitForWindow = getPageByUrlPart;

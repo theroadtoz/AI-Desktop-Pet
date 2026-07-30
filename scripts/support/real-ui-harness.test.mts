@@ -1,19 +1,26 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { CdpClient, waitForChildExit } from "./real-ui-harness.mjs";
+import { CdpClient, CdpClientError, waitForChildExit } from "./real-ui-harness.mjs";
 
 type SocketListener = (event: any) => void;
 
 class FakeSocket {
   static instance: FakeSocket;
+  static nextInitialEvent: "open" | "close" | "error" | "none" = "open";
+  static nextSendThrows = false;
 
   listeners = new Map<string, Set<SocketListener>>();
   sent: string[] = [];
+  closeCalls = 0;
 
   constructor(_url: string) {
     FakeSocket.instance = this;
-    queueMicrotask(() => this.emit("open", {}));
+    const initialEvent = FakeSocket.nextInitialEvent;
+    FakeSocket.nextInitialEvent = "open";
+    if (initialEvent !== "none") {
+      queueMicrotask(() => this.emit(initialEvent, {}));
+    }
   }
 
   addEventListener(type: string, listener: SocketListener) {
@@ -23,10 +30,15 @@ class FakeSocket {
   }
 
   send(serialized: string) {
+    if (FakeSocket.nextSendThrows) {
+      FakeSocket.nextSendThrows = false;
+      throw new Error("secret transport detail");
+    }
     this.sent.push(serialized);
   }
 
   close() {
+    this.closeCalls += 1;
     this.emit("close", {});
   }
 
@@ -36,6 +48,48 @@ class FakeSocket {
     }
   }
 }
+
+function assertCdpError(error: unknown, code: string) {
+  assert.equal(error instanceof CdpClientError, true);
+  assert.equal((error as CdpClientError).code, code);
+  assert.equal(JSON.stringify(error).includes("secret"), false);
+}
+
+test("CdpClient rejects open when the session closes before open", async () => {
+  (globalThis as any).WebSocket = FakeSocket;
+  FakeSocket.nextInitialEvent = "close";
+  const client = new CdpClient("ws://cdp.test");
+  await assert.rejects(client.open(), (error) => {
+    assert.equal(error instanceof CdpClientError, true);
+    assert.equal((error as CdpClientError).code, "session_closed");
+    assert.equal(JSON.stringify(error).includes("ws://"), false);
+    return true;
+  });
+});
+
+test("CdpClient rejects open when transport errors before open", async () => {
+  (globalThis as any).WebSocket = FakeSocket;
+  FakeSocket.nextInitialEvent = "error";
+  const client = new CdpClient("ws://cdp.test");
+  await assert.rejects(client.open(), (error) => {
+    assertCdpError(error, "transport_error");
+    return true;
+  });
+});
+
+test("CdpClient bounds an open with no event by its supplied deadline and closes", async () => {
+  (globalThis as any).WebSocket = FakeSocket;
+  FakeSocket.nextInitialEvent = "none";
+  const client = new CdpClient("ws://cdp.test");
+  const startedAt = Date.now();
+  await assert.rejects(client.open(10), (error) => {
+    assertCdpError(error, "command_timeout");
+    return true;
+  });
+  assert.equal(Date.now() - startedAt < 1_000, true);
+  assert.equal(FakeSocket.instance.closeCalls, 1);
+  assert.equal(client.pending.size, 0);
+});
 
 async function openClient() {
   (globalThis as any).WebSocket = FakeSocket;
@@ -119,10 +173,13 @@ test("CdpClient rejects pending sends and clears listeners when the socket close
   const { client, socket } = await openClient();
   let eventCalls = 0;
   client.on("Page.frameStoppedLoading", () => { eventCalls += 1; });
-  const pending = client.send("Page.captureScreenshot");
+  const pending = client.send("Runtime.enable");
 
   socket.emit("close", {});
-  await assert.rejects(pending, /CDP socket closed/);
+  await assert.rejects(pending, (error) => {
+    assertCdpError(error, "session_closed");
+    return true;
+  });
   socket.emit("message", {
     data: JSON.stringify({ method: "Page.frameStoppedLoading", params: {} })
   });
@@ -134,15 +191,64 @@ test("CdpClient rejects pending sends and clears listeners on socket errors", as
   const { client, socket } = await openClient();
   let eventCalls = 0;
   client.on("Inspector.detached", () => { eventCalls += 1; });
-  const pending = client.send("Runtime.getIsolateId");
+  const pending = client.send("Runtime.enable");
 
   socket.emit("error", { error: new Error("transport failed") });
-  await assert.rejects(pending, /transport failed/);
+  await assert.rejects(pending, (error) => {
+    assertCdpError(error, "transport_error");
+    return true;
+  });
   socket.emit("message", {
     data: JSON.stringify({ method: "Inspector.detached", params: {} })
   });
 
   assert.equal(eventCalls, 0);
+});
+
+test("CdpClient classifies Runtime.enable protocol errors without serializing CDP text", async () => {
+  const { client, socket } = await openClient();
+  const pending = client.send("Runtime.enable");
+  const request = JSON.parse(socket.sent[0]);
+  socket.emit("message", {
+    data: JSON.stringify({ id: request.id, error: { message: "Target closed: secret" } })
+  });
+  await assert.rejects(pending, (error) => {
+    assertCdpError(error, "protocol_error");
+    return true;
+  });
+});
+
+test("CdpClient classifies Runtime.enable command timeouts", async () => {
+  const { client, socket } = await openClient();
+  client.commandTimeoutMs = 0;
+  await assert.rejects(client.send("Runtime.enable"), (error) => {
+    assertCdpError(error, "command_timeout");
+    return true;
+  });
+  assert.equal(socket.closeCalls, 1);
+  assert.equal(client.pending.size, 0);
+  assert.equal(client.listeners.size, 0);
+});
+
+test("CdpClient uses the supplied remaining deadline for Runtime.enable", async () => {
+  const { client } = await openClient();
+  client.commandTimeoutMs = 500;
+  const startedAt = Date.now();
+  await assert.rejects(client.send("Runtime.enable", {}, 10), (error) => {
+    assertCdpError(error, "command_timeout");
+    return true;
+  });
+  assert.equal(Date.now() - startedAt < 200, true);
+  assert.equal(client.pending.size, 0);
+});
+
+test("CdpClient classifies synchronous Runtime.enable send errors", async () => {
+  const { client } = await openClient();
+  FakeSocket.nextSendThrows = true;
+  await assert.rejects(client.send("Runtime.enable"), (error) => {
+    assertCdpError(error, "transport_error");
+    return true;
+  });
 });
 
 test("waitForChildExit waits for the owned Electron child close event", async () => {

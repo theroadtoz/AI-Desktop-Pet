@@ -3,7 +3,8 @@ import { initializeCubismRuntime } from "./live2d/cubism-runtime";
 import { loadWitchLive2DModel } from "./live2d/cubism-model";
 import { createLive2DRenderer } from "./live2d/cubism-renderer";
 import { registerWebGLContextRecovery } from "./live2d/context-recovery";
-import type { LoadedLive2DModel, Live2DFrameSample, Live2DRenderer } from "./live2d/types";
+import { createLive2DFrameSampleWaiters } from "./live2d-frame-sample-waiters";
+import type { LoadedLive2DModel, Live2DRenderer } from "./live2d/types";
 import type { EmotionTag } from "../../shared/emotion";
 import { getScreenDragDelta, shouldSuppressScaleWheelDuringDrag, type ScreenPoint } from "./drag-pointer";
 import { createScaleWheelNormalizer, hasScaleWheelModifiers } from "./scale-wheel";
@@ -46,6 +47,7 @@ import {
   type ProactiveSpeechBubblePayload
 } from "../../shared/proactive-speech-bubble";
 import { isClientPointInsideVisibleBubble } from "./proactive-bubble-pointer-hit";
+import { createCuriousFocusPulsePreviewController } from "./p2-88d-curious-low-preview-controller";
 
 const foundCanvas = document.querySelector<HTMLCanvasElement>("#pet-canvas");
 const foundProactiveSpeechBubble = document.querySelector<HTMLButtonElement>("#proactive-speech-bubble");
@@ -267,7 +269,10 @@ let isRecoveringContext = false;
 let currentRenderStartMs = 0;
 let firstFrameMs: number | undefined;
 let recoveryCount = 0;
-let pendingLive2DFrameSample: ((sample: Live2DFrameSample) => void) | null = null;
+const live2DFrameSampleWaiters = createLive2DFrameSampleWaiters({
+  scheduleTimeout: (callback, delayMs) => window.setTimeout(callback, delayMs),
+  clearScheduledTimeout: (handle) => window.clearTimeout(handle)
+});
 let hasPlayedStartupAppearance = false;
 let currentDialogueModeId: DialogueModeId = DEFAULT_DIALOGUE_MODE_ID;
 let currentPresenceModeId: PresenceModeId = DEFAULT_PRESENCE_MODE_ID;
@@ -489,6 +494,23 @@ const interactionActionPlayer = createInteractionActionPlayer({
   }
 });
 
+const curiousFocusPulsePreviewController = createCuriousFocusPulsePreviewController({
+  isLive2D: () => isUsingLive2D && live2DModel !== null,
+  isInteractionActionActive: () => interactionActionPlayer.isActive(),
+  isRecoveringContext: () => isRecoveringContext,
+  setLookTarget: (x, y) => {
+    live2DModel?.setLookTarget(x, y);
+  },
+  releaseLookTarget: () => {
+    live2DModel?.setLookTarget(0, 0);
+  },
+  scheduleTimeout: (callback, delayMs) => window.setTimeout(callback, delayMs),
+  clearScheduledTimeout: (handle) => window.clearTimeout(handle as number),
+  reportStatus: (status) => {
+    canvas.dataset.p288dPreviewStatus = status;
+  }
+});
+
 function applyBasePresentation(
   presentation: EmotionPresentation,
   accessorySelection: PetAccessoryResolution
@@ -568,21 +590,6 @@ function reportRenderHealth(renderer: "live2d" | "placeholder", message?: string
   });
 }
 
-function waitForNextLive2DFrameSample(timeoutMs = 2_000): Promise<Live2DFrameSample | null> {
-  return new Promise((resolve) => {
-    const timeoutId = window.setTimeout(() => {
-      pendingLive2DFrameSample = null;
-      resolve(null);
-    }, timeoutMs);
-
-    pendingLive2DFrameSample = (sample) => {
-      window.clearTimeout(timeoutId);
-      pendingLive2DFrameSample = null;
-      resolve(sample);
-    };
-  });
-}
-
 async function releaseCubismStaticWebGLResources(): Promise<void> {
   const { CubismRenderer_WebGL } = await import("./live2d/vendor/framework/rendering/cubismrenderer_webgl");
   CubismRenderer_WebGL.doStaticRelease();
@@ -608,7 +615,7 @@ async function startPetRenderer(): Promise<void> {
 
     live2DModel = await loadWitchLive2DModel(gl, canvas.width, canvas.height);
     live2DRenderer = createLive2DRenderer(canvas, gl, live2DModel, (sample) => {
-      pendingLive2DFrameSample?.(sample);
+      live2DFrameSampleWaiters.resolveFrame(sample);
       window.petApi?.reportRenderHealth({
         framesPerSecond: 0,
         isContextLost: gl.isContextLost(),
@@ -641,7 +648,7 @@ async function startPetRenderer(): Promise<void> {
     live2DRenderer.setPresenceMode(currentPresenceModeId);
     isUsingLive2D = true;
     live2DModel.setLookTarget(0, 0);
-    const firstLive2DFrameSample = waitForNextLive2DFrameSample();
+    const firstLive2DFrameSample = live2DFrameSampleWaiters.waitForNextFrame();
     live2DRenderer.start();
     applyBasePresentationToModel(
       pendingPresentation ?? lastPresentation,
@@ -676,6 +683,8 @@ function handleWebGLContextLost(): void {
   const renderer = isUsingLive2D ? "live2d" : "placeholder";
 
   isRecoveringContext = true;
+  curiousFocusPulsePreviewController.cancelForOwnershipLoss();
+  live2DFrameSampleWaiters.cancelPending();
   recoveryCount += 1;
   window.petApi?.reportTelemetry("webgl_context_lost", {
     renderer,
@@ -708,7 +717,7 @@ async function handleWebGLContextRestored(): Promise<void> {
 
   try {
     await releaseCubismStaticWebGLResources();
-    const frameSample = waitForNextLive2DFrameSample();
+    const frameSample = live2DFrameSampleWaiters.waitForNextFrame();
     await startPetRenderer();
     const sample = isUsingLive2D ? await frameSample : null;
 
@@ -772,6 +781,9 @@ function injectWebGLContextLoss(): void {
 const removeInjectWebGLContextLossListener = window.petApi?.onInjectWebGLContextLoss(() => {
   injectWebGLContextLoss();
 }) ?? null;
+const removeCuriousFocusPulsePreviewListener = window.petApi?.onCuriousFocusPulsePreview(() => {
+  curiousFocusPulsePreviewController.start();
+}) ?? null;
 
 function applyAutomaticSituation(snapshot: AutomaticSituationSnapshot): void {
   currentDialogueModeId = snapshot.conversationContextId;
@@ -795,6 +807,7 @@ const removeAutomaticSituationChangedListener = window.petApi?.onAutomaticSituat
 ) ?? null;
 const returnFromIdleController = createReturnFromIdleController();
 const removeActionTriggerListener = window.petApi?.onActionTrigger((trigger) => {
+  curiousFocusPulsePreviewController.cancelForOwnershipLoss();
   if (trigger.reason === "chat_opened" || trigger.reason === "chat_input_focus") {
     clearProactiveSpeechBubble();
   }
@@ -869,6 +882,7 @@ window.addEventListener("beforeunload", () => {
   removeWebGLContextRecovery();
   removePresentationIntentListener?.();
   removeInjectWebGLContextLossListener?.();
+  removeCuriousFocusPulsePreviewListener?.();
   removeAutomaticSituationChangedListener?.();
   removeActionTriggerListener?.();
   removeProactiveSpeechBubbleListener?.();
@@ -878,6 +892,8 @@ window.addEventListener("beforeunload", () => {
   cancelClickInteractionAction();
   rapidTouchComboDetector.reset();
   interactionActionPlayer.dispose();
+  curiousFocusPulsePreviewController.dispose();
+  live2DFrameSampleWaiters.dispose();
   live2DRenderer?.release();
   live2DRenderer = null;
   live2DModel = null;

@@ -99,6 +99,8 @@
     "accept:p2-88b-affect-presentation-bundled": "npm run build && node --no-warnings scripts/p2-88b-affect-presentation-bundled-real-ui.mjs",
     "test:p2-88c-curious-shadow": "npm run build && node --test --experimental-strip-types scripts/p2-88c-deterministic-xita-interaction-cue.test.mts scripts/p2-88c-curious-shadow-real-ui.test.mts",
     "accept:p2-88c-curious-shadow": "npm run build && node --no-warnings scripts/p2-88c-curious-shadow-real-ui.mjs",
+    "test:p2-88d-curious-low-preview": "npm run build && node --test --experimental-strip-types scripts/p2-88d-curious-low-preview.test.mts scripts/p2-88d-recovery-first-frame-waiter.test.mts",
+    "accept:p2-88d-curious-low-preview": "npm run build && node --no-warnings scripts/p2-88d-curious-low-preview-real-ui.mjs",
     "accept:p2-83a-proactive-bubble": "npm run build && node --no-warnings scripts/p2-83a-proactive-bubble-conversation-orchestration-real-ui.mjs",
     "accept:p2-83c-companion-presentation-arbitration": "npm run build && node --no-warnings scripts/p2-83c-companion-presentation-arbitration-real-ui.mjs",
     "accept:p2-84": "npm run build && node --no-warnings scripts/p2-84-acceptance.mjs",

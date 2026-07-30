@@ -67,6 +67,8 @@ export const P2_85_ACCEPTANCE_SCENARIO_IDS = Object.freeze([
 export type P285AcceptanceScenarioId =
   (typeof P2_85_ACCEPTANCE_SCENARIO_IDS)[number];
 
+export const P2_88D_CURIOUS_FOCUS_PULSE_PREVIEW_CHANNEL = "pet:p2-88d-curious-focus-pulse-preview";
+
 export type PetWindowCommand =
   | { type: "pet:first-frame"; payload?: PetFirstFrameInfo }
   | { type: "pet:health"; payload: RenderHealth }
@@ -81,6 +83,7 @@ export type PetWindowCommand =
   | { type: "pet:window-motion-feedback"; payload: PetWindowMotionFeedback }
   | { type: "automaticSituation:changed"; payload: AutomaticSituationSnapshot }
   | { type: "pet:inject-webgl-context-loss" }
+  | { type: "pet:p2-88d-curious-focus-pulse-preview" }
   | { type: "pet:open-chat" }
   | { type: "pet:drag-start" }
   | { type: "pet:drag-move"; payload: PetDragDelta }
@@ -256,6 +259,8 @@ export type PetApi = {
   resetP285AcceptanceBaseline(): Promise<boolean>;
   resetP285AcceptanceBaselineAndRunScenario(scenarioId: P285AcceptanceScenarioId): Promise<boolean>;
   onInjectWebGLContextLoss(handler: () => void): () => void;
+  onCuriousFocusPulsePreview(handler: () => void): () => void;
+  triggerCuriousFocusPulsePreviewForAcceptance(): Promise<boolean>;
   onWindowMotionFeedback(handler: (feedback: PetWindowMotionFeedback) => void): () => void;
   openChat(): void;
   startDrag(): void;

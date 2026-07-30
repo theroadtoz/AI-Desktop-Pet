@@ -33,6 +33,7 @@ import type {
 import {
   isChatMessage,
   P2_85_ACCEPTANCE_SCENARIO_IDS,
+  P2_88D_CURIOUS_FOCUS_PULSE_PREVIEW_CHANNEL,
   type P285AcceptanceScenarioId
 } from "../shared/ipc-contract";
 import {
@@ -427,6 +428,10 @@ const isP284AcceptanceFixtureEnabled = isP284AcceptanceObservationEnabled &&
   process.env.AI_DESKTOP_PET_P2_84_SAFE_FIXTURE === "1";
 const isP288bAcceptanceFixtureEnabled = isAcceptanceTelemetryEnabled &&
   process.env.AI_DESKTOP_PET_P2_88B_SAFE_FIXTURE === "1";
+const isP288dCuriousFocusPulsePreviewEnabled =
+  !app.isPackaged &&
+  process.env.AI_DESKTOP_PET_ACCEPTANCE_TELEMETRY === "1" &&
+  process.env.AI_DESKTOP_PET_P2_88D_CURIOUS_LOW_PREVIEW === "1";
 const isP285AcceptanceObservationEnabled = isAcceptanceTelemetryEnabled &&
   process.env.AI_DESKTOP_PET_P2_85_SAFE_OBSERVATION === "1";
 const isP285AcceptanceFixtureEnabled = isP285AcceptanceObservationEnabled &&
@@ -3692,6 +3697,21 @@ app.whenReady().then(async () => {
       return false;
     }
     proactiveBubbleCoordinator?.queueSafeCandidateForAcceptance(candidateId as never);
+    return true;
+  });
+
+  ipcMain.handle(P2_88D_CURIOUS_FOCUS_PULSE_PREVIEW_CHANNEL, (event, ...payload: unknown[]) => {
+    if (
+      !isP288dCuriousFocusPulsePreviewEnabled ||
+      payload.length !== 0 ||
+      !isPetSender(event) ||
+      !petWindow ||
+      petWindow.isDestroyed()
+    ) {
+      return false;
+    }
+
+    petWindow.webContents.send(P2_88D_CURIOUS_FOCUS_PULSE_PREVIEW_CHANNEL);
     return true;
   });
 

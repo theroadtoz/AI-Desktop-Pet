@@ -1,4 +1,4 @@
-import { BrowserWindow, shell } from "electron";
+import { app, BrowserWindow, shell } from "electron";
 import { join } from "node:path";
 import { getWindowIconPath } from "./app-icon";
 import { restorePetWindowOnTop } from "./topmost-policy";
@@ -6,10 +6,13 @@ import { installTrustedWindowPolicy } from "./trusted-window-policy";
 
 export function createPetWindow(): BrowserWindow {
   const preload = join(__dirname, "../../preload/pet-preload.js");
+  const isOpaquePetWindowDiagnostic = !app.isPackaged &&
+    process.env.AI_DESKTOP_PET_ACCEPTANCE_TELEMETRY === "1" &&
+    process.env.AI_DESKTOP_PET_P2_88D_RENDERER_DIAG_MODE === "opaque-pet-window";
   const window = new BrowserWindow({
     width: 420,
     height: 600,
-    transparent: true,
+    transparent: !isOpaquePetWindowDiagnostic,
     backgroundColor: "#00000000",
     frame: false,
     hasShadow: false,

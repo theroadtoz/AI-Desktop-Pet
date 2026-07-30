@@ -29,6 +29,7 @@ const P2_85_ACCEPTANCE_SCENARIO_IDS = Object.freeze([
   "explicit_game_single_presentation",
   "proactive_suppress_single_defer"
 ] as const satisfies readonly P285AcceptanceScenarioId[]);
+const P2_88D_CURIOUS_FOCUS_PULSE_PREVIEW_CHANNEL = "pet:p2-88d-curious-focus-pulse-preview";
 
 const petRoleStates = [
   "idle",
@@ -506,6 +507,21 @@ const api: PetApi = {
     return () => {
       ipcRenderer.removeListener("pet:inject-webgl-context-loss", listener);
     };
+  },
+  onCuriousFocusPulsePreview(handler) {
+    const listener = (): void => {
+      handler();
+    };
+
+    ipcRenderer.on(P2_88D_CURIOUS_FOCUS_PULSE_PREVIEW_CHANNEL, listener);
+
+    return () => {
+      ipcRenderer.removeListener(P2_88D_CURIOUS_FOCUS_PULSE_PREVIEW_CHANNEL, listener);
+    };
+  },
+  async triggerCuriousFocusPulsePreviewForAcceptance() {
+    const result = await ipcRenderer.invoke(P2_88D_CURIOUS_FOCUS_PULSE_PREVIEW_CHANNEL);
+    return result === true;
   },
   onWindowMotionFeedback(handler) {
     const listener = (_event: Electron.IpcRendererEvent, value: unknown): void => {

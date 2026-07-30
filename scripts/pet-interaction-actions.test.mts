@@ -2318,7 +2318,7 @@ test("pet startup appearance waits for a visible Live2D frame and only plays onc
   const source = await readFile(new URL("../src/renderer/pet/main.ts", import.meta.url), "utf8");
 
   assert.match(source, /let hasPlayedStartupAppearance = false/);
-  assert.match(source, /waitForNextLive2DFrameSample\(\)/);
+  assert.match(source, /live2DFrameSampleWaiters\.waitForNextFrame\(\)/);
   assert.match(source, /!hasPlayedStartupAppearance && sample && sample\.nonTransparentPixels > 0/);
   assert.match(source, /interactionActionPlayer\.playAction\(getPetInteractionAction\("appearance"\), "startup_first_visible_frame"\)/);
 });
