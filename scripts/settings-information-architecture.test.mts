@@ -79,25 +79,30 @@ test("内置 MCP 忽略历史关闭配置并始终保持开启", () => {
   }).enabled, true);
 });
 
-test("历史固定保留 2048 个会话并折叠在记忆和历史页面", async () => {
+test("历史保留提供 100、500、1000 三档并默认 500", async () => {
   const $ = load(await readFile(htmlPath, "utf8"));
 
-  assert.deepEqual(HISTORY_RETENTION_LIMITS, [2_048]);
-  assert.equal(DEFAULT_HISTORY_RETENTION_LIMIT, 2_048);
-  assert.equal(isHistoryRetentionLimit(2_048), true);
-  assert.equal(isHistoryRetentionLimit(500), false);
-  assert.equal($("#history-retention-limit").length, 0);
-  assert.equal($("#save-history-retention-button").length, 0);
-  assert.equal($("#clear-history-button").length, 0);
+  assert.deepEqual(HISTORY_RETENTION_LIMITS, [100, 500, 1_000]);
+  assert.equal(DEFAULT_HISTORY_RETENTION_LIMIT, 500);
+  assert.equal(isHistoryRetentionLimit(100), true);
+  assert.equal(isHistoryRetentionLimit(500), true);
+  assert.equal(isHistoryRetentionLimit(1_000), true);
+  assert.equal(isHistoryRetentionLimit(2_048), false);
+  assert.deepEqual(
+    $("#history-retention-limit option").map((_, option) => Number($(option).attr("value"))).get(),
+    [100, 500, 1_000]
+  );
+  assert.equal($("#save-history-retention-button").length, 1);
+  assert.equal($("#clear-history-button.button-danger").length, 1);
   assert.equal($("#history-page #new-conversation-button").length, 0);
   assert.equal($("#settings-data-page #history-settings-group #conversation-list").length, 1);
 });
 
-test("历史上限迁移保留旧存储并统一升级为 2048", () => {
-  assert.equal(normalizeStoredHistoryRetentionLimit(100), 2_048);
-  assert.equal(normalizeStoredHistoryRetentionLimit(500), 2_048);
-  assert.equal(normalizeStoredHistoryRetentionLimit(1_000), 2_048);
-  assert.equal(normalizeStoredHistoryRetentionLimit(2_048), 2_048);
+test("历史上限保留合法档位并只把遗留 2048 迁移为默认 500", () => {
+  assert.equal(normalizeStoredHistoryRetentionLimit(100), 100);
+  assert.equal(normalizeStoredHistoryRetentionLimit(500), 500);
+  assert.equal(normalizeStoredHistoryRetentionLimit(1_000), 1_000);
+  assert.equal(normalizeStoredHistoryRetentionLimit(2_048), 500);
   assert.equal(normalizeStoredHistoryRetentionLimit(999), null);
 });
 

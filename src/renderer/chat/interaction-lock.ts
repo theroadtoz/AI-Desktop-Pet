@@ -5,6 +5,8 @@ export const REPLY_LOCKED_CONTROL_IDS = [
   "history-tab",
   "memory-tab",
   "new-conversation-button",
+  "save-history-retention-button",
+  "clear-history-button",
   "enable-memory-button",
   "clear-memory-button",
   "save-memory-draft-button",

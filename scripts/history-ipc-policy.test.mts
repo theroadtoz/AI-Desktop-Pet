@@ -25,6 +25,8 @@ test("history, memory, automatic situation and user profile IPC are restricted a
   assert.match(preloadSource, /exposeInMainWorld\("historyApi", historyApi\)/);
   assert.match(preloadSource, /ipcRenderer\.invoke\("history:get-retention"\)/);
   assert.match(preloadSource, /ipcRenderer\.invoke\("history:set-retention", parsedLimit\)/);
+  assert.match(preloadSource, /value === 100 \|\| value === 500 \|\| value === 1_000 \? value : null/);
+  assert.doesNotMatch(preloadSource, /value === 2048/);
   assert.match(preloadSource, /exposeInMainWorld\("memoryApi", memoryApi\)/);
   assert.match(preloadSource, /exposeInMainWorld\("userProfileApi", userProfileApi\)/);
   assert.doesNotMatch(preloadSource, /exposeInMainWorld\("(?:dialogue|presence)ModeApi"/);

@@ -1766,7 +1766,7 @@ function isConversationSummary(value: unknown): value is ConversationSummary {
 }
 
 function parseHistoryRetentionLimit(value: unknown): HistoryRetentionLimit | null {
-  return value === 100 || value === 500 || value === 1_000 || value === 2_048 ? 2_048 : null;
+  return value === 100 || value === 500 || value === 1_000 ? value : null;
 }
 
 function isWebSearchSettings(value: unknown): value is WebSearchSettings {

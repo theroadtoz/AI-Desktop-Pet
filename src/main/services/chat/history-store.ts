@@ -105,7 +105,6 @@ export function createHistoryStore(options: { userDataPath?: string; writeFileSy
         });
       }
 
-      applyRetention(storage);
       return tryWriteStorage(storage);
     },
     deleteConversation(id) {
@@ -145,7 +144,6 @@ export function createHistoryStore(options: { userDataPath?: string; writeFileSy
       if (!read.canWrite) return null;
       const storage = read.storage;
       storage.retentionLimit = limit;
-      applyRetention(storage);
       return tryWriteStorage(storage) ? storage.retentionLimit : null;
     },
     getSemanticSummary(conversationId, sourceMessageIds) {
@@ -187,6 +185,7 @@ export function createHistoryStore(options: { userDataPath?: string; writeFileSy
 
   function tryWriteStorage(storage: HistoryStorage): boolean {
     try {
+      applyRetention(storage);
       writeStorage(storage);
       return true;
     } catch {

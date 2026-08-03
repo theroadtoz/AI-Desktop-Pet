@@ -46,6 +46,8 @@ test("verification scripts keep local assets outside core and register security 
 
   for (const path of [
     "scripts/app-shutdown-coordinator.test.mts",
+    "scripts/p2-87e-history-lifecycle.test.mts",
+    "scripts/settings-information-architecture.test.mts",
     "scripts/trusted-ipc-sender.test.mts",
     "scripts/trusted-window-policy.test.mts"
   ]) {

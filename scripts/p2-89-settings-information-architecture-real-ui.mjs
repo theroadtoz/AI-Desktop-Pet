@@ -28,7 +28,7 @@ const historyDirectory = join(context.appDataDir, "history");
 mkdirSync(historyDirectory, { recursive: true });
 writeFileSync(join(historyDirectory, "conversations.json"), `${JSON.stringify({
   version: 2,
-  retentionLimit: 2_048,
+  retentionLimit: 500,
   conversations: [
     {
       id: "11111111-1111-4111-8111-111111111111",
@@ -418,11 +418,13 @@ try {
     getComputedStyle(document.querySelector("#history-page")).animationDuration === "0.24s"
   `);
   await new Promise((resolve) => setTimeout(resolve, 270));
-  checks.historyOnlyListsConversations = await evaluate(chat, `
+  checks.historyControlsAndConversations = await evaluate(chat, `
     document.querySelector("#history-settings-group")?.open === true &&
     Boolean(document.querySelector("#conversation-list")) &&
     !document.querySelector("#history-page .history-detail-actions button") &&
-    !document.querySelector("#history-page select")
+    document.querySelector("#history-retention-limit")?.value === "500" &&
+    document.querySelectorAll("#history-retention-limit option").length === 3 &&
+    Boolean(document.querySelector("#clear-history-button.button-danger"))
   `);
   await evaluate(chat, `
     [...document.querySelectorAll("#conversation-list .conversation-select")]

@@ -13,6 +13,8 @@ test("reply lock list includes existing key chat controls", () => {
   assert.ok(REPLY_LOCKED_CONTROL_IDS.includes("settings-button"));
   assert.ok(REPLY_LOCKED_CONTROL_IDS.includes("history-tab"));
   assert.ok(REPLY_LOCKED_CONTROL_IDS.includes("memory-tab"));
+  assert.ok(REPLY_LOCKED_CONTROL_IDS.includes("save-history-retention-button"));
+  assert.ok(REPLY_LOCKED_CONTROL_IDS.includes("clear-history-button"));
   assert.ok(REPLY_LOCKED_CONTROL_IDS.includes("save-memory-draft-button"));
   assert.ok(REPLY_LOCKED_CONTROL_IDS.includes("shelf-accessory-button"));
   assert.ok(REPLY_LOCKED_CONTROL_IDS.includes("shelf-scale-button"));
