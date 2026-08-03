@@ -22,6 +22,7 @@ import type {
 import type { AutomaticSituationSnapshot } from "../shared/automatic-situation-context";
 import type { PetPresentationIntent, PetRoleState } from "../shared/pet-role-state";
 import type { PetScaleAdjustmentIntent } from "../shared/pet-presentation";
+import type { AttentionMicroCueCommand } from "../shared/attention-micro-cue";
 
 const P2_85_ACCEPTANCE_SCENARIO_IDS = Object.freeze([
   "chat_opened_replace_active",
@@ -30,6 +31,7 @@ const P2_85_ACCEPTANCE_SCENARIO_IDS = Object.freeze([
   "proactive_suppress_single_defer"
 ] as const satisfies readonly P285AcceptanceScenarioId[]);
 const P2_88D_CURIOUS_FOCUS_PULSE_PREVIEW_CHANNEL = "pet:p2-88d-curious-focus-pulse-preview";
+const ATTENTION_MICRO_CUE_CHANNEL = "pet:attention-micro-cue";
 
 const petRoleStates = [
   "idle",
@@ -200,6 +202,24 @@ function parseAutomaticSituationSnapshot(value: unknown): AutomaticSituationSnap
 
 function isRequestVersion(value: number): boolean {
   return Number.isSafeInteger(value) && value > 0;
+}
+
+function parseAttentionMicroCueCommand(value: unknown): AttentionMicroCueCommand | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const command = value as Record<string, unknown>;
+  if (command.operation === "cancel") {
+    return Object.keys(command).length === 1 ? { operation: "cancel" } : null;
+  }
+
+  return command.operation === "start" &&
+    command.kind === "attention-micro-cue" &&
+    command.intensity === "low" &&
+    Object.keys(command).length === 3
+    ? { operation: "start", kind: "attention-micro-cue", intensity: "low" }
+    : null;
 }
 
 function isEmotionPresentation(value: unknown): boolean {
@@ -522,6 +542,19 @@ const api: PetApi = {
   async triggerCuriousFocusPulsePreviewForAcceptance() {
     const result = await ipcRenderer.invoke(P2_88D_CURIOUS_FOCUS_PULSE_PREVIEW_CHANNEL);
     return result === true;
+  },
+  onAttentionMicroCue(handler: (command: AttentionMicroCueCommand) => void) {
+    const listener = (_event: Electron.IpcRendererEvent, value: unknown): void => {
+      const command = parseAttentionMicroCueCommand(value);
+      if (command) {
+        handler(command);
+      }
+    };
+
+    ipcRenderer.on(ATTENTION_MICRO_CUE_CHANNEL, listener);
+    return () => {
+      ipcRenderer.removeListener(ATTENTION_MICRO_CUE_CHANNEL, listener);
+    };
   },
   onWindowMotionFeedback(handler) {
     const listener = (_event: Electron.IpcRendererEvent, value: unknown): void => {

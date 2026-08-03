@@ -28,6 +28,7 @@ import type { PetTelemetryEvent } from "./pet-telemetry-contract";
 import type { ShortcutActionId, ShortcutPreferenceView, ShortcutUpdateResult } from "./shortcut-preferences";
 import type { UserProfile, UserProfileInput } from "./user-profile";
 import type { PetActionTrigger } from "./pet-action-trigger";
+import type { AttentionMicroCueCommand } from "./attention-micro-cue";
 import type { LlamaCppRuntimeSafeSummary, LlamaCppRuntimeSettingsUpdate } from "./llama-cpp-runtime";
 import type { LocalModelDiagnosticSafeSummary } from "./local-model-diagnostic";
 import type {
@@ -84,6 +85,7 @@ export type PetWindowCommand =
   | { type: "automaticSituation:changed"; payload: AutomaticSituationSnapshot }
   | { type: "pet:inject-webgl-context-loss" }
   | { type: "pet:p2-88d-curious-focus-pulse-preview" }
+  | { type: "pet:attention-micro-cue"; payload: AttentionMicroCueCommand }
   | { type: "pet:open-chat" }
   | { type: "pet:drag-start" }
   | { type: "pet:drag-move"; payload: PetDragDelta }
@@ -261,6 +263,7 @@ export type PetApi = {
   onInjectWebGLContextLoss(handler: () => void): () => void;
   onCuriousFocusPulsePreview(handler: () => void): () => void;
   triggerCuriousFocusPulsePreviewForAcceptance(): Promise<boolean>;
+  onAttentionMicroCue(handler: (command: AttentionMicroCueCommand) => void): () => void;
   onWindowMotionFeedback(handler: (feedback: PetWindowMotionFeedback) => void): () => void;
   openChat(): void;
   startDrag(): void;

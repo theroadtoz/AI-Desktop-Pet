@@ -103,6 +103,12 @@ import type { LocalOpenAICompatibleConfig, ProviderConfig, ProviderStatus } from
 import type { ProviderHealthCheckRequest } from "../shared/provider-health";
 import type { LlamaCppRuntimeSettingsUpdate } from "../shared/llama-cpp-runtime";
 import {
+  ATTENTION_MICRO_CUE_CANCEL_COMMAND,
+  ATTENTION_MICRO_CUE_CHANNEL,
+  ATTENTION_MICRO_CUE_START_COMMAND,
+  type AttentionMicroCueCommand
+} from "../shared/attention-micro-cue";
+import {
   BAIDU_SEARCH_VERIFICATION_REQUIRED_ERROR,
   getWebSearchFailurePrompt,
   type WebSearchCitationPayload,
@@ -432,6 +438,8 @@ const isP288dCuriousFocusPulsePreviewEnabled =
   !app.isPackaged &&
   process.env.AI_DESKTOP_PET_ACCEPTANCE_TELEMETRY === "1" &&
   process.env.AI_DESKTOP_PET_P2_88D_CURIOUS_LOW_PREVIEW === "1";
+const isAttentionMicroCueRolloutEnabled =
+  process.env.AI_DESKTOP_PET_ATTENTION_MICRO_CUE_ROLLOUT === "1";
 const isP285AcceptanceObservationEnabled = isAcceptanceTelemetryEnabled &&
   process.env.AI_DESKTOP_PET_P2_85_SAFE_OBSERVATION === "1";
 const isP285AcceptanceFixtureEnabled = isP285AcceptanceObservationEnabled &&
@@ -1634,6 +1642,24 @@ function logLowFrequencyCompanionEventDecision(
 
 function isChatVisible(): boolean {
   return Boolean(chatWindow && !chatWindow.isDestroyed() && chatWindow.isVisible());
+}
+
+function sendAttentionMicroCueCommand(command: AttentionMicroCueCommand): boolean {
+  if (
+    !petWindow ||
+    petWindow.isDestroyed() ||
+    !petWindow.isVisible() ||
+    (command.operation === "start" && !hasPetFirstFrame)
+  ) {
+    return false;
+  }
+
+  try {
+    petWindow.webContents.send(ATTENTION_MICRO_CUE_CHANNEL, command);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function getProactiveBubbleRuntimeGates(): ProactiveBubbleRuntimeGates {
@@ -4116,6 +4142,9 @@ app.whenReady().then(async () => {
       );
       if (shadowObservation) {
         logTelemetry("xita_interaction_cue_shadow_observed", shadowObservation);
+        if (isAttentionMicroCueRolloutEnabled && currentDialogueAffectSettings.enabled) {
+          sendAttentionMicroCueCommand(ATTENTION_MICRO_CUE_START_COMMAND);
+        }
       }
       affectTurnResolution = resolveDialogueAffectForMessage(
         request.conversationId,
@@ -4656,6 +4685,7 @@ app.whenReady().then(async () => {
       cancelReplyCompletionAffectAction();
       latestCompletedChatRequestVersion = null;
       resetDialogueAffectToCalm();
+      sendAttentionMicroCueCommand(ATTENTION_MICRO_CUE_CANCEL_COMMAND);
     }
     logDialogueAffectDecision(
       currentDialogueAffectSettings.enabled ? "applied" : "suppressed",

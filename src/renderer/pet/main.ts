@@ -48,6 +48,7 @@ import {
 } from "../../shared/proactive-speech-bubble";
 import { isClientPointInsideVisibleBubble } from "./proactive-bubble-pointer-hit";
 import { createCuriousFocusPulsePreviewController } from "./p2-88d-curious-low-preview-controller";
+import { createAttentionMicroCueController } from "./attention-micro-cue-controller";
 
 const foundCanvas = document.querySelector<HTMLCanvasElement>("#pet-canvas");
 const foundProactiveSpeechBubble = document.querySelector<HTMLButtonElement>("#proactive-speech-bubble");
@@ -511,6 +512,25 @@ const curiousFocusPulsePreviewController = createCuriousFocusPulsePreviewControl
   }
 });
 
+const attentionMicroCueController = createAttentionMicroCueController({
+  isRendererStable: () => isUsingLive2D && live2DModel !== null && !isRecoveringContext,
+  isVisible: () => !document.hidden,
+  isInteractionActionActive: () => interactionActionPlayer.isActive(),
+  isRecoveringContext: () => isRecoveringContext,
+  setLookTarget: (x, y) => {
+    live2DModel?.setLookTarget(x, y);
+  },
+  releaseLookTarget: () => {
+    live2DModel?.setLookTarget(0, 0);
+  },
+  scheduleTimeout: (callback, delayMs) => window.setTimeout(callback, delayMs),
+  clearScheduledTimeout: (handle) => window.clearTimeout(handle as number),
+  reportResult: ({ accepted, reason }) => {
+    canvas.dataset.attentionMicroCueAccepted = String(accepted);
+    canvas.dataset.attentionMicroCueStatus = reason;
+  }
+});
+
 function applyBasePresentation(
   presentation: EmotionPresentation,
   accessorySelection: PetAccessoryResolution
@@ -684,6 +704,7 @@ function handleWebGLContextLost(): void {
 
   isRecoveringContext = true;
   curiousFocusPulsePreviewController.cancelForOwnershipLoss();
+  attentionMicroCueController.handle({ operation: "cancel" });
   live2DFrameSampleWaiters.cancelPending();
   recoveryCount += 1;
   window.petApi?.reportTelemetry("webgl_context_lost", {
@@ -784,6 +805,9 @@ const removeInjectWebGLContextLossListener = window.petApi?.onInjectWebGLContext
 const removeCuriousFocusPulsePreviewListener = window.petApi?.onCuriousFocusPulsePreview(() => {
   curiousFocusPulsePreviewController.start();
 }) ?? null;
+const removeAttentionMicroCueListener = window.petApi?.onAttentionMicroCue((command) => {
+  attentionMicroCueController.handle(command);
+}) ?? null;
 
 function applyAutomaticSituation(snapshot: AutomaticSituationSnapshot): void {
   currentDialogueModeId = snapshot.conversationContextId;
@@ -808,6 +832,7 @@ const removeAutomaticSituationChangedListener = window.petApi?.onAutomaticSituat
 const returnFromIdleController = createReturnFromIdleController();
 const removeActionTriggerListener = window.petApi?.onActionTrigger((trigger) => {
   curiousFocusPulsePreviewController.cancelForOwnershipLoss();
+  attentionMicroCueController.cancelForOwnershipLoss();
   if (trigger.reason === "chat_opened" || trigger.reason === "chat_input_focus") {
     clearProactiveSpeechBubble();
   }
@@ -876,6 +901,9 @@ window.addEventListener("resize", () => {
 
 document.addEventListener("visibilitychange", () => {
   live2DRenderer?.setVisible(!document.hidden);
+  if (document.hidden) {
+    attentionMicroCueController.handle({ operation: "cancel" });
+  }
 });
 
 window.addEventListener("beforeunload", () => {
@@ -883,6 +911,7 @@ window.addEventListener("beforeunload", () => {
   removePresentationIntentListener?.();
   removeInjectWebGLContextLossListener?.();
   removeCuriousFocusPulsePreviewListener?.();
+  removeAttentionMicroCueListener?.();
   removeAutomaticSituationChangedListener?.();
   removeActionTriggerListener?.();
   removeProactiveSpeechBubbleListener?.();
@@ -893,6 +922,7 @@ window.addEventListener("beforeunload", () => {
   rapidTouchComboDetector.reset();
   interactionActionPlayer.dispose();
   curiousFocusPulsePreviewController.dispose();
+  attentionMicroCueController.dispose();
   live2DFrameSampleWaiters.dispose();
   live2DRenderer?.release();
   live2DRenderer = null;
