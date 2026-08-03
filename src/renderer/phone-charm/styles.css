@@ -48,13 +48,6 @@ body {
   stroke-linejoin: round;
 }
 
-.charm-highlight {
-  fill: none;
-  stroke: rgba(255, 255, 255, 0.58);
-  stroke-width: 2.5;
-  stroke-linecap: round;
-}
-
 .charm-star {
   fill: #faf8ff;
   stroke: #6a54da;
