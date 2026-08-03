@@ -12,32 +12,22 @@ const childTimeoutMs = Number(process.env.P2_11G_CHILD_TIMEOUT_MS || 300_000);
 
 const smokeScripts = [
   {
-    id: "P2-10C",
-    script: "scripts/p2-10c-chat-mode-switching-real-ui.mjs",
-    reason: "automatic situation read-only UI, action chain, and memory privacy"
+    id: "P2-89",
+    script: "scripts/p2-89-settings-information-architecture-real-ui.mjs",
+    reason: "current Figma chat, settings, memory, history, input, scrolling, and motion flow"
   },
   {
-    id: "P2-11D",
-    script: "scripts/p2-11d-chat-ui-polish-real-ui.mjs",
-    reason: "chat UI polish, density, and retired manual-mode controls"
-  },
-  {
-    id: "P2-11E",
-    script: "scripts/p2-11e-companion-control-shelf-real-ui.mjs",
-    reason: "companion control shelf"
+    id: "MODEL-REPLY",
+    script: "scripts/model-reply-motion-real-ui.mjs",
+    reason: "current Figma thinking and assistant reply motion tracks"
   }
 ];
 
 const extendedScripts = [
   {
-    id: "P2-5E",
-    script: "scripts/p2-5e-accessory-selector-real-ui.mjs",
-    reason: "accessory selector"
-  },
-  {
-    id: "P2-9A",
-    script: "scripts/p2-9a-custom-shortcuts-real-ui.mjs",
-    reason: "global lock shortcut; must run serially"
+    id: "P2-8H",
+    script: "scripts/p2-8h-lock-shortcut-real-ui.mjs",
+    reason: "desktop pet lock interaction and shortcut feedback; must run serially"
   },
   {
     id: "P2-9B",
@@ -91,8 +81,8 @@ function listEntries(directory) {
 }
 
 function matchesTmpResidue(name, scope) {
-  const common = [/^p2-10c-/i, /^p2-11d-/i, /^p2-11e-/i, /^p2-11g-/i];
-  const extended = [/^p2-5e-/i, /^p2-9a-/i, /^p2-9b-/i];
+  const common = [/^p2-89-/i, /^model-reply-/i, /^p2-11g-/i];
+  const extended = [/^p2-8h-/i, /^p2-9b-/i];
   return [...common, ...(scope === "extended" ? extended : [])].some((pattern) => pattern.test(name));
 }
 

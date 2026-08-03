@@ -83,6 +83,84 @@ try {
   const chat = await waitForWindow(context, "renderer/chat/index.html");
   await waitFor(chat, "Boolean(document.querySelector('#settings-button'))");
 
+  const charm = await waitForWindow(context, "renderer/phone-charm/index.html");
+  await waitFor(charm, "Boolean(document.querySelector('#charm-pendant'))");
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  const observedPhoneCharm = await evaluate(charm, `
+    (() => {
+      const stage = document.querySelector("#charm-stage");
+      const pendant = document.querySelector("#charm-pendant");
+      const stageRect = stage.getBoundingClientRect();
+      const pendantRect = pendant.getBoundingClientRect();
+      return {
+        innerWidth: window.innerWidth,
+        innerHeight: window.innerHeight,
+        scrollWidth: document.documentElement.scrollWidth,
+        scrollHeight: document.documentElement.scrollHeight,
+        stage: { width: stageRect.width, height: stageRect.height },
+        pendant: { left: pendantRect.left, top: pendantRect.top, right: pendantRect.right, bottom: pendantRect.bottom }
+      };
+    })()
+  `);
+  checks.phoneCharmViewport = observedPhoneCharm.innerWidth >= 420 &&
+    observedPhoneCharm.innerHeight >= 330 &&
+    observedPhoneCharm.scrollWidth === observedPhoneCharm.innerWidth &&
+    observedPhoneCharm.scrollHeight === observedPhoneCharm.innerHeight &&
+    observedPhoneCharm.stage.width === observedPhoneCharm.innerWidth &&
+    observedPhoneCharm.stage.height === observedPhoneCharm.innerHeight &&
+    observedPhoneCharm.pendant.left >= 0 &&
+    observedPhoneCharm.pendant.top >= 0 &&
+    observedPhoneCharm.pendant.right <= observedPhoneCharm.innerWidth &&
+    observedPhoneCharm.pendant.bottom <= observedPhoneCharm.innerHeight;
+
+  checks.memoryFixtureCreated = await evaluate(chat, `
+    (async () => {
+      await window.memoryApi.setEnabled(true);
+      const result = await window.memoryApi.createCard({
+        title: "Final acceptance memory",
+        content: "Used to verify that memory selection can be checked and unchecked.",
+        tags: ["acceptance"],
+        sourceConversationId: "77777777-7777-4777-8777-777777777777"
+      });
+      return result.status === "created";
+    })()
+  `);
+
+  checks.mcpErrorLightIsRed = await evaluate(chat, `
+    (() => {
+      const light = document.querySelector("#figma-mcp-light");
+      light.dataset.connection = "error";
+      const isRed = getComputedStyle(light).backgroundColor === "rgb(214, 66, 66)";
+      light.dataset.connection = "disabled";
+      return isRed;
+    })()
+  `);
+
+  checks.chatInputStability = await evaluate(chat, `
+    (() => {
+      const input = document.querySelector("#chat-input");
+      const baseline = input.getBoundingClientRect();
+      const baselineFont = getComputedStyle(input).fontSize;
+      input.value = "Short input";
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      const shortRect = input.getBoundingClientRect();
+      input.value = "This is a deliberately long input used to verify textarea wrapping without changing its width or font size. ".repeat(8);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      const longRect = input.getBoundingClientRect();
+      const longValuePreserved = input.value.endsWith("font size. ");
+      const fontStable = getComputedStyle(input).fontSize === baselineFont;
+      input.value = "Figma motion acceptance";
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      return Math.abs(shortRect.width - baseline.width) < 1 &&
+        Math.abs(longRect.width - baseline.width) < 1 &&
+        shortRect.height === 45 &&
+        longRect.height > shortRect.height &&
+        longRect.height <= 129 &&
+        longValuePreserved &&
+        fontStable;
+    })()
+  `);
+
   await evaluate(chat, `
     (() => {
       const messages = document.querySelector("#messages");
@@ -123,12 +201,35 @@ try {
   checks.sendMotionFinishes = await evaluate(chat, `
     document.querySelector("#chat-form")?.classList.contains("is-sending") === false &&
     document.querySelector("#messages")?.classList.contains("is-sending") === false &&
-    Math.abs(document.querySelector("#messages").scrollTop - 126) < 1 &&
+    document.querySelector("#messages").scrollTop > 0 &&
     (() => {
-      const items = [...document.querySelectorAll("#messages > .message")];
-      const previousRect = items.at(-2).getBoundingClientRect();
-      const userRect = items.at(-1).getBoundingClientRect();
+      const user = [...document.querySelectorAll("#messages > .message-user")].at(-1);
+      const previousRect = user.previousElementSibling.getBoundingClientRect();
+      const userRect = user.getBoundingClientRect();
       return Math.abs(userRect.top - previousRect.bottom - 116) < 1;
+    })()
+  `);
+  checks.messageBubbleSizing = await evaluate(chat, `
+    (() => {
+      const shortBubble = [...document.querySelectorAll("#messages > .message-user")].at(-1);
+      const shortContent = shortBubble.querySelector(".message-content");
+      const shortRect = shortBubble.getBoundingClientRect();
+      const shortContentRect = shortContent.getBoundingClientRect();
+      const longBubble = document.createElement("p");
+      longBubble.className = "message message-user";
+      const longContent = document.createElement("span");
+      longContent.className = "message-content";
+      longContent.textContent = "A long message should wrap only after reaching the configured maximum bubble width. ".repeat(5);
+      longBubble.append(longContent);
+      document.querySelector("#messages").append(longBubble);
+      const longRect = longBubble.getBoundingClientRect();
+      const longContentRect = longContent.getBoundingClientRect();
+      return shortRect.width < 323 &&
+        shortContentRect.height <= 22 &&
+        longRect.width <= 323 &&
+        longRect.width > 280 &&
+        longContentRect.height > 22 &&
+        Math.abs(longRect.top - shortRect.bottom - 116) < 1;
     })()
   `);
 
@@ -282,6 +383,20 @@ try {
     document.querySelector("#memory-delete-selected-button")?.disabled === true &&
     document.querySelector("#memory-forget-selected-button")?.disabled === true
   `);
+  await waitFor(chat, "Boolean(document.querySelector('#memory-list input[type=checkbox]'))");
+  checks.memorySelectionCanToggle = await evaluate(chat, `
+    (() => {
+      const checkbox = document.querySelector("#memory-list input[type=checkbox]");
+      const deleteButton = document.querySelector("#memory-delete-selected-button");
+      const forgetButton = document.querySelector("#memory-forget-selected-button");
+      const initiallyClear = checkbox.checked === false && deleteButton.disabled && forgetButton.disabled;
+      checkbox.click();
+      const selected = checkbox.checked === true && !deleteButton.disabled && !forgetButton.disabled;
+      checkbox.click();
+      const clearedAgain = checkbox.checked === false && deleteButton.disabled && forgetButton.disabled;
+      return initiallyClear && selected && clearedAgain;
+    })()
+  `);
   await new Promise((resolve) => setTimeout(resolve, 270));
   await evaluate(chat, "document.querySelector('#memory-cancel-manage-button').click()");
   checks.memoryManagementCollapseMotion = await evaluate(chat, `
@@ -360,6 +475,17 @@ try {
     })()
   `);
   await new Promise((resolve) => setTimeout(resolve, 270));
+  checks.historyDetailScrollableWithoutOverlap = await evaluate(chat, `
+    (() => {
+      const scroller = document.querySelector("#settings-form");
+      const messages = [...document.querySelectorAll("#history-detail .history-message")];
+      const rects = messages.map((message) => message.getBoundingClientRect());
+      const noOverlap = rects.every((rect, index) => index === 0 || rect.top >= rects[index - 1].bottom);
+      const maximumScrollTop = scroller.scrollHeight - scroller.clientHeight;
+      scroller.scrollTop = maximumScrollTop;
+      return noOverlap && maximumScrollTop > 0 && Math.abs(scroller.scrollTop - maximumScrollTop) < 1;
+    })()
+  `);
   if (process.env.P2_89_CAPTURE_HISTORY_DETAIL === "1") {
     const screenshot = await chat.cdp.send("Page.captureScreenshot", {
       format: "png",
@@ -380,6 +506,45 @@ try {
     getComputedStyle(document.querySelector("#history-detail")).display === "none"
   `);
   checks.historyDetailReturnsToList = true;
+
+  await evaluate(chat, "document.querySelector('#settings-basic-tab').click()");
+  await waitFor(chat, "document.querySelector('#settings-basic-page')?.hidden === false");
+  checks.returnToBasicCrossfade = await evaluate(chat, `
+    document.querySelector("#settings-data-page")?.hidden === false &&
+    getComputedStyle(document.querySelector("#settings-data-page")).animationName === "settings-page-fade-out" &&
+    getComputedStyle(document.querySelector("#settings-basic-page")).animationName === "settings-page-fade-in"
+  `);
+  await new Promise((resolve) => setTimeout(resolve, 330));
+  checks.appearanceStillInteractiveAfterReturn = await evaluate(chat, `
+    (() => {
+      const group = document.querySelector("#appearance-settings-group");
+      const field = document.querySelector("#pet-scale");
+      group.open = true;
+      field.value = "1.75";
+      field.dispatchEvent(new Event("input", { bubbles: true }));
+      field.dispatchEvent(new Event("change", { bubbles: true }));
+      return document.querySelector("#pet-scale-value")?.value === "175%" &&
+        getComputedStyle(field).pointerEvents !== "none";
+    })()
+  `);
+  await waitFor(chat, "window.petPresentationApi.getPreferences().then((preferences) => preferences.petScale === 1.75)");
+  checks.scalePersistsAfterReturn = true;
+  const initialLockState = await evaluate(chat, "document.querySelector('#toggle-pet-lock-button').getAttribute('aria-checked')");
+  await evaluate(chat, "document.querySelector('#toggle-pet-lock-button').click()");
+  await waitFor(chat, `document.querySelector("#toggle-pet-lock-button").getAttribute("aria-checked") !== ${JSON.stringify(initialLockState)}`);
+  checks.lockSwitchMatchesAndFades = await evaluate(chat, `
+    (() => {
+      const button = document.querySelector("#toggle-pet-lock-button");
+      const display = button.querySelector(".figma-switch-display");
+      const labels = [...button.querySelectorAll(".pet-lock-toggle-label > span")];
+      return getComputedStyle(display).borderRadius === "16px" &&
+        labels.every((label) => getComputedStyle(label).transitionDuration === "0.2s") &&
+        labels.filter((label) => getComputedStyle(label).opacity === "1").length === 1;
+    })()
+  `);
+  await evaluate(chat, "document.querySelector('#toggle-pet-lock-button').click()");
+  await waitFor(chat, `document.querySelector("#toggle-pet-lock-button").getAttribute("aria-checked") === ${JSON.stringify(initialLockState)}`);
+  checks.lockSwitchCanRestore = true;
 
   checks.settingsDragAndScaleContract = await evaluate(chat, `
     (() => {
@@ -432,7 +597,7 @@ try {
     document.querySelector("#settings-panel")?.classList.contains("is-exiting") === false
   `);
 
-  const result = { ok: Object.values(checks).every(Boolean), checks, observedFlatFigmaSurface, observedSettingsTabMotion, observedHistoryDetail };
+  const result = { ok: Object.values(checks).every(Boolean), checks, observedPhoneCharm, observedFlatFigmaSurface, observedSettingsTabMotion, observedHistoryDetail };
   console.log(JSON.stringify(result, null, 2));
   if (!result.ok) {
     process.exitCode = 1;

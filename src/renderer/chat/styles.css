@@ -2575,7 +2575,7 @@ body {
   box-shadow: 0 0 0 3px rgb(66 197 91 / 14%);
 }
 
-.figma-mcp-light[data-connection="disconnected"] {
+.figma-mcp-light[data-connection="error"] {
   background: #d64242;
   box-shadow: 0 0 0 3px rgb(214 66 66 / 12%);
 }

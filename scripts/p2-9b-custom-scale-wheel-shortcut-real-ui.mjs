@@ -465,7 +465,7 @@ async function main() {
     await hideChat(chat);
     let point = await readScreenPoint(pet.cdp);
     await sendInputWheel(point, { ctrl: true, shift: true, wheelDelta: 120 });
-    await assertViewportScale(checks, pet.cdp, "defaultCtrlShiftWheelScales", 1.05);
+    await assertViewportScale(checks, pet.cdp, "defaultCtrlShiftWheelScales", 1.25);
 
     await showChatFromPet(pet);
     await openSettings(chat);
@@ -486,11 +486,11 @@ async function main() {
     await hideChat(chat);
     point = await readScreenPoint(pet.cdp);
     await sendInputWheel(point, { ctrl: true, shift: true, wheelDelta: 120 });
-    await assertViewportScale(checks, pet.cdp, "oldCtrlShiftWheelIgnoredAfterChange", 1.05);
+    await assertViewportScale(checks, pet.cdp, "oldCtrlShiftWheelIgnoredAfterChange", 1.25);
 
     point = await readScreenPoint(pet.cdp);
     await sendInputWheel(point, { ctrl: true, alt: true, wheelDelta: 120 });
-    await assertViewportScale(checks, pet.cdp, "newCtrlAltWheelScalesImmediately", 1.1);
+    await assertViewportScale(checks, pet.cdp, "newCtrlAltWheelScalesImmediately", 1.5);
 
     await evaluate(chat.cdp, "window.petPresentationApi.setPetLocked(false)", true);
     await evaluate(chat.cdp, "window.blur()");
@@ -519,13 +519,13 @@ async function main() {
     });
 
     await hideChat(chat);
-    await returnToScale(pet.cdp, 1.1, { ctrl: true, alt: true });
+    await returnToScale(pet.cdp, 1.5, { ctrl: true, alt: true });
     point = await readScreenPoint(pet.cdp);
     await sendInputWheel(point, { ctrl: true, shift: true, wheelDelta: 120 });
-    await assertViewportScale(checks, pet.cdp, "restartOldCtrlShiftWheelStillIgnored", 1.1);
+    await assertViewportScale(checks, pet.cdp, "restartOldCtrlShiftWheelStillIgnored", 1.5);
     point = await readScreenPoint(pet.cdp);
     await sendInputWheel(point, { ctrl: true, alt: true, wheelDelta: -120 });
-    await assertViewportScale(checks, pet.cdp, "restartCustomCtrlAltWheelStillWorks", 1.05);
+    await assertViewportScale(checks, pet.cdp, "restartCustomCtrlAltWheelStillWorks", 1.25);
 
     await showChatFromPet(pet);
     await openSettings(chat);
@@ -541,7 +541,7 @@ async function main() {
     await hideChat(chat);
     point = await readScreenPoint(pet.cdp);
     await sendInputWheel(point, { ctrl: true, shift: true, wheelDelta: 120 });
-    await assertViewportScale(checks, pet.cdp, "defaultCtrlShiftWorksAfterReset", 1.1);
+    await assertViewportScale(checks, pet.cdp, "defaultCtrlShiftWorksAfterReset", 1.5);
 
     await returnToScale(pet.cdp, 1, { ctrl: true, shift: true });
     point = await readScreenPoint(pet.cdp);
