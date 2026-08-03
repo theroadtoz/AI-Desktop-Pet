@@ -13,6 +13,11 @@ __pycache__/
 *.pyc
 tools/
 docs/
+.agent/
+.agents/
+.interface-design/
+CONTEXT.md
+.vs/
 
 # Local research/report generators. Keep out of the app repository.
 scripts/add_toc.py
