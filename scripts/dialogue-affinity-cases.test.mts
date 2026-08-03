@@ -47,17 +47,17 @@ test("affinity display case: chat renderer polishes assistant display without ch
   const source = await readFile(new URL("../src/renderer/chat/main.ts", import.meta.url), "utf8");
   const appendStart = source.indexOf("function appendMessage");
   const appendEnd = source.indexOf("function createMessage", appendStart);
-  const deltaStart = source.indexOf("window.chatApi?.onReplyDelta");
-  const deltaEnd = source.indexOf("window.chatApi?.onReplyDone", deltaStart);
+  const doneStart = source.indexOf("window.chatApi?.onReplyDone");
+  const doneEnd = source.indexOf("window.chatApi?.onReplyError", doneStart);
   const historyStart = source.indexOf("function renderHistoryDetail");
   const historyEnd = source.indexOf("async function refreshHistoryList", historyStart);
 
   assert.notEqual(appendStart, -1);
-  assert.notEqual(deltaStart, -1);
+  assert.notEqual(doneStart, -1);
   assert.notEqual(historyStart, -1);
-  assert.match(source, /polishAssistantDisplayText/);
+  assert.match(source, /function getVisibleMessageContent[\s\S]*?polishAssistantDisplayText\(message\.content\)/);
   assert.match(source.slice(appendStart, appendEnd), /getVisibleMessageContent\(message\)/);
-  assert.match(source.slice(deltaStart, deltaEnd), /polishAssistantDisplayText\(activeReplyMessage\.content\)/);
+  assert.match(source.slice(doneStart, doneEnd), /appendMessage\(activeReplyMessage, true\)/);
   assert.match(source.slice(historyStart, historyEnd), /content\.textContent = message\.content/);
 });
 

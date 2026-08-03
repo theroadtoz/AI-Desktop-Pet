@@ -28,24 +28,17 @@ export function cloneDialogueAffectSettings(settings: DialogueAffectSettings): D
 }
 
 export function resolveDialogueAffectSettingsRecord(value: unknown): DialogueAffectSettings {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return createDefaultSettings();
-  }
-
-  const input = value as DialogueAffectSettingsRecordInput;
-  if (isCurrentOrFutureVersion(input.version) && typeof input.enabled === "boolean") {
-    return { enabled: input.enabled };
-  }
-
+  void value;
   return createDefaultSettings();
 }
 
 export function createDialogueAffectSettingsRecord(
   settings: DialogueAffectSettings
 ): DialogueAffectSettingsRecord {
+  void settings;
   return {
     version: DIALOGUE_AFFECT_SETTINGS_SCHEMA_VERSION,
-    enabled: settings.enabled
+    enabled: true
   };
 }
 
@@ -64,10 +57,4 @@ export function isFutureDialogueAffectSettingsRecord(
 
 function createDefaultSettings(): DialogueAffectSettings {
   return cloneDialogueAffectSettings(DEFAULT_DIALOGUE_AFFECT_SETTINGS);
-}
-
-function isCurrentOrFutureVersion(value: unknown): boolean {
-  return typeof value === "number" &&
-    Number.isSafeInteger(value) &&
-    value >= DIALOGUE_AFFECT_SETTINGS_SCHEMA_VERSION;
 }

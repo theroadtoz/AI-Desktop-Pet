@@ -24,6 +24,7 @@ import {
   type MemorySuppressionView,
   type MemoryStorage
 } from "../../../shared/chat-memory";
+import { parseUserProfile } from "../../../shared/user-profile";
 
 export const MEMORY_CONTEXT_COMPRESSION_THRESHOLD = 8;
 export const MEMORY_INJECTION_BUDGET = 8;
@@ -71,6 +72,7 @@ export type MemoryStore = {
 export function createMemoryStore(options: { userDataPath?: string } = {}): MemoryStore {
   const userDataPath = options.userDataPath ?? app.getPath("userData");
   const memoryPath = join(userDataPath, "memory", "facts.json");
+  const legacyProfilePath = join(userDataPath, "config", "user-profile.json");
   const suppressionIdsByTuple = new Map<string, string>();
   const suppressionsById = new Map<string, MemorySuppression>();
 
@@ -84,30 +86,31 @@ export function createMemoryStore(options: { userDataPath?: string } = {}): Memo
   }
 
   function readStorage(): MemoryStorage {
+    let storage = emptyStorage();
+
     if (!existsSync(memoryPath)) {
-      return emptyStorage();
-    }
+      return migrateLegacyUserProfile(storage);
+    } else {
+      try {
+        const rawStorage = JSON.parse(readFileSync(memoryPath, "utf8"));
+        const parsedStorage = parseMemoryStorage(rawStorage);
 
-    try {
-      const rawStorage = JSON.parse(readFileSync(memoryPath, "utf8"));
-      const storage = parseMemoryStorage(rawStorage);
-
-      if (!storage) {
-        return emptyStorage();
-      }
-
-      if (rawStorage?.version !== MEMORY_STORAGE_VERSION) {
-        try {
-          writeStorage(storage);
-        } catch {
-          // Keep compatible reads available even if a migration write cannot be persisted yet.
+        if (parsedStorage) {
+          storage = parsedStorage;
+          if (rawStorage?.version !== MEMORY_STORAGE_VERSION) {
+            try {
+              writeStorage(storage);
+            } catch {
+              // Keep compatible reads available even if a migration write cannot be persisted yet.
+            }
+          }
         }
+      } catch {
+        storage = emptyStorage();
       }
-
-      return storage;
-    } catch {
-      return emptyStorage();
     }
+
+    return migrateLegacyUserProfile(storage);
   }
 
   function writeStorage(storage: MemoryStorage): void {
@@ -122,6 +125,54 @@ export function createMemoryStore(options: { userDataPath?: string } = {}): Memo
         unlinkSync(temporaryPath);
       }
     }
+  }
+
+  function migrateLegacyUserProfile(storage: MemoryStorage): MemoryStorage {
+    if (!existsSync(legacyProfilePath)) {
+      return storage;
+    }
+
+    try {
+      const profile = parseUserProfile(JSON.parse(readFileSync(legacyProfilePath, "utf8")));
+      if (!profile) {
+        return storage;
+      }
+
+      if (!storage.cards.some((card) => card.namespace === "personal" && card.key === "preferred-name")) {
+        const preferredName = profile.preferredName ?? profile.displayName;
+        const now = Date.now();
+        storage.cards.push({
+          id: crypto.randomUUID(),
+          title: "用户称呼",
+          content: `用户希望被称为${preferredName}。`,
+          tags: [],
+          sourceConversationId: crypto.randomUUID(),
+          sourceType: "auto-local-heuristic",
+          namespace: "personal",
+          key: "preferred-name",
+          importance: "key",
+          category: "addressing",
+          confidence: 1,
+          sourceMessageId: null,
+          observedCount: 1,
+          lastObservedAt: now,
+          compressionState: "raw",
+          createdAt: now,
+          updatedAt: now,
+          enabled: true,
+          managedByUser: false,
+          lastInjectedAt: null,
+          injectionCount: 0
+        });
+        writeStorage(storage);
+      }
+
+      unlinkSync(legacyProfilePath);
+    } catch {
+      // Keep the legacy profile available so a later launch can retry the migration.
+    }
+
+    return storage;
   }
 
   return {
@@ -202,17 +253,50 @@ export function createMemoryStore(options: { userDataPath?: string } = {}): Memo
     confirmReviewedCandidate(candidate) {
       const storage = readStorage();
       if (!storage.enabled) return { status: "disabled" };
+      const existingCard = storage.cards.find(
+        (card) => card.namespace === candidate.namespace && card.key === candidate.key
+      ) ?? (
+        candidate.category === "addressing"
+          ? storage.cards.find(
+              (card) => card.namespace === candidate.namespace &&
+                card.category === "addressing" &&
+                !card.managedByUser
+            )
+          : undefined
+      );
       if (
         candidate.status !== "pending-review" ||
         candidate.action !== "create" ||
         containsSensitiveMemoryMaterial(`${candidate.title}\n${candidate.content}\n${candidate.tags.join("\n")}`) ||
         isSuppressed(storage, candidate) ||
-        storage.cards.some((card) => card.namespace === candidate.namespace && card.key === candidate.key)
+        (existingCard && (
+          candidate.category !== "addressing" ||
+          existingCard.category !== "addressing" ||
+          existingCard.managedByUser
+        ))
       ) {
         return { status: "blocked" };
       }
 
       const now = Date.now();
+      if (existingCard) {
+        Object.assign(existingCard, {
+          title: candidate.title,
+          content: candidate.content,
+          tags: candidate.tags,
+          confidence: candidate.confidence,
+          sourceConversationId: candidate.sourceConversationId,
+          sourceMessageId: candidate.sourceMessageId,
+          observedCount: existingCard.observedCount + 1,
+          lastObservedAt: now,
+          compressionState: "merged" as const,
+          updatedAt: now,
+          enabled: true
+        });
+        writeStorage(storage);
+        return { status: "created" };
+      }
+
       storage.cards.push({
         id: crypto.randomUUID(),
         title: candidate.title,
@@ -232,7 +316,7 @@ export function createMemoryStore(options: { userDataPath?: string } = {}): Memo
         createdAt: now,
         updatedAt: now,
         enabled: true,
-        managedByUser: true,
+        managedByUser: candidate.category !== "addressing",
         lastInjectedAt: null,
         injectionCount: 0
       });

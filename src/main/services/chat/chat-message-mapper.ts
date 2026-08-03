@@ -153,7 +153,8 @@ function createLocalTurnHintMessage(
   }
 
   if (isPlayfulTeasing(latestUserMessage)) {
-    hints.push("玩笑=仅2句；首句必须先以“原来是逗我的”或“还好只是玩笑”开头，再接俏皮反应，≤30字；次句回1句俏皮话，≤40字，次句即止；禁解释分析/列举；不编电脑/文件/屏幕/现实状态");
+    const teasingConcept = derivePlayfulTeasingConcept(latestUserMessage);
+    hints.push(`玩笑=${teasingConcept}；仅2句；首句同一句依次：复用用户本轮1个具体名词/对象，明确包含“${teasingConcept}”，再简短俏皮回应；具体名词决定开头，禁通用固定开头；次句自然收束。首句≤30字，次句≤40字，次句即止；禁完整回复示例/随机短语池/固定候选开头/解释分析/列举；不编电脑/文件/屏幕/现实状态`);
   } else if (asksWhetherXitaWillBlindlyAgree(latestUserMessage)) {
     hints.push("分歧=3句；首句用我不会盲从/我不同意/我更喜欢开头；次句写审美理由；末句写“你可以有自己的看法，我们不必一样”；每句≤50字；禁复述/泛谈人类");
   } else if (describesUnfairTreatment(latestUserMessage)) {
@@ -553,6 +554,25 @@ function asksWhetherCharacterCanFeelEmotion(text: string): boolean {
 function isPlayfulTeasing(text: string): boolean {
   return !/(?:不是|并非|没(?:有)?|不)(?:在)?(?:开玩笑|逗你(?:的)?|骗你的|闹着玩|说笑)/.test(text) &&
     /开玩笑|逗你(?:的)?|骗你的|闹着玩|说笑/.test(text);
+}
+
+function derivePlayfulTeasingConcept(text: string): string {
+  if (/说笑/.test(text)) {
+    return "说笑";
+  }
+  if (/闹着玩/.test(text)) {
+    return "闹着玩";
+  }
+  if (/开玩笑/.test(text)) {
+    return "开玩笑";
+  }
+  if (/玩笑/.test(text)) {
+    return "玩笑";
+  }
+  if (/逗你(?:的)?/.test(text)) {
+    return "逗我";
+  }
+  return "玩笑";
 }
 
 function asksWhetherXitaWillBlindlyAgree(text: string): boolean {

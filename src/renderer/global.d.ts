@@ -1,8 +1,10 @@
 import type { ChatApi, ConfigApi, DialogueAffectApi, EnvironmentActionApi, HistoryApi, LocalRuntimeApi, MemoryApi, PetApi, PetPresentationApi, ProactiveCompanionApi, ShortcutApi, UserProfileApi, WebSearchApi } from "../shared/ipc-contract";
+import type { PhoneCharmApi } from "../shared/phone-charm-motion";
 
 declare global {
   interface Window {
     petApi?: PetApi;
+    phoneCharmApi?: PhoneCharmApi;
     chatApi?: ChatApi;
     configApi?: ConfigApi;
     localRuntimeApi?: LocalRuntimeApi;

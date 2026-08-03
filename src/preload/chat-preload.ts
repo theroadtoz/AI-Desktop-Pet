@@ -196,9 +196,9 @@ type LocalModelDiagnosticSafeSummary = {
 
 const emotionTags = ["neutral", "happy", "sad", "surprised", "confused", "angry"] as const;
 const emotionIntensities = ["low", "medium", "high"] as const;
-const PET_SCALE_MIN = 0.7;
-const PET_SCALE_MAX = 1.35;
-const PET_SCALE_STEP = 0.05;
+const PET_SCALE_MIN = 0.5;
+const PET_SCALE_MAX = 2;
+const PET_SCALE_STEP = 0.25;
 const USER_PROFILE_TEXT_MAX_LENGTH = 32;
 
 function isEmotionTag(value: unknown): boolean {
@@ -1766,7 +1766,7 @@ function isConversationSummary(value: unknown): value is ConversationSummary {
 }
 
 function parseHistoryRetentionLimit(value: unknown): HistoryRetentionLimit | null {
-  return value === 100 || value === 500 || value === 1_000 ? value : null;
+  return value === 100 || value === 500 || value === 1_000 || value === 2_048 ? 2_048 : null;
 }
 
 function isWebSearchSettings(value: unknown): value is WebSearchSettings {
@@ -1836,6 +1836,9 @@ const api: ChatApi = {
     ipcRenderer.once("chat:focus-input", () => {
       window.dispatchEvent(new CustomEvent("chat:focus-input"));
     });
+  },
+  closeWindow() {
+    ipcRenderer.send("chat:close-window");
   },
   sendMessage(request: ChatSendRequest) {
     if (!isChatSendRequest(request)) {

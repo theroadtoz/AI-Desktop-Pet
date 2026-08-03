@@ -11,7 +11,8 @@ export default defineConfig({
     rollupOptions: {
       input: {
         pet: "pet/index.html",
-        chat: "chat/index.html"
+        chat: "chat/index.html",
+        phoneCharm: "phone-charm/index.html"
       }
     }
   }

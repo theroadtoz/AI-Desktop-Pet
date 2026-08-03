@@ -10,94 +10,45 @@ const { createEnvironmentActionSettingsStore } = require(
   "../dist/main/services/config/environment-action-settings-store.js"
 ) as typeof import("../src/main/services/config/environment-action-settings-store");
 
-test("environment settings store defaults fresh, partial, and corrupt records to v4 enabled values", async () => {
-  await withStore(async (userDataPath) => {
-    const store = createEnvironmentActionSettingsStore({ userDataPath });
-    const defaults = { basicEnabled: true, musicEnabled: true, explicitGameContextEnabled: true };
-    assert.deepEqual(store.getSettings(), defaults);
-    await mkdir(dirname(store.getSettingsPath()), { recursive: true });
-    await writeFile(store.getSettingsPath(), '{"musicEnabled":false}', "utf8");
-    assert.deepEqual(createEnvironmentActionSettingsStore({ userDataPath }).getSettings(), defaults);
-    await writeFile(store.getSettingsPath(), "not-json", "utf8");
-    assert.deepEqual(createEnvironmentActionSettingsStore({ userDataPath }).getSettings(), defaults);
-  });
-});
+const alwaysEnabled = {
+  basicEnabled: true,
+  musicEnabled: true,
+  explicitGameContextEnabled: true
+};
 
-test("v3 migration is lazy and the next save writes v4 without gameEnabled or unknown keys", async () => {
-  await withStore(async (userDataPath) => {
-    const store = createEnvironmentActionSettingsStore({ userDataPath });
-    await mkdir(dirname(store.getSettingsPath()), { recursive: true });
-    const v3 = {
-      version: 3,
-      basicEnabled: true,
-      musicEnabled: false,
-      gameEnabled: false,
-      userSelected: { basicEnabled: false, musicEnabled: true, gameEnabled: true }
-    };
-    await writeFile(store.getSettingsPath(), JSON.stringify(v3), "utf8");
-    const migrated = createEnvironmentActionSettingsStore({ userDataPath });
-    assert.deepEqual(migrated.getSettings(), {
-      basicEnabled: true,
-      musicEnabled: false,
-      explicitGameContextEnabled: false
-    });
-    assert.deepEqual(JSON.parse(await readFile(store.getSettingsPath(), "utf8")), v3);
-
-    assert.deepEqual(migrated.saveSettings({ basicEnabled: false, processName: "must-not-persist" }), {
-      basicEnabled: false,
-      musicEnabled: false,
-      explicitGameContextEnabled: false
-    });
-    const written = JSON.parse(await readFile(store.getSettingsPath(), "utf8")) as Record<string, unknown>;
-    assert.deepEqual(written, {
-      version: 4,
-      basicEnabled: false,
-      musicEnabled: false,
-      explicitGameContextEnabled: false,
-      userSelected: { basicEnabled: true, musicEnabled: true, explicitGameContextEnabled: true }
-    });
-    assert.equal("gameEnabled" in written, false);
-    assert.equal("processName" in written, false);
-  });
-});
-
-test("v2 and legacy selections survive restart and old update keys have no authority", async () => {
+test("environment settings store normalizes old opt-outs and ignores later disable requests", async () => {
   await withStore(async (userDataPath) => {
     const store = createEnvironmentActionSettingsStore({ userDataPath });
     await mkdir(dirname(store.getSettingsPath()), { recursive: true });
     await writeFile(store.getSettingsPath(), JSON.stringify({
-      version: 2,
+      version: 3,
+      basicEnabled: false,
       musicEnabled: false,
-      gameEnabled: true,
-      userSelected: { musicEnabled: true, gameEnabled: false }
+      gameEnabled: false,
+      userSelected: { basicEnabled: true, musicEnabled: true, gameEnabled: true }
     }), "utf8");
-    const migrated = createEnvironmentActionSettingsStore({ userDataPath });
-    assert.deepEqual(migrated.getSettings(), {
-      basicEnabled: true,
-      musicEnabled: false,
-      explicitGameContextEnabled: true
-    });
-    assert.deepEqual(migrated.saveSettings({ gameEnabled: false } as unknown), {
-      basicEnabled: true,
-      musicEnabled: false,
-      explicitGameContextEnabled: true
-    });
-    assert.deepEqual(createEnvironmentActionSettingsStore({ userDataPath }).getSettings(), {
-      basicEnabled: true,
-      musicEnabled: false,
-      explicitGameContextEnabled: true
-    });
 
-    await writeFile(store.getSettingsPath(), '{"musicEnabled":false,"gameEnabled":false}', "utf8");
-    assert.deepEqual(createEnvironmentActionSettingsStore({ userDataPath }).getSettings(), {
+    const migrated = createEnvironmentActionSettingsStore({ userDataPath });
+    assert.deepEqual(migrated.getSettings(), alwaysEnabled);
+    assert.deepEqual(migrated.saveSettings({
       basicEnabled: false,
       musicEnabled: false,
       explicitGameContextEnabled: false
+    }), alwaysEnabled);
+    assert.deepEqual(JSON.parse(await readFile(store.getSettingsPath(), "utf8")), {
+      version: 4,
+      ...alwaysEnabled,
+      userSelected: {
+        basicEnabled: false,
+        musicEnabled: false,
+        explicitGameContextEnabled: false
+      }
     });
+    assert.deepEqual(createEnvironmentActionSettingsStore({ userDataPath }).getSettings(), alwaysEnabled);
   });
 });
 
-test("environment runtime evening date remains separate from v4 settings", async () => {
+test("environment runtime evening date remains separate from settings", async () => {
   await withStore(async (userDataPath) => {
     const store = createEnvironmentActionSettingsStore({ userDataPath });
     assert.equal(store.getEveningDateKey(), null);

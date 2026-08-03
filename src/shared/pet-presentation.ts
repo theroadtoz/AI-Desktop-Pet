@@ -10,9 +10,9 @@ import {
 
 export const PET_WINDOW_BASE_WIDTH = 420;
 export const PET_WINDOW_BASE_HEIGHT = 600;
-export const PET_SCALE_MIN = 0.7;
-export const PET_SCALE_MAX = 1.35;
-export const PET_SCALE_STEP = 0.05;
+export const PET_SCALE_MIN = 0.5;
+export const PET_SCALE_MAX = 2;
+export const PET_SCALE_STEP = 0.25;
 export const PET_VISIBLE_INSET_RATIO = 0.1;
 export const PET_WAIST_RATIO = 0.58;
 export const PET_INITIAL_RIGHT_MARGIN_PX = 50;

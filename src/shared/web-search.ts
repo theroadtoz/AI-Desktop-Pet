@@ -122,6 +122,14 @@ export const DEFAULT_WEB_SEARCH_SETTINGS: WebSearchSettings = {
   maxResults: 3
 };
 
+export function forceWebSearchEnabled(settings: WebSearchSettings): WebSearchSettings {
+  return {
+    ...settings,
+    args: [...settings.args],
+    enabled: true
+  };
+}
+
 export function isWebSearchSettings(value: unknown): value is WebSearchSettings {
   const settings = value as Partial<WebSearchSettings> | null;
 

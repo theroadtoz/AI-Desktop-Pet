@@ -89,12 +89,7 @@ function mergeSettingsUpdate(
   current: DialogueAffectSettings,
   update: unknown
 ): DialogueAffectSettings {
-  if (!update || typeof update !== "object") {
-    return cloneDialogueAffectSettings(current);
-  }
-
-  const input = update as Partial<DialogueAffectSettings>;
-  return {
-    enabled: typeof input.enabled === "boolean" ? input.enabled : current.enabled
-  };
+  void current;
+  void update;
+  return { enabled: true };
 }

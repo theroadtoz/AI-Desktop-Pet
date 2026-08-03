@@ -46,6 +46,22 @@ const FORBIDDEN_AFFECT_TELEMETRY_KEYS = new Set([
   "reasoning",
   "timeline"
 ]);
+let bundledActiveStage = "entry";
+export const BUNDLED_FALLBACK_STAGES = Object.freeze([
+  "entry",
+  "validation",
+  "port",
+  "context",
+  "diagnostic_init",
+  "electron_flow",
+  "runtime_handoff",
+  "case_execution",
+  "joke_diagnostics",
+  "evidence_aggregation",
+  "cleanup",
+  "result_summary",
+  "returned"
+]);
 
 class ProductionStartupError extends Error {
   constructor(stage, cause, attempts, cleanup) {
@@ -56,50 +72,52 @@ class ProductionStartupError extends Error {
   }
 }
 
-const startedAt = Date.now();
-const l1 = acceptanceScope === "all" ? runThirdPartyReportedAffectL1() : null;
-let production = null;
-let bundled = null;
-let activeSection = null;
+async function main() {
+  const startedAt = Date.now();
+  const l1 = acceptanceScope === "all" ? runThirdPartyReportedAffectL1() : null;
+  let production = null;
+  let bundled = null;
+  let activeSection = null;
 
-try {
-  if (acceptanceScope !== "bundled") {
-    activeSection = "production-electron-l2";
-    production = await runProductionL2();
+  try {
+    if (acceptanceScope !== "bundled") {
+      activeSection = "production-electron-l2";
+      production = await runProductionL2();
+    }
+    if (acceptanceScope !== "production") {
+      activeSection = "bundled-local-qwen-real-ui";
+      bundled = await runBundledQwen();
+    }
+  } catch (error) {
+    if (activeSection === "production-electron-l2") {
+      production = failedSection("production-electron-l2", error);
+    } else if (activeSection === "bundled-local-qwen-real-ui") {
+      bundled = failedSection("bundled-local-qwen-real-ui", error);
+    }
   }
-  if (acceptanceScope !== "production") {
-    activeSection = "bundled-local-qwen-real-ui";
-    bundled = await runBundledQwen();
-  }
-} catch (error) {
-  if (activeSection === "production-electron-l2") {
-    production = failedSection("production-electron-l2", error);
-  } else if (activeSection === "bundled-local-qwen-real-ui") {
-    bundled = failedSection("bundled-local-qwen-real-ui", error);
-  }
-}
 
-const totalAssertions = sumAssertions(l1, production, bundled);
-const summary = {
-  ok: [l1, production, bundled].filter(Boolean).every((section) => section.ok === true),
-  safeSummaryOnly: true,
-  runName: "p2-84-acceptance",
-  scope: acceptanceScope,
-  durationMs: Date.now() - startedAt,
-  assertions: totalAssertions,
-  evidenceBoundary: {
-    thirdPartyReportedAffectL1: "deterministic parser contract only; no real-model classification claim",
-    productionL2: "closed-safe-fixture; proves production Electron/IPC/settings/coordinator/P2-83C routing, not real emotion understanding",
-    bundledQwen: "real bundled llama.cpp/Qwen UI replies; proves sampled relevance and boundaries, not genuine emotion understanding"
-  },
-  l1,
-  production,
-  bundled
-};
+  const totalAssertions = sumAssertions(l1, production, bundled);
+  const summary = {
+    ok: [l1, production, bundled].filter(Boolean).every((section) => section.ok === true),
+    safeSummaryOnly: true,
+    runName: "p2-84-acceptance",
+    scope: acceptanceScope,
+    durationMs: Date.now() - startedAt,
+    assertions: totalAssertions,
+    evidenceBoundary: {
+      thirdPartyReportedAffectL1: "deterministic parser contract only; no real-model classification claim",
+      productionL2: "closed-safe-fixture; proves production Electron/IPC/settings/coordinator/P2-83C routing, not real emotion understanding",
+      bundledQwen: "real bundled llama.cpp/Qwen UI replies; proves sampled relevance and boundaries, not genuine emotion understanding"
+    },
+    l1,
+    production,
+    bundled
+  };
 
-console.log(JSON.stringify(summary, null, 2));
-if (!summary.ok) {
-  process.exitCode = 1;
+  console.log(JSON.stringify(summary, null, 2));
+  if (!summary.ok) {
+    process.exitCode = 1;
+  }
 }
 
 function runThirdPartyReportedAffectL1() {
@@ -614,10 +632,30 @@ function sanitizeDiagnosticText(value, context = null) {
 }
 
 async function runBundledQwen() {
+  setBundledActiveStage("entry");
   const sectionStartedAt = Date.now();
-  const validation = validateLocalLlmPack(packRoot);
+  let setupStage = "validation";
+  let validation = null;
+  let context = null;
+  let checks = null;
+  let caseResults = null;
+  let jokeOpeningVariants = null;
+  let jokeAcknowledgementDiagnostics = null;
+
+  try {
+    setBundledActiveStage("validation");
+    validation = validateLocalLlmPack(packRoot);
+  } catch (error) {
+    return returnBundledSection(await createBundledSetupFailureSection({
+      stage: setupStage,
+      error,
+      sectionStartedAt,
+      validation,
+      context
+    }));
+  }
   if (!validation.ok) {
-    return {
+    return returnBundledSection({
       ok: false,
       mode: "bundled-local-qwen-real-ui",
       runtime: "llama.cpp",
@@ -628,32 +666,55 @@ async function runBundledQwen() {
       checks: { localLlmPackReady: false },
       failureCategory: validation.status ?? "local_llm_pack_unavailable",
       evidenceBoundary: "development pack unavailable; no model evidence created"
-    };
+    });
   }
 
-  const context = createRealUiRunContext({
-    runName: "p2-84-bundled-qwen-real-ui",
-    port: await selectAvailablePort(),
-    env: {
-      AI_DESKTOP_PET_PROVIDER: "",
-      AI_DESKTOP_PET_API_KEY: "",
-      AI_DESKTOP_PET_BASE_URL: "",
-      AI_DESKTOP_PET_MODEL: "",
-      AI_DESKTOP_PET_BUNDLED_LLAMA_CPP_ROOT: packRoot,
-      AI_DESKTOP_PET_ACCEPTANCE_TELEMETRY: "1"
-    },
-    tmpResiduePatterns: [/^p2-84-bundled-qwen-real-ui$/i]
-  });
-  context.electronArgs = ["--use-angle=swiftshader", "--enable-unsafe-swiftshader"];
-  const checks = { localLlmPackReady: true };
-  const caseResults = [];
+  try {
+    setupStage = "port";
+    setBundledActiveStage("port");
+    const port = await selectAvailablePort();
+    setupStage = "context";
+    setBundledActiveStage("context");
+    context = createRealUiRunContext({
+      runName: "p2-84-bundled-qwen-real-ui",
+      port,
+      env: {
+        AI_DESKTOP_PET_PROVIDER: "",
+        AI_DESKTOP_PET_API_KEY: "",
+        AI_DESKTOP_PET_BASE_URL: "",
+        AI_DESKTOP_PET_MODEL: "",
+        AI_DESKTOP_PET_BUNDLED_LLAMA_CPP_ROOT: packRoot,
+        AI_DESKTOP_PET_ACCEPTANCE_TELEMETRY: "1"
+      },
+      tmpResiduePatterns: [/^p2-84-bundled-qwen-real-ui$/i]
+    });
+    context.electronArgs = ["--use-angle=swiftshader", "--enable-unsafe-swiftshader"];
+    setupStage = "diagnostic_init";
+    setBundledActiveStage("diagnostic_init");
+    checks = { localLlmPackReady: true };
+    caseResults = [];
+    jokeOpeningVariants = [];
+    jokeAcknowledgementDiagnostics = createJokeAcknowledgementDiagnosticCounts();
+  } catch (error) {
+    return returnBundledSection(await createBundledSetupFailureSection({
+      stage: setupStage,
+      error,
+      sectionStartedAt,
+      validation,
+      context
+    }));
+  }
   let providerStatus = null;
   let runtime = null;
   let handoff = null;
-  let error = null;
   let runtimePort = null;
+  let primaryFailure = false;
+  let primaryError = null;
+  let primaryStage = "electron_flow";
 
   try {
+    primaryStage = "electron_flow";
+    setBundledActiveStage("electron_flow");
     startElectron(context);
     await connectToElectron(context, 45_000);
     const pet = await waitForWindow(context, "renderer/pet/index.html", 45_000);
@@ -664,17 +725,37 @@ async function runBundledQwen() {
       timeoutMs: 30_000
     });
 
+    primaryStage = "runtime_handoff";
+    setBundledActiveStage("runtime_handoff");
     ({ runtime, handoff } = await waitForEmbeddedRuntime(context));
     runtimePort = runtime?.port ?? null;
     providerStatus = await waitForEmbeddedProviderStatus(chat, handoff);
     checks.defaultAffectEnabled =
       (await evaluate(chat, "window.dialogueAffectApi.getSettings()"))?.enabled === true;
 
+    primaryStage = "case_execution";
+    setBundledActiveStage("case_execution");
     for (const item of bundledCases()) {
       await startNewConversation(chat);
-      caseResults.push(await runBundledCase(chat, item));
+      const bundledCase = await runBundledCase(chat, item);
+      caseResults.push(bundledCase.result);
+      primaryStage = "joke_diagnostics";
+      setBundledActiveStage("joke_diagnostics");
+      if (item.jokeSample && bundledCase.jokeOpeningVariant) {
+        jokeOpeningVariants.push(bundledCase.jokeOpeningVariant);
+      }
+      if (item.jokeSample) {
+        recordJokeAcknowledgementDiagnostic(
+          jokeAcknowledgementDiagnostics,
+          bundledCase.jokeAcknowledgementCategory
+        );
+      }
+      primaryStage = "case_execution";
+      setBundledActiveStage("case_execution");
     }
 
+    primaryStage = "evidence_aggregation";
+    setBundledActiveStage("evidence_aggregation");
     const telemetry = readTelemetryEntries(context);
     const completedRequests = telemetry.filter((entry) =>
       entry.type === "provider_request_completed"
@@ -724,6 +805,8 @@ async function runBundledQwen() {
       entry.type === "chat_stream_failed"
     );
     checks.requiredCasesPassed = caseResults.every((item) => item.status === "passed");
+    checks.jokeSamplesCompleted = jokeOpeningVariants.length === bundledCases().filter((item) => item.jokeSample).length;
+    checks.jokeOpeningDiversity = new Set(jokeOpeningVariants).size > 1;
     checks.affectTelemetrySafeKeys = affectEvents.length > 0 &&
       affectEvents.every((entry) =>
         Object.keys(entry.payload ?? {}).every((key) => !FORBIDDEN_AFFECT_TELEMETRY_KEYS.has(key))
@@ -737,44 +820,248 @@ async function runBundledQwen() {
     );
     checks.noScreenshotResidue = assertNoScreenshotResidueSafe(context);
   } catch (caught) {
-    error = caught;
-  } finally {
-    const cleanup = await cleanupContext(context, runtimePort);
-    checks.electronStopped = cleanup.electronStopped;
-    checks.cdpPortReleased = cleanup.cdpPortReleased;
-    checks.runtimePortReleased = cleanup.runtimePortReleased;
-    checks.runnerTmpRemoved = cleanup.runnerTmpRemoved;
+    primaryFailure = true;
+    primaryError = caught;
   }
 
-  const caseAssertions = caseResults.reduce(
-    (sum, item) => ({
-      passed: sum.passed + item.assertions.passed,
-      total: sum.total + item.assertions.total
-    }),
-    { passed: 0, total: 0 }
-  );
-  const sectionAssertions = summarizeChecks(checks);
-  const assertions = {
-    passed: caseAssertions.passed + sectionAssertions.passed,
-    total: caseAssertions.total + sectionAssertions.total
-  };
+  return returnBundledSection(await finalizeBundledRun({
+    primaryStage,
+    primaryFailure,
+    primaryError,
+    cleanup: () => cleanupContext(context, runtimePort),
+    buildResult(cleanup) {
+      checks.electronStopped = cleanup.electronStopped;
+      checks.cdpPortReleased = cleanup.cdpPortReleased;
+      checks.runtimePortReleased = cleanup.runtimePortReleased;
+      checks.runnerTmpRemoved = cleanup.runnerTmpRemoved;
 
+      const caseAssertions = caseResults.reduce(
+        (sum, item) => ({
+          passed: sum.passed + item.assertions.passed,
+          total: sum.total + item.assertions.total
+        }),
+        { passed: 0, total: 0 }
+      );
+      const sectionAssertions = summarizeChecks(checks);
+      const assertions = {
+        passed: caseAssertions.passed + sectionAssertions.passed,
+        total: caseAssertions.total + sectionAssertions.total
+      };
+
+      return {
+        ok: assertions.passed === assertions.total,
+        mode: "bundled-local-qwen-real-ui",
+        provider: providerStatus?.providerId ?? "unknown",
+        runtime: runtime?.runtime ?? validation.runtime ?? "llama.cpp",
+        model: handoff?.alias ?? validation.alias,
+        durationMs: Date.now() - sectionStartedAt,
+        validation,
+        providerStatus: summarizeProviderStatus(providerStatus),
+        runtimeStatus: summarizeRuntime(runtime),
+        assertions,
+        cases: caseResults,
+        jokeDiversity: {
+          openingVariantCount: new Set(jokeOpeningVariants).size,
+          fixedOpeningDetected: jokeOpeningVariants.length > 1 && new Set(jokeOpeningVariants).size === 1
+        },
+        jokeAcknowledgementDiagnostics,
+        checks,
+        failureCategory: firstFailedCheck(checks),
+        evidenceBoundary: "real bundled llama.cpp/Qwen sampled UI replies; not proof of genuine emotion understanding"
+      };
+    }
+  }));
+}
+
+export const BUNDLED_SETUP_STAGES = Object.freeze([
+  "validation",
+  "port",
+  "context",
+  "diagnostic_init"
+]);
+
+const BUNDLED_SETUP_ERROR_NAMES = Object.freeze([
+  "Error",
+  "TypeError",
+  "RangeError",
+  "SyntaxError",
+  "ReferenceError",
+  "URIError",
+  "EvalError",
+  "AggregateError",
+  "AbortError"
+]);
+
+export const BUNDLED_RUN_STAGES = Object.freeze([
+  "electron_flow",
+  "runtime_handoff",
+  "case_execution",
+  "joke_diagnostics",
+  "evidence_aggregation",
+  "cleanup",
+  "result_summary"
+]);
+
+export function createBundledRunDiagnostic({
+  stage,
+  primaryFailure,
+  primaryError,
+  cleanupFailure,
+  cleanupError
+}) {
   return {
-    ok: error === null && assertions.passed === assertions.total,
-    mode: "bundled-local-qwen-real-ui",
-    provider: providerStatus?.providerId ?? "unknown",
-    runtime: runtime?.runtime ?? validation.runtime ?? "llama.cpp",
-    model: handoff?.alias ?? validation.alias,
-    durationMs: Date.now() - sectionStartedAt,
-    validation,
-    providerStatus: summarizeProviderStatus(providerStatus),
-    runtimeStatus: summarizeRuntime(runtime),
-    assertions,
-    cases: caseResults,
-    checks,
-    failureCategory: error ? classifyError(error) : firstFailedCheck(checks),
-    evidenceBoundary: "real bundled llama.cpp/Qwen sampled UI replies; not proof of genuine emotion understanding"
+    stage: BUNDLED_RUN_STAGES.includes(stage) ? stage : "result_summary",
+    primaryFailurePresent: primaryFailure === true,
+    primaryErrorName: primaryFailure === true ? normalizeBundledSetupErrorName(primaryError) : "none",
+    cleanupErrorName: cleanupFailure === true ? normalizeBundledSetupErrorName(cleanupError) : "none"
   };
+}
+
+export async function finalizeBundledRun({
+  primaryStage,
+  primaryFailure,
+  primaryError,
+  cleanup,
+  buildResult
+}) {
+  let cleanupResult = null;
+  let cleanupFailure = false;
+  let cleanupError = null;
+
+  try {
+    setBundledActiveStage("cleanup");
+    cleanupResult = await cleanup();
+    if (!isBundledCleanupResult(cleanupResult)) {
+      throw new TypeError();
+    }
+  } catch (caught) {
+    cleanupFailure = true;
+    cleanupError = caught;
+  }
+
+  if (primaryFailure === true) {
+    return createBundledRunFailureSection({
+      stage: primaryStage,
+      primaryFailure,
+      primaryError,
+      cleanupFailure,
+      cleanupError
+    });
+  }
+  if (cleanupFailure) {
+    return createBundledRunFailureSection({
+      stage: "cleanup",
+      primaryFailure: false,
+      primaryError: null,
+      cleanupFailure,
+      cleanupError
+    });
+  }
+
+  try {
+    setBundledActiveStage("result_summary");
+    return buildResult(cleanupResult);
+  } catch (caught) {
+    return createBundledRunFailureSection({
+      stage: "result_summary",
+      primaryFailure: true,
+      primaryError: caught,
+      cleanupFailure: false,
+      cleanupError: null
+    });
+  }
+}
+
+function setBundledActiveStage(stage) {
+  if (BUNDLED_FALLBACK_STAGES.includes(stage)) {
+    bundledActiveStage = stage;
+  }
+}
+
+function returnBundledSection(section) {
+  setBundledActiveStage("returned");
+  return section;
+}
+
+function isBundledCleanupResult(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value) &&
+    typeof value.electronStopped === "boolean" &&
+    typeof value.cdpPortReleased === "boolean" &&
+    typeof value.runtimePortReleased === "boolean" &&
+    typeof value.runnerTmpRemoved === "boolean";
+}
+
+function createBundledRunFailureSection({
+  stage,
+  primaryFailure,
+  primaryError,
+  cleanupFailure,
+  cleanupError
+}) {
+  const runDiagnostic = createBundledRunDiagnostic({
+    stage,
+    primaryFailure,
+    primaryError,
+    cleanupFailure,
+    cleanupError
+  });
+  return {
+    ok: false,
+    mode: "bundled-local-qwen-real-ui",
+    runtime: "llama.cpp",
+    provider: "unavailable",
+    assertions: { passed: 0, total: 1 },
+    checks: { bundledRunCompleted: false },
+    failureCategory: `bundled_run_${runDiagnostic.stage}`,
+    runDiagnostic,
+    evidenceBoundary: "bundled runtime did not produce complete acceptance evidence"
+  };
+}
+
+export function createBundledSetupFailureDiagnostic(stage, error) {
+  const safeStage = BUNDLED_SETUP_STAGES.includes(stage) ? stage : "diagnostic_init";
+  return {
+    stage: safeStage,
+    errorName: normalizeBundledSetupErrorName(error)
+  };
+}
+
+async function createBundledSetupFailureSection({
+  stage,
+  error,
+  sectionStartedAt,
+  validation,
+  context
+}) {
+  if (context) {
+    try {
+      await cleanupContext(context, null);
+    } catch {
+      // Setup diagnostics remain closed even if best-effort cleanup fails.
+    }
+  }
+  const setupDiagnostic = createBundledSetupFailureDiagnostic(stage, error);
+  return {
+    ok: false,
+    mode: "bundled-local-qwen-real-ui",
+    runtime: "llama.cpp",
+    provider: "unavailable",
+    durationMs: Date.now() - sectionStartedAt,
+    assertions: { passed: 0, total: 1 },
+    checks: { localLlmPackReady: validation?.ok === true },
+    failureCategory: `bundled_setup_${setupDiagnostic.stage}`,
+    setupDiagnostic,
+    evidenceBoundary: "bundled setup did not reach Electron or model execution"
+  };
+}
+
+function normalizeBundledSetupErrorName(error) {
+  try {
+    const name = error instanceof Error && typeof error.name === "string" ? error.name : "";
+    return BUNDLED_SETUP_ERROR_NAMES.includes(name) ? name : "unknown_error";
+  } catch {
+    return "unknown_error";
+  }
 }
 
 function bundledCases() {
@@ -811,8 +1098,45 @@ function bundledCases() {
       }
     },
     {
-      caseId: "joke",
+      caseId: "joke-world-ending",
       turns: ["刚才说“世界末日了”，只是逗你的。"],
+      jokeSample: true,
+      assert(reply) {
+        return {
+          jokeUnderstood: hasSemanticJokeAcknowledgement(reply),
+          noOverreading: !hasDeniedAffectOverread(reply),
+          noForcedComfort: !hasForcedComfort(reply)
+        };
+      }
+    },
+    {
+      caseId: "joke-notes",
+      turns: ["我的魔导笔记被风卷走了。骗你的，刚才只是说笑。"],
+      jokeSample: true,
+      assert(reply) {
+        return {
+          jokeUnderstood: hasSemanticJokeAcknowledgement(reply),
+          noOverreading: !hasDeniedAffectOverread(reply),
+          noForcedComfort: !hasForcedComfort(reply)
+        };
+      }
+    },
+    {
+      caseId: "joke-portal",
+      turns: ["我把传送门开到教室天花板上了，闹着玩的。"],
+      jokeSample: true,
+      assert(reply) {
+        return {
+          jokeUnderstood: hasSemanticJokeAcknowledgement(reply),
+          noOverreading: !hasDeniedAffectOverread(reply),
+          noForcedComfort: !hasForcedComfort(reply)
+        };
+      }
+    },
+    {
+      caseId: "joke-stars",
+      turns: ["西塔，我把你桌面的星星都拿走了，开玩笑的。"],
+      jokeSample: true,
       assert(reply) {
         return {
           jokeUnderstood: hasSemanticJokeAcknowledgement(reply),
@@ -895,7 +1219,7 @@ async function runBundledCase(page, item) {
       noThinkLeak: !/<\/?think>|reasoning/i.test(lastReply)
     };
     const assertions = summarizeChecks(caseChecks);
-    return {
+    const result = {
       caseId: item.caseId,
       status: assertions.passed === assertions.total ? "passed" : "failed",
       turnCount: item.turns.length,
@@ -906,8 +1230,14 @@ async function runBundledCase(page, item) {
       anchors: caseChecks,
       failureCategory: firstFailedCheck(caseChecks)
     };
+    return {
+      result,
+      jokeOpeningVariant: item.jokeSample ? normalizeJokeOpening(lastReply) : null,
+      jokeAcknowledgementCategory: item.jokeSample ? classifyJokeAcknowledgement(lastReply) : null
+    };
   } catch (error) {
     return {
+      result: {
       caseId: item.caseId,
       status: "failed",
       turnCount: item.turns.length,
@@ -917,6 +1247,9 @@ async function runBundledCase(page, item) {
       assertions: { passed: 0, total: 1 },
       anchors: { completed: false },
       failureCategory: classifyError(error)
+      },
+      jokeOpeningVariant: null,
+      jokeAcknowledgementCategory: item.jokeSample ? "absent" : null
     };
   }
 }
@@ -1235,8 +1568,74 @@ function hasTaskifyingReply(reply) {
   return /(?:^|\n)\s*[1-3][.、)]|建议你|你应该|你可以先|第一步|第二步|需要做|要不要我帮你/.test(reply);
 }
 
-function hasSemanticJokeAcknowledgement(reply) {
-  return /^(?:原来|还好|你刚才|你这是).{0,16}(?:开玩笑|玩笑|逗我|闹着玩|说笑)/.test(reply);
+const JOKE_ACKNOWLEDGEMENT_CATEGORIES = Object.freeze([
+  "first_sentence_explicit_marker",
+  "first_sentence_semantic_ack",
+  "later_sentence_explicit_marker",
+  "ambiguous_generic",
+  "absent"
+]);
+
+const EXPLICIT_JOKE_MARKER = /(?:开玩笑|玩笑|逗我|闹着玩|说笑)/;
+const AMBIGUOUS_JOKE_GENERIC = /(?:哈哈|原来|收到|明白|这样啊|这样呀|好吧|哦|噢)/;
+const FIRST_SENTENCE_XITA_TARGETED_TEASING = /(?:骗(?:了|到)?我(?:了|一下)?|捉弄(?:了)?我(?:了|一下)?|耍(?:了)?我(?:了|一下)?|唬(?:了)?我(?:了|一下)?|吓唬(?:了)?我(?:了|一下)?|吓到我(?:了|一下)?|把我(?:骗(?:了|到)?|捉弄(?:了)?|耍(?:了)?|唬(?:了)?|吓唬(?:了)?|吓到)(?:了|一下)?|把我吓(?:了)?一跳)/;
+
+export function hasSemanticJokeAcknowledgement(reply) {
+  const opening = firstSentence(reply);
+  return EXPLICIT_JOKE_MARKER.test(opening) || hasFirstSentenceSemanticJokeAcknowledgement(opening);
+}
+
+export function classifyJokeAcknowledgement(reply) {
+  const opening = firstSentence(reply);
+  if (EXPLICIT_JOKE_MARKER.test(opening)) {
+    return "first_sentence_explicit_marker";
+  }
+  if (hasFirstSentenceSemanticJokeAcknowledgement(opening)) {
+    return "first_sentence_semantic_ack";
+  }
+  if (EXPLICIT_JOKE_MARKER.test(afterFirstSentence(reply))) {
+    return "later_sentence_explicit_marker";
+  }
+  if (AMBIGUOUS_JOKE_GENERIC.test(opening)) {
+    return "ambiguous_generic";
+  }
+  return "absent";
+}
+
+export function createJokeAcknowledgementDiagnosticCounts() {
+  return Object.fromEntries(
+    JOKE_ACKNOWLEDGEMENT_CATEGORIES.map((category) => [category, 0])
+  );
+}
+
+export function recordJokeAcknowledgementDiagnostic(counts, category) {
+  if (JOKE_ACKNOWLEDGEMENT_CATEGORIES.includes(category)) {
+    counts[category] += 1;
+  }
+}
+
+export function hasFirstSentenceSemanticJokeAcknowledgement(sentence) {
+  return FIRST_SENTENCE_XITA_TARGETED_TEASING.test(sentence);
+}
+
+function normalizeJokeOpening(reply) {
+  return firstSentence(reply)
+    .replace(/[“”"'「」]/g, "")
+    .replace(/[，,、；;：:\s]/g, "")
+    .slice(0, 8);
+}
+
+function firstSentence(reply) {
+  return reply.trim().split(/[。！？!?]/, 1)[0] ?? "";
+}
+
+function afterFirstSentence(reply) {
+  const [, ...laterSentences] = reply.trim().split(/[。！？!?]/);
+  return laterSentences.join("。");
+}
+
+function isMainModule() {
+  return process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 }
 
 function hasSemanticNegationAcknowledgement(reply) {
@@ -1363,6 +1762,16 @@ function firstFailedCheck(checks) {
 }
 
 function failedSection(mode, error) {
+  if (mode === "bundled-local-qwen-real-ui") {
+    return {
+      ok: false,
+      mode,
+      durationMs: 0,
+      assertions: { passed: 0, total: 1 },
+      failureCategory: "bundled_fallback_failure",
+      fallbackDiagnostic: createBundledFallbackDiagnostic(bundledActiveStage, error)
+    };
+  }
   return {
     ok: false,
     mode,
@@ -1370,6 +1779,17 @@ function failedSection(mode, error) {
     assertions: { passed: 0, total: 1 },
     failureCategory: classifyError(error)
   };
+}
+
+export function createBundledFallbackDiagnostic(stage, error) {
+  try {
+    return {
+      stage: BUNDLED_FALLBACK_STAGES.includes(stage) ? stage : "entry",
+      errorName: normalizeBundledSetupErrorName(error)
+    };
+  } catch {
+    return { stage: "entry", errorName: "unknown_error" };
+  }
 }
 
 function classifyError(error) {
@@ -1410,4 +1830,8 @@ function parseJson(value) {
 function readPositiveInteger(value) {
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+if (isMainModule()) {
+  await main();
 }

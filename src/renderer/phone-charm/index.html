@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Phone Charm</title>
+  </head>
+  <body>
+    <svg id="charm-stage" viewBox="0 0 420 330" aria-hidden="true">
+      <circle class="charm-anchor" cx="160" cy="14" r="5" />
+      <path id="charm-cord" class="charm-cord" d="M 160 14 Q 172 98 204 182" />
+      <g id="charm-slider" class="charm-slider">
+        <rect x="-9" y="-11" width="18" height="22" rx="6" />
+        <path d="M 0 -4 L 1.35 -1.35 L 4 0 L 1.35 1.35 L 0 4 L -1.35 1.35 L -4 0 L -1.35 -1.35 Z" />
+      </g>
+      <g id="charm-pendant" class="charm-pendant">
+        <circle class="charm-ring" cx="0" cy="0" r="6.5" />
+        <g transform="translate(-42 10)">
+          <path class="charm-moon" d="M 42 0 C 19 0 0 18 0 40 C 0 62 19 80 42 80 C 55 80 67 74 75 64 C 59 63 47 53 47 39 C 47 24 59 12 75 10 C 67 3 55 0 42 0 Z" />
+          <path class="charm-highlight" d="M 8 21 C 9 29 13 35 19 40 C 22 42 25 43 28 44" />
+        </g>
+        <path class="charm-star" d="M 19 33 L 22.2 41.8 L 31 45 L 22.2 48.2 L 19 57 L 15.8 48.2 L 7 45 L 15.8 41.8 Z" />
+      </g>
+    </svg>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

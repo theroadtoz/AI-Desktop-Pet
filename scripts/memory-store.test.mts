@@ -91,6 +91,76 @@ test("v1 memory storage migrates to v4 metadata without dropping cards", async (
   }
 });
 
+test("legacy local identity migrates once into an addressing memory", async () => {
+  const userDataPath = await mkdtemp(join(tmpdir(), "desktop-pet-memory-"));
+
+  try {
+    const profileDirectory = join(userDataPath, "config");
+    await mkdir(profileDirectory, { recursive: true });
+    const profilePath = join(profileDirectory, "user-profile.json");
+    await writeFile(profilePath, JSON.stringify({
+      displayName: "小林",
+      preferredName: "林林",
+      completedAt: "2026-07-30T00:00:00.000Z"
+    }), "utf8");
+
+    const store = createMemoryStore({ userDataPath });
+    const cards = store.listCards();
+    assert.equal(cards.length, 1);
+    assert.equal(cards[0]?.category, "addressing");
+    assert.equal(cards[0]?.key, "preferred-name");
+    assert.equal(cards[0]?.content, "用户希望被称为林林。");
+    assert.equal(cards[0]?.managedByUser, false);
+    await assert.rejects(readFile(profilePath, "utf8"), { code: "ENOENT" });
+
+    assert.equal(createMemoryStore({ userDataPath }).listCards().length, 1);
+  } finally {
+    await rm(userDataPath, { recursive: true, force: true });
+  }
+});
+
+test("a later audited addressing candidate updates the migrated preferred name", async () => {
+  const userDataPath = await mkdtemp(join(tmpdir(), "desktop-pet-memory-"));
+
+  try {
+    const profileDirectory = join(userDataPath, "config");
+    await mkdir(profileDirectory, { recursive: true });
+    await writeFile(join(profileDirectory, "user-profile.json"), JSON.stringify({
+      displayName: "小林",
+      preferredName: "林林",
+      completedAt: "2026-07-30T00:00:00.000Z"
+    }), "utf8");
+    const store = createMemoryStore({ userDataPath });
+    store.setEnabled(true);
+
+    const result = store.confirmReviewedCandidate({
+      id: crypto.randomUUID(),
+      action: "create",
+      title: "用户称呼",
+      content: "用户希望被称为阿林。",
+      tags: [],
+      namespace: "personal",
+      key: "addressing-preference",
+      importance: "key",
+      category: "addressing",
+      confidence: 0.95,
+      sourceConversationId: crypto.randomUUID(),
+      sourceMessageId: crypto.randomUUID(),
+      status: "pending-review",
+      createdAt: Date.now(),
+      updatedAt: Date.now()
+    });
+
+    assert.deepEqual(result, { status: "created" });
+    assert.equal(store.listCards().length, 1);
+    assert.equal(store.listCards()[0]?.content, "用户希望被称为阿林。");
+    assert.equal(store.listCards()[0]?.compressionState, "merged");
+    assert.equal(store.listCards()[0]?.managedByUser, false);
+  } finally {
+    await rm(userDataPath, { recursive: true, force: true });
+  }
+});
+
 test("memory cards require explicit enablement and deletion survives restart", async () => {
   const userDataPath = await mkdtemp(join(tmpdir(), "desktop-pet-memory-"));
 

@@ -275,6 +275,7 @@ export type PetApi = {
 
 export type ChatApi = {
   focusInput(): void;
+  closeWindow(): void;
   sendMessage(request: ChatSendRequest): void;
   abortReply(): void;
   onReplyDelta(handler: (delta: ChatStreamDeltaPayload) => void): () => void;

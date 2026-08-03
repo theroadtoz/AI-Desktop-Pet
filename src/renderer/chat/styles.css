@@ -176,6 +176,132 @@ body {
   font-size: 14px;
 }
 
+.settings-page-title {
+  margin: 0;
+  color: #2a2118;
+  font-size: 16px;
+  letter-spacing: 0.01em;
+}
+
+.settings-expander {
+  overflow: hidden;
+  border: 1px solid #e7dccb;
+  border-radius: 10px;
+  background: #fffdf8;
+}
+
+.settings-expander > summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  color: #2a2118;
+  cursor: pointer;
+  list-style: none;
+  transition: background-color 140ms ease, color 140ms ease;
+}
+
+.settings-expander > summary::-webkit-details-marker {
+  display: none;
+}
+
+.settings-expander > summary::after {
+  color: #806b56;
+  content: "›";
+  font-size: 20px;
+  line-height: 1;
+  transform: rotate(0deg);
+  transition: transform 160ms ease;
+}
+
+.settings-expander[open] > summary {
+  border-bottom: 1px solid #f0e7dc;
+  background: #fffaf0;
+}
+
+.settings-expander[open] > summary::after {
+  transform: rotate(90deg);
+}
+
+.settings-expander > summary:hover {
+  background: #fbf4e9;
+}
+
+.settings-expander > summary:focus-visible {
+  outline: 2px solid #ead7ad;
+  outline-offset: -2px;
+}
+
+.settings-expander > .fold-body {
+  padding: 14px;
+}
+
+.settings-expander-copy,
+.settings-row-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.settings-expander-copy strong,
+.settings-row-copy strong {
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.settings-expander-copy small,
+.settings-row-copy small {
+  color: #806b56;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.settings-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  color: #4b3928;
+}
+
+.settings-row input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: #654321;
+}
+
+.settings-row input[type="checkbox"]:focus-visible {
+  outline: 2px solid #ead7ad;
+  outline-offset: 2px;
+}
+
+.settings-list-heading {
+  padding-bottom: 8px;
+  border-bottom: 1px solid #f0e7dc;
+  color: #4b3928;
+  font-size: 13px;
+}
+
+.management-toolbar {
+  justify-content: flex-start;
+  padding: 10px;
+  border: 1px solid #e7dccb;
+  border-radius: 8px;
+  background: #fffaf0;
+}
+
+.management-toolbar[hidden] {
+  display: none;
+}
+
+.management-toolbar .selection-note {
+  margin-right: auto;
+}
+
 .content-stack {
   display: flex;
   flex-direction: column;
@@ -347,8 +473,14 @@ body {
 
 .memory-actions {
   display: flex;
+  align-items: center;
   justify-content: space-between;
   gap: 10px;
+}
+
+.memory-actions .settings-row {
+  flex: 1 1 100%;
+  padding-top: 0;
 }
 
 .memory-safe-stats {
@@ -676,6 +808,85 @@ body {
 .memory-card:focus-within {
   border-color: #d7c8b6;
   background: #fffdf8;
+}
+
+.memory-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  color: #4b3928;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.memory-card:has(> input[type="checkbox"]) {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.memory-card > input[type="checkbox"] {
+  position: relative;
+  width: 48px;
+  height: 48px;
+  margin: -13px -13px -13px 0;
+  padding: 0;
+  appearance: none;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.memory-card:has(> input[type="checkbox"]) > span {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.memory-card > input[type="checkbox"]::before {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  box-sizing: border-box;
+  width: 18px;
+  height: 18px;
+  translate: -50% -50%;
+  border: 2px solid #79747e;
+  border-radius: 2px;
+  background: transparent;
+  content: "";
+  transition: border-color 150ms ease-out, background-color 150ms ease-out;
+}
+
+.memory-card > input[type="checkbox"]::after {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 5px;
+  height: 10px;
+  content: "";
+  opacity: 0;
+  scale: 0.7;
+  translate: -50% -58%;
+  rotate: 45deg;
+  border-right: 2px solid #fff;
+  border-bottom: 2px solid #fff;
+  transition: opacity 150ms ease-out, scale 150ms ease-out;
+}
+
+.memory-card > input[type="checkbox"]:checked::before {
+  border-color: #6750a4;
+  background: #6750a4;
+}
+
+.memory-card > input[type="checkbox"]:checked::after {
+  opacity: 1;
+  scale: 1;
+}
+
+.memory-card > input[type="checkbox"]:focus-visible {
+  outline: 2px solid #6a54da;
+  outline-offset: -10px;
 }
 
 .memory-card-meta {
@@ -1006,5 +1217,2061 @@ textarea:disabled {
 
   .message {
     max-width: 92%;
+  }
+}
+
+
+/* Figma phone shell — main chat adaptation */
+:root {
+  color-scheme: light;
+  --chat-ui-scale: 1;
+  --phone-shell: #dcd4ff;
+  --phone-screen: #f9f7ff;
+  --phone-topbar: #f3eeff;
+  --phone-pet-bubble: #e7e0fa;
+  --phone-user-bubble: #6a54da;
+  --phone-gold: #d7ab52;
+  --composer-height: 61px;
+}
+
+html,
+body {
+  overflow: hidden;
+  background: transparent;
+  color: #000;
+}
+
+body {
+  display: grid;
+  place-items: center;
+  -webkit-app-region: drag;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.chat-shell {
+  position: relative;
+  box-sizing: border-box;
+  display: block;
+  width: 402px;
+  height: 874px;
+  min-width: 402px;
+  padding: 0;
+  overflow: hidden;
+  border-radius: 34px;
+  background: var(--phone-shell);
+  box-shadow: -1px 3px 34px rgb(0 0 0 / 25%);
+  transform: scale(var(--chat-ui-scale));
+  transform-origin: center;
+  will-change: transform;
+  -webkit-app-region: drag;
+}
+
+.chat-page {
+  --composer-height: 61px;
+  position: absolute;
+  inset: 6px;
+  display: block;
+  min-height: 0;
+  overflow: hidden;
+  border-radius: 34px;
+  background: var(--phone-screen);
+  -webkit-app-region: no-drag;
+}
+
+.phone-topbar {
+  position: absolute;
+  z-index: 6;
+  inset: 0 0 auto;
+  box-sizing: border-box;
+  display: flex;
+  height: 60px;
+  padding: 10px 4px 4px 27px;
+  align-items: flex-start;
+  justify-content: space-between;
+  border-radius: 28px 28px 0 0;
+  background: var(--phone-topbar);
+  -webkit-app-region: drag;
+}
+
+.phone-identity {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.phone-avatar {
+  width: 40px;
+  height: 40px;
+  flex: 0 0 auto;
+}
+
+.phone-identity-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0;
+}
+
+.phone-partner-name {
+  height: 24px;
+  font-size: 20px;
+  font-weight: 400;
+  line-height: 24px;
+}
+
+.phone-presence {
+  display: flex;
+  height: 17px;
+  align-items: center;
+  gap: 7px;
+  color: rgb(0 0 0 / 58%);
+  font-size: 14px;
+  line-height: 17px;
+}
+
+.phone-presence.is-thinking {
+  animation: figma-thinking-breathe 2s linear infinite;
+}
+
+@keyframes figma-thinking-breathe {
+  0% {
+    opacity: 0.62;
+    scale: 1;
+    animation-timing-function: ease-in-out;
+  }
+
+  50% {
+    opacity: 1;
+    scale: 1.04;
+    animation-timing-function: ease-in-out;
+  }
+
+  100% {
+    opacity: 0.62;
+    scale: 1;
+  }
+}
+
+.phone-status-light {
+  width: 12px;
+  height: 12px;
+}
+
+.phone-system-area {
+  display: flex;
+  height: 44px;
+  align-items: center;
+  gap: 7px;
+  -webkit-app-region: no-drag;
+}
+
+.phone-system-status {
+  display: flex;
+  height: 20px;
+  align-items: center;
+  gap: 5px;
+  color: #1d1b20;
+  font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
+}
+
+.phone-system-status time {
+  min-width: 34px;
+  margin-right: 3px;
+  text-align: right;
+}
+
+.phone-system-status img {
+  width: 17px;
+  height: 17px;
+}
+
+.phone-system-status .phone-battery {
+  width: 8px;
+  height: 15px;
+}
+
+.phone-icon-button {
+  box-sizing: border-box;
+  display: grid;
+  width: 40px;
+  height: 40px;
+  min-width: 40px;
+  padding: 8px;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  cursor: pointer;
+}
+
+.phone-icon-button img {
+  display: block;
+  width: 24px;
+  height: 24px;
+}
+
+.phone-icon-button:hover {
+  background: rgb(106 84 218 / 10%);
+}
+
+.phone-icon-button:focus-visible,
+.phone-send-button:focus-visible {
+  outline: 2px solid #6a54da;
+  outline-offset: 1px;
+}
+
+.chat-settings-entry {
+  position: static;
+  z-index: auto;
+  inset: auto;
+  opacity: 1;
+}
+
+.phone-close-button {
+  padding: 0;
+}
+
+.phone-close-button img {
+  width: 40px;
+  height: 40px;
+}
+
+.messages {
+  position: absolute;
+  inset: 68px 0 var(--composer-height) 7px;
+  box-sizing: border-box;
+  display: flex;
+  min-height: 0;
+  padding: 42px 14px 42px 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  flex-direction: column;
+  gap: 116px;
+  scroll-behavior: smooth;
+  scrollbar-width: thin;
+  scrollbar-color: rgb(106 84 218 / 32%) transparent;
+  background-color: rgb(249 247 255 / 70%);
+  background-image: url("./assets/figma/chat-background.png");
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: cover;
+}
+
+.messages:empty::before {
+  display: none;
+}
+
+.message {
+  position: relative;
+  box-sizing: border-box;
+  width: fit-content;
+  max-width: 328px;
+  min-height: 58px;
+  margin: 0;
+  padding: 18px 20px;
+  flex: 0 0 auto;
+  border: 0;
+  border-radius: 34px;
+  font-size: 16px;
+  line-height: 1.35;
+  overflow: visible;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.message-role {
+  display: none;
+}
+
+.message-content {
+  min-height: 0;
+  white-space: pre-wrap;
+}
+
+.message-pet {
+  align-self: flex-start;
+  color: #000;
+  background: var(--phone-pet-bubble);
+}
+
+.message-pet::before,
+.message-pet::after {
+  position: absolute;
+  z-index: 1;
+  color: var(--phone-gold);
+  content: "✦";
+  font-family: "Microsoft YaHei", "Segoe UI Symbol", sans-serif;
+  line-height: 1;
+  pointer-events: none;
+}
+
+.message-pet::before {
+  top: -10px;
+  left: 5px;
+  font-size: 20px;
+  transform: rotate(19deg);
+}
+
+.message-pet::after {
+  right: 3px;
+  bottom: -8px;
+  font-size: 16px;
+  transform: rotate(-37deg);
+}
+
+.message-user {
+  position: relative;
+  width: fit-content;
+  max-width: 323px;
+  align-self: flex-end;
+  color: #fff;
+  background-color: var(--phone-user-bubble);
+}
+
+.message-user::before,
+.message-user::after {
+  position: absolute;
+  z-index: 1;
+  display: block;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: contain;
+  content: "";
+  pointer-events: none;
+}
+
+.message-user::before {
+  top: 3px;
+  right: -3px;
+  width: 16px;
+  height: 16px;
+  background-image: url("./assets/figma/user-star.svg");
+}
+
+.message-user::after {
+  bottom: -4px;
+  left: 3px;
+  width: 24px;
+  height: 20px;
+  background-image: url("./assets/figma/user-book.svg");
+}
+
+.message.is-entering-user {
+  animation: message-user-enter 1260.923ms linear both;
+}
+
+.message.is-entering-pet {
+  animation:
+    message-pet-enter-opacity 120ms ease-out both,
+    message-pet-enter-translate 240ms cubic-bezier(0.45, 1.45, 0.8, 1) both;
+}
+
+@keyframes message-user-enter {
+  0%,
+  72.169% {
+    opacity: 0;
+    translate: 200px var(--figma-send-scroll-offset, -126px);
+  }
+
+  72.169% {
+    animation-timing-function: cubic-bezier(0.45, 1.45, 0.8, 1);
+  }
+
+  81.686% {
+    opacity: 1;
+  }
+
+  91.203%,
+  100% {
+    opacity: 1;
+    translate: 0 var(--figma-send-scroll-offset, -126px);
+  }
+}
+
+.messages.is-sending > .message:not(.is-entering-user):not(.is-entering-pet) {
+  animation: message-list-send-scroll 1260.923ms linear both;
+}
+
+.messages.is-sending {
+  scroll-behavior: auto;
+}
+
+@keyframes message-list-send-scroll {
+  0%,
+  44.412% {
+    translate: 0 0;
+  }
+
+  44.412% {
+    animation-timing-function: ease-out;
+  }
+
+  63.446%,
+  100% {
+    translate: 0 var(--figma-send-scroll-offset, -126px);
+  }
+}
+
+@keyframes message-pet-enter-opacity {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes message-pet-enter-translate {
+  from {
+    translate: -200px 0;
+  }
+
+  to {
+    translate: 0 0;
+  }
+}
+
+.message-pet .message-content:empty::after {
+  color: rgb(0 0 0 / 55%);
+  content: "正在整理回复...";
+}
+
+.composer {
+  position: absolute;
+  z-index: 7;
+  inset: auto 0 0;
+  box-sizing: border-box;
+  display: grid;
+  min-height: var(--composer-height);
+  padding: 8px 17px 8px 21px;
+  grid-template-columns: minmax(0, 1fr) 44px;
+  gap: 0;
+  align-items: end;
+  border-radius: 0 0 28px 28px;
+  background: var(--phone-topbar);
+}
+
+.composer::before {
+  position: absolute;
+  z-index: -1;
+  inset: 8px 17px;
+  border-radius: 22.5px;
+  background: var(--phone-pet-bubble);
+  box-shadow: 0 6px 10px 4px rgb(0 0 0 / 15%), 0 2px 3px rgb(0 0 0 / 30%);
+  content: "";
+}
+
+.composer textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: 45px;
+  max-height: 129px;
+  margin: 0;
+  padding: 12px 18px;
+  resize: none;
+  border: 0;
+  border-radius: 22.5px;
+  outline: 0;
+  background: var(--phone-screen);
+  color: #000;
+  font: 14px/21px "Microsoft YaHei", "Segoe UI", sans-serif;
+  scrollbar-width: thin;
+  justify-self: end;
+}
+
+.composer textarea::placeholder {
+  color: rgb(0 0 0 / 50%);
+}
+
+.composer textarea:focus-visible {
+  box-shadow: inset 0 0 0 2px rgb(106 84 218 / 28%);
+}
+
+.phone-send-button,
+.composer .phone-send-button {
+  position: relative;
+  display: grid;
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  padding: 9.5px;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  cursor: pointer;
+}
+
+.phone-send-button img {
+  width: 25px;
+  height: 25px;
+  transition: transform 120ms ease, opacity 120ms ease;
+}
+
+.phone-send-button::after {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  background: #6a54da;
+  content: "";
+  opacity: 0;
+  transform: scale(0.72);
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+.phone-send-button:active img,
+.phone-send-button[data-state="replying"] img {
+  transform: scale(0.82);
+}
+
+.phone-send-button[data-state="replying"] img {
+  opacity: 0;
+}
+
+.phone-send-button[data-state="replying"]::after {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.composer .phone-send-button:hover:not(:disabled),
+.composer .phone-send-button:active:not(:disabled) {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+
+.composer.is-sending textarea {
+  animation: figma-send-field-width 1260.923ms linear both;
+}
+
+.composer.is-sending textarea::placeholder {
+  animation: figma-send-placeholder-opacity 1260.923ms linear both;
+}
+
+.composer.is-sending .phone-send-button {
+  animation: figma-send-button-scale 1260.923ms linear both;
+}
+
+.composer.is-sending .phone-send-button img {
+  opacity: 1;
+  transform: none;
+}
+
+.composer.is-sending .phone-send-button::after {
+  opacity: 0;
+  transform: scale(0.72);
+}
+
+@keyframes figma-send-button-scale {
+  0% {
+    scale: 1;
+    animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1);
+  }
+
+  15.941%,
+  74.231% {
+    scale: 0;
+  }
+
+  74.231% {
+    animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1);
+  }
+
+  85.652%,
+  100% {
+    scale: 1;
+  }
+}
+
+@keyframes figma-send-field-width {
+  0% {
+    width: 316px;
+    animation-timing-function: cubic-bezier(0.447, 0.023, 0.642, 1.312);
+  }
+
+  33.076%,
+  49.449% {
+    width: 352px;
+  }
+
+  49.449% {
+    animation-timing-function: ease-in-out;
+  }
+
+  65.987%,
+  72.24% {
+    width: 23px;
+  }
+
+  85.652%,
+  100% {
+    width: 316px;
+  }
+}
+
+@keyframes figma-send-placeholder-opacity {
+  0%,
+  47.584% {
+    opacity: 0.5;
+  }
+
+  47.584% {
+    animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1);
+  }
+
+  55.594%,
+  74.231% {
+    opacity: 0;
+  }
+
+  74.231% {
+    animation-timing-function: cubic-bezier(0.5, 0, 0.5, 1);
+  }
+
+  85.625%,
+  100% {
+    opacity: 0.5;
+  }
+}
+
+#chat-session-note {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.user-welcome-panel {
+  position: absolute;
+  z-index: 8;
+}
+
+.message-pet:has(.message-citations) {
+  width: min(328px, calc(100% - 8px));
+  border-radius: 34px;
+}
+
+.message-pet .message-citations {
+  display: flex;
+  margin: 14px 0 0;
+  padding: 12px 0 0;
+  flex-direction: column;
+  gap: 10px;
+  border: 0;
+  border-top: 1px solid rgb(106 84 218 / 18%);
+  border-radius: 0;
+  background: transparent;
+}
+
+.message-pet .message-citations-heading {
+  color: #6a54da;
+  font-size: 12px;
+}
+
+.message-pet .message-citation-item {
+  gap: 3px;
+}
+
+.message-pet .message-citation-title {
+  color: #4e3aa9;
+  font-size: 13px;
+}
+
+.message-pet .message-citation-meta,
+.message-pet .message-citation-url,
+.message-pet .message-citation-snippet {
+  color: #6e687d;
+  font-size: 12px;
+}
+
+.settings-panel {
+  position: absolute;
+  z-index: 20;
+  inset: 6px;
+  box-sizing: border-box;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: 34px;
+  background: var(--phone-screen);
+  box-shadow: 0 4px 4px rgb(0 0 0 / 25%);
+  will-change: translate;
+  -webkit-app-region: no-drag;
+}
+
+.settings-panel.is-entering {
+  animation: settings-slide-in 520ms linear both;
+}
+
+.settings-panel.is-exiting {
+  animation: settings-slide-out 480ms linear both;
+  pointer-events: none;
+}
+
+@keyframes settings-slide-in {
+  0% {
+    translate: 0 -874px;
+    animation-timing-function: ease-out;
+  }
+
+  100% {
+    translate: 0 0;
+  }
+}
+
+@keyframes settings-slide-out {
+  0% {
+    translate: 0 0;
+    animation-timing-function: ease-in-out;
+  }
+
+  100% {
+    translate: 0 -874px;
+  }
+}
+
+.settings-header {
+  position: absolute;
+  z-index: 4;
+  inset: auto 0 0;
+  display: block;
+  height: 61px;
+  pointer-events: none;
+}
+
+.settings-header h2 {
+  display: none;
+}
+
+#settings-close-button {
+  position: absolute;
+  left: 50%;
+  bottom: 3px;
+  width: 48px;
+  height: 44px;
+  min-width: 48px;
+  padding: 0;
+  overflow: hidden;
+  translate: -50% 0;
+  border: 0;
+  border-radius: 18px;
+  background: transparent url("./assets/figma/settings-back.svg") center / 47px 33px no-repeat;
+  color: transparent;
+  pointer-events: auto;
+}
+
+#settings-close-button:hover {
+  background-color: rgb(106 84 218 / 8%);
+}
+
+.settings-nav {
+  position: absolute;
+  z-index: 3;
+  top: 44px;
+  left: 20px;
+  display: grid;
+  width: 239px;
+  height: 39px;
+  padding: 0;
+  overflow: visible;
+  grid-template-columns: 119px 120px;
+  gap: 0;
+  border: 0;
+}
+
+.settings-nav::before {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 1px;
+  background: #c2bef7;
+  content: "";
+}
+
+.settings-nav::after {
+  position: absolute;
+  bottom: -1px;
+  left: 0;
+  width: 95px;
+  height: 3px;
+  border-radius: 2px;
+  background: #6a54da;
+  content: "";
+  transform: translateX(0);
+  transition: width 300ms ease-in-out, transform 300ms ease-in-out;
+}
+
+.settings-nav[data-active-page="data"]::after {
+  width: 120px;
+  transform: translateX(119px);
+}
+
+.settings-nav .subpage-tab {
+  position: relative;
+  box-sizing: border-box;
+  height: 39px;
+  padding: 0 0 4px;
+  border: 0;
+  color: #2f2f36;
+  background: transparent;
+  font-size: 20px;
+  font-weight: 400;
+  line-height: 29px;
+  opacity: 0.7;
+  text-align: left;
+  transform-origin: center;
+}
+
+.settings-nav .subpage-tab::after {
+  display: none;
+}
+
+.settings-nav .subpage-tab.is-active {
+  border: 0;
+  color: #2f2f36;
+  font-size: 24px;
+  font-weight: 700;
+  opacity: 1;
+  animation: figma-settings-tab-activate 300ms linear both;
+}
+
+.settings-nav .subpage-tab.is-deactivating {
+  animation: figma-settings-tab-deactivate 300ms linear both;
+}
+
+@keyframes figma-settings-tab-activate {
+  0% {
+    opacity: 0.7;
+    scale: 0.833;
+    animation-timing-function: ease-in-out;
+  }
+
+  100% {
+    opacity: 1;
+    scale: 1;
+  }
+}
+
+@keyframes figma-settings-tab-deactivate {
+  0% {
+    opacity: 1;
+    scale: 1.2;
+    animation-timing-function: ease-in-out;
+  }
+
+  100% {
+    opacity: 0.7;
+    scale: 1;
+  }
+}
+
+#settings-history-tab,
+#settings-appearance-tab,
+#settings-model-tab,
+#settings-advanced-tab {
+  display: none;
+}
+
+.settings-back-row {
+  display: none;
+}
+
+#settings-form {
+  position: absolute;
+  inset: 139px 7px 67px 13px;
+  display: block;
+  margin: 0;
+  padding: 0 7px 20px 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgb(106 84 218 / 30%) transparent;
+  scrollbar-gutter: stable;
+}
+
+.settings-page {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 100%;
+  margin: 0;
+}
+
+.settings-page.is-page-entering {
+  animation: settings-page-fade-in 300ms linear both;
+}
+
+.settings-page.is-page-leaving {
+  animation: settings-page-fade-out 300ms linear both;
+  pointer-events: none;
+}
+
+.settings-page.is-page-transitioning {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+}
+
+:is(.settings-page, .memory-page, .history-page, .history-detail).is-management-entering {
+  overflow: hidden;
+  transform-origin: top center;
+  animation: settings-management-expand 240ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+:is(.settings-page, .memory-page, .history-page, .history-detail).is-management-exiting {
+  overflow: hidden;
+  pointer-events: none;
+  transform-origin: top center;
+  animation: settings-management-collapse 220ms cubic-bezier(0.4, 0, 1, 1) both;
+}
+
+#memory-page {
+  --figma-management-height: 650px;
+  --figma-management-shift: 321px;
+}
+
+#history-page {
+  --figma-management-height: 648px;
+  --figma-management-shift: 320px;
+}
+
+@keyframes settings-page-fade-in {
+  0% {
+    opacity: 0;
+    animation-timing-function: ease-in-out;
+  }
+
+  80%,
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes settings-page-fade-out {
+  0% {
+    opacity: 1;
+    animation-timing-function: ease-in-out;
+  }
+
+  80%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes settings-management-expand {
+  0% {
+    opacity: 0;
+    clip-path: inset(0 0 100% 0);
+    transform: scaleY(0.92);
+  }
+
+  100% {
+    opacity: 1;
+    clip-path: inset(0);
+    transform: scaleY(1);
+  }
+}
+
+@keyframes settings-management-collapse {
+  0% {
+    opacity: 1;
+    clip-path: inset(0);
+    transform: scaleY(1);
+  }
+
+  100% {
+    opacity: 0;
+    clip-path: inset(0 0 100% 0);
+    transform: scaleY(0.92);
+  }
+}
+
+.settings-page .settings-section-title {
+  color: #2f2f36;
+  font-size: 20px;
+  font-weight: 400;
+  line-height: 32px;
+}
+
+.settings-page .status-box,
+.settings-page .memory-card,
+.settings-page .memory-draft-panel,
+.settings-page .conversation-select {
+  border: 0;
+  border-radius: 34px;
+  background: var(--phone-pet-bubble);
+  color: #2f2f36;
+}
+
+.settings-page .field-label {
+  color: #2f2f36;
+}
+
+.settings-page .field-label input,
+.settings-page .field-label select,
+.settings-page .field-label textarea,
+.settings-page .memory-card input,
+.settings-page .memory-card textarea {
+  border-color: transparent;
+  border-radius: 20px;
+  background: var(--phone-pet-bubble);
+  color: #2f2f36;
+}
+
+.legacy-user-profile[hidden] {
+  display: none;
+}
+
+#settings-basic-page {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+#settings-basic-page[hidden] {
+  display: none;
+}
+
+#settings-basic-page > section {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0 2px 20px;
+  border: 0;
+  border-bottom: 1px solid #d7d3df;
+}
+
+#settings-basic-page > section + section {
+  padding-top: 20px;
+}
+
+#settings-basic-page > section[aria-labelledby="proactive-companion-settings-title"] {
+  min-height: 75px;
+}
+
+#settings-basic-page > section[aria-labelledby="proactive-companion-settings-title"] > :not(.figma-switch-row) {
+  display: none;
+}
+
+.figma-switch-row {
+  display: flex;
+  width: 100%;
+  min-height: 34px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  color: #2f2f36;
+  cursor: pointer;
+}
+
+.figma-switch {
+  position: relative;
+  box-sizing: border-box;
+  width: 52px;
+  height: 32px;
+  margin: 0;
+  flex: 0 0 auto;
+  appearance: none;
+  border: 2px solid #79747e;
+  border-radius: 16px;
+  background: #e6e0e9;
+  cursor: pointer;
+  transition: border-color 200ms cubic-bezier(0.2, 0, 0, 1), background-color 200ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+.figma-switch::after {
+  position: absolute;
+  top: 50%;
+  left: 6px;
+  width: 16px;
+  height: 16px;
+  translate: 0 -50%;
+  border-radius: 50%;
+  background: #79747e;
+  content: "";
+  transition: left 200ms cubic-bezier(0.2, 0, 0, 1), width 200ms cubic-bezier(0.2, 0, 0, 1), height 200ms cubic-bezier(0.2, 0, 0, 1), background-color 200ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+.figma-switch:checked {
+  border-color: #6750a4;
+  background: #6750a4;
+}
+
+.figma-switch:checked::after {
+  left: 24px;
+  width: 24px;
+  height: 24px;
+  background: #fff;
+}
+
+.figma-switch:focus-visible {
+  outline: 2px solid #6a54da;
+  outline-offset: 3px;
+}
+
+#figma-basic-appearance {
+  min-height: 198px;
+}
+
+#figma-basic-appearance > .settings-section-title,
+#figma-basic-model > .settings-section-title {
+  margin-bottom: 14px;
+}
+
+#figma-pet-lock-slot {
+  display: flex;
+  min-height: 42px;
+  justify-content: flex-end;
+}
+
+#toggle-pet-lock-button {
+  position: relative;
+  box-sizing: border-box;
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  height: 42px;
+  padding: 5px 0;
+  align-items: center;
+  justify-content: flex-start;
+  border: 0;
+  background: transparent;
+  color: #2f2f36;
+  cursor: pointer;
+  font-size: 20px;
+  line-height: 32px;
+  text-align: left;
+  transform: none;
+}
+
+#toggle-pet-lock-button:active {
+  transform: none;
+}
+
+.pet-lock-toggle-label {
+  display: grid;
+}
+
+.pet-lock-toggle-label > span {
+  grid-area: 1 / 1;
+  transition: opacity 200ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+.pet-lock-toggle-label > [data-lock-label="locked"] {
+  opacity: 0;
+}
+
+#toggle-pet-lock-button[data-locked="true"] .pet-lock-toggle-label > [data-lock-label="unlocked"] {
+  opacity: 0;
+}
+
+#toggle-pet-lock-button[data-locked="true"] .pet-lock-toggle-label > [data-lock-label="locked"] {
+  opacity: 1;
+}
+
+#toggle-pet-lock-button:focus-visible {
+  outline: 2px solid #6a54da;
+  outline-offset: 3px;
+}
+
+#toggle-pet-lock-button[data-locked="true"] .figma-switch-display {
+  border-color: #6750a4;
+  background: #6750a4;
+}
+
+#toggle-pet-lock-button[data-locked="true"] .figma-switch-display::after {
+  left: 24px;
+  width: 24px;
+  height: 24px;
+  background: #fff;
+}
+
+#figma-pet-scale-slot {
+  position: relative;
+  min-height: 76px;
+  margin-top: 8px;
+}
+
+#figma-pet-scale-slot .field-label {
+  display: block;
+  color: #817b91;
+  font-size: 14px;
+}
+
+#figma-pet-scale-slot #pet-scale-value {
+  position: absolute;
+  top: 0;
+  left: 62px;
+  width: auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #817b91;
+  font-size: 14px;
+}
+
+.figma-scale-control {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 56px;
+  margin-top: 7px;
+}
+
+.figma-scale-visual {
+  position: absolute;
+  inset: 0 8px;
+  pointer-events: none;
+}
+
+.figma-scale-visual::before,
+.figma-scale-fill {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  height: 16px;
+  translate: 0 -50%;
+  border-radius: 8px;
+  content: "";
+}
+
+.figma-scale-visual::before {
+  right: 0;
+  background: #e8def8;
+}
+
+.figma-scale-fill {
+  width: var(--pet-scale-progress, 33.333%);
+  background: #6750a4;
+  transition: width 150ms ease-out;
+}
+
+.figma-scale-handle {
+  position: absolute;
+  top: 50%;
+  left: var(--pet-scale-progress, 33.333%);
+  width: 4px;
+  height: 30px;
+  translate: -50% -50%;
+  border-radius: 2px;
+  background: #6750a4;
+  transition: left 150ms ease-out;
+}
+
+.figma-scale-control:has(#pet-scale:focus-visible) .figma-scale-visual {
+  border-radius: 12px;
+  outline: 2px solid #6a54da;
+  outline-offset: 2px;
+}
+
+#pet-scale {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  width: 100%;
+  height: 56px;
+  margin: 0;
+  padding: 0;
+  appearance: none;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  opacity: 0;
+}
+
+#pet-scale::-webkit-slider-runnable-track {
+  height: 56px;
+  background: transparent;
+}
+
+#pet-scale::-webkit-slider-thumb {
+  width: 44px;
+  height: 56px;
+  margin: 0;
+  appearance: none;
+  border: 0;
+  background: transparent;
+}
+
+#figma-basic-model {
+  border-bottom: 0;
+}
+
+.figma-settings-card {
+  position: relative;
+  box-sizing: border-box;
+  min-height: 79px;
+  padding: 14px 18px 10px;
+  border-radius: 34px;
+  background: var(--phone-pet-bubble);
+  color: #2f2f36;
+}
+
+.figma-settings-card + .figma-settings-card {
+  margin-top: 20px;
+}
+
+.figma-settings-card > strong {
+  font-size: 16px;
+  font-weight: 400;
+  line-height: 21px;
+}
+
+.figma-card-side {
+  position: absolute;
+  top: 14px;
+  right: 18px;
+  color: #817b91;
+  font-size: 16px;
+}
+
+.figma-settings-card .status-box {
+  margin-top: 6px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.figma-mcp-light {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  margin-left: 6px;
+  translate: 0 2px;
+  border-radius: 50%;
+  background: #9b96a4;
+}
+
+.figma-mcp-light[data-connection="connected"] {
+  background: #42c55b;
+  box-shadow: 0 0 0 3px rgb(66 197 91 / 14%);
+}
+
+.figma-mcp-light[data-connection="disconnected"] {
+  background: #d64242;
+  box-shadow: 0 0 0 3px rgb(214 66 66 / 12%);
+}
+
+.figma-mcp-light[data-connection="checking"] {
+  background: #8173cf;
+}
+
+.figma-memory-overview {
+  display: flex;
+  min-height: 100%;
+  flex-direction: column;
+  color: #2f2f36;
+}
+
+.figma-memory-overview > .figma-switch-row {
+  box-sizing: border-box;
+  min-height: 55px;
+  padding: 0 2px 20px 0;
+  border-bottom: 1px solid #d7d3df;
+}
+
+.figma-overview-section {
+  box-sizing: border-box;
+  padding: 9px 0 20px 2px;
+  border-bottom: 1px solid #d7d3df;
+}
+
+.figma-overview-section + .figma-overview-section {
+  padding-top: 38px;
+}
+
+.figma-overview-heading {
+  display: flex;
+  min-height: 32px;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.figma-overview-heading h3 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 400;
+  line-height: 32px;
+}
+
+.figma-overview-heading .button {
+  width: auto;
+  min-width: 61px;
+  height: 22px;
+  margin-top: 8px;
+  padding: 3px 7px;
+  border-color: #6a54da;
+  border-radius: 34px;
+  background: #6a54da;
+  color: #fff;
+  font-size: 12px;
+  line-height: 15px;
+  white-space: nowrap;
+}
+
+.figma-memory-search-slot {
+  width: 235px;
+  height: 32px;
+  margin: 0 0 24px;
+}
+
+.figma-memory-search-slot input {
+  box-sizing: border-box;
+  width: 100%;
+  height: 32px;
+  padding: 6px 11px;
+  border: 0;
+  border-radius: 34px;
+  outline: 0;
+  background: var(--phone-pet-bubble);
+  color: #2f2f36;
+  font: 14px/20px "Microsoft YaHei", "Segoe UI", sans-serif;
+}
+
+.figma-memory-search-slot input::placeholder {
+  color: #817b91;
+}
+
+.figma-overview-list {
+  display: flex;
+  max-height: 178px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  flex-direction: column;
+  gap: 20px;
+  border: 0;
+  list-style: none;
+  scrollbar-width: none;
+}
+
+.figma-memory-item,
+.figma-history-item,
+.figma-overview-list .conversation-select,
+.figma-overview-empty,
+.figma-overview-list .conversation-item {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 79px;
+  margin: 0;
+  padding: 8px 20px;
+  flex: 0 0 auto;
+  border: 0;
+  border-radius: 34px;
+  background: var(--phone-pet-bubble);
+  color: #2f2f36;
+  font: 20px/24px "Microsoft YaHei", "Segoe UI", sans-serif;
+  text-align: left;
+}
+
+.figma-memory-item,
+.figma-history-item,
+.figma-overview-list .conversation-select {
+  cursor: pointer;
+}
+
+.figma-memory-item:hover,
+.figma-history-item:hover,
+.figma-overview-list .conversation-select:hover:not(:disabled) {
+  background: #ded4f7;
+}
+
+.figma-overview-empty {
+  display: grid;
+  place-items: center;
+  color: #817b91;
+  font-size: 14px;
+  text-align: center;
+}
+
+.figma-overview-list .conversation-item {
+  padding: 0;
+}
+
+.figma-overview-list .conversation-select {
+  display: flex;
+  justify-content: center;
+  gap: 0;
+}
+
+.figma-history-item {
+  display: flex;
+  justify-content: center;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.figma-overview-list .conversation-meta {
+  color: #817b91;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 19px;
+}
+
+.figma-history-overview {
+  border-bottom: 0;
+}
+
+.memory-legacy-controls[hidden] {
+  display: none;
+}
+
+.settings-management-page .memory-legacy-controls,
+#history-page {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  color: #2f2f36;
+}
+
+#history-page {
+  flex: 0 0 auto;
+  overflow: visible;
+}
+
+#history-page.is-detail-open > .conversation-list,
+#history-page:not(.is-detail-open) > #history-detail {
+  display: none;
+}
+
+#history-page.is-detail-open > #history-detail {
+  display: flex;
+}
+
+.settings-management-page[hidden],
+#history-page[hidden] {
+  display: none;
+}
+
+.settings-management-page .memory-actions,
+#history-page .history-actions {
+  position: sticky;
+  z-index: 2;
+  top: 0;
+  box-sizing: border-box;
+  padding: 0 0 12px;
+  background: linear-gradient(var(--phone-screen) 78%, transparent);
+}
+
+.settings-management-page .memory-actions .button,
+.settings-management-page .memory-actions .button-light,
+.settings-management-page .memory-actions .button-danger,
+#history-page .history-actions .button,
+#history-page .history-actions .button-danger {
+  min-height: 34px;
+  padding: 7px 12px;
+  border-radius: 18px;
+  font-size: 12px;
+}
+
+.settings-management-page .button,
+#history-page .button {
+  border-color: #6a54da;
+  background: #6a54da;
+  color: #fff;
+}
+
+.settings-management-page .button-light,
+#history-page .button-light {
+  border-color: #c2bef7;
+  background: #f9f7ff;
+  color: #5e5870;
+}
+
+.settings-management-page .button-danger,
+#history-page .button-danger {
+  border-color: #d64242;
+  background: #fff;
+  color: #b83030;
+}
+
+.settings-management-page .selection-note,
+#history-page .selection-note,
+.settings-management-page .field-label,
+#history-page .field-label {
+  color: #6e687d;
+}
+
+.settings-management-page #memory-filter-nav {
+  display: flex;
+  width: 100%;
+  padding: 0 0 4px;
+  overflow-x: auto;
+  gap: 8px;
+  border: 0;
+  scrollbar-width: none;
+}
+
+.settings-management-page #memory-filter-nav .subpage-tab {
+  min-width: max-content;
+  min-height: 32px;
+  padding: 6px 12px;
+  border: 1px solid #c2bef7;
+  border-radius: 18px;
+  background: transparent;
+  color: #5e5870;
+  font-size: 12px;
+}
+
+.settings-management-page #memory-filter-nav .subpage-tab.is-active {
+  border-color: #6a54da;
+  background: #6a54da;
+  color: #fff;
+}
+
+.settings-management-page .memory-list,
+#history-page .conversation-list {
+  display: flex;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  overflow: visible;
+  flex-direction: column;
+  gap: 18px;
+  border: 0;
+}
+
+.settings-management-page .memory-card {
+  box-sizing: border-box;
+  padding: 18px;
+  gap: 12px;
+}
+
+.settings-management-page .memory-card input,
+.settings-management-page .memory-card textarea,
+.settings-management-page .memory-card select,
+.settings-management-page #memory-search,
+#history-page select {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 38px;
+  padding: 8px 12px;
+  border: 1px solid rgb(106 84 218 / 16%);
+  border-radius: 19px;
+  outline: 0;
+  background: #f9f7ff;
+  color: #2f2f36;
+  font: 14px/20px "Microsoft YaHei", "Segoe UI", sans-serif;
+}
+
+.settings-management-page .memory-card textarea {
+  min-height: 84px;
+  resize: vertical;
+}
+
+.settings-management-page .memory-enabled-toggle {
+  display: flex;
+  min-height: 34px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  color: #2f2f36;
+  cursor: pointer;
+}
+
+.settings-management-page .memory-enabled-toggle input {
+  position: relative;
+  box-sizing: border-box;
+  width: 52px;
+  min-width: 52px;
+  height: 32px;
+  min-height: 32px;
+  margin: 0;
+  order: 2;
+  appearance: none;
+  border: 2px solid #79747e;
+  border-radius: 16px;
+  background: #e6e0e9;
+  cursor: pointer;
+  transition: border-color 200ms cubic-bezier(0.2, 0, 0, 1), background-color 200ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+.settings-management-page .memory-enabled-toggle input::after {
+  position: absolute;
+  top: 50%;
+  left: 6px;
+  width: 16px;
+  height: 16px;
+  translate: 0 -50%;
+  border-radius: 50%;
+  background: #79747e;
+  content: "";
+  transition: left 200ms cubic-bezier(0.2, 0, 0, 1), width 200ms cubic-bezier(0.2, 0, 0, 1), height 200ms cubic-bezier(0.2, 0, 0, 1), background-color 200ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+.settings-management-page .memory-enabled-toggle input:checked {
+  border-color: #6750a4;
+  background: #6750a4;
+}
+
+.settings-management-page .memory-enabled-toggle input:checked::after {
+  left: 24px;
+  width: 24px;
+  height: 24px;
+  background: #fff;
+}
+
+.settings-management-page .memory-enabled-toggle input:disabled {
+  cursor: wait;
+  opacity: 0.62;
+}
+
+.settings-management-page .memory-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+}
+
+.settings-management-page .memory-card-meta span {
+  color: #817b91;
+  font-size: 11px;
+}
+
+.settings-management-page .memory-safe-stats span {
+  border-color: rgb(106 84 218 / 14%);
+  background: #f9f7ff;
+  color: #5e5870;
+}
+
+.settings-management-page .history-detail-actions,
+#history-page .history-detail-actions {
+  gap: 8px;
+}
+
+.settings-management-page .history-detail-actions button,
+#history-page .history-detail-actions button {
+  min-height: 32px;
+  padding: 6px 12px;
+  border-radius: 17px;
+  font-size: 12px;
+}
+
+#history-page .conversation-item {
+  border: 0;
+}
+
+#history-page .conversation-select {
+  min-height: 66px;
+  padding: 12px 18px;
+  justify-content: center;
+  border-radius: 28px;
+  background: var(--phone-pet-bubble);
+  color: #2f2f36;
+  font-size: 15px;
+}
+
+#history-page .conversation-select.is-selected {
+  box-shadow: inset 0 0 0 2px #6a54da;
+  background: #ded4f7;
+}
+
+#history-page .content-stack {
+  gap: 18px;
+}
+
+.settings-nested-page {
+  color: #2f2f36;
+}
+
+#memory-detail,
+#history-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+#history-detail {
+  overflow: visible;
+}
+
+#history-detail .history-detail-heading {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 12px;
+}
+
+#history-detail .history-detail-heading > strong {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 20px;
+  line-height: 28px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#history-detail .history-detail-back {
+  min-height: 34px;
+  padding: 6px 12px;
+  flex: 0 0 auto;
+  border-radius: 17px;
+}
+
+#memory-detail > strong,
+#history-detail > strong {
+  font-size: 24px;
+  line-height: 32px;
+}
+
+#memory-detail .status-box,
+#history-detail .status-box {
+  padding: 16px 18px;
+  border: 0;
+  border-radius: 28px;
+  background: var(--phone-pet-bubble);
+  color: #2f2f36;
+}
+
+#history-detail .history-message-list {
+  gap: 12px;
+}
+
+#history-detail .history-message {
+  padding: 14px 18px;
+  border: 0;
+  border-radius: 24px;
+  background: var(--phone-pet-bubble);
+  color: #2f2f36;
+}
+
+#history-detail .history-message-role {
+  color: #817b91;
+}
+
+#memory-detail .selection-note,
+#history-detail .selection-note {
+  color: #6e687d;
+}
+
+.settings-management-page .delete-confirmation,
+#history-detail .delete-confirmation {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.settings-management-page .delete-confirmation[hidden],
+#history-detail .delete-confirmation[hidden] {
+  display: none;
+}
+
+/* P2-90 settings semantics rendered in the flat Figma visual language. */
+.settings-panel .settings-page-title {
+  display: none;
+}
+
+#settings-basic-page.content-stack,
+#settings-data-page.content-stack {
+  gap: 48px;
+}
+
+.settings-panel .settings-expander {
+  flex: 0 0 auto;
+  overflow: visible;
+  border: 0;
+  border-bottom: 1px solid #d7d3df;
+  border-radius: 0;
+  background: transparent;
+}
+
+.settings-panel .settings-expander > summary,
+.settings-panel .settings-expander[open] > summary {
+  padding: 0 2px 12px;
+  border: 0;
+  background: transparent;
+  color: #2f2f36;
+}
+
+.settings-panel .settings-expander > summary:hover {
+  background: rgb(106 84 218 / 6%);
+}
+
+.settings-panel .settings-expander > summary:focus-visible {
+  outline-color: #6a54da;
+}
+
+.settings-panel .settings-expander > summary::after,
+.settings-panel .settings-expander-copy small,
+.settings-panel .settings-row-copy small {
+  color: #817b91;
+}
+
+.settings-panel .settings-expander-copy strong {
+  color: #2f2f36;
+  font-size: 17px;
+  font-weight: 500;
+  line-height: 24px;
+}
+
+.settings-panel .settings-row-copy strong {
+  color: #2f2f36;
+  font-size: 20px;
+  font-weight: 400;
+  line-height: 32px;
+}
+
+.settings-panel .settings-expander > .fold-body {
+  padding: 8px 2px 22px;
+  background: transparent;
+}
+
+.settings-panel input:not([type="range"]),
+.settings-panel select,
+.settings-panel textarea {
+  border-color: #c2bef7;
+  background: #fff;
+  color: #2f2f36;
+}
+
+.settings-panel input:not([type="range"]):focus,
+.settings-panel select:focus,
+.settings-panel textarea:focus {
+  border-color: #6a54da;
+  outline-color: #c2bef7;
+}
+
+.settings-panel .settings-row input.figma-switch {
+  width: 52px;
+  height: 32px;
+  border: 2px solid #79747e;
+  border-radius: 16px;
+  background: #e6e0e9;
+}
+
+.settings-panel .settings-row input.figma-switch:checked {
+  border-color: #6750a4;
+  background: #6750a4;
+}
+
+.settings-panel .button {
+  border-color: #6a54da;
+  background: #6a54da;
+  color: #fff;
+}
+
+.settings-panel .button:hover:not(:disabled) {
+  border-color: #5945c9;
+  background: #5945c9;
+}
+
+.settings-panel .button:active:not(:disabled) {
+  border-color: #4937b8;
+  background: #4937b8;
+}
+
+.settings-panel .button-light {
+  border-color: #c2bef7;
+  background: #eee9ff;
+  color: #3d3563;
+}
+
+.settings-panel .button-light:hover:not(:disabled) {
+  border-color: #a89ee8;
+  background: #e3dcff;
+}
+
+.settings-panel .button-light:active:not(:disabled) {
+  background: #d8d0fb;
+}
+
+.settings-panel .button:focus-visible,
+.settings-panel .button-light:focus-visible {
+  outline-color: #6a54da;
+}
+
+@media (max-width: 401px) {
+  .chat-shell {
+    width: 100vw;
+    min-width: 0;
+    border-radius: 0;
+  }
+
+  .chat-page,
+  .settings-panel {
+    right: 4px;
+    left: 4px;
+  }
+
+  .settings-panel {
+    padding-right: 16px;
+    padding-left: 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .messages {
+    scroll-behavior: auto;
+  }
+
+  .phone-send-button img,
+  .phone-send-button::after,
+  .pet-lock-toggle-label > span,
+  .figma-switch,
+  .figma-switch::after,
+  .settings-management-page .memory-enabled-toggle input,
+  .settings-management-page .memory-enabled-toggle input::after,
+  .figma-scale-fill,
+  .figma-scale-handle,
+  .memory-card > input[type="checkbox"]::before,
+  .memory-card > input[type="checkbox"]::after {
+    transition: none;
+  }
+
+  .composer.is-sending textarea,
+  .composer.is-sending textarea::placeholder,
+  .composer.is-sending .phone-send-button,
+  .messages.is-sending > .message,
+  .message.is-entering-user,
+  .message.is-entering-pet,
+  .phone-presence.is-thinking {
+    animation-duration: 1ms;
+  }
+
+  .settings-panel.is-entering,
+  .settings-panel.is-exiting,
+  .settings-page.is-page-entering,
+  .settings-page.is-page-leaving,
+  :is(.settings-page, .memory-page, .history-page, .history-detail).is-management-entering,
+  :is(.settings-page, .memory-page, .history-page, .history-detail).is-management-exiting {
+    animation-duration: 1ms;
+  }
+
+  .settings-nav::after {
+    transition: none;
+  }
+
+  .settings-nav .subpage-tab.is-active,
+  .settings-nav .subpage-tab.is-deactivating {
+    animation-duration: 1ms;
   }
 }

@@ -3948,6 +3948,14 @@ app.whenReady().then(async () => {
     return getScaleWheelModifierAccelerator(getCurrentShortcutPreferences());
   });
 
+  ipcMain.on("chat:close-window", (event) => {
+    if (!isChatSender(event) || !chatWindow || chatWindow.isDestroyed()) {
+      return;
+    }
+
+    chatWindow.close();
+  });
+
   ipcMain.on("chat:interaction-active", (event, isActive: unknown) => {
     if (!isChatSender(event) || typeof isActive !== "boolean") {
       return;
@@ -4129,7 +4137,17 @@ app.whenReady().then(async () => {
             messageId: submittedMessage.id
           });
           if (extraction.status === "created" || extraction.status === "blocked") {
-            const review = memoryReviewStoreForRequest.enqueue(extraction.candidate);
+            const review = memoryReviewStoreForRequest.enqueue(
+              extraction.candidate,
+              extraction.status === "blocked" ? "blocked" : "pending-review"
+            );
+            if (review.status === "pending-review") {
+              const result = memoryStoreForRequest.confirmReviewedCandidate(review);
+              memoryReviewStoreForRequest.setStatus(
+                review.id,
+                result.status === "created" ? "confirmed" : "blocked"
+              );
+            }
             autoMemoryCaptureForActivity = {
               ...autoMemoryCaptureForActivity,
               skippedReason: null,

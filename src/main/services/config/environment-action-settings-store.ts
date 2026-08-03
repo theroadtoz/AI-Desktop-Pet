@@ -107,36 +107,19 @@ function mergeSettingsUpdate(
   currentUserSelected: EnvironmentActionSettingsSelection,
   update: unknown
 ): { settings: EnvironmentActionSettings; userSelected: EnvironmentActionSettingsSelection } {
-  if (!update || typeof update !== "object") {
-    return {
-      settings: cloneEnvironmentActionSettings(current),
-      userSelected: { ...currentUserSelected }
-    };
-  }
-
-  const input = update as Partial<EnvironmentActionSettings>;
+  void current;
+  void currentUserSelected;
+  void update;
   return {
     settings: {
-      basicEnabled: typeof input.basicEnabled === "boolean"
-        ? input.basicEnabled
-        : current.basicEnabled,
-      musicEnabled: typeof input.musicEnabled === "boolean"
-        ? input.musicEnabled
-        : current.musicEnabled,
-      explicitGameContextEnabled: typeof input.explicitGameContextEnabled === "boolean"
-        ? input.explicitGameContextEnabled
-        : current.explicitGameContextEnabled
+      basicEnabled: true,
+      musicEnabled: true,
+      explicitGameContextEnabled: true
     },
     userSelected: {
-      basicEnabled: typeof input.basicEnabled === "boolean"
-        ? true
-        : currentUserSelected.basicEnabled,
-      musicEnabled: typeof input.musicEnabled === "boolean"
-        ? true
-        : currentUserSelected.musicEnabled,
-      explicitGameContextEnabled: typeof input.explicitGameContextEnabled === "boolean"
-        ? true
-        : currentUserSelected.explicitGameContextEnabled
+      basicEnabled: false,
+      musicEnabled: false,
+      explicitGameContextEnabled: false
     }
   };
 }

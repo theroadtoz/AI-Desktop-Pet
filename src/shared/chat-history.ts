@@ -1,5 +1,20 @@
 import type { ChatRole } from "./chat";
 import { containsSensitiveMemoryMaterial } from "./chat-memory";
+import {
+  DEFAULT_HISTORY_RETENTION_LIMIT,
+  HISTORY_RETENTION_LIMITS,
+  isHistoryRetentionLimit,
+  normalizeStoredHistoryRetentionLimit,
+  type HistoryRetentionLimit
+} from "./history-retention";
+
+export {
+  DEFAULT_HISTORY_RETENTION_LIMIT,
+  HISTORY_RETENTION_LIMITS,
+  isHistoryRetentionLimit,
+  normalizeStoredHistoryRetentionLimit,
+  type HistoryRetentionLimit
+} from "./history-retention";
 
 export type HistoryMessage = {
   id: string;
@@ -22,10 +37,6 @@ export type ConversationSummary = Omit<Conversation, "messages"> & {
 
 export const HISTORY_STORAGE_VERSION = 2;
 export const HISTORY_STORAGE_V1 = 1;
-export const HISTORY_RETENTION_LIMITS = [100, 500, 1_000] as const;
-export const DEFAULT_HISTORY_RETENTION_LIMIT = 500;
-
-export type HistoryRetentionLimit = (typeof HISTORY_RETENTION_LIMITS)[number];
 
 export type HistorySemanticSummary = {
   conversationId: string;
@@ -69,10 +80,6 @@ export function isHistoryMessage(value: unknown): value is HistoryMessage {
   );
 }
 
-export function isHistoryRetentionLimit(value: unknown): value is HistoryRetentionLimit {
-  return typeof value === "number" && HISTORY_RETENTION_LIMITS.includes(value as HistoryRetentionLimit);
-}
-
 export function parseHistoryStorage(value: unknown): HistoryStorage | HistoryStorageV1 | null {
   const storage = value as (Partial<HistoryStorage> | Partial<HistoryStorageV1>) | null;
 
@@ -90,10 +97,14 @@ export function parseHistoryStorage(value: unknown): HistoryStorage | HistorySto
     return { version: HISTORY_STORAGE_V1, conversations: conversations as Conversation[] };
   }
 
+  const retentionLimit = "retentionLimit" in storage
+    ? normalizeStoredHistoryRetentionLimit(storage.retentionLimit)
+    : null;
+
   if (
     storage.version !== HISTORY_STORAGE_VERSION ||
     !hasExactKeys(storage, ["version", "retentionLimit", "conversations", "semanticSummaries"]) ||
-    !isHistoryRetentionLimit(storage.retentionLimit) ||
+    retentionLimit === null ||
     !Array.isArray(storage.semanticSummaries)
   ) {
     return null;
@@ -113,7 +124,7 @@ export function parseHistoryStorage(value: unknown): HistoryStorage | HistorySto
 
   return {
     version: HISTORY_STORAGE_VERSION,
-    retentionLimit: storage.retentionLimit,
+    retentionLimit,
     conversations: conversations as Conversation[],
     semanticSummaries: semanticSummaries as HistorySemanticSummary[]
   };

@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import {
   DEFAULT_WEB_SEARCH_SETTINGS,
+  forceWebSearchEnabled,
   type WebSearchSettings,
   type WebSearchStatus
 } from "../../../shared/web-search";
@@ -103,7 +104,7 @@ function normalizeSettings(value: unknown, hasSettingsFile: boolean, disableUnsu
   const normalizedArgs = shouldUseBundledPreset ? [...DEFAULT_WEB_SEARCH_SETTINGS.args] : normalizeArgs(input?.args);
   const shouldPinBundledToolName = isSupportedCommandProfile(normalizedCommand, normalizedArgs);
 
-  return {
+  return forceWebSearchEnabled({
     enabled: shouldUseDefaultPreset
       ? DEFAULT_WEB_SEARCH_SETTINGS.enabled
       : shouldMigrateHistoricalPreset
@@ -120,7 +121,7 @@ function normalizeSettings(value: unknown, hasSettingsFile: boolean, disableUnsu
     maxResults: shouldUseBundledPreset
       ? DEFAULT_WEB_SEARCH_SETTINGS.maxResults
       : normalizeInteger(input?.maxResults, DEFAULT_WEB_SEARCH_SETTINGS.maxResults, MIN_RESULTS, MAX_RESULTS)
-  };
+  });
 }
 
 function assertSupportedUpdate(value: unknown): void {

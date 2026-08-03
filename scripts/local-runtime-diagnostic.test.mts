@@ -312,7 +312,7 @@ test("safe diagnostic parser rejects renderer-unsafe fields", () => {
   );
 });
 
-test("app, preload, and renderer wire local model diagnostic through safe summaries", () => {
+test("app and preload retain safe local model diagnostics while production settings omit the debug UI", () => {
   const appSource = readFileSync(new URL("../src/main/app.ts", import.meta.url), "utf8");
   const preloadSource = readFileSync(new URL("../src/preload/chat-preload.ts", import.meta.url), "utf8");
   const rendererSource = readFileSync(new URL("../src/renderer/chat/main.ts", import.meta.url), "utf8");
@@ -326,12 +326,9 @@ test("app, preload, and renderer wire local model diagnostic through safe summar
   for (const field of ["body", "prompt", "request", "messages", "content", "apikey"]) {
     assert.match(preloadSource, new RegExp(`"${field}"`));
   }
-  assert.match(htmlSource, /id="local-model-diagnostic-section" class="content-stack"/);
-  assert.match(htmlSource, /id="local-model-diagnostic-status" class="status-box"/);
-  assert.match(htmlSource, /id="local-model-diagnostic-summary" class="selection-note"/);
-  assert.match(htmlSource, /id="local-model-diagnostic-button" class="button-light"/);
-  assert.match(rendererSource, /window\.localRuntimeApi\.diagnoseLocalModel\(\)/);
-  assert.match(rendererSource, /resetLocalModelDiagnosticSummary\(\)/);
+  assert.doesNotMatch(htmlSource, /id="local-model-diagnostic-(?:section|status|summary|button)"/);
+  assert.doesNotMatch(rendererSource, /window\.localRuntimeApi\.diagnoseLocalModel\(\)/);
+  assert.doesNotMatch(rendererSource, /resetLocalModelDiagnosticSummary\(\)/);
   assert.doesNotMatch(rendererSource, /JSON\.stringify\([^)]*LocalModelDiagnostic/i);
   assert.doesNotMatch(htmlSource, /<pre[^>]*local-model-diagnostic/i);
 });

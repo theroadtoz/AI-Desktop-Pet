@@ -633,7 +633,7 @@ test("web search settings default to the bundled Baidu compatibility preset enab
     timeoutMs: 5_000,
     maxResults: 2
   }), {
-    enabled: false,
+    enabled: true,
     command: "",
     args: ["--unsafe"],
     toolName: "web_search",
@@ -642,7 +642,7 @@ test("web search settings default to the bundled Baidu compatibility preset enab
   });
 });
 
-test("web search settings store defaults on first run but preserves explicit user disable", () => {
+test("web search settings store defaults on first run and normalizes disable requests to enabled", () => {
   const userDataPath = mkdtempSync(join(tmpdir(), "p2-web-search-store-"));
   const store = createWebSearchSettingsStore({ userDataPath });
   assert.deepEqual(store.getSettings(), {
@@ -664,7 +664,7 @@ test("web search settings store defaults on first run but preserves explicit use
   });
 
   const reloaded = createWebSearchSettingsStore({ userDataPath });
-  assert.equal(reloaded.getSettings().enabled, false);
+  assert.equal(reloaded.getSettings().enabled, true);
   assert.equal(reloaded.getSettings().command, "bundled-baidu-search");
 });
 
@@ -703,7 +703,7 @@ test("web search settings store migrates empty legacy config to the enabled defa
   }), "utf8");
 
   assert.deepEqual(createWebSearchSettingsStore({ userDataPath: customUserDataPath }).getSettings(), {
-    enabled: false,
+    enabled: true,
     command: "custom-mcp.cmd",
     args: ["--stdio"],
     toolName: "custom_search",
@@ -896,7 +896,7 @@ test("MCP request timeout survives a throwing kill and escalates through session
   await registry.shutdown();
 });
 
-test("web search settings migrate only exact historical defaults and preserve their enabled state", () => {
+test("web search settings migrate only exact historical defaults and keep MCP enabled", () => {
   const historicalDefaults = [
     {
       name: "Google",
@@ -944,9 +944,9 @@ test("web search settings migrate only exact historical defaults and preserve th
 
     for (const legacyEnabled of [true, false]) {
       assert.deepEqual(normalizeHistoricalDefault({ enabled: legacyEnabled }), {
-        enabled: legacyEnabled,
+        enabled: true,
         ...bundledBaiduDefault
-      }, `${historicalDefault.name} must preserve legacy enabled=${legacyEnabled}`);
+      }, `${historicalDefault.name} must normalize legacy enabled=${legacyEnabled} to enabled`);
     }
 
     const customVariants = [
@@ -1116,11 +1116,13 @@ test("app and settings UI wire the safe verification prompt and enabled compatib
   assert.match(appSource, /if \(!mappedContextBudget\.withinBudget\) \{\s*throw new Error\("P2-87C context budget exceeded"\);/);
   assert.doesNotMatch(appSource, /providerMessages:\s*\[\s*\.\.\.contextBudget\.providerMessages/);
   assert.match(preloadSource, /DEFAULT_WEB_SEARCH_SETTINGS[\s\S]*?enabled:\s*true,[\s\S]*?bundled-baidu-search/);
+  assert.match(settingsHtml, /<h3 id="web-search-title"[^>]*>联网搜索 MCP<\/h3>/);
   assert.match(settingsHtml, /class="selection-note"[^>]*>内置 MCP 搜索默认开启，使用百度网页兼容适配器。/);
-  assert.match(settingsHtml, /<select id="web-search-profile">[\s\S]*?内置百度网页搜索（兼容适配器）/);
+  assert.doesNotMatch(settingsHtml, /id="web-search-profile"/);
+  assert.match(settingsHtml, /id="web-search-test-button"[^>]*>测试连接<\/button>/);
   assert.doesNotMatch(settingsHtml, /web-search-(?:command|args|tool-name)/);
   assert.match(rendererSource, /command:\s*BUNDLED_BAIDU_SEARCH_COMMAND,\s*args:\s*\[\],\s*toolName:\s*DEFAULT_WEB_SEARCH_SETTINGS\.toolName/);
-  assert.match(rendererSource, /历史自定义配置（不受支持）/);
+  assert.match(rendererSource, /检测到历史自定义搜索配置，已停用且不受支持。/);
   assert.doesNotMatch(rendererSource, /webSearch(?:Command|Args|ToolName)(?:Field)?/);
 });
 

@@ -162,7 +162,8 @@ test("prompt template: local semantic hints depend only on the latest user quest
     },
     {
       content: "那些藏起来的实验记录不会是你偷偷删了吧？开玩笑的。",
-      pattern: /玩笑=.*仅2句.*首句必须先以.*原来是逗我的.*还好只是玩笑.*开头.*再接俏皮反应.*≤30字.*次句回1句俏皮话.*≤40字.*次句即止.*禁解释分析.*列举.*不编电脑.*文件.*现实状态/
+      pattern: /玩笑=开玩笑.*仅2句.*首句同一句依次.*复用用户本轮1个具体名词\/对象.*明确包含.*开玩笑.*简短俏皮回应.*具体名词决定开头.*禁通用固定开头.*次句自然收束.*首句≤30字.*次句≤40字.*次句即止.*禁完整回复示例.*随机短语池.*固定候选开头.*解释分析.*列举.*不编电脑.*文件.*屏幕.*现实状态/,
+      forbiddenPattern: /原来是逗我的|还好只是玩笑/
     },
     {
       content: "如果我说月亮一点也不好看，你会顺着我说吗？",
@@ -227,6 +228,38 @@ test("prompt template: local semantic hints depend only on the latest user quest
     if (/你自己的(?:偏好|感受|看法)/.test(item.content)) {
       assert.doesNotMatch(hints[0]?.content ?? "", /只陪伴=/);
     }
+  }
+});
+
+test("prompt template: playful teasing derives a single semantic anchor without widening its trigger", () => {
+  for (const [content, concept] of [
+    ["刚才闹着玩的。", "闹着玩"],
+    ["这只是说笑。", "说笑"],
+    ["开玩笑的。", "开玩笑"],
+    ["刚才只是逗你的。", "逗我"],
+    ["我骗你的。", "玩笑"]
+  ]) {
+    const mapped = mapChatMessagesToOpenAICompatible([
+      { id: crypto.randomUUID(), role: "user", content }
+    ], undefined, undefined, undefined, "local-small-model");
+    const hint = mapped.find((message) => message.role === "system" && message.content.startsWith("本轮提示："));
+
+    assert.match(hint?.content ?? "", new RegExp(`玩笑=${concept}.*首句同一句依次.*复用用户本轮1个具体名词/对象.*明确包含.*${concept}.*简短俏皮回应.*具体名词决定开头.*禁通用固定开头.*次句自然收束`));
+    assert.doesNotMatch(hint?.content ?? "", /原来是逗我的|还好只是玩笑|固定候选开头：[“"]|完整回复示例：[“"]/);
+  }
+
+  for (const content of [
+    "我不是在开玩笑。",
+    "我没有开玩笑。",
+    "这不是说笑。",
+    "我不逗你。"
+  ]) {
+    const mapped = mapChatMessagesToOpenAICompatible([
+      { id: crypto.randomUUID(), role: "user", content }
+    ], undefined, undefined, undefined, "local-small-model");
+    const hints = mapped.filter((message) => message.role === "system" && message.content.startsWith("本轮提示："));
+
+    assert.doesNotMatch(hints[0]?.content ?? "", /玩笑=/);
   }
 });
 

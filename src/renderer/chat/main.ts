@@ -1,6 +1,6 @@
 import "./styles.css";
 import type { ChatMessage, ChatRole } from "../../shared/chat";
-import type { Conversation, ConversationSummary, HistoryRetentionLimit } from "../../shared/chat-history";
+import type { Conversation, ConversationSummary } from "../../shared/chat-history";
 import type { ChatContextTransparencyPayload, ChatMemoryActivityPayload } from "../../shared/ipc-contract";
 import type { MemoryCard, MemoryReviewCandidate, MemorySummary, MemorySuppressionView } from "../../shared/chat-memory";
 import {
@@ -11,11 +11,6 @@ import {
   type ProviderStatus
 } from "../../shared/provider-config";
 import type { ProviderHealthCheckRequest } from "../../shared/provider-health";
-import type { LlamaCppRuntimeSafeSummary } from "../../shared/llama-cpp-runtime";
-import type {
-  LocalModelDiagnosticRuntimeSummary,
-  LocalModelDiagnosticSafeSummary
-} from "../../shared/local-model-diagnostic";
 import { polishAssistantDisplayText } from "../../shared/reply-text-polish";
 import {
   DEFAULT_PET_PRESENTATION_PREFERENCES,
@@ -29,7 +24,6 @@ import {
   type PetAccessoryId
 } from "../../shared/pet-accessory";
 import type { ShortcutActionId, ShortcutPreferenceView } from "../../shared/shortcut-preferences";
-import type { UserProfile } from "../../shared/user-profile";
 import {
   BUNDLED_BAIDU_SEARCH_COMMAND,
   DEFAULT_WEB_SEARCH_SETTINGS,
@@ -87,7 +81,7 @@ import {
 } from "./interaction-lock";
 
 const form = document.querySelector<HTMLFormElement>("#chat-form");
-const input = document.querySelector<HTMLInputElement>("#chat-input");
+const input = document.querySelector<HTMLTextAreaElement>("#chat-input");
 const messages = document.querySelector<HTMLElement>("#messages");
 const sendButton = document.querySelector<HTMLButtonElement>("#send-button");
 const abortButton = document.querySelector<HTMLButtonElement>("#abort-button");
@@ -95,27 +89,18 @@ const partnerStatus = document.querySelector<HTMLElement>("#partner-status");
 const providerStatus = document.querySelector<HTMLElement>("#provider-status");
 const memorySessionStatus = document.querySelector<HTMLElement>("#memory-session-status");
 const settingsButton = document.querySelector<HTMLButtonElement>("#settings-button");
+const chatCloseButton = document.querySelector<HTMLButtonElement>("#chat-close-button");
+const phoneClock = document.querySelector<HTMLTimeElement>("#phone-clock");
 const settingsPanel = document.querySelector<HTMLElement>("#settings-panel");
 const settingsCloseButton = document.querySelector<HTMLButtonElement>("#settings-close-button");
 const settingsForm = document.querySelector<HTMLFormElement>("#settings-form");
-const settingsBackRow = document.querySelector<HTMLElement>("#settings-back-row");
-const settingsBackButton = document.querySelector<HTMLButtonElement>("#settings-back-button");
-const settingsNestedTitle = document.querySelector<HTMLElement>("#settings-nested-title");
 const settingsBasicTab = document.querySelector<HTMLButtonElement>("#settings-basic-tab");
-const settingsMemoryTab = document.querySelector<HTMLButtonElement>("#settings-memory-tab");
-const settingsHistoryTab = document.querySelector<HTMLButtonElement>("#settings-history-tab");
-const settingsAppearanceTab = document.querySelector<HTMLButtonElement>("#settings-appearance-tab");
-const settingsModelTab = document.querySelector<HTMLButtonElement>("#settings-model-tab");
-const settingsAdvancedTab = document.querySelector<HTMLButtonElement>("#settings-advanced-tab");
+const settingsDataTab = document.querySelector<HTMLButtonElement>("#settings-data-tab");
 const settingsBasicPage = document.querySelector<HTMLElement>("#settings-basic-page");
+const settingsDataPage = document.querySelector<HTMLElement>("#settings-data-page");
 const settingsAppearancePage = document.querySelector<HTMLElement>("#settings-appearance-page");
 const settingsModelPage = document.querySelector<HTMLElement>("#settings-model-page");
-const settingsModelDetailPage = document.querySelector<HTMLElement>("#settings-model-detail-page");
-const settingsModelDetailButton = document.querySelector<HTMLButtonElement>("#settings-model-detail-button");
-const settingsAdvancedPage = document.querySelector<HTMLElement>("#settings-advanced-page");
-const settingsMemoryDetailPage = document.querySelector<HTMLElement>("#settings-memory-detail-page");
 const memoryDetail = document.querySelector<HTMLElement>("#memory-detail");
-const settingsHistoryDetailPage = document.querySelector<HTMLElement>("#settings-history-detail-page");
 const providerIdSelect = document.querySelector<HTMLSelectElement>("#provider-id");
 const displayNameInput = document.querySelector<HTMLInputElement>("#provider-display-name");
 const openAIFields = document.querySelector<HTMLElement>("#openai-fields");
@@ -127,25 +112,7 @@ const timeoutInput = document.querySelector<HTMLInputElement>("#provider-timeout
 const localProviderPresetContainer = document.querySelector<HTMLElement>("#local-provider-preset-field");
 const localProviderPresetSelect = document.querySelector<HTMLSelectElement>("#local-provider-preset");
 const localProviderNote = document.querySelector<HTMLElement>("#local-provider-note");
-const localModelDiagnosticSection = document.querySelector<HTMLElement>("#local-model-diagnostic-section");
-const localModelDiagnosticStatus = document.querySelector<HTMLElement>("#local-model-diagnostic-status");
-const localModelDiagnosticSummary = document.querySelector<HTMLElement>("#local-model-diagnostic-summary");
-const localModelDiagnosticRuntimes = document.querySelector<HTMLElement>("#local-model-diagnostic-runtimes");
-const localModelDiagnosticButton = document.querySelector<HTMLButtonElement>("#local-model-diagnostic-button");
-const llamaCppRuntimeSection = document.querySelector<HTMLElement>("#llama-cpp-runtime-section");
-const llamaCppRuntimeStatus = document.querySelector<HTMLElement>("#llama-cpp-runtime-status");
-const llamaCppRuntimeFiles = document.querySelector<HTMLElement>("#llama-cpp-runtime-files");
-const llamaCppRuntimeEnabled = document.querySelector<HTMLInputElement>("#llama-cpp-runtime-enabled");
-const llamaCppRuntimeHost = document.querySelector<HTMLInputElement>("#llama-cpp-runtime-host");
-const llamaCppRuntimePort = document.querySelector<HTMLInputElement>("#llama-cpp-runtime-port");
-const llamaCppRuntimeCtx = document.querySelector<HTMLInputElement>("#llama-cpp-runtime-ctx");
-const llamaCppRuntimeAlias = document.querySelector<HTMLInputElement>("#llama-cpp-runtime-alias");
-const llamaCppRuntimeSaveButton = document.querySelector<HTMLButtonElement>("#llama-cpp-runtime-save-button");
-const llamaCppRuntimeExecutableButton = document.querySelector<HTMLButtonElement>("#llama-cpp-runtime-executable-button");
-const llamaCppRuntimeModelButton = document.querySelector<HTMLButtonElement>("#llama-cpp-runtime-model-button");
-const llamaCppRuntimeStartButton = document.querySelector<HTMLButtonElement>("#llama-cpp-runtime-start-button");
-const llamaCppRuntimeStopButton = document.querySelector<HTMLButtonElement>("#llama-cpp-runtime-stop-button");
-const llamaCppRuntimeRefreshButton = document.querySelector<HTMLButtonElement>("#llama-cpp-runtime-refresh-button");
+const externalProviderSettings = document.querySelector<HTMLElement>("#external-provider-settings");
 const providerResetLocalButton = document.querySelector<HTMLButtonElement>("#provider-reset-local-button");
 const providerHealthCheckButton = document.querySelector<HTMLButtonElement>("#provider-health-check-button");
 const providerHealthStatus = document.querySelector<HTMLElement>("#provider-health-status");
@@ -165,11 +132,7 @@ const savePetScaleButton = document.querySelector<HTMLButtonElement>("#save-pet-
 const savePetAccessoryButton = document.querySelector<HTMLButtonElement>("#save-pet-accessory-button");
 const petLockStatus = document.querySelector<HTMLElement>("#pet-lock-status");
 const togglePetLockButton = document.querySelector<HTMLButtonElement>("#toggle-pet-lock-button");
-const userProfileSummary = document.querySelector<HTMLElement>("#user-profile-summary");
-const settingsUserDisplayName = document.querySelector<HTMLInputElement>("#settings-user-display-name");
-const settingsUserPreferredName = document.querySelector<HTMLInputElement>("#settings-user-preferred-name");
-const saveUserProfileButton = document.querySelector<HTMLButtonElement>("#save-user-profile-button");
-const clearUserProfileButton = document.querySelector<HTMLButtonElement>("#clear-user-profile-button");
+const proactiveCompanionEnabled = document.querySelector<HTMLInputElement>("#proactive-companion-enabled");
 const proactiveCompanionStatus = document.querySelector<HTMLElement>("#proactive-companion-status");
 const proactiveCadenceControls = document.querySelector<HTMLElement>("#proactive-cadence-controls");
 const proactiveMemorySourceBubbles = document.querySelector<HTMLInputElement>("#proactive-memory-source-bubbles");
@@ -186,14 +149,11 @@ const saveDialogueAffectSettingsButton = document.querySelector<HTMLButtonElemen
 const shortcutList = document.querySelector<HTMLElement>("#shortcut-list");
 const shortcutStatus = document.querySelector<HTMLElement>("#shortcut-status");
 const webSearchStatus = document.querySelector<HTMLElement>("#web-search-status");
-const webSearchEnabled = document.querySelector<HTMLInputElement>("#web-search-enabled");
-const webSearchProfile = document.querySelector<HTMLSelectElement>("#web-search-profile");
-const webSearchProfileNote = document.querySelector<HTMLElement>("#web-search-profile-note");
 const webSearchTimeout = document.querySelector<HTMLInputElement>("#web-search-timeout");
 const webSearchMaxResults = document.querySelector<HTMLInputElement>("#web-search-max-results");
 const webSearchSaveButton = document.querySelector<HTMLButtonElement>("#web-search-save-button");
-const webSearchRefreshButton = document.querySelector<HTMLButtonElement>("#web-search-refresh-button");
 const webSearchTestButton = document.querySelector<HTMLButtonElement>("#web-search-test-button");
+const figmaMcpLight = document.querySelector<HTMLElement>("#figma-mcp-light");
 const chatTab = document.querySelector<HTMLButtonElement>("#chat-tab");
 const historyTab = document.querySelector<HTMLButtonElement>("#history-tab");
 const memoryTab = document.querySelector<HTMLButtonElement>("#memory-tab");
@@ -213,17 +173,17 @@ const memoryDraftTags = document.querySelector<HTMLInputElement>("#memory-draft-
 const cancelMemoryDraftButton = document.querySelector<HTMLButtonElement>("#cancel-memory-draft-button");
 const saveMemoryDraftButton = document.querySelector<HTMLButtonElement>("#save-memory-draft-button");
 const newConversationButton = document.querySelector<HTMLButtonElement>("#new-conversation-button");
-const clearHistoryButton = document.querySelector<HTMLButtonElement>("#clear-history-button");
-const clearHistoryConfirmation = document.querySelector<HTMLElement>("#clear-history-confirmation");
-const cancelClearHistoryButton = document.querySelector<HTMLButtonElement>("#cancel-clear-history-button");
-const confirmClearHistoryButton = document.querySelector<HTMLButtonElement>("#confirm-clear-history-button");
-const historyFeedback = document.querySelector<HTMLElement>("#history-feedback");
-const historyRetentionLimit = document.querySelector<HTMLSelectElement>("#history-retention-limit");
-const saveHistoryRetentionButton = document.querySelector<HTMLButtonElement>("#save-history-retention-button");
 const conversationList = document.querySelector<HTMLOListElement>("#conversation-list");
 const historyDetail = document.querySelector<HTMLElement>("#history-detail");
 const enableMemoryButton = document.querySelector<HTMLButtonElement>("#enable-memory-button");
+const memoryEnabledInput = document.querySelector<HTMLInputElement>("#memory-enabled");
 const newMemoryButton = document.querySelector<HTMLButtonElement>("#new-memory-button");
+const memoryManageButton = document.querySelector<HTMLButtonElement>("#memory-manage-button");
+const memoryManagementActions = document.querySelector<HTMLElement>("#memory-management-actions");
+const memorySelectionCount = document.querySelector<HTMLElement>("#memory-selection-count");
+const memoryDeleteSelectedButton = document.querySelector<HTMLButtonElement>("#memory-delete-selected-button");
+const memoryForgetSelectedButton = document.querySelector<HTMLButtonElement>("#memory-forget-selected-button");
+const memoryCancelManageButton = document.querySelector<HTMLButtonElement>("#memory-cancel-manage-button");
 const clearMemoryButton = document.querySelector<HTMLButtonElement>("#clear-memory-button");
 const clearMemoryConfirmation = document.querySelector<HTMLElement>("#clear-memory-confirmation");
 const cancelClearMemoryButton = document.querySelector<HTMLButtonElement>("#cancel-clear-memory-button");
@@ -233,7 +193,6 @@ const memoryCreateNote = document.querySelector<HTMLElement>("#memory-create-not
 const memoryOverviewStatus = document.querySelector<HTMLElement>("#memory-overview-status");
 const memoryNextInjectionStatus = document.querySelector<HTMLElement>("#memory-next-injection-status");
 const memorySafeStats = document.querySelector<HTMLElement>("#memory-safe-stats");
-const memoryFilterTabs = [...document.querySelectorAll<HTMLButtonElement>("[data-memory-filter]")];
 const memorySearch = document.querySelector<HTMLInputElement>("#memory-search");
 const memoryList = document.querySelector<HTMLElement>("#memory-list");
 const memoryReviews = document.querySelector<HTMLElement>("#memory-reviews");
@@ -242,49 +201,35 @@ const clearMemorySuppressionsButton = document.querySelector<HTMLButtonElement>(
 const clearMemorySuppressionsConfirmation = document.querySelector<HTMLElement>("#clear-memory-suppressions-confirmation");
 const cancelClearMemorySuppressionsButton = document.querySelector<HTMLButtonElement>("#cancel-clear-memory-suppressions-button");
 const confirmClearMemorySuppressionsButton = document.querySelector<HTMLButtonElement>("#confirm-clear-memory-suppressions-button");
-const userWelcomePanel = document.querySelector<HTMLElement>("#user-welcome-panel");
-const welcomeUserDisplayName = document.querySelector<HTMLInputElement>("#welcome-user-display-name");
-const welcomeUserPreferredName = document.querySelector<HTMLInputElement>("#welcome-user-preferred-name");
-const welcomeSaveUserProfileButton = document.querySelector<HTMLButtonElement>("#welcome-save-user-profile-button");
-const userWelcomeFeedback = document.querySelector<HTMLElement>("#user-welcome-feedback");
 
 if (
   !form || !input || !messages || !sendButton || !abortButton || !partnerStatus || !providerStatus ||
-  !memorySessionStatus || !settingsButton || !settingsPanel || !settingsCloseButton || !settingsForm ||
-  !settingsBackRow || !settingsBackButton || !settingsNestedTitle || !settingsBasicTab || !settingsMemoryTab ||
-  !settingsHistoryTab || !settingsAppearanceTab || !settingsModelTab || !settingsAdvancedTab || !settingsBasicPage ||
-  !settingsAppearancePage || !settingsModelPage || !settingsModelDetailPage || !settingsModelDetailButton ||
-  !settingsAdvancedPage || !settingsMemoryDetailPage || !memoryDetail || !settingsHistoryDetailPage || !providerIdSelect ||
+  !memorySessionStatus || !settingsButton || !chatCloseButton || !phoneClock || !settingsPanel || !settingsCloseButton || !settingsForm ||
+  !settingsBasicTab || !settingsDataTab || !settingsBasicPage || !settingsDataPage ||
+  !settingsAppearancePage || !settingsModelPage || !memoryDetail || !providerIdSelect ||
   !displayNameInput || !openAIFields || !baseURLInput || !modelInput || !temperatureInput ||
-  !maxTokensInput || !timeoutInput || !localProviderPresetContainer || !localProviderPresetSelect || !localProviderNote ||
-  !localModelDiagnosticSection || !localModelDiagnosticStatus || !localModelDiagnosticSummary ||
-  !localModelDiagnosticRuntimes || !localModelDiagnosticButton ||
-  !llamaCppRuntimeSection || !llamaCppRuntimeStatus || !llamaCppRuntimeFiles || !llamaCppRuntimeEnabled ||
-  !llamaCppRuntimeHost || !llamaCppRuntimePort || !llamaCppRuntimeCtx || !llamaCppRuntimeAlias ||
-  !llamaCppRuntimeSaveButton || !llamaCppRuntimeExecutableButton || !llamaCppRuntimeModelButton ||
-  !llamaCppRuntimeStartButton || !llamaCppRuntimeStopButton || !llamaCppRuntimeRefreshButton ||
+  !maxTokensInput || !timeoutInput || !localProviderPresetContainer || !localProviderPresetSelect || !localProviderNote || !externalProviderSettings ||
   !providerResetLocalButton || !providerHealthCheckButton || !providerHealthStatus || !apiKeyInput || !apiKeyStatus || !connectionSafeSection || !deleteApiKeyButton ||
   !deleteKeyConfirmation || !cancelDeleteApiKeyButton || !confirmDeleteApiKeyButton || !settingsFeedback ||
   !petScaleInput || !petScaleValue || !petAccessoryGroups || !petAccessoryStatus || !savePetScaleButton ||
-  !savePetAccessoryButton || !petLockStatus || !togglePetLockButton || !userProfileSummary ||
-  !settingsUserDisplayName || !settingsUserPreferredName || !saveUserProfileButton || !clearUserProfileButton ||
-  !proactiveCompanionStatus || !proactiveCadenceControls ||
+  !savePetAccessoryButton || !petLockStatus || !togglePetLockButton ||
+  !proactiveCompanionEnabled || !proactiveCompanionStatus || !proactiveCadenceControls ||
   !proactiveMemorySourceBubbles || !proactiveSearchSourceBubbles || !saveProactiveCompanionSettingsButton ||
   !environmentActionStatus || !environmentBasicEnabled || !environmentMusicEnabled || !environmentExplicitGameContextEnabled || !saveEnvironmentActionSettingsButton ||
   !dialogueAffectStatus || !dialogueAffectEnabled || !saveDialogueAffectSettingsButton ||
   !shortcutList || !shortcutStatus ||
-  !webSearchStatus || !webSearchEnabled || !webSearchProfile || !webSearchProfileNote ||
-  !webSearchTimeout || !webSearchMaxResults || !webSearchSaveButton || !webSearchRefreshButton || !webSearchTestButton ||
+  !webSearchStatus || !webSearchTimeout || !webSearchMaxResults || !webSearchSaveButton || !webSearchTestButton || !figmaMcpLight ||
   !chatTab || !historyTab || !memoryTab || !chatPage || !companionControlShelf ||
   !shelfAccessoryButton || !shelfScaleButton || !shelfLockButton || !shelfActionEcho || !historyPage ||
   !memoryPage || !chatSessionNote || !memoryDraftPanel || !memoryDraftTitle || !memoryDraftContent || !memoryDraftTags ||
-  !cancelMemoryDraftButton || !saveMemoryDraftButton || !newConversationButton || !clearHistoryButton || !clearHistoryConfirmation ||
-  !cancelClearHistoryButton || !confirmClearHistoryButton || !historyFeedback || !historyRetentionLimit || !saveHistoryRetentionButton || !conversationList || !historyDetail ||
-  !enableMemoryButton || !newMemoryButton || !clearMemoryButton || !clearMemoryConfirmation || !cancelClearMemoryButton ||
-  !confirmClearMemoryButton || !memoryFeedback || !memoryOverviewStatus || !memoryNextInjectionStatus || !memorySafeStats || !memorySearch || !memoryList || !memoryReviews || !userWelcomePanel ||
+  !cancelMemoryDraftButton || !saveMemoryDraftButton || !newConversationButton ||
+  !conversationList || !historyDetail ||
+  !enableMemoryButton || !memoryEnabledInput || !newMemoryButton || !memoryManageButton || !memoryManagementActions || !memorySelectionCount ||
+  !memoryDeleteSelectedButton || !memoryForgetSelectedButton || !memoryCancelManageButton ||
+  !clearMemoryButton || !clearMemoryConfirmation || !cancelClearMemoryButton ||
+  !confirmClearMemoryButton || !memoryFeedback || !memoryOverviewStatus || !memoryNextInjectionStatus || !memorySafeStats || !memorySearch || !memoryList || !memoryReviews ||
   !memoryCreateNote || !memorySuppressions || !clearMemorySuppressionsButton || !clearMemorySuppressionsConfirmation ||
-  !cancelClearMemorySuppressionsButton || !confirmClearMemorySuppressionsButton ||
-  !welcomeUserDisplayName || !welcomeUserPreferredName || !welcomeSaveUserProfileButton || !userWelcomeFeedback
+  !cancelClearMemorySuppressionsButton || !confirmClearMemorySuppressionsButton
 ) {
   throw new Error("chat elements missing");
 }
@@ -298,21 +243,15 @@ const partnerStatusBox = partnerStatus;
 const providerStatusBox = providerStatus;
 const memorySessionStatusBox = memorySessionStatus;
 const settingsAction = settingsButton;
+const chatCloseAction = chatCloseButton;
+const phoneClockElement = phoneClock;
 const providerSettingsPanel = settingsPanel;
 const settingsCloseAction = settingsCloseButton;
 const providerSettingsForm = settingsForm;
-const settingsBackRowBox = settingsBackRow;
-const settingsBackAction = settingsBackButton;
-const settingsNestedTitleBox = settingsNestedTitle;
 const settingsRootTabs = {
   basic: settingsBasicTab,
-  memory: settingsMemoryTab,
-  history: settingsHistoryTab,
-  appearance: settingsAppearanceTab,
-  model: settingsModelTab,
-  advanced: settingsAdvancedTab
+  data: settingsDataTab
 };
-const settingsModelDetailAction = settingsModelDetailButton;
 const memoryDetailElement = memoryDetail;
 const memoryReviewsElement = memoryReviews;
 const providerIdField = providerIdSelect;
@@ -326,25 +265,7 @@ const timeoutField = timeoutInput;
 const localProviderPresetFieldBox = localProviderPresetContainer;
 const localProviderPresetField = localProviderPresetSelect;
 const localProviderNoteBox = localProviderNote;
-const localModelDiagnosticSectionBox = localModelDiagnosticSection;
-const localModelDiagnosticStatusBox = localModelDiagnosticStatus;
-const localModelDiagnosticSummaryBox = localModelDiagnosticSummary;
-const localModelDiagnosticRuntimesBox = localModelDiagnosticRuntimes;
-const localModelDiagnosticAction = localModelDiagnosticButton;
-const llamaCppRuntimeSectionBox = llamaCppRuntimeSection;
-const llamaCppRuntimeStatusBox = llamaCppRuntimeStatus;
-const llamaCppRuntimeFilesBox = llamaCppRuntimeFiles;
-const llamaCppRuntimeEnabledField = llamaCppRuntimeEnabled;
-const llamaCppRuntimeHostField = llamaCppRuntimeHost;
-const llamaCppRuntimePortField = llamaCppRuntimePort;
-const llamaCppRuntimeCtxField = llamaCppRuntimeCtx;
-const llamaCppRuntimeAliasField = llamaCppRuntimeAlias;
-const llamaCppRuntimeSaveAction = llamaCppRuntimeSaveButton;
-const llamaCppRuntimeExecutableAction = llamaCppRuntimeExecutableButton;
-const llamaCppRuntimeModelAction = llamaCppRuntimeModelButton;
-const llamaCppRuntimeStartAction = llamaCppRuntimeStartButton;
-const llamaCppRuntimeStopAction = llamaCppRuntimeStopButton;
-const llamaCppRuntimeRefreshAction = llamaCppRuntimeRefreshButton;
+const externalProviderSettingsBox = externalProviderSettings;
 const providerResetLocalAction = providerResetLocalButton;
 const providerHealthCheckAction = providerHealthCheckButton;
 const providerHealthStatusBox = providerHealthStatus;
@@ -364,11 +285,7 @@ const savePetScaleAction = savePetScaleButton;
 const savePetAccessoryAction = savePetAccessoryButton;
 const petLockStatusBox = petLockStatus;
 const togglePetLockAction = togglePetLockButton;
-const userProfileSummaryBox = userProfileSummary;
-const settingsUserDisplayNameField = settingsUserDisplayName;
-const settingsUserPreferredNameField = settingsUserPreferredName;
-const saveUserProfileAction = saveUserProfileButton;
-const clearUserProfileAction = clearUserProfileButton;
+const proactiveCompanionEnabledField = proactiveCompanionEnabled;
 const proactiveCompanionStatusBox = proactiveCompanionStatus;
 const proactiveCadenceControlsElement = proactiveCadenceControls;
 const proactiveMemorySourceBubblesField = proactiveMemorySourceBubbles;
@@ -385,14 +302,11 @@ const saveDialogueAffectSettingsAction = saveDialogueAffectSettingsButton;
 const shortcutListElement = shortcutList;
 const shortcutStatusBox = shortcutStatus;
 const webSearchStatusBox = webSearchStatus;
-const webSearchEnabledField = webSearchEnabled;
-const webSearchProfileField = webSearchProfile;
-const webSearchProfileNoteBox = webSearchProfileNote;
 const webSearchTimeoutField = webSearchTimeout;
 const webSearchMaxResultsField = webSearchMaxResults;
 const webSearchSaveAction = webSearchSaveButton;
-const webSearchRefreshAction = webSearchRefreshButton;
 const webSearchTestAction = webSearchTestButton;
+const figmaMcpLightElement = figmaMcpLight;
 const chatTabAction = chatTab;
 const historyTabAction = historyTab;
 const memoryTabAction = memoryTab;
@@ -412,17 +326,17 @@ const memoryDraftTagsField = memoryDraftTags;
 const cancelMemoryDraftAction = cancelMemoryDraftButton;
 const saveMemoryDraftAction = saveMemoryDraftButton;
 const newConversationAction = newConversationButton;
-const clearHistoryAction = clearHistoryButton;
-const clearHistoryConfirmationBox = clearHistoryConfirmation;
-const cancelClearHistoryAction = cancelClearHistoryButton;
-const confirmClearHistoryAction = confirmClearHistoryButton;
-const historyFeedbackBox = historyFeedback;
-const historyRetentionLimitField = historyRetentionLimit;
-const saveHistoryRetentionAction = saveHistoryRetentionButton;
 const conversationListElement = conversationList;
 const historyDetailElement = historyDetail;
 const enableMemoryAction = enableMemoryButton;
+const memoryEnabledField = memoryEnabledInput;
 const newMemoryAction = newMemoryButton;
+const memoryManageAction = memoryManageButton;
+const memoryManagementActionsBox = memoryManagementActions;
+const memorySelectionCountBox = memorySelectionCount;
+const memoryDeleteSelectedAction = memoryDeleteSelectedButton;
+const memoryForgetSelectedAction = memoryForgetSelectedButton;
+const memoryCancelManageAction = memoryCancelManageButton;
 const clearMemoryAction = clearMemoryButton;
 const clearMemoryConfirmationBox = clearMemoryConfirmation;
 const cancelClearMemoryAction = cancelClearMemoryButton;
@@ -439,21 +353,9 @@ const clearMemorySuppressionsAction = clearMemorySuppressionsButton;
 const clearMemorySuppressionsConfirmationBox = clearMemorySuppressionsConfirmation;
 const cancelClearMemorySuppressionsAction = cancelClearMemorySuppressionsButton;
 const confirmClearMemorySuppressionsAction = confirmClearMemorySuppressionsButton;
-const userWelcomePanelBox = userWelcomePanel;
-const welcomeUserDisplayNameField = welcomeUserDisplayName;
-const welcomeUserPreferredNameField = welcomeUserPreferredName;
-const welcomeSaveUserProfileAction = welcomeSaveUserProfileButton;
-const userWelcomeFeedbackBox = userWelcomeFeedback;
 const settingsPages = {
   basic: settingsBasicPage,
-  memory: memoryPageContainer,
-  history: historyPageContainer,
-  appearance: settingsAppearancePage,
-  model: settingsModelPage,
-  advanced: settingsAdvancedPage,
-  "memory-detail": settingsMemoryDetailPage,
-  "history-detail": settingsHistoryDetailPage,
-  "model-detail": settingsModelDetailPage
+  data: settingsDataPage
 };
 type DisableableChatControl = HTMLButtonElement | HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement;
 const replyLockControlElements: Record<ReplyLockControlId, DisableableChatControl> = {
@@ -464,13 +366,9 @@ const replyLockControlElements: Record<ReplyLockControlId, DisableableChatContro
   "history-tab": historyTabAction,
   "memory-tab": memoryTabAction,
   "new-conversation-button": newConversationAction,
-  "clear-history-button": clearHistoryAction,
   "enable-memory-button": enableMemoryAction,
   "clear-memory-button": clearMemoryAction,
   "save-memory-draft-button": saveMemoryDraftAction,
-  "save-user-profile-button": saveUserProfileAction,
-  "clear-user-profile-button": clearUserProfileAction,
-  "welcome-save-user-profile-button": welcomeSaveUserProfileAction,
   "save-proactive-companion-settings-button": saveProactiveCompanionSettingsAction,
   "shelf-accessory-button": shelfAccessoryAction,
   "shelf-scale-button": shelfScaleAction,
@@ -497,28 +395,7 @@ const DEFAULT_LOCAL_OPENAI_CONFIG = {
   timeoutMs: RECOMMENDED_LOCAL_PROVIDER_CONFIG.timeoutMs
 };
 
-type SettingsRootPageId = "basic" | "memory" | "history" | "appearance" | "model" | "advanced";
-type SettingsNestedPageId = "memory-detail" | "history-detail" | "model-detail";
-type SettingsPageId = SettingsRootPageId | SettingsNestedPageId;
-type MemoryFilter = "all" | "key" | "general" | "auto" | "manual" | "disabled";
-
-const settingsNestedParents: Record<SettingsNestedPageId, SettingsRootPageId> = {
-  "memory-detail": "memory",
-  "history-detail": "history",
-  "model-detail": "model"
-};
-
-const settingsPageLabels: Record<SettingsPageId, string> = {
-  basic: "基础",
-  memory: "记忆",
-  history: "历史",
-  appearance: "外观",
-  model: "模型",
-  advanced: "高级",
-  "memory-detail": "记忆内容",
-  "history-detail": "历史详情",
-  "model-detail": "模型连接详情"
-};
+type SettingsPageId = "basic" | "data";
 
 let chatTurnState: ChatTurnState = createInitialChatTurnState();
 let activeReplyMessage: ChatMessage | null = null;
@@ -533,14 +410,14 @@ let memoryReviewCandidates: MemoryReviewCandidate[] = [];
 let memorySummary: MemorySummary | null = null;
 let memorySuppressionsState: MemorySuppressionView[] = [];
 let memoryEnabled = false;
-let activeMemoryFilter: MemoryFilter = "all";
+let isMemoryManagementMode = false;
+const selectedMemoryCardIds = new Set<string>();
 let memoryDraftSourceMessage: ChatMessage | null = null;
 let isPetLocked = false;
 let currentPetScale = DEFAULT_PET_PRESENTATION_PREFERENCES.petScale;
 let currentPetAccessoryIds: PetAccessoryId[] = [...DEFAULT_PET_PRESENTATION_PREFERENCES.accessoryIds];
 let shortcutViews: ShortcutPreferenceView[] = [];
 let currentProactiveCompanionSettings: ProactiveCompanionSettings = DEFAULT_PROACTIVE_COMPANION_SETTINGS;
-let currentUserProfile: UserProfile | null = null;
 let currentMemoryInjectionCount: number | null = null;
 let latestMemoryActivity: ReturnType<typeof formatMemoryActivity> | null = null;
 let latestMemoryActivityPayload: ChatMemoryActivityPayload | null = null;
@@ -548,8 +425,6 @@ let latestMemoryActivityRequestVersion: number | null = null;
 let latestContextTransparency: ReturnType<typeof formatContextTransparency> | null = null;
 let latestContextTransparencyPayload: ChatContextTransparencyPayload | null = null;
 let latestContextTransparencyRequestVersion: number | null = null;
-let latestLocalModelDiagnosticSummary: LocalModelDiagnosticSafeSummary | null = null;
-let isLocalModelDiagnosticRunning = false;
 
 let currentActivityEcho = ACTIVITY_ECHO_IDLE_MESSAGE;
 let currentActivityEchoState: ActivityEchoState = "idle";
@@ -560,6 +435,65 @@ let activityEchoActiveTimer: number | null = null;
 let activityEchoIdleTimer: number | null = null;
 let recordingShortcutActionId: ShortcutActionId | null = null;
 let pendingWheelModifierRecordTimeout: number | null = null;
+let settingsExitTimer: number | null = null;
+let settingsPageTransitionTimer: number | null = null;
+let sendAnimationTimer: number | null = null;
+let webSearchConnectionRequestVersion = 0;
+let petScaleRequestVersion = 0;
+
+const CHAT_INPUT_MIN_HEIGHT = 45;
+const CHAT_INPUT_MAX_HEIGHT = 129;
+const FIGMA_SEND_ANIMATION_MS = 1260.923;
+const FIGMA_SEND_SCROLL_DISTANCE = 126;
+
+function resizeChatInput(): void {
+  chatInput.style.height = "0px";
+  const nextHeight = Math.min(CHAT_INPUT_MAX_HEIGHT, Math.max(CHAT_INPUT_MIN_HEIGHT, chatInput.scrollHeight));
+  chatInput.style.height = `${nextHeight}px`;
+  chatInput.style.overflowY = chatInput.scrollHeight > CHAT_INPUT_MAX_HEIGHT ? "auto" : "hidden";
+  chatPageContainer.style.setProperty("--composer-height", `${nextHeight + 16}px`);
+}
+
+const CHAT_WINDOW_BASE_WIDTH = 438;
+const CHAT_WINDOW_BASE_HEIGHT = 910;
+
+function updateChatUiScale(): void {
+  const scale = Math.min(
+    window.innerWidth / CHAT_WINDOW_BASE_WIDTH,
+    window.innerHeight / CHAT_WINDOW_BASE_HEIGHT
+  );
+  document.documentElement.style.setProperty("--chat-ui-scale", String(scale));
+}
+
+function updatePhoneClock(): void {
+  phoneClockElement.textContent = new Intl.DateTimeFormat("zh-CN", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false
+  }).format(new Date());
+}
+
+function playSendAnimation(startScrollTop: number): void {
+  if (sendAnimationTimer !== null) {
+    window.clearTimeout(sendAnimationTimer);
+  }
+  chatForm.classList.remove("is-sending");
+  messageList.classList.remove("is-sending");
+  const maximumScrollTop = Math.max(0, messageList.scrollHeight - messageList.clientHeight);
+  const targetScrollTop = Math.min(maximumScrollTop, startScrollTop + FIGMA_SEND_SCROLL_DISTANCE);
+  const scrollOffset = startScrollTop - targetScrollTop;
+  messageList.style.setProperty("--figma-send-scroll-offset", `${scrollOffset}px`);
+  void chatForm.offsetWidth;
+  chatForm.classList.add("is-sending");
+  messageList.classList.add("is-sending");
+  sendAnimationTimer = window.setTimeout(() => {
+    messageList.scrollTop = targetScrollTop;
+    chatForm.classList.remove("is-sending");
+    messageList.classList.remove("is-sending");
+    messageList.style.removeProperty("--figma-send-scroll-offset");
+    sendAnimationTimer = null;
+  }, FIGMA_SEND_ANIMATION_MS);
+}
 
 function setProviderStatus(status: ProviderStatus): void {
   providerStatusBox.textContent = formatProviderStatus(status);
@@ -578,28 +512,38 @@ function setWebSearchStatus(status: WebSearchStatus): void {
         : "尚未配置联网搜索。";
 }
 
-function setWebSearchFields(settings: WebSearchSettings): void {
-  const usesBundledProfile = settings.command === BUNDLED_BAIDU_SEARCH_COMMAND && settings.args.length === 0;
-  webSearchProfileField.replaceChildren();
+function setWebSearchConnectionLight(state: "disabled" | "checking" | "connected" | "error"): void {
+  figmaMcpLightElement.dataset.connection = state;
+  figmaMcpLightElement.title = state === "connected"
+    ? "MCP 连接正常"
+    : state === "checking"
+      ? "正在检查 MCP 连接"
+      : state === "error"
+        ? "MCP 连接不顺畅"
+        : "MCP 搜索不可用";
+}
 
-  if (!usesBundledProfile) {
-    const unsupportedOption = document.createElement("option");
-    unsupportedOption.value = "unsupported";
-    unsupportedOption.textContent = "历史自定义配置（不受支持）";
-    unsupportedOption.disabled = true;
-    webSearchProfileField.append(unsupportedOption);
+async function refreshWebSearchConnection(settings: WebSearchSettings): Promise<void> {
+  if (!window.webSearchApi || !settings.enabled) {
+    setWebSearchConnectionLight("disabled");
+    return;
   }
 
-  const bundledOption = document.createElement("option");
-  bundledOption.value = BUNDLED_BAIDU_SEARCH_COMMAND;
-  bundledOption.textContent = "内置百度网页搜索（兼容适配器）";
-  webSearchProfileField.append(bundledOption);
-  webSearchProfileField.value = usesBundledProfile ? BUNDLED_BAIDU_SEARCH_COMMAND : "unsupported";
-  webSearchProfileNoteBox.textContent = usesBundledProfile
-    ? "使用应用内置且经过批准的百度搜索配置，无需填写命令或参数。"
-    : "检测到历史自定义配置。该配置已停用且不受支持；保存后会安全迁移到内置百度搜索，不会显示原命令或参数。";
-  webSearchProfileNoteBox.dataset.state = usesBundledProfile ? "ready" : "error";
-  webSearchEnabledField.checked = settings.enabled;
+  const requestVersion = ++webSearchConnectionRequestVersion;
+  setWebSearchConnectionLight("checking");
+  try {
+    const result = await window.webSearchApi.testConnection(settings);
+    if (requestVersion === webSearchConnectionRequestVersion) {
+      setWebSearchConnectionLight(result.status === "tool_available" ? "connected" : "error");
+    }
+  } catch {
+    if (requestVersion === webSearchConnectionRequestVersion) {
+      setWebSearchConnectionLight("error");
+    }
+  }
+}
+
+function setWebSearchFields(settings: WebSearchSettings): void {
   webSearchTimeoutField.value = String(settings.timeoutMs);
   webSearchMaxResultsField.value = String(settings.maxResults);
 }
@@ -619,6 +563,7 @@ function formatProactiveCompanionStatus(settings: ProactiveCompanionSettings): s
 
 function renderProactiveCompanionSettings(settings: ProactiveCompanionSettings): void {
   currentProactiveCompanionSettings = settings;
+  proactiveCompanionEnabledField.checked = settings.cadence !== "off";
   proactiveCompanionStatusBox.textContent = formatProactiveCompanionStatus(settings);
   proactiveCompanionStatusBox.dataset.state = settings.cadence === "normal" ? "ready" : "fallback";
   proactiveMemorySourceBubblesField.checked = settings.memorySourceBubbles;
@@ -679,9 +624,9 @@ async function saveProactiveCompanionSettings(): Promise<void> {
 
   try {
     const settings = await window.proactiveCompanionApi.setSettings({
-      cadence: currentProactiveCompanionSettings.cadence,
-      memorySourceBubbles: proactiveMemorySourceBubblesField.checked,
-      searchSourceBubbles: proactiveSearchSourceBubblesField.checked
+      cadence: proactiveCompanionEnabledField.checked ? "normal" : "off",
+      memorySourceBubbles: true,
+      searchSourceBubbles: true
     });
     renderProactiveCompanionSettings(settings);
     setSettingsFeedback("主动气泡设置已保存。", "ready");
@@ -808,6 +753,7 @@ async function refreshWebSearchSettings(): Promise<void> {
     webSearchStatusBox.dataset.state = "fallback";
     webSearchStatusBox.textContent = "MCP 搜索设置不可用。";
     setWebSearchFields(DEFAULT_WEB_SEARCH_SETTINGS);
+    setWebSearchConnectionLight("disabled");
     return;
   }
 
@@ -818,9 +764,11 @@ async function refreshWebSearchSettings(): Promise<void> {
     ]);
     setWebSearchFields(settings);
     setWebSearchStatus(status);
+    void refreshWebSearchConnection(settings);
   } catch {
     webSearchStatusBox.dataset.state = "fallback";
     webSearchStatusBox.textContent = "无法读取 MCP 搜索设置。";
+    setWebSearchConnectionLight("error");
   }
 }
 
@@ -833,7 +781,7 @@ function buildWebSearchSettings(): WebSearchSettings | null {
   }
 
   return {
-    enabled: webSearchEnabledField.checked,
+    enabled: true,
     command: BUNDLED_BAIDU_SEARCH_COMMAND,
     args: [],
     toolName: DEFAULT_WEB_SEARCH_SETTINGS.toolName,
@@ -858,6 +806,7 @@ async function saveWebSearchSettings(): Promise<void> {
     const savedSettings = await window.webSearchApi.setSettings(settings);
     setWebSearchFields(savedSettings);
     setWebSearchStatus(await window.webSearchApi.getStatus());
+    void refreshWebSearchConnection(savedSettings);
     setSettingsFeedback(savedSettings.enabled ? "内置百度搜索已启用。" : "内置百度搜索设置已保存，当前仍关闭。", "ready");
   } catch {
     setSettingsFeedback("无法保存内置百度搜索设置，请稍后重试。");
@@ -877,6 +826,8 @@ async function testWebSearchConnection(): Promise<void> {
   }
 
   webSearchTestAction.disabled = true;
+  webSearchConnectionRequestVersion += 1;
+  setWebSearchConnectionLight("checking");
   webSearchStatusBox.dataset.state = "fallback";
   webSearchStatusBox.textContent = "正在测试 MCP 工具...";
 
@@ -884,6 +835,7 @@ async function testWebSearchConnection(): Promise<void> {
     const result = await window.webSearchApi.testConnection(settings);
     webSearchStatusBox.textContent = formatWebSearchConnectionTestResult(result);
     webSearchStatusBox.dataset.state = result.status === "tool_available" ? "ready" : "fallback";
+    setWebSearchConnectionLight(result.status === "tool_available" ? "connected" : "error");
     setSettingsFeedback(
       result.status === "tool_available" ? "MCP 工具可用。" : "MCP 连接测试完成，请查看状态摘要。",
       result.status === "tool_available" ? "ready" : "fallback"
@@ -891,6 +843,7 @@ async function testWebSearchConnection(): Promise<void> {
   } catch {
     webSearchStatusBox.dataset.state = "fallback";
     webSearchStatusBox.textContent = "MCP 连接测试失败。";
+    setWebSearchConnectionLight("error");
     setSettingsFeedback("MCP 连接测试失败；未发送用户消息或搜索查询。");
   } finally {
     webSearchTestAction.disabled = false;
@@ -926,267 +879,13 @@ function setProviderHealthStatus(message: string, state: "ready" | "fallback" = 
   providerHealthStatusBox.dataset.state = state;
 }
 
-function resetLocalModelDiagnosticSummary(): void {
-  latestLocalModelDiagnosticSummary = null;
-  localModelDiagnosticStatusBox.textContent = "本地模型诊断尚未运行。";
-  localModelDiagnosticStatusBox.dataset.state = "fallback";
-  localModelDiagnosticSummaryBox.textContent = "运行后会显示内置 local-llm、托管 llama.cpp 和兼容运行时的安全摘要。";
-  localModelDiagnosticRuntimesBox.replaceChildren();
-  localModelDiagnosticAction.disabled = false;
-  localModelDiagnosticAction.textContent = "运行本地诊断";
-}
-
-function setLocalModelDiagnosticPending(): void {
-  localModelDiagnosticStatusBox.textContent = "正在运行本地模型诊断...";
-  localModelDiagnosticStatusBox.dataset.state = "fallback";
-  localModelDiagnosticSummaryBox.textContent = "正在检查命令、进程、端口、模型列表和最小聊天探测。";
-  localModelDiagnosticAction.disabled = true;
-  localModelDiagnosticAction.textContent = "诊断中...";
-}
-
-function formatLocalModelDiagnosticStatus(status: LocalModelDiagnosticRuntimeSummary["status"]): string {
-  const labels: Record<LocalModelDiagnosticRuntimeSummary["status"], string> = {
-    ready: "已就绪",
-    not_installed_or_unreachable: "未安装或不可达",
-    model_missing: "缺少模型",
-    chat_failed: "聊天探测失败",
-    missing_resources: "缺少资源",
-    env_configured: "已配置，待启动",
-    skipped: "未配置"
-  };
-
-  return labels[status];
-}
-
-function formatLocalModelDiagnosticNextAction(runtime: LocalModelDiagnosticRuntimeSummary): string {
-  if (runtime.status === "ready") {
-    return "可以用于真实本地模型验收。";
-  }
-
-  if (runtime.id === "llama-cpp-managed" && runtime.reason === "missing_local_paths") {
-    return "先在托管 llama.cpp 区选择运行文件和 GGUF 模型。";
-  }
-
-  if (runtime.id === "llama-cpp-bundled" && runtime.status === "missing_resources") {
-    return runtime.nextAction ?? "安装包需要包含 local-llm 运行时与 GGUF 模型资源。";
-  }
-
-  if (runtime.reason === "command_missing") {
-    return runtime.id === "ollama"
-      ? "Ollama 仅作为高级兼容路径；默认使用内置本地模型。"
-      : "该兼容运行时未就绪；默认使用内置本地模型。";
-  }
-
-  if (runtime.reason === "tcp_unreachable") {
-    return "启动对应本地服务，并确认端口正在监听。";
-  }
-
-  if (runtime.reason === "model_missing") {
-    return "准备目标模型后重新诊断。";
-  }
-
-  if (runtime.status === "chat_failed") {
-    return "检查本地服务控制台和模型兼容性后重试。";
-  }
-
-  return runtime.nextAction ?? "按运行时提示完成本地服务准备后重试。";
-}
-
-function formatLocalModelDiagnosticRuntime(runtime: LocalModelDiagnosticRuntimeSummary): string {
-  const details = [
-    `${runtime.label}：${formatLocalModelDiagnosticStatus(runtime.status)}`,
-    runtime.baseURLHost ? `Host：${runtime.baseURLHost}` : null,
-    runtime.model ? `模型：${runtime.model}` : null,
-    typeof runtime.modelCount === "number" ? `模型数：${runtime.modelCount}` : null,
-    typeof runtime.firstTokenMs === "number" ? `首 token：${runtime.firstTokenMs}ms` : null,
-    typeof runtime.replyLength === "number" ? `回复长度：${runtime.replyLength}` : null,
-    `下一步：${formatLocalModelDiagnosticNextAction(runtime)}`
-  ].filter(Boolean);
-
-  return details.join(" · ");
-}
-
-function renderLocalModelDiagnosticSummary(summary: LocalModelDiagnosticSafeSummary): void {
-  latestLocalModelDiagnosticSummary = summary;
-  const state = summary.status === "ready" ? "ready" : "fallback";
-  localModelDiagnosticStatusBox.dataset.state = state;
-  localModelDiagnosticStatusBox.textContent = summary.ok
-    ? `诊断完成：已有可用本地运行时 · 建议 ${summary.recommendedRuntime} · ${summary.durationMs}ms`
-    : `诊断完成：本地模型尚未就绪 · 建议先看 ${summary.recommendedRuntime} · ${summary.durationMs}ms`;
-  localModelDiagnosticSummaryBox.textContent = summary.ok
-    ? "可以继续做真实本地模型 Chat 验收；不要用 mock 或 Fake 代替真实运行时。"
-    : "诊断功能正常完成，但当前本地运行时还没准备好。";
-  localModelDiagnosticRuntimesBox.replaceChildren(
-    ...summary.runtimes.map((runtime) => {
-      const item = document.createElement("p");
-      item.className = "selection-note";
-      item.dataset.state = runtime.status === "ready" ? "ready" : "fallback";
-      item.textContent = formatLocalModelDiagnosticRuntime(runtime);
-      return item;
-    })
-  );
-}
-
-function setLocalModelDiagnosticUnavailable(): void {
-  latestLocalModelDiagnosticSummary = null;
-  localModelDiagnosticStatusBox.textContent = "本地模型诊断功能不可用。";
-  localModelDiagnosticStatusBox.dataset.state = "fallback";
-  localModelDiagnosticSummaryBox.textContent = "请稍后重试，或使用命令行诊断入口。";
-  localModelDiagnosticRuntimesBox.replaceChildren();
-}
-
-async function runLocalModelDiagnostic(): Promise<void> {
-  if (chatTurnState.isReplying || isLocalModelDiagnosticRunning) {
-    return;
-  }
-
-  if (!window.localRuntimeApi) {
-    setLocalModelDiagnosticUnavailable();
-    return;
-  }
-
-  isLocalModelDiagnosticRunning = true;
-  setLocalModelDiagnosticPending();
-
-  try {
-    renderLocalModelDiagnosticSummary(await window.localRuntimeApi.diagnoseLocalModel());
-  } catch {
-    setLocalModelDiagnosticUnavailable();
-  } finally {
-    isLocalModelDiagnosticRunning = false;
-    localModelDiagnosticAction.disabled = false;
-    localModelDiagnosticAction.textContent = "运行本地诊断";
-  }
-}
-
-function formatLlamaCppRuntimeStatus(status: LlamaCppRuntimeSafeSummary["status"]): string {
-  const labels: Record<LlamaCppRuntimeSafeSummary["status"], string> = {
-    disabled: "未启用",
-    missing_binary: "缺运行文件",
-    missing_model: "缺模型",
-    starting: "启动中",
-    ready: "已就绪",
-    exited: "已退出",
-    timeout: "超时",
-    error: "错误"
-  };
-
-  return labels[status];
-}
-
-function renderLlamaCppRuntimeSummary(summary: LlamaCppRuntimeSafeSummary): void {
-  llamaCppRuntimeEnabledField.checked = summary.enabled;
-  llamaCppRuntimeHostField.value = summary.host ?? "";
-  llamaCppRuntimePortField.value = typeof summary.port === "number" ? String(summary.port) : "";
-  llamaCppRuntimeCtxField.value = typeof summary.ctxSize === "number" ? String(summary.ctxSize) : "";
-  llamaCppRuntimeAliasField.value = summary.alias ?? "";
-
-  const hostLabel = summary.baseURLHost ?? [
-    summary.host,
-    typeof summary.port === "number" ? summary.port : null
-  ].filter(Boolean).join(":");
-  const details = [
-    `状态：${formatLlamaCppRuntimeStatus(summary.status)}`,
-    summary.enabled ? "开关：已启用" : "开关：未启用",
-    hostLabel ? `Host：${hostLabel}` : null,
-    typeof summary.ctxSize === "number" ? `Context：${summary.ctxSize}` : null,
-    summary.alias ? `Alias：${summary.alias}` : null
-  ].filter(Boolean);
-
-  llamaCppRuntimeStatusBox.textContent = details.join(" · ");
-  llamaCppRuntimeStatusBox.dataset.state = summary.status === "ready" ? "ready" : "fallback";
-  llamaCppRuntimeFilesBox.textContent = `运行文件：${summary.executableName ?? "未选择"} · 模型：${summary.modelName ?? "未选择"}`;
-}
-
-function setLlamaCppRuntimeStatus(message: string, state: "ready" | "fallback" = "fallback"): void {
-  llamaCppRuntimeStatusBox.textContent = message;
-  llamaCppRuntimeStatusBox.dataset.state = state;
-}
-
-async function refreshLlamaCppRuntimeStatus(): Promise<void> {
-  if (!window.localRuntimeApi) {
-    setLlamaCppRuntimeStatus("托管 llama.cpp 设置不可用。", "fallback");
-    return;
-  }
-
-  try {
-    renderLlamaCppRuntimeSummary(await window.localRuntimeApi.getLlamaCppStatus());
-  } catch {
-    setLlamaCppRuntimeStatus("托管 llama.cpp 状态不可用。", "fallback");
-  }
-}
-
-function parseOptionalRuntimeInteger(field: HTMLInputElement, fieldName: string): number | undefined | null {
-  if (field.value.trim() === "") {
-    return undefined;
-  }
-
-  const value = Number(field.value);
-
-  if (!Number.isInteger(value) || value <= 0) {
-    setSettingsFeedback(`${fieldName}必须留空或填写正整数。`);
-    return null;
-  }
-
-  return value;
-}
-
-async function saveLlamaCppRuntimeSettings(): Promise<void> {
-  if (!window.localRuntimeApi) {
-    setLlamaCppRuntimeStatus("托管 llama.cpp 设置不可用。", "fallback");
-    return;
-  }
-
-  const port = parseOptionalRuntimeInteger(llamaCppRuntimePortField, "Port");
-  const ctxSize = parseOptionalRuntimeInteger(llamaCppRuntimeCtxField, "Context");
-
-  if (port === null || ctxSize === null) {
-    return;
-  }
-
-  try {
-    const summary = await window.localRuntimeApi.updateLlamaCppSettings({
-      enabled: llamaCppRuntimeEnabledField.checked,
-      host: llamaCppRuntimeHostField.value,
-      port: typeof port === "number" ? port : null,
-      ctxSize: typeof ctxSize === "number" ? ctxSize : null,
-      alias: llamaCppRuntimeAliasField.value
-    });
-    renderLlamaCppRuntimeSummary(summary);
-    setSettingsFeedback("托管 llama.cpp 设置已保存。", "ready");
-  } catch {
-    setLlamaCppRuntimeStatus("无法保存托管 llama.cpp 设置。", "fallback");
-  }
-}
-
-async function runLlamaCppRuntimeAction(
-  action: () => Promise<LlamaCppRuntimeSafeSummary>,
-  pendingMessage: string
-): Promise<void> {
-  if (chatTurnState.isReplying) {
-    return;
-  }
-
-  setLlamaCppRuntimeStatus(pendingMessage, "fallback");
-
-  try {
-    renderLlamaCppRuntimeSummary(await action());
-  } catch {
-    setLlamaCppRuntimeStatus("托管 llama.cpp 操作失败，请稍后重试。", "fallback");
-  }
-}
-
 function setPartnerStatus(message: string): void {
   partnerStatusBox.textContent = message;
   partnerStatusBox.dataset.state = "ready";
 }
 
 function renderPartnerStatus(): void {
-  const userProfileLabel = currentUserProfile
-    ? currentUserProfile.preferredName ?? currentUserProfile.displayName
-    : "等待本地身份";
-
-  setPartnerStatus(`桌面伙伴：${userProfileLabel} · 自动陪伴`);
+  setPartnerStatus("桌面伙伴 · 自动陪伴");
 }
 
 function renderRibbonEcho(): void {
@@ -1278,127 +977,6 @@ function renderCompanionControlShelf(): void {
   shelfActionEchoBox.dataset.state = shelf.actionEchoState;
 }
 
-function formatUserProfileSummary(profile: UserProfile | null): string {
-  if (!profile) {
-    return "尚未设置本地昵称。";
-  }
-
-  return profile.preferredName
-    ? `本地身份：${profile.displayName} · 称呼：${profile.preferredName}`
-    : `本地身份：${profile.displayName}`;
-}
-
-function setUserWelcomeFeedback(message: string, state: "ready" | "fallback" = "fallback"): void {
-  userWelcomeFeedbackBox.textContent = message;
-  userWelcomeFeedbackBox.dataset.state = state;
-  userWelcomeFeedbackBox.hidden = false;
-}
-
-function clearUserWelcomeFeedback(): void {
-  userWelcomeFeedbackBox.textContent = "";
-  userWelcomeFeedbackBox.hidden = true;
-  delete userWelcomeFeedbackBox.dataset.state;
-}
-
-function normalizeUserProfileField(field: HTMLInputElement): string | null {
-  if (/[\r\n<>]/.test(field.value)) {
-    return null;
-  }
-
-  const value = field.value.trim().replace(/\s+/g, " ");
-
-  if (value.length === 0 || value.length > 32) {
-    return null;
-  }
-
-  return value;
-}
-
-function readUserProfileFields(displayNameField: HTMLInputElement, preferredNameField: HTMLInputElement): { displayName: string; preferredName?: string } | null {
-  const displayName = normalizeUserProfileField(displayNameField);
-  const preferredNameRaw = preferredNameField.value.trim();
-  const preferredName = preferredNameRaw.length > 0 ? normalizeUserProfileField(preferredNameField) : undefined;
-
-  if (!displayName || preferredName === null) {
-    return null;
-  }
-
-  return {
-    displayName,
-    ...(preferredName ? { preferredName } : {})
-  };
-}
-
-function renderUserProfile(profile: UserProfile | null): void {
-  currentUserProfile = profile;
-  const hasProfile = Boolean(profile);
-
-  userWelcomePanelBox.hidden = true;
-  chatSessionNoteBox.hidden = true;
-  messageList.hidden = false;
-  chatForm.hidden = false;
-  settingsUserDisplayNameField.value = profile?.displayName ?? "";
-  settingsUserPreferredNameField.value = profile?.preferredName ?? "";
-  userProfileSummaryBox.textContent = formatUserProfileSummary(profile);
-  userProfileSummaryBox.dataset.state = hasProfile ? "ready" : "fallback";
-  renderPartnerStatus();
-  renderCompanionControlShelf();
-}
-
-async function refreshUserProfile(): Promise<void> {
-  if (!window.userProfileApi) {
-    renderUserProfile(null);
-    setSettingsFeedback("本地身份设置不可用。");
-    return;
-  }
-
-  try {
-    renderUserProfile(await window.userProfileApi.getUserProfile());
-  } catch {
-    renderUserProfile(null);
-    setSettingsFeedback("无法读取本地身份，请稍后重试。");
-  }
-}
-
-async function saveUserProfileFromFields(
-  displayNameField: HTMLInputElement,
-  preferredNameField: HTMLInputElement,
-  source: "welcome" | "settings"
-): Promise<void> {
-  if (!window.userProfileApi || chatTurnState.isReplying) {
-    return;
-  }
-
-  const profileInput = readUserProfileFields(displayNameField, preferredNameField);
-
-  if (!profileInput) {
-    if (source === "welcome") {
-      setUserWelcomeFeedback("昵称和称呼需为 1 到 32 个字符，不能包含换行或尖括号。");
-    } else {
-      setSettingsFeedback("昵称和称呼需为 1 到 32 个字符，不能包含换行或尖括号。", "fallback");
-    }
-    return;
-  }
-
-  try {
-    const savedProfile = await window.userProfileApi.saveUserProfile(profileInput);
-    clearUserWelcomeFeedback();
-    renderUserProfile(savedProfile);
-    if (source === "settings") {
-      setSettingsFeedback("本地身份已保存。", "ready");
-    } else {
-      setChatSessionNote("本地身份已设置；之后只会把清洗后的称呼加入当前回复。", "ready");
-      chatInput.focus();
-    }
-  } catch {
-    if (source === "welcome") {
-      setUserWelcomeFeedback("无法保存本地身份，请稍后重试。");
-    } else {
-      setSettingsFeedback("无法保存本地身份，请稍后重试。", "fallback");
-    }
-  }
-}
-
 function setMemorySessionStatus(count: number | null): void {
   currentMemoryInjectionCount = count;
   renderRibbonEcho();
@@ -1457,7 +1035,7 @@ function getVisibleMessageContent(message: ChatMessage): string {
     : message.content;
 }
 
-function appendMessage(message: ChatMessage): HTMLElement {
+function appendMessage(message: ChatMessage, animate = false): HTMLElement {
   const item = document.createElement("p");
   const authorClass = message.role === "user" ? "user" : "pet";
   item.className = `message message-${authorClass}`;
@@ -1469,8 +1047,30 @@ function appendMessage(message: ChatMessage): HTMLElement {
   content.textContent = getVisibleMessageContent(message);
   item.append(role, content);
 
+  if (animate) {
+    const isUserMessage = message.role === "user";
+    const terminalAnimationName = isUserMessage
+      ? "message-user-enter"
+      : "message-pet-enter-translate";
+    item.classList.add(isUserMessage ? "is-entering-user" : "is-entering-pet");
+    const finishEntrance = (event: AnimationEvent): void => {
+      if (event.animationName !== terminalAnimationName) {
+        return;
+      }
+      item.classList.remove("is-entering-user", "is-entering-pet");
+      item.removeEventListener("animationend", finishEntrance);
+    };
+    item.addEventListener("animationend", finishEntrance);
+  }
+
   messageList.append(item);
-  messageList.scrollTop = messageList.scrollHeight;
+  if (animate && message.role === "assistant") {
+    window.requestAnimationFrame(() => {
+      item.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    });
+  } else if (!(animate && message.role === "user")) {
+    messageList.scrollTop = messageList.scrollHeight;
+  }
   return item;
 }
 
@@ -1545,7 +1145,7 @@ function setChatSessionNote(message: string, state: "ready" | "fallback" | "erro
 }
 
 function setHistoryFeedback(message: string): void {
-  historyFeedbackBox.textContent = message;
+  setSettingsFeedback(message);
 }
 
 function formatHistoryTime(timestamp: number): string {
@@ -1562,50 +1162,66 @@ function renderCurrentConversation(): void {
   chatHistory.forEach((message) => appendMessage(message));
 }
 
-function isSettingsRootPage(page: SettingsPageId): page is SettingsRootPageId {
-  return !page.includes("-");
-}
-
-function getSettingsRootForPage(page: SettingsPageId): SettingsRootPageId {
-  return isSettingsRootPage(page) ? page : settingsNestedParents[page];
-}
-
-function renderSettingsNavigation(page: SettingsPageId): void {
-  const activeRoot = getSettingsRootForPage(page);
-
-  for (const [rootPage, tab] of Object.entries(settingsRootTabs) as [SettingsRootPageId, HTMLButtonElement][]) {
-    const isActive = rootPage === activeRoot;
-    tab.classList.toggle("is-active", isActive);
-    tab.setAttribute("aria-pressed", String(isActive));
+function renderSettingsNavigation(page: SettingsPageId, previousPage?: SettingsPageId): void {
+  const navigation = settingsRootTabs.basic.parentElement;
+  if (navigation) {
+    navigation.dataset.activePage = page;
   }
 
-  const isNested = !isSettingsRootPage(page);
-  settingsBackRowBox.hidden = !isNested;
-  settingsNestedTitleBox.textContent = isNested ? settingsPageLabels[page] : "";
+  for (const [pageId, tab] of Object.entries(settingsRootTabs) as [SettingsPageId, HTMLButtonElement][]) {
+    const isActive = pageId === page;
+    tab.classList.toggle("is-deactivating", previousPage === pageId && previousPage !== page);
+    tab.classList.toggle("is-active", isActive);
+    tab.setAttribute("aria-pressed", String(isActive));
+    if (tab.classList.contains("is-deactivating")) {
+      tab.addEventListener("animationend", () => {
+        tab.classList.remove("is-deactivating");
+      }, { once: true });
+    }
+  }
 }
 
 function setSettingsPage(page: SettingsPageId): void {
+  const previousPage = activeSettingsPage;
   activeSettingsPage = page;
 
-  for (const [pageId, pageElement] of Object.entries(settingsPages) as [SettingsPageId, HTMLElement][]) {
-    pageElement.hidden = pageId !== page;
+  if (settingsPageTransitionTimer !== null) {
+    window.clearTimeout(settingsPageTransitionTimer);
+    settingsPageTransitionTimer = null;
   }
 
-  renderSettingsNavigation(page);
+  const previousPageElement = settingsPages[previousPage];
+  const activePageElement = settingsPages[page];
+  const shouldAnimate = previousPage !== page && !providerSettingsPanel.hidden;
 
-  if (page === "memory") {
+  for (const pageElement of Object.values(settingsPages)) {
+    pageElement.classList.remove("is-page-entering", "is-page-leaving", "is-page-transitioning");
+  }
+
+  if (shouldAnimate) {
+    previousPageElement.hidden = false;
+    activePageElement.hidden = false;
+    previousPageElement.classList.add("is-page-transitioning", "is-page-leaving");
+    activePageElement.classList.add("is-page-transitioning", "is-page-entering");
+    settingsPageTransitionTimer = window.setTimeout(() => {
+      previousPageElement.hidden = true;
+      previousPageElement.classList.remove("is-page-transitioning", "is-page-leaving");
+      activePageElement.classList.remove("is-page-transitioning", "is-page-entering");
+      settingsPageTransitionTimer = null;
+    }, 300);
+  } else {
+    for (const [pageId, pageElement] of Object.entries(settingsPages) as [SettingsPageId, HTMLElement][]) {
+      pageElement.hidden = pageId !== page;
+    }
+  }
+
+  renderSettingsNavigation(page, previousPage);
+
+  if (page === "data") {
     void refreshMemory();
-  } else if (page === "history") {
     void refreshHistoryList();
-  } else if (page === "history-detail") {
-    renderHistoryDetail();
-  } else if (page === "memory-detail") {
-    renderMemoryDetail();
-  } else if (page === "model") {
+  } else {
     void refreshProviderStatus();
-  } else if (page === "model-detail") {
-    void refreshLlamaCppRuntimeStatus();
-  } else if (page === "advanced") {
     void refreshWebSearchSettings();
   }
 }
@@ -1621,9 +1237,15 @@ function setActivePage(page: "chat" | "history" | "memory"): void {
   memoryTabAction.classList.toggle("is-active", isMemoryPage);
 
   if (isHistoryPage) {
-    void openSettings("history");
+    void openSettings("data").then(() => {
+      const group = historyPageContainer.closest<HTMLDetailsElement>("details");
+      if (group) group.open = true;
+    });
   } else if (isMemoryPage) {
-    void openSettings("memory");
+    void openSettings("data").then(() => {
+      const group = memoryPageContainer.closest<HTMLDetailsElement>("details");
+      if (group) group.open = true;
+    });
   } else {
     closeSettings();
     chatInput.focus();
@@ -1705,12 +1327,6 @@ function renderMemorySafeStats(): void {
   });
 }
 
-function renderMemoryFilterTabs(): void {
-  memoryFilterTabs.forEach((tab) => {
-    tab.classList.toggle("is-active", tab.dataset.memoryFilter === activeMemoryFilter);
-  });
-}
-
 function parseTagsInput(value: string): string[] {
   return value
     .split(/[,，]/)
@@ -1725,19 +1341,15 @@ function openMemoryDraft(message?: ChatMessage): void {
   }
 
   memoryDraftSourceMessage = message ?? null;
-  memoryDraftTitleField.value = message?.content.trim().slice(0, 36) || "新的事实";
   memoryDraftContentField.value = message?.content.trim() ?? "";
-  memoryDraftTagsField.value = "";
   memoryDraftPanelBox.hidden = false;
-  memoryDraftTitleField.focus();
+  memoryDraftContentField.focus();
 }
 
 function closeMemoryDraft(): void {
   memoryDraftSourceMessage = null;
   memoryDraftPanelBox.hidden = true;
-  memoryDraftTitleField.value = "";
   memoryDraftContentField.value = "";
-  memoryDraftTagsField.value = "";
 }
 
 async function refreshMemory(): Promise<void> {
@@ -1747,18 +1359,15 @@ async function refreshMemory(): Promise<void> {
   }
 
   try {
-    const [settings, summary, cards, suppressions, reviews] = await Promise.all([
+    const [settings, summary, cards] = await Promise.all([
       window.memoryApi.getSettings(),
       window.memoryApi.getSummary(),
-      window.memoryApi.listCards(),
-      window.memoryApi.listSuppressions(),
-      window.memoryApi.listReviews()
+      window.memoryApi.listCards()
     ]);
     memoryEnabled = settings.enabled;
     memorySummary = summary;
     memoryCards = cards;
-    memorySuppressionsState = suppressions;
-    memoryReviewCandidates = reviews;
+    memoryEnabledField.checked = memoryEnabled;
     enableMemoryAction.textContent = memoryEnabled ? "关闭记忆" : "开启记忆";
     newMemoryAction.disabled = !memoryEnabled;
     memoryCreateNoteBox.textContent = memoryEnabled
@@ -1767,11 +1376,9 @@ async function refreshMemory(): Promise<void> {
     renderMemoryOverview();
     renderMemoryInjectionPreview();
     renderMemorySafeStats();
-    renderMemoryReviews();
-    renderMemoryFilterTabs();
     renderMemoryList();
-    renderMemorySuppressions();
     renderMemoryDetail();
+    renderMemoryManagementActions();
     setMemoryFeedback(
       memoryEnabled
         ? summary.injectableCount > 0
@@ -1788,21 +1395,12 @@ async function refreshMemory(): Promise<void> {
 function renderMemoryList(): void {
   const query = memorySearchField.value.trim().toLowerCase();
   const cards = memoryCards.filter((card) => {
-    if (!matchesMemoryFilter(card)) {
-      return false;
-    }
-
     if (!query) {
       return true;
     }
 
     return [
-      card.title,
-      card.content,
-      card.tags.join(" "),
-      card.category,
-      card.importance,
-      card.sourceType
+      card.content
     ].some((text) => text.toLowerCase().includes(query));
   });
 
@@ -1812,10 +1410,10 @@ function renderMemoryList(): void {
     const empty = document.createElement("p");
     empty.className = "selection-note";
     empty.textContent = memoryCards.length === 0
-      ? "暂无事实卡。"
+      ? "暂无已保存的记忆。"
       : query
         ? "没有匹配的事实卡。"
-        : "当前筛选下没有事实卡。";
+        : "暂无已保存的记忆。";
     memoryListElement.append(empty);
     return;
   }
@@ -1934,24 +1532,6 @@ async function rejectMemoryReview(id: string): Promise<void> {
   }
 }
 
-function matchesMemoryFilter(card: MemoryCard): boolean {
-  switch (activeMemoryFilter) {
-    case "key":
-      return card.importance === "key";
-    case "general":
-      return card.importance === "general";
-    case "auto":
-      return card.sourceType === "auto-local-heuristic" || card.sourceType === "auto-local-model";
-    case "manual":
-      return card.sourceType === "manual-chat";
-    case "disabled":
-      return !card.enabled;
-    case "all":
-    default:
-      return true;
-  }
-}
-
 function getMemorySourceLabel(card: MemoryCard): string {
   if (card.sourceType === "auto-local-heuristic") {
     return "本地启发式自动提取";
@@ -2037,126 +1617,57 @@ function formatMemoryConfidence(card: Pick<MemoryCard, "confidence">): string {
 }
 
 function createMemoryCardElement(card: MemoryCard): HTMLElement {
-  const item = document.createElement("section");
-  item.className = "memory-card fold-body";
-  const title = document.createElement("input");
-  title.className = "memory-title-input";
-  title.value = card.title;
-  const content = document.createElement("textarea");
-  content.value = card.content;
-  const tags = document.createElement("input");
-  tags.value = card.tags.join("，");
-  const importanceSelect = document.createElement("select");
-  for (const [value, label] of [["key", "关键"], ["general", "一般"]] as const) {
-    const option = document.createElement("option");
-    option.value = value;
-    option.textContent = label;
-    importanceSelect.append(option);
+  const item = document.createElement("label");
+  item.className = "memory-card";
+  if (isMemoryManagementMode) {
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = selectedMemoryCardIds.has(card.id);
+    checkbox.addEventListener("change", () => {
+      if (checkbox.checked) {
+        selectedMemoryCardIds.add(card.id);
+      } else {
+        selectedMemoryCardIds.delete(card.id);
+      }
+      renderMemoryManagementActions();
+    });
+    item.append(checkbox);
   }
-  importanceSelect.value = card.importance;
-  const meta = document.createElement("div");
-  meta.className = "memory-card-meta selection-note";
-  const status = document.createElement("span");
-  status.textContent = `状态：${card.enabled ? "已启用" : "已停用"}`;
-  const source = document.createElement("span");
-  source.textContent = `来源：${getMemorySourceLabel(card)}`;
-  const importance = document.createElement("span");
-  importance.textContent = `重要性：${getMemoryImportanceLabel(card)}`;
-  const category = document.createElement("span");
-  category.textContent = `分类：${getMemoryCategoryLabel(card)}`;
-  const confidence = document.createElement("span");
-  confidence.textContent = `置信度：${formatMemoryConfidence(card)}`;
-  const observed = document.createElement("span");
-  observed.textContent = `观察：${card.observedCount} 次`;
-  const compression = document.createElement("span");
-  compression.textContent = `压缩：${getMemoryCompressionLabel(card)}`;
-  const created = document.createElement("span");
-  created.textContent = `创建：${formatHistoryTime(card.createdAt)}`;
-  const updated = document.createElement("span");
-  updated.textContent = `更新：${formatHistoryTime(card.updatedAt)}`;
-  const injected = document.createElement("span");
-  injected.textContent = card.lastInjectedAt
-    ? `使用：${formatHistoryTime(card.lastInjectedAt)} · ${card.injectionCount} 次`
-    : "使用：从未注入";
-  meta.append(status, source, importance, category, confidence, observed, compression, created, updated, injected);
-  const actions = document.createElement("div");
-  actions.className = "history-detail-actions";
-  const saveButton = document.createElement("button");
-  saveButton.className = "button";
-  saveButton.type = "button";
-  saveButton.textContent = "保存";
-  saveButton.addEventListener("click", () => {
-    void updateMemoryCard(card.id, {
-      title: title.value,
-      content: content.value,
-      tags: parseTagsInput(tags.value),
-      importance: importanceSelect.value === "general" ? "general" : "key"
-    });
-  });
-  const toggleButton = document.createElement("button");
-  toggleButton.className = "button-light";
-  toggleButton.type = "button";
-  toggleButton.textContent = card.enabled ? "停用" : "启用";
-  toggleButton.addEventListener("click", () => {
-    void updateMemoryCard(card.id, { enabled: !card.enabled });
-  });
-  const detailButton = document.createElement("button");
-  detailButton.className = "button-light";
-  detailButton.type = "button";
-  detailButton.textContent = "查看内容";
-  detailButton.addEventListener("click", () => {
-    selectedMemoryCardId = card.id;
-    renderMemoryDetail();
-    setSettingsPage("memory-detail");
-  });
-  const deleteButton = document.createElement("button");
-  deleteButton.className = "button-danger";
-  deleteButton.type = "button";
-  deleteButton.textContent = "删除";
-  const confirmation = document.createElement("div");
-  confirmation.className = "status-box delete-confirmation";
-  confirmation.hidden = true;
-  confirmation.append("删除后无法恢复，是否继续？");
-  const confirm = document.createElement("button");
-  confirm.className = "button-danger";
-  confirm.type = "button";
-  confirm.textContent = "确认删除";
-  confirm.addEventListener("click", () => {
-    void deleteMemoryCard(card.id);
-  });
-  confirmation.append(confirm);
-  deleteButton.addEventListener("click", () => {
-    confirmation.hidden = false;
-  });
-  actions.append(saveButton, toggleButton, detailButton, deleteButton);
-
-  if (card.sourceType !== "manual-chat") {
-    const forgetButton = document.createElement("button");
-    forgetButton.className = "button-danger";
-    forgetButton.type = "button";
-    forgetButton.textContent = "忘记此类";
-    const forgetConfirmation = document.createElement("div");
-    forgetConfirmation.className = "status-box delete-confirmation";
-    forgetConfirmation.hidden = true;
-    forgetConfirmation.append("会删除此卡并阻止同类自动重建，是否继续？");
-    const confirmForget = document.createElement("button");
-    confirmForget.className = "button-danger";
-    confirmForget.type = "button";
-    confirmForget.textContent = "确认忘记";
-    confirmForget.addEventListener("click", () => {
-      void forgetMemoryCard(card.id);
-    });
-    forgetConfirmation.append(confirmForget);
-    forgetButton.addEventListener("click", () => {
-      forgetConfirmation.hidden = false;
-    });
-    actions.append(forgetButton);
-    item.append(title, content, tags, importanceSelect, meta, actions, confirmation, forgetConfirmation);
-    return item;
-  }
-
-  item.append(title, content, tags, importanceSelect, meta, actions, confirmation);
+  const content = document.createElement("span");
+  content.textContent = card.content;
+  item.append(content);
   return item;
+}
+
+function renderMemoryManagementActions(): void {
+  memoryManagementActionsBox.hidden = !isMemoryManagementMode;
+  memoryManageAction.hidden = isMemoryManagementMode;
+  const hasSelection = selectedMemoryCardIds.size > 0;
+  memorySelectionCountBox.textContent = hasSelection
+    ? `已选择 ${selectedMemoryCardIds.size} 条`
+    : "未选择记忆";
+  memoryDeleteSelectedAction.disabled = !hasSelection;
+  memoryForgetSelectedAction.disabled = !hasSelection;
+}
+
+function playManagementTransition(
+  surface: HTMLElement,
+  isEntering: boolean,
+  onComplete?: () => void
+): void {
+  const className = isEntering ? "is-management-entering" : "is-management-exiting";
+  surface.classList.remove("is-management-entering", "is-management-exiting");
+  void surface.offsetWidth;
+  surface.classList.add(className);
+  const handleAnimationEnd = (event: AnimationEvent): void => {
+    if (event.target !== surface) {
+      return;
+    }
+    surface.removeEventListener("animationend", handleAnimationEnd);
+    surface.classList.remove(className);
+    onComplete?.();
+  };
+  surface.addEventListener("animationend", handleAnimationEnd);
 }
 
 function renderMemoryDetail(): void {
@@ -2273,15 +1784,21 @@ function renderHistoryDetail(): void {
   historyDetailElement.replaceChildren();
 
   if (!selectedHistoryConversation) {
-    const note = document.createElement("p");
-    note.className = "selection-note";
-    note.textContent = "选择一段历史以查看内容。";
-    historyDetailElement.append(note);
+    historyPageContainer.classList.remove("is-detail-open");
     return;
   }
 
+  historyPageContainer.classList.add("is-detail-open");
+  const heading = document.createElement("div");
+  heading.className = "history-detail-heading";
+  const backButton = document.createElement("button");
+  backButton.className = "button-light history-detail-back";
+  backButton.type = "button";
+  backButton.textContent = "返回对话列表";
+  backButton.addEventListener("click", closeHistoryDetail);
   const title = document.createElement("strong");
   title.textContent = selectedHistoryConversation.title;
+  heading.append(backButton, title);
   const boundary = document.createElement("p");
   boundary.className = "selection-note";
   boundary.textContent = "打开历史只恢复本地界面；只有选择“继续发送给当前 Provider”后，下一条消息才会携带此会话上下文。";
@@ -2310,16 +1827,6 @@ function renderHistoryDetail(): void {
 
   const actions = document.createElement("div");
   actions.className = "history-detail-actions";
-  const openButton = document.createElement("button");
-  openButton.className = "button-light";
-  openButton.type = "button";
-  openButton.textContent = "打开历史";
-  openButton.addEventListener("click", () => restoreSelectedHistory(false));
-  const continueButton = document.createElement("button");
-  continueButton.className = "button";
-  continueButton.type = "button";
-  continueButton.textContent = "继续发送给当前 Provider";
-  continueButton.addEventListener("click", () => restoreSelectedHistory(true));
   const deleteButton = document.createElement("button");
   deleteButton.className = "button-danger";
   deleteButton.type = "button";
@@ -2350,8 +1857,20 @@ function renderHistoryDetail(): void {
   deleteButton.addEventListener("click", () => {
     confirmation.hidden = false;
   });
-  actions.append(openButton, continueButton, deleteButton);
-  historyDetailElement.append(title, boundary, contextPreview, messageItems, actions, confirmation);
+  actions.append(deleteButton);
+  historyDetailElement.append(heading, boundary, contextPreview, messageItems, actions, confirmation);
+}
+
+function closeHistoryDetail(): void {
+  if (!selectedHistoryConversation) {
+    return;
+  }
+
+  playManagementTransition(historyDetailElement, false, () => {
+    selectedHistoryConversation = null;
+    renderHistoryDetail();
+    void refreshHistoryList();
+  });
 }
 
 async function refreshHistoryList(): Promise<void> {
@@ -2361,11 +1880,7 @@ async function refreshHistoryList(): Promise<void> {
   }
 
   try {
-    const [conversations, retentionLimit] = await Promise.all([
-      window.historyApi.listConversations(),
-      window.historyApi.getRetentionLimit()
-    ]);
-    historyRetentionLimitField.value = String(retentionLimit);
+    const conversations = await window.historyApi.listConversations();
 
     if (!conversations.some((conversation) => conversation.id === selectedHistoryConversation?.id)) {
       selectedHistoryConversation = null;
@@ -2375,31 +1890,6 @@ async function refreshHistoryList(): Promise<void> {
     renderHistoryList(conversations);
   } catch {
     setHistoryFeedback("无法读取本地历史，请稍后重试。");
-  }
-}
-
-function parseHistoryRetentionLimit(value: string): HistoryRetentionLimit | null {
-  return value === "100" ? 100 : value === "500" ? 500 : value === "1000" ? 1_000 : null;
-}
-
-async function saveHistoryRetentionLimit(): Promise<void> {
-  if (!window.historyApi || chatTurnState.isReplying) {
-    return;
-  }
-
-  const limit = parseHistoryRetentionLimit(historyRetentionLimitField.value);
-  if (!limit) {
-    setHistoryFeedback("历史保留上限不可用。");
-    return;
-  }
-
-  try {
-    const savedLimit = await window.historyApi.setRetentionLimit(limit);
-    historyRetentionLimitField.value = String(savedLimit);
-    setHistoryFeedback(`已保存本地历史上限：${savedLimit.toLocaleString("en-US")} 个会话。`);
-    await refreshHistoryList();
-  } catch {
-    setHistoryFeedback("无法保存历史保留上限，请稍后重试。");
   }
 }
 
@@ -2420,28 +1910,13 @@ async function selectHistoryConversation(id: string): Promise<void> {
     selectedHistoryConversation = conversation;
     renderHistoryDetail();
     await refreshHistoryList();
-    setSettingsPage("history-detail");
+    const group = historyPageContainer.closest<HTMLDetailsElement>("details");
+    if (group) group.open = true;
+    historyPageContainer.scrollIntoView({ block: "start" });
+    playManagementTransition(historyDetailElement, true);
   } catch {
     setHistoryFeedback("无法打开该会话，请稍后重试。");
   }
-}
-
-function restoreSelectedHistory(includeProviderContext: boolean): void {
-  if (!selectedHistoryConversation || chatTurnState.isReplying) {
-    return;
-  }
-
-  conversationId = selectedHistoryConversation.id;
-  chatHistory.splice(0, chatHistory.length, ...selectedHistoryConversation.messages.map(({ id, role, content }) => ({ id, role, content })));
-  providerContextEnabled = includeProviderContext;
-  renderCurrentConversation();
-  setChatSessionNote(
-    includeProviderContext
-      ? "已明确继续：下一条消息将携带当前会话上下文发送给当前 Provider。"
-      : "已仅在本地打开历史：下一条消息只发送当前消息，不会自动发送历史内容。",
-    "ready"
-  );
-  setActivePage("chat");
 }
 
 function startNewConversation(): void {
@@ -2493,7 +1968,9 @@ function setReplying(isReplying: boolean): void {
     replyLockControlElements[controlState.controlId].disabled = controlState.disabled;
   }
 
-  sendAction.textContent = isReplying ? "停止" : "发送";
+  sendAction.dataset.state = isReplying ? "replying" : "idle";
+  document.querySelector<HTMLElement>(".phone-presence")?.classList.toggle("is-thinking", isReplying);
+  sendAction.setAttribute("aria-label", isReplying ? "停止回复" : "发送");
   sendAction.classList.toggle("button", !isReplying);
   sendAction.classList.toggle("button-danger", isReplying);
   sendAction.disabled = false;
@@ -2563,7 +2040,9 @@ function clearSettingsFeedback(): void {
 function setPetScaleValue(petScale: number): void {
   currentPetScale = petScale;
   petScaleField.value = petScale.toFixed(2);
-  petScaleValueBox.value = `${petScale.toFixed(2)} 倍`;
+  petScaleValueBox.value = `${Math.round(petScale * 100)}%`;
+  petScaleField.closest<HTMLElement>(".figma-scale-control")
+    ?.style.setProperty("--pet-scale-progress", `${((petScale - 0.5) / 1.5) * 100}%`);
   renderCompanionControlShelf();
 }
 
@@ -2648,7 +2127,9 @@ function setPetLockState(nextIsLocked: boolean): void {
   isPetLocked = nextIsLocked;
   petLockStatusBox.textContent = `桌宠锁定：${isPetLocked ? "已锁定，点击可穿透" : "未锁定"}`;
   petLockStatusBox.dataset.state = isPetLocked ? "ready" : "fallback";
-  togglePetLockAction.textContent = isPetLocked ? "解除锁定" : "锁定桌宠";
+  togglePetLockAction.dataset.locked = String(isPetLocked);
+  togglePetLockAction.setAttribute("aria-checked", String(isPetLocked));
+  togglePetLockAction.setAttribute("aria-label", isPetLocked ? "解除锁定" : "锁定桌宠");
   renderCompanionControlShelf();
 }
 
@@ -2925,26 +2406,29 @@ function applyLocalProviderPreset(presetId: LocalProviderPresetId): void {
   }
 
   resetProviderHealthStatus();
-  resetLocalModelDiagnosticSummary();
+  renderProviderConnectionMode();
+}
+
+function renderProviderConnectionMode(): void {
+  const usesExternalProvider = getSelectedLocalProviderPresetId() === "custom-local";
+  externalProviderSettingsBox.hidden = !usesExternalProvider;
+  connectionSafeSectionBox.hidden = !usesExternalProvider;
+  providerHealthCheckAction.hidden = !usesExternalProvider;
+  providerHealthStatusBox.hidden = !usesExternalProvider;
+  baseURLField.required = usesExternalProvider;
+  modelField.required = usesExternalProvider;
 }
 
 function updateProviderFields(): void {
   const hasOpenAIFields = isProviderWithOpenAIFieldsSelected();
-  const isLocalOpenAI = isLocalOpenAICompatibleSelected();
   openAIFieldsContainer.hidden = !hasOpenAIFields;
-  connectionSafeSectionBox.hidden = true;
-  localProviderPresetFieldBox.hidden = !isLocalOpenAI;
-  localProviderNoteBox.hidden = !isLocalOpenAI;
-  localModelDiagnosticSectionBox.hidden = !isLocalOpenAI;
-  llamaCppRuntimeSectionBox.hidden = !isLocalOpenAI;
-  providerHealthCheckAction.hidden = !hasOpenAIFields;
-  providerHealthStatusBox.hidden = !hasOpenAIFields;
-  baseURLField.required = hasOpenAIFields;
-  modelField.required = hasOpenAIFields;
-  temperatureField.required = hasOpenAIFields;
-  maxTokensField.required = hasOpenAIFields;
-  timeoutField.required = hasOpenAIFields;
+  localProviderPresetFieldBox.hidden = !hasOpenAIFields;
+  localProviderNoteBox.hidden = true;
+  temperatureField.required = false;
+  maxTokensField.required = false;
+  timeoutField.required = false;
   deleteKeyConfirmationBox.hidden = true;
+  renderProviderConnectionMode();
 }
 
 function fillOpenAIDefaults(): void {
@@ -2955,7 +2439,6 @@ function fillOpenAIDefaults(): void {
   maxTokensField.value = String(DEFAULT_OPENAI_CONFIG.maxTokens);
   timeoutField.value = String(DEFAULT_OPENAI_CONFIG.timeoutMs);
   resetProviderHealthStatus();
-  resetLocalModelDiagnosticSummary();
 }
 
 function fillLocalOpenAIDefaults(): void {
@@ -2967,7 +2450,6 @@ function fillLocalOpenAIDefaults(): void {
   maxTokensField.value = String(DEFAULT_LOCAL_OPENAI_CONFIG.maxTokens);
   timeoutField.value = String(DEFAULT_LOCAL_OPENAI_CONFIG.timeoutMs);
   resetProviderHealthStatus();
-  resetLocalModelDiagnosticSummary();
 }
 
 function fillProviderForm(config: ProviderConfig): void {
@@ -2995,7 +2477,6 @@ function fillProviderForm(config: ProviderConfig): void {
   apiKeyField.value = "";
   updateProviderFields();
   resetProviderHealthStatus();
-  resetLocalModelDiagnosticSummary();
 }
 
 function getApiKeyRef(): string {
@@ -3020,8 +2501,20 @@ async function openSettings(page: SettingsPageId = "basic"): Promise<void> {
 
   clearSettingsFeedback();
   deleteKeyConfirmationBox.hidden = true;
+  const wasHidden = providerSettingsPanel.hidden;
+  if (settingsExitTimer !== null) {
+    window.clearTimeout(settingsExitTimer);
+    settingsExitTimer = null;
+  }
+  providerSettingsPanel.classList.remove("is-exiting");
   providerSettingsPanel.hidden = false;
-  chatPageContainer.hidden = true;
+  chatPageContainer.hidden = false;
+  if (wasHidden) {
+    providerSettingsPanel.classList.add("is-entering");
+    providerSettingsPanel.addEventListener("animationend", () => {
+      providerSettingsPanel.classList.remove("is-entering");
+    }, { once: true });
+  }
   setSettingsPage(page);
   window.chatApi?.setInteractionActive(true);
 
@@ -3030,9 +2523,6 @@ async function openSettings(page: SettingsPageId = "basic"): Promise<void> {
       const config = await window.configApi.getProvider();
       fillProviderForm(config);
       await refreshApiKeyStatus();
-      if (activeSettingsPage === "model-detail") {
-        await refreshLlamaCppRuntimeStatus();
-      }
     } else {
       setProviderHealthStatus("Provider 设置不可用。", "fallback");
     }
@@ -3041,7 +2531,6 @@ async function openSettings(page: SettingsPageId = "basic"): Promise<void> {
       refreshPetPresentationPreferences(),
       refreshPetLockState(),
       refreshShortcuts(),
-      refreshUserProfile(),
       refreshMemory(),
       refreshHistoryList()
     ]);
@@ -3051,8 +2540,16 @@ async function openSettings(page: SettingsPageId = "basic"): Promise<void> {
 }
 
 function closeSettings(): void {
-  providerSettingsPanel.hidden = true;
   chatPageContainer.hidden = false;
+  if (!providerSettingsPanel.hidden && !providerSettingsPanel.classList.contains("is-exiting")) {
+    providerSettingsPanel.classList.remove("is-entering");
+    providerSettingsPanel.classList.add("is-exiting");
+    settingsExitTimer = window.setTimeout(() => {
+      providerSettingsPanel.hidden = true;
+      providerSettingsPanel.classList.remove("is-exiting");
+      settingsExitTimer = null;
+    }, 480);
+  }
   deleteKeyConfirmationBox.hidden = true;
   apiKeyField.value = "";
   recordingShortcutActionId = null;
@@ -3187,15 +2684,12 @@ function buildProviderHealthRequest(): ProviderHealthCheckRequest | null {
 window.chatApi?.onReplyDelta((delta) => {
   const result = applyChatTurnDelta(chatTurnState, delta.requestVersion, delta.text);
 
-  if (!result.accepted || !activeReplyMessage || !activeReplyElement) {
+  if (!result.accepted || !activeReplyMessage) {
     return;
   }
 
   chatTurnState = result.state;
   activeReplyMessage.content = result.content;
-  const content = activeReplyElement.querySelector<HTMLElement>(".message-content") ?? activeReplyElement;
-  content.textContent = polishAssistantDisplayText(activeReplyMessage.content);
-  messageList.scrollTop = messageList.scrollHeight;
 });
 
 window.chatApi?.onReplyDone((reply) => {
@@ -3203,7 +2697,9 @@ window.chatApi?.onReplyDone((reply) => {
     return;
   }
 
-  if (activeReplyElement) {
+  if (activeReplyMessage) {
+    activeReplyMessage.content = reply.text;
+    activeReplyElement = appendMessage(activeReplyMessage, true);
     appendWebSearchCitations(activeReplyElement, reply.webSearchCitation);
   }
 
@@ -3215,14 +2711,14 @@ window.chatApi?.onReplyError((error) => {
     return;
   }
 
-  if (activeReplyMessage && activeReplyElement) {
+  if (activeReplyMessage) {
     const index = chatHistory.findIndex((message) => message.id === activeReplyMessage?.id);
 
     if (index >= 0) {
       chatHistory.splice(index, 1);
     }
 
-    activeReplyElement.remove();
+    activeReplyElement?.remove();
   }
 
   const wasAborted = error.errorType === "aborted";
@@ -3286,19 +2782,20 @@ chatForm.addEventListener("submit", (event) => {
   const userMessage = createMessage("user", text);
   chatHistory.push(userMessage);
   const requestMessages = providerContextEnabled ? [...chatHistory] : [userMessage];
-  appendMessage(userMessage);
+  const messageListStartScrollTop = messageList.scrollTop;
+  appendMessage(userMessage, true);
 
   const replyMessage = createMessage("assistant", "");
   chatHistory.push(replyMessage);
-  const replyElement = appendMessage(replyMessage);
-
   chatInput.value = "";
+  resizeChatInput();
   const startedTurn = startChatTurn(chatTurnState, replyMessage.id);
 
   chatTurnState = startedTurn.state;
   activeReplyMessage = replyMessage;
-  activeReplyElement = replyElement;
+  activeReplyElement = null;
   setMemorySessionStatus(null);
+  playSendAnimation(messageListStartScrollTop);
   setReplying(true);
 
   window.chatApi?.sendMessage({
@@ -3312,6 +2809,19 @@ chatInput.addEventListener("focus", () => {
   if (providerSettingsPanel.hidden) {
     window.chatApi?.setInteractionActive(true);
   }
+});
+
+chatInput.addEventListener("input", resizeChatInput);
+
+chatInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+    event.preventDefault();
+    chatForm.requestSubmit();
+  }
+});
+
+chatCloseAction.addEventListener("click", () => {
+  window.chatApi?.closeWindow();
 });
 
 chatInput.addEventListener("blur", () => {
@@ -3329,13 +2839,17 @@ settingsAction.addEventListener("click", () => {
 });
 
 shelfAccessoryAction.addEventListener("click", () => {
-  void openSettings("appearance").then(() => {
-    petAccessoryGroupsBox.querySelector<HTMLInputElement>("input[type=radio]:checked")?.focus();
+  void openSettings("basic").then(() => {
+    const group = settingsAppearancePage.closest<HTMLDetailsElement>("details");
+    if (group) group.open = true;
+    petScaleField.focus();
   });
 });
 
 shelfScaleAction.addEventListener("click", () => {
-  void openSettings("appearance").then(() => {
+  void openSettings("basic").then(() => {
+    const group = settingsAppearancePage.closest<HTMLDetailsElement>("details");
+    if (group) group.open = true;
     petScaleField.focus();
   });
 });
@@ -3353,103 +2867,11 @@ shelfLockAction.addEventListener("click", () => {
   });
 });
 
-welcomeSaveUserProfileAction.addEventListener("click", () => {
-  void saveUserProfileFromFields(welcomeUserDisplayNameField, welcomeUserPreferredNameField, "welcome");
-});
-
-saveUserProfileAction.addEventListener("click", () => {
-  void saveUserProfileFromFields(settingsUserDisplayNameField, settingsUserPreferredNameField, "settings");
-});
-
-clearUserProfileAction.addEventListener("click", () => {
-  if (!window.userProfileApi || chatTurnState.isReplying) {
-    return;
-  }
-
-  void window.userProfileApi.clearUserProfile().then(() => {
-    settingsUserDisplayNameField.value = "";
-    settingsUserPreferredNameField.value = "";
-    welcomeUserDisplayNameField.value = "";
-    welcomeUserPreferredNameField.value = "";
-    renderUserProfile(null);
-    setSettingsFeedback("本地身份已清除。", "ready");
-    settingsUserDisplayNameField.focus();
-  }).catch(() => {
-    setSettingsFeedback("无法清除本地身份，请稍后重试。", "fallback");
-  });
-});
-
-settingsBackAction.addEventListener("click", () => {
-  setSettingsPage(getSettingsRootForPage(activeSettingsPage));
-});
-
-for (const [page, tab] of Object.entries(settingsRootTabs) as [SettingsRootPageId, HTMLButtonElement][]) {
+for (const [page, tab] of Object.entries(settingsRootTabs) as [SettingsPageId, HTMLButtonElement][]) {
   tab.addEventListener("click", () => {
     setSettingsPage(page);
   });
 }
-
-settingsModelDetailAction.addEventListener("click", () => {
-  setSettingsPage("model-detail");
-});
-
-llamaCppRuntimeSaveAction.addEventListener("click", () => {
-  if (!chatTurnState.isReplying) {
-    void saveLlamaCppRuntimeSettings();
-  }
-});
-
-llamaCppRuntimeExecutableAction.addEventListener("click", () => {
-  if (!window.localRuntimeApi) {
-    setLlamaCppRuntimeStatus("托管 llama.cpp 设置不可用。", "fallback");
-    return;
-  }
-
-  void runLlamaCppRuntimeAction(
-    () => window.localRuntimeApi!.chooseLlamaCppExecutable(),
-    "正在选择运行文件..."
-  );
-});
-
-llamaCppRuntimeModelAction.addEventListener("click", () => {
-  if (!window.localRuntimeApi) {
-    setLlamaCppRuntimeStatus("托管 llama.cpp 设置不可用。", "fallback");
-    return;
-  }
-
-  void runLlamaCppRuntimeAction(
-    () => window.localRuntimeApi!.chooseLlamaCppModel(),
-    "正在选择模型..."
-  );
-});
-
-llamaCppRuntimeStartAction.addEventListener("click", () => {
-  if (!window.localRuntimeApi) {
-    setLlamaCppRuntimeStatus("托管 llama.cpp 设置不可用。", "fallback");
-    return;
-  }
-
-  void runLlamaCppRuntimeAction(
-    () => window.localRuntimeApi!.startLlamaCpp(),
-    "正在启动托管 llama.cpp..."
-  );
-});
-
-llamaCppRuntimeStopAction.addEventListener("click", () => {
-  if (!window.localRuntimeApi) {
-    setLlamaCppRuntimeStatus("托管 llama.cpp 设置不可用。", "fallback");
-    return;
-  }
-
-  void runLlamaCppRuntimeAction(
-    () => window.localRuntimeApi!.stopLlamaCpp(),
-    "正在停止托管 llama.cpp..."
-  );
-});
-
-llamaCppRuntimeRefreshAction.addEventListener("click", () => {
-  void refreshLlamaCppRuntimeStatus();
-});
 
 webSearchSaveAction.addEventListener("click", () => {
   if (!chatTurnState.isReplying) {
@@ -3457,23 +2879,20 @@ webSearchSaveAction.addEventListener("click", () => {
   }
 });
 
-webSearchProfileField.addEventListener("change", () => {
-  if (webSearchProfileField.value !== BUNDLED_BAIDU_SEARCH_COMMAND) {
-    return;
-  }
-
-  webSearchProfileNoteBox.textContent = "使用应用内置且经过批准的百度搜索配置，无需填写命令或参数。";
-  webSearchProfileNoteBox.dataset.state = "ready";
-});
-
-webSearchRefreshAction.addEventListener("click", () => {
-  void refreshWebSearchSettings();
-});
-
 webSearchTestAction.addEventListener("click", () => {
   if (!chatTurnState.isReplying) {
     void testWebSearchConnection();
   }
+});
+
+proactiveCompanionEnabledField.addEventListener("change", () => {
+  renderProactiveCompanionSettings({
+    ...currentProactiveCompanionSettings,
+    cadence: proactiveCompanionEnabledField.checked ? "normal" : "off",
+    memorySourceBubbles: true,
+    searchSourceBubbles: true
+  });
+  void saveProactiveCompanionSettings();
 });
 
 proactiveMemorySourceBubblesField.addEventListener("change", () => {
@@ -3524,10 +2943,6 @@ newConversationAction.addEventListener("click", () => {
   startNewConversation();
 });
 
-saveHistoryRetentionAction.addEventListener("click", () => {
-  void saveHistoryRetentionLimit();
-});
-
 cancelMemoryDraftAction.addEventListener("click", () => {
   closeMemoryDraft();
 });
@@ -3541,10 +2956,15 @@ saveMemoryDraftAction.addEventListener("click", () => {
 
   void (async () => {
     try {
+      const content = memoryDraftContentField.value.trim();
+      if (!content) {
+        setSettingsFeedback("记忆内容不能为空。");
+        return;
+      }
       const result = await memoryApi.createCard({
-        title: memoryDraftTitleField.value,
-        content: memoryDraftContentField.value,
-        tags: parseTagsInput(memoryDraftTagsField.value),
+        title: content.slice(0, 36) || "新的记忆",
+        content,
+        tags: [],
         sourceConversationId: conversationId
       });
 
@@ -3558,38 +2978,7 @@ saveMemoryDraftAction.addEventListener("click", () => {
       setMemoryFeedback("事实卡已保存到本机记忆。");
       await refreshMemory();
     } catch {
-      setChatSessionNote("无法保存事实卡，请检查标题和正文。", "error");
-    }
-  })();
-});
-
-clearHistoryAction.addEventListener("click", () => {
-  if (!chatTurnState.isReplying) {
-    clearHistoryConfirmationBox.hidden = false;
-  }
-});
-
-cancelClearHistoryAction.addEventListener("click", () => {
-  clearHistoryConfirmationBox.hidden = true;
-});
-
-confirmClearHistoryAction.addEventListener("click", () => {
-  if (chatTurnState.isReplying || !window.historyApi) {
-    return;
-  }
-
-  void (async () => {
-    try {
-      await window.historyApi?.clearConversations();
-      selectedHistoryConversation = null;
-      resetCurrentConversation();
-      clearHistoryConfirmationBox.hidden = true;
-      renderHistoryDetail();
-      setHistoryFeedback("全部本地历史已清空，无法恢复。");
-      setChatSessionNote("历史已清空；当前本地会话已重置，下一条消息不会携带已清空内容。", "ready");
-      await refreshHistoryList();
-    } catch {
-      setHistoryFeedback("无法清空本地历史，请稍后重试。");
+      setSettingsFeedback("无法保存记忆，请检查内容后重试。");
     }
   })();
 });
@@ -3610,6 +2999,24 @@ enableMemoryAction.addEventListener("click", () => {
   })();
 });
 
+memoryEnabledField.addEventListener("change", () => {
+  if (!window.memoryApi || chatTurnState.isReplying) {
+    memoryEnabledField.checked = memoryEnabled;
+    return;
+  }
+
+  void (async () => {
+    try {
+      const settings = await window.memoryApi?.setEnabled(memoryEnabledField.checked);
+      memoryEnabled = Boolean(settings?.enabled);
+      await refreshMemory();
+    } catch {
+      memoryEnabledField.checked = memoryEnabled;
+      setSettingsFeedback("无法更新记忆开关，请稍后重试。");
+    }
+  })();
+});
+
 newMemoryAction.addEventListener("click", () => {
   if (!memoryEnabled || chatTurnState.isReplying) {
     setMemoryFeedback("记忆关闭时不能新建；请先开启记忆。");
@@ -3617,6 +3024,76 @@ newMemoryAction.addEventListener("click", () => {
   }
 
   openMemoryDraft();
+});
+
+memoryManageAction.addEventListener("click", () => {
+  isMemoryManagementMode = true;
+  selectedMemoryCardIds.clear();
+  renderMemoryManagementActions();
+  renderMemoryList();
+  playManagementTransition(memoryPageContainer, true);
+});
+
+memoryCancelManageAction.addEventListener("click", () => {
+  playManagementTransition(memoryPageContainer, false, () => {
+    isMemoryManagementMode = false;
+    selectedMemoryCardIds.clear();
+    renderMemoryManagementActions();
+    renderMemoryList();
+  });
+});
+
+const historySettingsGroup = historyPageContainer.closest<HTMLDetailsElement>("details");
+const historySettingsSummary = historySettingsGroup?.querySelector<HTMLElement>("summary");
+historySettingsSummary?.addEventListener("click", (event) => {
+  event.preventDefault();
+  if (!historySettingsGroup) {
+    return;
+  }
+  if (historySettingsGroup.open) {
+    playManagementTransition(historyPageContainer, false, () => {
+      historySettingsGroup.open = false;
+    });
+    return;
+  }
+  historySettingsGroup.open = true;
+  playManagementTransition(historyPageContainer, true);
+});
+
+memoryDeleteSelectedAction.addEventListener("click", () => {
+  if (!window.memoryApi || selectedMemoryCardIds.size === 0 || chatTurnState.isReplying) {
+    return;
+  }
+
+  const ids = [...selectedMemoryCardIds];
+  void Promise.all(ids.map((id) => window.memoryApi!.deleteCard(id))).then(async () => {
+    isMemoryManagementMode = false;
+    selectedMemoryCardIds.clear();
+    renderMemoryManagementActions();
+    await refreshMemory();
+  }).catch(() => {
+    setSettingsFeedback("无法删除所选记忆，请稍后重试。");
+  });
+});
+
+memoryForgetSelectedAction.addEventListener("click", () => {
+  if (!window.memoryApi || selectedMemoryCardIds.size === 0 || chatTurnState.isReplying) {
+    return;
+  }
+
+  const cards = memoryCards.filter((card) => selectedMemoryCardIds.has(card.id));
+  void Promise.all(cards.map((card) => (
+    card.sourceType === "manual-chat"
+      ? window.memoryApi!.deleteCard(card.id)
+      : window.memoryApi!.forgetCard(card.id)
+  ))).then(async () => {
+    isMemoryManagementMode = false;
+    selectedMemoryCardIds.clear();
+    renderMemoryManagementActions();
+    await refreshMemory();
+  }).catch(() => {
+    setSettingsFeedback("无法忘记所选记忆类型，请稍后重试。");
+  });
 });
 
 clearMemoryAction.addEventListener("click", () => {
@@ -3677,24 +3154,6 @@ confirmClearMemorySuppressionsAction.addEventListener("click", () => {
 
 memorySearchField.addEventListener("input", () => {
   renderMemoryList();
-});
-
-memoryFilterTabs.forEach((tab) => {
-  tab.addEventListener("click", () => {
-    const filter = tab.dataset.memoryFilter;
-    if (
-      filter === "all" ||
-      filter === "key" ||
-      filter === "general" ||
-      filter === "auto" ||
-      filter === "manual" ||
-      filter === "disabled"
-    ) {
-      activeMemoryFilter = filter;
-      renderMemoryFilterTabs();
-      renderMemoryList();
-    }
-  });
 });
 
 settingsCloseAction.addEventListener("click", () => {
@@ -3763,11 +3222,9 @@ providerIdField.addEventListener("change", () => {
     void refreshApiKeyStatus();
   } else if (isLocalOpenAICompatibleSelected()) {
     fillLocalOpenAIDefaults();
-    void refreshLlamaCppRuntimeStatus();
   }
 
   updateProviderFields();
-  resetLocalModelDiagnosticSummary();
   clearSettingsFeedback();
 });
 
@@ -3775,7 +3232,6 @@ providerResetLocalAction.addEventListener("click", () => {
   providerIdField.value = "local-openai-compatible";
   fillLocalOpenAIDefaults();
   updateProviderFields();
-  resetLocalModelDiagnosticSummary();
   setSettingsFeedback("已切回内置本地模型。", "ready");
 });
 
@@ -3791,15 +3247,10 @@ localProviderPresetField.addEventListener("change", () => {
 for (const field of [baseURLField, modelField]) {
   field.addEventListener("input", () => {
     resetProviderHealthStatus();
-    resetLocalModelDiagnosticSummary();
   });
 }
 
 timeoutField.addEventListener("input", resetProviderHealthStatus);
-
-localModelDiagnosticAction.addEventListener("click", () => {
-  void runLocalModelDiagnostic();
-});
 
 providerHealthCheckAction.addEventListener("click", () => {
   if (chatTurnState.isReplying || !window.configApi) {
@@ -3828,11 +3279,13 @@ petScaleField.addEventListener("input", () => {
   const petScale = normalizePetScale(Number(petScaleField.value));
 
   if (petScale !== null) {
-    petScaleValueBox.value = `${petScale.toFixed(2)} 倍`;
+    petScaleValueBox.value = `${Math.round(petScale * 100)}%`;
+    petScaleField.closest<HTMLElement>(".figma-scale-control")
+      ?.style.setProperty("--pet-scale-progress", `${((petScale - 0.5) / 1.5) * 100}%`);
   }
 });
 
-savePetScaleAction.addEventListener("click", () => {
+function savePetScale(): void {
   if (chatTurnState.isReplying || !window.petPresentationApi) {
     return;
   }
@@ -3840,18 +3293,30 @@ savePetScaleAction.addEventListener("click", () => {
   const petScale = normalizePetScale(Number(petScaleField.value));
 
   if (petScale === null) {
-    setSettingsFeedback("桌宠大小必须在 0.70 到 1.35 之间，并以 0.05 为步长。", "fallback");
+    setSettingsFeedback("桌宠大小必须选择 50%、75%、100%、125%、150%、175% 或 200%。", "fallback");
     return;
   }
 
   clearSettingsFeedback();
+  const requestVersion = ++petScaleRequestVersion;
 
   void window.petPresentationApi.setPetScale(petScale).then((preferences) => {
-    setPetScaleValue(preferences.petScale);
-    setSettingsFeedback("桌宠大小已保存。", "ready");
+    if (requestVersion === petScaleRequestVersion) {
+      setPetScaleValue(preferences.petScale);
+    }
   }).catch(() => {
-    setSettingsFeedback("无法保存桌宠大小，请稍后重试。", "fallback");
+    if (requestVersion === petScaleRequestVersion) {
+      setSettingsFeedback("无法保存桌宠大小，请稍后重试。", "fallback");
+    }
   });
+}
+
+petScaleField.addEventListener("change", () => {
+  savePetScale();
+});
+
+savePetScaleAction.addEventListener("click", () => {
+  savePetScale();
 });
 
 savePetAccessoryAction.addEventListener("click", () => {
@@ -3969,13 +3434,19 @@ confirmDeleteApiKeyAction.addEventListener("click", () => {
 window.addEventListener("chat:focus-input", () => {
   chatInput.focus();
 });
+window.addEventListener("resize", updateChatUiScale);
+
+updatePhoneClock();
+window.setInterval(updatePhoneClock, 30_000);
+resizeChatInput();
+updateChatUiScale();
 
 window.chatApi?.focusInput();
 setMemorySessionStatus(null);
 void refreshProactiveCompanionSettings();
 void refreshEnvironmentActionSettings();
 void refreshDialogueAffectSettings();
-void refreshUserProfile();
+renderPartnerStatus();
 void refreshProviderStatus();
 void refreshWebSearchSettings();
 void refreshMemory();

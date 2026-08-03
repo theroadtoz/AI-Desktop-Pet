@@ -25,11 +25,12 @@ function assertApproximatelyEqual(actual: number, expected: number, tolerance = 
 }
 
 test("normalizePetScale accepts only the configured range and step", () => {
-  assert.equal(normalizePetScale(0.7), 0.7);
+  assert.equal(normalizePetScale(0.5), 0.5);
+  assert.equal(normalizePetScale(0.75), 0.75);
   assert.equal(normalizePetScale(1), 1);
-  assert.equal(normalizePetScale(1.35), 1.35);
-  assert.equal(normalizePetScale(0.69), null);
-  assert.equal(normalizePetScale(1.36), null);
+  assert.equal(normalizePetScale(2), 2);
+  assert.equal(normalizePetScale(0.49), null);
+  assert.equal(normalizePetScale(2.01), null);
   assert.equal(normalizePetScale(0.73), null);
   assert.equal(normalizePetScale(Number.NaN), null);
 });
@@ -40,10 +41,10 @@ test("scale adjustment accepts only one discrete step and clamps at the configur
   assert.equal(parsePetScaleAdjustmentIntent({ steps: 2 }), null);
   assert.equal(parsePetScaleAdjustmentIntent({ steps: 0 }), null);
   assert.equal(parsePetScaleAdjustmentIntent(null), null);
-  assert.equal(getAdjustedPetScale(1, { steps: 1 }), 1.05);
-  assert.equal(getAdjustedPetScale(1, { steps: -1 }), 0.95);
-  assert.equal(getAdjustedPetScale(1.35, { steps: 1 }), 1.35);
-  assert.equal(getAdjustedPetScale(0.7, { steps: -1 }), 0.7);
+  assert.equal(getAdjustedPetScale(1, { steps: 1 }), 1.25);
+  assert.equal(getAdjustedPetScale(1, { steps: -1 }), 0.75);
+  assert.equal(getAdjustedPetScale(2, { steps: 1 }), 2);
+  assert.equal(getAdjustedPetScale(0.5, { steps: -1 }), 0.5);
 });
 
 test("scale adjustment is rejected while drag or chat interaction owns the pet", () => {
@@ -76,12 +77,12 @@ test("scale adjustment is rejected while drag or chat interaction owns the pet",
 test("calculateScaledPetBounds preserves the visible waist center before clamping", () => {
   const bounds = calculateScaledPetBounds(
     { x: 100, y: 200, width: 420, height: 600 },
-    0.7,
+    0.5,
     { x: 0, y: 0, width: 1920, height: 1080 }
   );
   const region = calculatePetVisibleRegion(bounds);
 
-  assert.deepEqual(bounds, { x: 163, y: 302, width: 294, height: 420 });
+  assert.deepEqual(bounds, { x: 205, y: 369, width: 210, height: 300 });
   assert.equal(bounds.x + bounds.width / 2, 310);
   assertApproximatelyEqual(bounds.y + region.waistY, 538.4);
 });
@@ -90,10 +91,10 @@ test("calculateScaledPetBounds stays idempotent for repeated application of the 
   const workArea = { x: 0, y: 0, width: 1920, height: 1080 };
   const first = calculateScaledPetBounds(
     { x: 100, y: 200, width: 420, height: 600 },
-    1.35,
+    1.25,
     workArea
   );
-  const second = calculateScaledPetBounds(first, 1.35, workArea);
+  const second = calculateScaledPetBounds(first, 1.25, workArea);
 
   assert.equal(second.width, first.width);
   assert.equal(second.height, first.height);
@@ -102,12 +103,12 @@ test("calculateScaledPetBounds stays idempotent for repeated application of the 
 test("calculateScaledPetBounds allows the visible left and top edges to touch the work area", () => {
   const bounds = calculateScaledPetBounds(
     { x: -80, y: -60, width: 420, height: 600 },
-    1.35,
+    1.25,
     { x: 0, y: 0, width: 1280, height: 900 }
   );
   const region = calculatePetVisibleRegion(bounds);
 
-  assert.deepEqual(bounds, { x: -56, y: -81, width: 567, height: 810 });
+  assert.deepEqual(bounds, { x: -52, y: -75, width: 525, height: 750 });
   assertApproximatelyEqual(bounds.x + region.visibleLeft, 0);
   assertApproximatelyEqual(bounds.y + region.visibleTop, 0);
 });
@@ -115,7 +116,7 @@ test("calculateScaledPetBounds allows the visible left and top edges to touch th
 test("calculateScaledPetBounds reduces only the rendered scale when the work area is smaller", () => {
   const bounds = calculateScaledPetBounds(
     { x: 100, y: 100, width: 420, height: 600 },
-    1.35,
+    2,
     { x: 0, y: 0, width: 1280, height: 768 }
   );
 
@@ -173,7 +174,7 @@ test("calculateInitialPetBounds keeps the half-body placement across scales and 
   ];
 
   for (const workArea of workAreas) {
-    for (const scale of [0.7, 1, 1.35]) {
+    for (const scale of [0.5, 1, 2]) {
       const bounds = calculateInitialPetBounds(scale, workArea);
       const region = calculatePetVisibleRegion(bounds);
 
@@ -193,17 +194,17 @@ test("calculateInitialPetBounds keeps the half-body placement across scales and 
 });
 
 test("parsePetPresentationPreferences rejects missing and invalid scales", () => {
-  assert.deepEqual(parsePetPresentationPreferences({ petScale: 1.1 }), {
+  assert.deepEqual(parsePetPresentationPreferences({ petScale: 1.25 }), {
     schemaVersion: 2,
-    petScale: 1.1,
+    petScale: 1.25,
     accessoryIds: []
   });
-  assert.deepEqual(parsePetPresentationPreferences({ petScale: 1.1, accessoryIds: ["hat", "ghost"] }), {
+  assert.deepEqual(parsePetPresentationPreferences({ petScale: 1.25, accessoryIds: ["hat", "ghost"] }), {
     schemaVersion: 2,
-    petScale: 1.1,
+    petScale: 1.25,
     accessoryIds: ["ghost", "hat"]
   });
-  assert.equal(parsePetPresentationPreferences({ petScale: 1.1, accessoryIds: ["staff", "microphone"] }), null);
+  assert.equal(parsePetPresentationPreferences({ petScale: 1.25, accessoryIds: ["staff", "microphone"] }), null);
   assert.equal(parsePetPresentationPreferences({}), null);
   assert.equal(parsePetPresentationPreferences({ petScale: 1.02 }), null);
   assert.equal(parsePetPresentationPreferences({ petScale: Number.NaN }), null);
@@ -225,20 +226,20 @@ test("stored pet presentation data falls back safely on invalid content", () => 
 
 test("stored presentation migrates legacy presets and tolerantly filters schema-v2 accessory data", () => {
   assert.deepEqual(
-    parseStoredPetPresentationPreferences(JSON.stringify({ petScale: 1.1, accessoryPresetId: "none" })),
-    { schemaVersion: 2, petScale: 1.1, accessoryIds: [] }
+    parseStoredPetPresentationPreferences(JSON.stringify({ petScale: 1.25, accessoryPresetId: "none" })),
+    { schemaVersion: 2, petScale: 1.25, accessoryIds: [] }
   );
   assert.deepEqual(
-    parseStoredPetPresentationPreferences(JSON.stringify({ petScale: 1.1, accessoryPresetId: "glasses" })),
-    { schemaVersion: 2, petScale: 1.1, accessoryIds: ["glasses"] }
+    parseStoredPetPresentationPreferences(JSON.stringify({ petScale: 1.25, accessoryPresetId: "glasses" })),
+    { schemaVersion: 2, petScale: 1.25, accessoryIds: ["glasses"] }
   );
   assert.deepEqual(
     parseStoredPetPresentationPreferences(JSON.stringify({
       schemaVersion: 2,
-      petScale: 1.1,
+      petScale: 1.25,
       accessoryIds: ["staff", "ghost", "unknown", "microphone", "ghost", "hat"]
     })),
-    { schemaVersion: 2, petScale: 1.1, accessoryIds: ["ghost", "hat", "staff"] }
+    { schemaVersion: 2, petScale: 1.25, accessoryIds: ["ghost", "hat", "staff"] }
   );
 });
 

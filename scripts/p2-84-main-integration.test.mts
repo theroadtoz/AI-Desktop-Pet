@@ -16,6 +16,43 @@ const acceptanceSource = readFileSync(
   new URL("./p2-84-acceptance.mjs", import.meta.url),
   "utf8"
 );
+const {
+  BUNDLED_FALLBACK_STAGES,
+  BUNDLED_SETUP_STAGES,
+  BUNDLED_RUN_STAGES,
+  classifyJokeAcknowledgement,
+  hasFirstSentenceSemanticJokeAcknowledgement,
+  hasSemanticJokeAcknowledgement,
+  createBundledFallbackDiagnostic,
+  createBundledSetupFailureDiagnostic,
+  finalizeBundledRun,
+  createJokeAcknowledgementDiagnosticCounts,
+  recordJokeAcknowledgementDiagnostic
+} = await import(new URL("./p2-84-acceptance.mjs", import.meta.url).href);
+
+test("P2-86C acceptance entry runs only after its runtime declarations initialize", () => {
+  const entry = acceptanceSource.lastIndexOf("if (isMainModule()) {");
+  assert.ok(entry > -1, "direct-execution entry must exist");
+
+  for (const declaration of [
+    "export const BUNDLED_FALLBACK_STAGES",
+    "export const BUNDLED_SETUP_STAGES",
+    "export const BUNDLED_RUN_STAGES",
+    "const JOKE_ACKNOWLEDGEMENT_CATEGORIES",
+    "function isMainModule()",
+    "function readPositiveInteger(value)"
+  ]) {
+    assert.ok(
+      acceptanceSource.indexOf(declaration) < entry,
+      `${declaration} must initialize before the direct-execution entry`
+    );
+  }
+
+  assert.match(
+    acceptanceSource.slice(entry),
+    /^if \(isMainModule\(\)\) \{\s*await main\(\);\s*\}\s*$/
+  );
+});
 
 test("P2-84 main owns affect lifecycle without renderer or memory state", () => {
   assert.match(appSource, /createDialogueAffectSettingsStore\(\{/);
@@ -150,6 +187,9 @@ test("P2-84 bundled prompts are natural user utterances without answer-shaping i
     "今天做什么都提不起劲。",
     "今天真的很累。",
     "刚才说“世界末日了”，只是逗你的。",
+    "我的魔导笔记被风卷走了。骗你的，刚才只是说笑。",
+    "我把传送门开到教室天花板上了，闹着玩的。",
+    "西塔，我把你桌面的星星都拿走了，开玩笑的。",
     "我没有难过，也不焦虑，今天就是下雨了。",
     "刚才那句是开玩笑的，我没有难过。",
     "我有点难过，这是我的感受，不是你的。",
@@ -251,38 +291,282 @@ test("OpenAI-compatible wire request contains the fixed emotional dialogue promp
     true
   );
 });
-test("P2-84 bundled joke acknowledgement requires the first sentence to name the teasing or joke", () => {
-  const match = acceptanceSource.match(
-    /function hasSemanticJokeAcknowledgement\(reply\) \{\s*return (\/.*\/).test\(reply\);\s*\}/
+test("P2-86C bundled jokes require a first-sentence closed acknowledgement without fixed openings", () => {
+  assert.match(
+    acceptanceSource,
+    /export function hasSemanticJokeAcknowledgement\(reply\) \{[\s\S]*EXPLICIT_JOKE_MARKER\.test\(opening\) \|\| hasFirstSentenceSemanticJokeAcknowledgement\(opening\);\s*\}/
   );
-  assert.ok(match, "joke acknowledgement helper must remain a deterministic regex");
-  const acknowledgement = new RegExp(match[1].slice(1, -1));
+  assert.match(acceptanceSource, /function firstSentence\(reply\)/);
+  assert.doesNotMatch(acceptanceSource, /\^\(\?:原来\|还好\|你刚才\|你这是\)/);
+});
 
-  for (const reply of [
-    "\u539f\u6765\u662f\u5728\u5f00\u73a9\u7b11\u3002",
-    "\u4f60\u521a\u624d\u662f\u5728\u9017\u6211\u5440\u3002",
-    "\u8fd8\u597d\u53ea\u662f\u73a9\u7b11\uff0c\u5bb3\u6211\u767d\u7d27\u5f20\u4e86\u3002",
-    "\u4f60\u8fd9\u662f\u5728\u95f9\u7740\u73a9\u5427\u3002"
+test("P2-86C Xita-targeted teasing helper accepts only its first-sentence closed set", () => {
+  for (const sentence of [
+    "这下骗我了。",
+    "可把我骗到了。",
+    "你又捉弄我一下。",
+    "真把我耍了。",
+    "你这是唬我一下。",
+    "可别吓唬我了。",
+    "这回吓到我一下。",
+    "你把我吓了一跳。"
   ]) {
-    assert.equal(acknowledgement.test(reply), true, reply);
+    assert.equal(hasFirstSentenceSemanticJokeAcknowledgement(sentence), true, sentence);
   }
 
-  for (const reply of [
-    "\u6536\u5230\u3002",
-    "\u660e\u767d\u3002",
-    "\u539f\u6765\u3002",
-    "\u8fd9\u6837\u554a\u3002",
-    "\u4f60\u628a\u6211\u5413\u4e00\u8df3\u3002",
-    "\u54c8\u54c8\uff0c\u4f60\u662f\u5728\u95f9\u7740\u73a9\u5427\u3002",
-    "\u54c8\u54c8\uff0c\u539f\u6765\u662f\u73a9\u7b11\u3002\u4f60\u8fd8\u771f\u4f1a\u9009\u65f6\u5019\u3002"
+  for (const sentence of [
+    "哈哈。",
+    "原来。",
+    "收到。",
+    "这样啊。",
+    "吓一跳。",
+    "是假的。",
+    "你在骗人。",
+    "捉弄别人可不好。"
   ]) {
-    assert.equal(acknowledgement.test(reply), false, reply);
+    assert.equal(hasFirstSentenceSemanticJokeAcknowledgement(sentence), false, sentence);
   }
+
+  assert.equal(hasSemanticJokeAcknowledgement("平静一下。你刚才是在骗我。"), false);
+});
+
+test("P2-86C joke acknowledgement diagnostic classifies only the conservative closed set", () => {
+  assert.equal(classifyJokeAcknowledgement("原来是在开玩笑。"), "first_sentence_explicit_marker");
+  assert.equal(classifyJokeAcknowledgement("可把我骗到了。"), "first_sentence_semantic_ack");
+  assert.equal(classifyJokeAcknowledgement("你把我吓了一跳。"), "first_sentence_semantic_ack");
+  assert.equal(classifyJokeAcknowledgement("这样啊。原来是玩笑。"), "later_sentence_explicit_marker");
+
+  for (const reply of ["哈哈。", "原来。", "收到。", "这样啊。"] ) {
+    assert.equal(classifyJokeAcknowledgement(reply), "ambiguous_generic", reply);
+  }
+
+  for (const reply of ["吓一跳。", "是假的。", "你在骗人。", "捉弄别人可不好。", "平静一下。你刚才是在骗我。", "我会在这里陪你。"]) {
+    assert.equal(classifyJokeAcknowledgement(reply), "absent", reply);
+  }
+});
+
+test("P2-86C joke acknowledgement diagnostic exposes aggregate counters only", () => {
+  const counts = createJokeAcknowledgementDiagnosticCounts();
+  recordJokeAcknowledgementDiagnostic(counts, "first_sentence_explicit_marker");
+  recordJokeAcknowledgementDiagnostic(counts, "first_sentence_semantic_ack");
+  recordJokeAcknowledgementDiagnostic(counts, "unknown_category");
+
+  assert.deepEqual(counts, {
+    first_sentence_explicit_marker: 1,
+    first_sentence_semantic_ack: 1,
+    later_sentence_explicit_marker: 0,
+    ambiguous_generic: 0,
+    absent: 0
+  });
+  assert.match(acceptanceSource, /jokeAcknowledgementDiagnostics,\s*checks,/);
+  assert.doesNotMatch(
+    acceptanceSource,
+    /jokeAcknowledgementDiagnostics:\s*\{[\s\S]*?\b(?:reply|firstSentence|opening|hash)\s*:/
+  );
+});
+
+test("P2-86C bundled joke diversity outputs only aggregate safe evidence", () => {
+  assert.equal((acceptanceSource.match(/caseId: "joke-/g) ?? []).length, 4);
+  assert.match(acceptanceSource, /openingVariantCount: new Set\(jokeOpeningVariants\)\.size/);
+  assert.match(acceptanceSource, /fixedOpeningDetected: jokeOpeningVariants\.length > 1 && new Set\(jokeOpeningVariants\)\.size === 1/);
+  assert.match(acceptanceSource, /checks\.jokeOpeningDiversity = new Set\(jokeOpeningVariants\)\.size > 1/);
+  assert.doesNotMatch(acceptanceSource, /jokeDiversity:\s*\{[\s\S]*?\breply\s*:/);
+});
+
+test("P2-86C bundled pre-Electron setup diagnostics use a closed opaque contract", () => {
+  assert.deepEqual(BUNDLED_SETUP_STAGES, [
+    "validation",
+    "port",
+    "context",
+    "diagnostic_init"
+  ]);
+  for (const stage of BUNDLED_SETUP_STAGES) {
+    assert.deepEqual(
+      createBundledSetupFailureDiagnostic(stage, new TypeError("C:\\private\\model.gguf")),
+      { stage, errorName: "TypeError" }
+    );
+  }
+  assert.deepEqual(
+    createBundledSetupFailureDiagnostic("untrusted-stage", {
+      name: "C:\\private\\token"
+    }),
+    { stage: "diagnostic_init", errorName: "unknown_error" }
+  );
+  const untrustedErrorName = new Error("C:\\private\\model.gguf");
+  untrustedErrorName.name = "C:\\private\\error-name";
+  assert.deepEqual(
+    createBundledSetupFailureDiagnostic("context", untrustedErrorName),
+    { stage: "context", errorName: "unknown_error" }
+  );
+
+  const setupDiagnosticSource = acceptanceSource.slice(
+    acceptanceSource.indexOf("async function runBundledQwen"),
+    acceptanceSource.indexOf("function bundledCases()")
+  );
+  assert.match(setupDiagnosticSource, /setupStage = "validation"/);
+  assert.match(setupDiagnosticSource, /setupStage = "port"/);
+  assert.match(setupDiagnosticSource, /setupStage = "context"/);
+  assert.match(setupDiagnosticSource, /setupStage = "diagnostic_init"/);
+  assert.match(setupDiagnosticSource, /failureCategory: `bundled_setup_\$\{setupDiagnostic\.stage\}`/);
+  assert.match(setupDiagnosticSource, /if \(context\) \{[\s\S]*await cleanupContext\(context, null\)/);
+  assert.doesNotMatch(setupDiagnosticSource, /\b(?:message|stack|path)\b/);
+});
+
+test("P2-86C bundled runtime failures close primary, cleanup, and summary errors", async () => {
+  assert.deepEqual(BUNDLED_RUN_STAGES, [
+    "electron_flow",
+    "runtime_handoff",
+    "case_execution",
+    "joke_diagnostics",
+    "evidence_aggregation",
+    "cleanup",
+    "result_summary"
+  ]);
+
+  const cleanupReject = await finalizeBundledRun({
+    primaryStage: "electron_flow",
+    primaryFailure: false,
+    primaryError: null,
+    cleanup: async () => { throw new TypeError(); },
+    buildResult: () => { throw new Error("build must not run"); }
+  });
+  assert.deepEqual(cleanupReject.runDiagnostic, {
+    stage: "cleanup",
+    primaryFailurePresent: false,
+    primaryErrorName: "none",
+    cleanupErrorName: "TypeError"
+  });
+  assert.equal(cleanupReject.failureCategory, "bundled_run_cleanup");
+
+  const primaryAndCleanup = await finalizeBundledRun({
+    primaryStage: "runtime_handoff",
+    primaryFailure: true,
+    primaryError: new RangeError(),
+    cleanup: async () => { throw new TypeError(); },
+    buildResult: () => ({ ok: true })
+  });
+  assert.deepEqual(primaryAndCleanup.runDiagnostic, {
+    stage: "runtime_handoff",
+    primaryFailurePresent: true,
+    primaryErrorName: "RangeError",
+    cleanupErrorName: "TypeError"
+  });
+  assert.equal(primaryAndCleanup.failureCategory, "bundled_run_runtime_handoff");
+
+  const malformedCleanup = await finalizeBundledRun({
+    primaryStage: "case_execution",
+    primaryFailure: false,
+    primaryError: null,
+    cleanup: async () => ({}),
+    buildResult: () => ({ ok: true })
+  });
+  assert.equal(malformedCleanup.runDiagnostic.stage, "cleanup");
+  assert.equal(malformedCleanup.runDiagnostic.cleanupErrorName, "TypeError");
+
+  const summaryError = await finalizeBundledRun({
+    primaryStage: "case_execution",
+    primaryFailure: false,
+    primaryError: null,
+    cleanup: async () => ({
+      electronStopped: true,
+      cdpPortReleased: true,
+      runtimePortReleased: true,
+      runnerTmpRemoved: true
+    }),
+    buildResult: () => { throw new ReferenceError(); }
+  });
+  assert.deepEqual(summaryError.runDiagnostic, {
+    stage: "result_summary",
+    primaryFailurePresent: true,
+    primaryErrorName: "ReferenceError",
+    cleanupErrorName: "none"
+  });
+
+  const nonStandardPrimary = await finalizeBundledRun({
+    primaryStage: "joke_diagnostics",
+    primaryFailure: true,
+    primaryError: undefined,
+    cleanup: async () => ({
+      electronStopped: true,
+      cdpPortReleased: true,
+      runtimePortReleased: true,
+      runnerTmpRemoved: true
+    }),
+    buildResult: () => ({ ok: true })
+  });
+  assert.deepEqual(nonStandardPrimary.runDiagnostic, {
+    stage: "joke_diagnostics",
+    primaryFailurePresent: true,
+    primaryErrorName: "unknown_error",
+    cleanupErrorName: "none"
+  });
+
+  const runtimeSource = acceptanceSource.slice(
+    acceptanceSource.indexOf("export const BUNDLED_RUN_STAGES"),
+    acceptanceSource.indexOf("function bundledCases()")
+  );
+  assert.match(runtimeSource, /failureCategory: `bundled_run_\$\{runDiagnostic\.stage\}`/);
+  assert.match(runtimeSource, /cleanupResult = await cleanup\(\)/);
+  assert.doesNotMatch(runtimeSource, /\b(?:message|stack|path|reply|opening)\b/);
+});
+
+test("P2-86C outer bundled fallback keeps only a closed safe diagnostic", () => {
+  assert.deepEqual(BUNDLED_FALLBACK_STAGES, [
+    "entry",
+    "validation",
+    "port",
+    "context",
+    "diagnostic_init",
+    "electron_flow",
+    "runtime_handoff",
+    "case_execution",
+    "joke_diagnostics",
+    "evidence_aggregation",
+    "cleanup",
+    "result_summary",
+    "returned"
+  ]);
+  for (const stage of BUNDLED_FALLBACK_STAGES) {
+    assert.deepEqual(
+      createBundledFallbackDiagnostic(stage, new TypeError("C:\\private\\model.gguf")),
+      { stage, errorName: "TypeError" }
+    );
+  }
+  assert.deepEqual(
+    createBundledFallbackDiagnostic("untrusted-stage", { name: "C:\\private\\token" }),
+    { stage: "entry", errorName: "unknown_error" }
+  );
+  assert.deepEqual(
+    createBundledFallbackDiagnostic("cleanup", undefined),
+    { stage: "cleanup", errorName: "unknown_error" }
+  );
+  assert.deepEqual(
+    createBundledFallbackDiagnostic("result_summary", new Proxy(new Error(), {
+      get() { throw new Error("must not expose"); }
+    })),
+    { stage: "result_summary", errorName: "unknown_error" }
+  );
+
+  const fallbackSource = acceptanceSource.slice(
+    acceptanceSource.indexOf("function failedSection"),
+    acceptanceSource.indexOf("function classifyError")
+  );
+  assert.match(fallbackSource, /mode === "bundled-local-qwen-real-ui"/);
+  assert.match(fallbackSource, /failureCategory: "bundled_fallback_failure"/);
+  assert.match(fallbackSource, /fallbackDiagnostic: createBundledFallbackDiagnostic\(bundledActiveStage, error\)/);
+  assert.doesNotMatch(fallbackSource, /\b(?:message|stack|path)\b/);
+
+  const bundledSource = acceptanceSource.slice(
+    acceptanceSource.indexOf("async function runBundledQwen"),
+    acceptanceSource.indexOf("function bundledCases()")
+  );
+  assert.match(bundledSource, /setBundledActiveStage\("entry"\)/);
+  assert.match(bundledSource, /setBundledActiveStage\("returned"\)/);
 });
 
 test("P2-84 bundled explicit tired accepts heartache while retaining relevance and non-taskifying guards", () => {
   const tiredCase = acceptanceSource.match(
-    /caseId: "explicit-tired",[\s\S]*?\r?\n    \},\r?\n    \{\r?\n      caseId: "joke"/
+    /caseId: "explicit-tired",[\s\S]*?\r?\n    \},\r?\n    \{\r?\n      caseId: "joke-world-ending"/
   )?.[0] ?? "";
 
   assert.match(tiredCase, /relevant:\s*hasAny\(reply, \["累", "疲惫", "困", "歇", "休息", "安静", "陪", "听"\]\)/);

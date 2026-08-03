@@ -17,18 +17,18 @@ const { createDialogueAffectSettingsStore } = require(
   "../dist/main/services/config/dialogue-affect-settings-store.js"
 ) as typeof import("../src/main/services/config/dialogue-affect-settings-store");
 
-test("dialogue affect settings default to enabled and preserve an explicit opt-out", () => {
+test("dialogue affect settings are always enabled and ignore explicit opt-outs", () => {
   assert.equal(DIALOGUE_AFFECT_SETTINGS_SCHEMA_VERSION, 1);
   assert.deepEqual(DEFAULT_DIALOGUE_AFFECT_SETTINGS, { enabled: true });
   assert.deepEqual(normalizeDialogueAffectSettings(null), { enabled: true });
-  assert.deepEqual(resolveDialogueAffectSettingsRecord({ version: 1, enabled: false }), { enabled: false });
+  assert.deepEqual(resolveDialogueAffectSettingsRecord({ version: 1, enabled: false }), { enabled: true });
   assert.deepEqual(createDialogueAffectSettingsRecord({ enabled: false }), {
     version: 1,
-    enabled: false
+    enabled: true
   });
 });
 
-test("dialogue affect store rejects malformed records and writes only the versioned opt-out", async () => {
+test("dialogue affect store normalizes malformed records and disable requests to enabled", async () => {
   await withStore(async (userDataPath) => {
     const store = createDialogueAffectSettingsStore({ userDataPath });
     assert.deepEqual(store.getSettings(), { enabled: true });
@@ -40,10 +40,10 @@ test("dialogue affect store rejects malformed records and writes only the versio
     await writeFile(store.getSettingsPath(), "not-json", "utf8");
     assert.deepEqual(createDialogueAffectSettingsStore({ userDataPath }).getSettings(), { enabled: true });
 
-    assert.deepEqual(store.saveSettings({ enabled: false, extra: "must-not-persist" }), { enabled: false });
+    assert.deepEqual(store.saveSettings({ enabled: false, extra: "must-not-persist" }), { enabled: true });
     assert.deepEqual(JSON.parse(await readFile(store.getSettingsPath(), "utf8")), {
       version: 1,
-      enabled: false
+      enabled: true
     });
     assert.deepEqual(await readdir(dirname(store.getSettingsPath())), [
       "dialogue-affect-settings.json"
@@ -51,7 +51,7 @@ test("dialogue affect store rejects malformed records and writes only the versio
   });
 });
 
-test("future dialogue affect schema preserves explicit opt-out and unknown fields when updated", async () => {
+test("future dialogue affect schema preserves unknown fields but normalizes opt-out", async () => {
   await withStore(async (userDataPath) => {
     const settingsPath = join(userDataPath, "config", "dialogue-affect-settings.json");
     await mkdir(dirname(settingsPath), { recursive: true });
@@ -62,7 +62,7 @@ test("future dialogue affect schema preserves explicit opt-out and unknown field
     }), "utf8");
 
     const store = createDialogueAffectSettingsStore({ userDataPath });
-    assert.deepEqual(store.getSettings(), { enabled: false });
+    assert.deepEqual(store.getSettings(), { enabled: true });
     assert.deepEqual(store.saveSettings({ enabled: true }), { enabled: true });
     assert.deepEqual(JSON.parse(await readFile(settingsPath, "utf8")), {
       version: 2,
