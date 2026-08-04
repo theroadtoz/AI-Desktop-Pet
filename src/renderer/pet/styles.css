@@ -23,13 +23,13 @@ body {
   position: fixed;
   top: clamp(12px, 6vh, 34px);
   left: clamp(14px, 8vw, 38px);
-  max-width: min(328px, calc(100vw - 32px));
-  min-height: 58px;
+  max-width: min(262.4px, calc(100vw - 32px));
+  min-height: 46.4px;
   box-sizing: border-box;
-  padding: 18px 20px;
+  padding: 14.4px 16px;
   overflow: visible;
   border: 0;
-  border-radius: 34px;
+  border-radius: 27.2px;
   color: #000;
   background: #e7e0fa;
   box-shadow: none;

@@ -88,9 +88,10 @@ try {
       return style.backgroundColor === "rgb(231, 224, 250)" &&
         style.color === "rgb(0, 0, 0)" &&
         style.borderTopWidth === "0px" &&
-        style.borderRadius === "34px" &&
-        style.padding === "18px 20px" &&
-        style.minHeight === "58px" &&
+        style.maxWidth === "262.4px" &&
+        style.borderRadius === "27.2px" &&
+        style.padding === "14.4px 16px" &&
+        style.minHeight === "46.4px" &&
         style.fontSize === "16px" &&
         style.lineHeight === "21.6px" &&
         style.boxShadow === "none" &&
