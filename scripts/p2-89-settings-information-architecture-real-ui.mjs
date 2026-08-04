@@ -79,6 +79,27 @@ try {
   await connectToElectron(context);
   const pet = await waitForWindow(context, "renderer/pet/index.html");
   await waitFor(pet, "Boolean(window.petApi)");
+  checks.proactiveBubbleMatchesPetMessageStyle = await evaluate(pet, `
+    (() => {
+      const bubble = document.querySelector("#proactive-speech-bubble");
+      const style = getComputedStyle(bubble);
+      const before = getComputedStyle(bubble, "::before");
+      const after = getComputedStyle(bubble, "::after");
+      return style.backgroundColor === "rgb(231, 224, 250)" &&
+        style.color === "rgb(0, 0, 0)" &&
+        style.borderTopWidth === "0px" &&
+        style.borderRadius === "34px" &&
+        style.padding === "18px 20px" &&
+        style.minHeight === "58px" &&
+        style.fontSize === "16px" &&
+        style.lineHeight === "21.6px" &&
+        style.boxShadow === "none" &&
+        before.content.includes("✦") &&
+        after.content.includes("✦") &&
+        before.color === "rgb(215, 171, 82)" &&
+        after.color === "rgb(215, 171, 82)";
+    })()
+  `);
   await evaluate(pet, "window.petApi.openChat()");
   const chat = await waitForWindow(context, "renderer/chat/index.html");
   await waitFor(chat, "Boolean(document.querySelector('#settings-button'))");
@@ -197,7 +218,11 @@ try {
         buttonStyle.animationDuration === "1.26092s";
     })()
   `);
-  await new Promise((resolve) => setTimeout(resolve, 1400));
+  await new Promise((resolve) => setTimeout(resolve, 140));
+  checks.sendPromptFadesQuickly = await evaluate(chat, `
+    Number.parseFloat(getComputedStyle(document.querySelector("#chat-input"), "::placeholder").opacity) <= 0.05
+  `);
+  await new Promise((resolve) => setTimeout(resolve, 1260));
   checks.sendMotionFinishes = await evaluate(chat, `
     document.querySelector("#chat-form")?.classList.contains("is-sending") === false &&
     document.querySelector("#messages")?.classList.contains("is-sending") === false &&

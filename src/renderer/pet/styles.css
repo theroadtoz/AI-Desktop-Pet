@@ -23,15 +23,17 @@ body {
   position: fixed;
   top: clamp(12px, 6vh, 34px);
   left: clamp(14px, 8vw, 38px);
-  max-width: min(178px, calc(100vw - 32px));
+  max-width: min(328px, calc(100vw - 32px));
+  min-height: 58px;
   box-sizing: border-box;
-  padding: 8px 11px;
-  border: 1px solid #e7dccb;
-  border-radius: 8px;
-  color: #4b3928;
-  background: #fffaf0;
-  box-shadow: 0 2px 6px rgba(75, 57, 40, 0.08);
-  font: 13px/1.45 "Microsoft YaHei", "Segoe UI", sans-serif;
+  padding: 18px 20px;
+  overflow: visible;
+  border: 0;
+  border-radius: 34px;
+  color: #000;
+  background: #e7e0fa;
+  box-shadow: none;
+  font: 16px/1.35 "Microsoft YaHei", "Segoe UI", sans-serif;
   letter-spacing: 0;
   overflow-wrap: anywhere;
   text-align: left;
@@ -44,6 +46,31 @@ body {
     opacity 160ms ease,
     transform 160ms ease,
     visibility 160ms ease;
+}
+
+#proactive-speech-bubble::before,
+#proactive-speech-bubble::after {
+  position: absolute;
+  z-index: 1;
+  color: #d7ab52;
+  content: "✦";
+  font-family: "Microsoft YaHei", "Segoe UI Symbol", sans-serif;
+  line-height: 1;
+  pointer-events: none;
+}
+
+#proactive-speech-bubble::before {
+  top: -10px;
+  left: 5px;
+  font-size: 20px;
+  transform: rotate(19deg);
+}
+
+#proactive-speech-bubble::after {
+  right: 3px;
+  bottom: -8px;
+  font-size: 16px;
+  transform: rotate(-37deg);
 }
 
 #proactive-speech-bubble[data-state="visible"] {
