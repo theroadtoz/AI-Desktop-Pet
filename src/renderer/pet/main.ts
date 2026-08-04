@@ -30,7 +30,7 @@ import {
   selectEmotionPresentation,
   type EmotionPresentation
 } from "../../shared/emotion-presentation";
-import type { PetPresentationIntent } from "../../shared/pet-role-state";
+import { applyPetPresentationIntent } from "./presentation-intent-receiver";
 import {
   getPetActionStateActionType,
   getPetActionStateForReason
@@ -540,48 +540,31 @@ function applyBasePresentation(
   applyBasePresentationToModel(presentation, accessorySelection);
 }
 
-function applyPresentationIntent(intent: PetPresentationIntent): void {
-  const expressionAllowed = intent.expression.mode === "emphasis"
-    ? intent.allowEmphasisExpression
-    : intent.expression.mode === "micro"
-      ? intent.allowMicroExpression
-      : true;
-
-  canvas.dataset.roleState = intent.state;
-  canvas.dataset.workStatus = intent.workStatus;
-  canvas.dataset.expressionEmotion = intent.expression.emotion;
-  canvas.dataset.expressionIntensity = intent.expression.intensity;
-  canvas.dataset.expressionMode = intent.expression.mode;
-  window.petApi?.reportTelemetry("pet_presentation_intent_applied", {
-    state: intent.state,
-    requestVersion: intent.requestVersion,
-    emotion: intent.expression.emotion,
-    intensity: intent.expression.intensity,
-    mode: intent.expression.mode,
-    allowMicroExpression: intent.allowMicroExpression,
-    allowEmphasisExpression: intent.allowEmphasisExpression,
-    recovery: intent.recovery
-  });
-  lastAccessorySelection = intent.accessorySelection;
-  if (live2DModel) {
-    live2DModel.setAccessorySelection(lastAccessorySelection);
-  } else {
-    pendingAccessorySelection = lastAccessorySelection;
-  }
-
-  if (expressionAllowed) {
-    lastPresentation = intent.expression;
-  }
-
-  if (!interactionActionPlayer.isActive()) {
-    applyBasePresentationToModel(lastPresentation, lastAccessorySelection);
-  }
-
-  live2DRenderer?.boostInteraction();
-}
-
 const removePresentationIntentListener = window.petApi?.onPresentationIntent((intent) => {
-  applyPresentationIntent(intent);
+  applyPetPresentationIntent(intent, {
+    dataset: canvas.dataset,
+    reportAppliedIntent: (payload) => {
+      window.petApi?.reportTelemetry("pet_presentation_intent_applied", payload);
+    },
+    setPersistentAccessorySelection: (accessorySelection) => {
+      lastAccessorySelection = accessorySelection;
+      if (live2DModel) {
+        live2DModel.setAccessorySelection(lastAccessorySelection);
+      } else {
+        pendingAccessorySelection = lastAccessorySelection;
+      }
+    },
+    setPersistentPresentation: (presentation) => {
+      lastPresentation = presentation;
+    },
+    getPersistentPresentation: () => lastPresentation,
+    getPersistentAccessorySelection: () => lastAccessorySelection,
+    isInteractionActionActive: () => interactionActionPlayer.isActive(),
+    applyPresentation: applyBasePresentationToModel,
+    boostInteraction: () => {
+      live2DRenderer?.boostInteraction();
+    }
+  });
 }) ?? null;
 window.petApi?.presentationReady();
 

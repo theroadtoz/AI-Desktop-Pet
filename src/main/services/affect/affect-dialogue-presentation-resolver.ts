@@ -79,6 +79,14 @@ export function resolveAffectDialoguePresentation(
     };
   }
 
+  if (input.state === "sleepy" && input.isSleepEligible) {
+    return {
+      expression: NEUTRAL_EXPRESSION,
+      action: { reason: "state_sleep" },
+      replyAction: "affect"
+    };
+  }
+
   return { expression: NEUTRAL_EXPRESSION, action: null, replyAction: "suppressed" };
 }
 

@@ -213,6 +213,12 @@ import {
   resolveAffectDialoguePresentation,
   type AffectDialoguePresentationResolution
 } from "./services/affect/affect-dialogue-presentation-resolver";
+import {
+  canStartAttentionMicroCueSafely,
+  isAttentionMicroCueRolloutEnabled as readAttentionMicroCueRolloutEnabled,
+  publishAffectTerminalPresentation,
+  selectAffectPresentationCrosswalk
+} from "./services/affect/affect-presentation-crosswalk";
 import { createDeterministicXitaInteractionCueShadowObservation } from "./services/affect/deterministic-xita-interaction-cue";
 import { createReplyCompletionAffectActionController } from "./services/affect/reply-completion-affect-action-controller";
 import { createReplyCompletionAffectRetryScheduler } from "./services/affect/reply-completion-affect-retry-scheduler";
@@ -438,8 +444,9 @@ const isP288dCuriousFocusPulsePreviewEnabled =
   !app.isPackaged &&
   process.env.AI_DESKTOP_PET_ACCEPTANCE_TELEMETRY === "1" &&
   process.env.AI_DESKTOP_PET_P2_88D_CURIOUS_LOW_PREVIEW === "1";
-const isAttentionMicroCueRolloutEnabled =
-  process.env.AI_DESKTOP_PET_ATTENTION_MICRO_CUE_ROLLOUT === "1";
+const isAttentionMicroCueRolloutEnabled = readAttentionMicroCueRolloutEnabled(
+  process.env.AI_DESKTOP_PET_ATTENTION_MICRO_CUE_ROLLOUT
+);
 const isP285AcceptanceObservationEnabled = isAcceptanceTelemetryEnabled &&
   process.env.AI_DESKTOP_PET_P2_85_SAFE_OBSERVATION === "1";
 const isP285AcceptanceFixtureEnabled = isP285AcceptanceObservationEnabled &&
@@ -1398,13 +1405,13 @@ function deferReplyCompletionAffectActionIfEligible(
   resolution: AffectDialoguePresentationResolution | null,
   shouldRequestReplyWarmSettle: boolean,
   requestVersion: number
-): void {
+): boolean {
   if (
     !shouldRequestReplyWarmSettle ||
     resolution?.replyAction !== "affect" ||
     resolution.action?.reason !== "state_idle"
   ) {
-    return;
+    return false;
   }
 
   const legacyDecision = resolveCompanionContextArbitration(
@@ -1428,7 +1435,9 @@ function deferReplyCompletionAffectActionIfEligible(
       requestVersion,
       reason: "state_idle"
     });
+    return true;
   }
+  return false;
 }
 
 function dispatchDeferredReplyCompletionAffectAction(input: {
@@ -1645,16 +1654,23 @@ function isChatVisible(): boolean {
 }
 
 function sendAttentionMicroCueCommand(command: AttentionMicroCueCommand): boolean {
-  if (
-    !petWindow ||
-    petWindow.isDestroyed() ||
-    !petWindow.isVisible() ||
-    (command.operation === "start" && !hasPetFirstFrame)
-  ) {
-    return false;
-  }
-
   try {
+    const isStartAllowed = command.operation !== "start" || canStartAttentionMicroCueSafely(() => ({
+      rolloutEnabled: isAttentionMicroCueRolloutEnabled,
+      affectEnabled: currentDialogueAffectSettings.enabled,
+      petReady: hasPetFirstFrame,
+      petVisible: Boolean(petWindow && !petWindow.isDestroyed() && petWindow.isVisible()),
+      presentationBusy: petActionDispatchCoordinator?.getState().busy ?? true
+    }));
+    if (
+      !isStartAllowed ||
+      !petWindow ||
+      petWindow.isDestroyed() ||
+      !petWindow.isVisible() ||
+      (command.operation === "start" && !hasPetFirstFrame)
+    ) {
+      return false;
+    }
     petWindow.webContents.send(ATTENTION_MICRO_CUE_CHANNEL, command);
     return true;
   } catch {
@@ -2171,7 +2187,10 @@ function savePetAccessorySelection(accessoryIds: readonly PetAccessoryId[]): Pet
   return preferences;
 }
 
-function transitionPetRole(event: PetRoleEvent): boolean {
+function transitionPetRole(
+  event: PetRoleEvent,
+  options: Readonly<{ publish?: boolean }> = {}
+): boolean {
   const transition = reducePetRoleState(petRoleSnapshot, event);
 
   if (!transition.accepted) {
@@ -2180,7 +2199,9 @@ function transitionPetRole(event: PetRoleEvent): boolean {
 
   petRoleSnapshot = transition.snapshot;
   currentPetPresentationIntent = withCurrentAccessorySelection(transition.intent);
-  publishPetPresentation(currentPetPresentationIntent);
+  if (options.publish !== false) {
+    publishPetPresentation(currentPetPresentationIntent);
+  }
   logTelemetry("pet_role_transition", {
     state: petRoleSnapshot.state,
     requestVersion: petRoleSnapshot.activeRequestVersion,
@@ -4464,16 +4485,15 @@ app.whenReady().then(async () => {
       }
 
       const replyExpression = selectEmotionPresentation(result);
-      const expression = currentDialogueAffectSettings.enabled &&
-        affectPresentation &&
-        replyExpression.mode === "neutral"
-        ? affectPresentation.expression
+      const xitaPresentation = currentDialogueAffectSettings.enabled ? affectPresentation : null;
+      const terminalExpression = replyExpression.mode === "neutral" && xitaPresentation
+        ? xitaPresentation.expression
         : replyExpression;
       const accepted = transitionPetRole({
         type: "reply:completed",
         requestVersion: request.requestVersion,
-        expression
-      });
+        expression: terminalExpression
+      }, { publish: false });
       if (activeChatRequestVersion === request.requestVersion) {
         activeChatRequestVersion = null;
         latestCompletedChatRequestVersion = request.requestVersion;
@@ -4493,8 +4513,12 @@ app.whenReady().then(async () => {
         affectPresentation,
         shouldRequestReplyWarmSettle
       );
+      let acceptedActionReason: PetActionTriggerReason | null = null;
       if (dialogueReplyActionReason) {
         const attempt = requestPetActionTriggerWithResult(dialogueReplyActionReason);
+        if (attempt.coordinatorAttempted && attempt.result.accepted) {
+          acceptedActionReason = dialogueReplyActionReason;
+        }
         if (
           dialogueReplyActionReason === affectPresentation?.action?.reason
         ) {
@@ -4515,10 +4539,21 @@ app.whenReady().then(async () => {
           }
         }
       }
-      deferReplyCompletionAffectActionIfEligible(
+      const deferredActionPending = deferReplyCompletionAffectActionIfEligible(
         affectPresentation,
         shouldRequestReplyWarmSettle,
         request.requestVersion
+      );
+      const presentationPlan = selectAffectPresentationCrosswalk({
+        acceptedAction: acceptedActionReason ? { reason: acceptedActionReason } : null,
+        actionPending: deferredActionPending,
+        emotion: replyExpression,
+        xita: xitaPresentation
+      });
+      currentPetPresentationIntent = publishAffectTerminalPresentation(
+        presentationPlan,
+        currentPetPresentationIntent,
+        publishPetPresentation
       );
 
       logTelemetry("chat_stream_completed", {
@@ -4529,8 +4564,11 @@ app.whenReady().then(async () => {
         durationMs: Date.now() - startedAt,
         emotion: result.emotion,
         intensity: result.intensity,
-        presentationMode: expression.mode,
-        emphasisExpressionTriggered: expression.mode === "emphasis"
+        presentationMode: presentationPlan.kind === "expression"
+          ? presentationPlan.expression.mode
+          : "neutral",
+        emphasisExpressionTriggered: presentationPlan.kind === "expression" &&
+          presentationPlan.expression.mode === "emphasis"
       });
       event.sender.send("chat:stream-done", {
         ...result,

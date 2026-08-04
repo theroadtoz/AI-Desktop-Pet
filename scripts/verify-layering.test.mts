@@ -56,6 +56,24 @@ test("verification scripts keep local assets outside core and register security 
 
   assert.match(packageJson.scripts["verify:core"], /npm run test:live2d-core/u);
   assert.match(packageJson.scripts["verify:core"], /npm run test:history/u);
+  assert.match(packageJson.scripts["verify:core"], /npm run test:p2-91b-contract/u);
+  assert.match(packageJson.scripts["verify:core"], /npm run test:p2-82b-environment/u);
+  assert.match(packageJson.scripts["verify:core"], /npm run test:p2-82d-coarse-state/u);
+  assert.match(packageJson.scripts["verify:core"], /npm run test:p2-85-context-emotion-proactive/u);
+  const p291bTests = new Set(testFiles("test:p2-91b-contract"));
+  for (const path of [
+    "scripts/companion-environment.test.mts",
+    "scripts/coarse-user-state-coordinator.test.mts",
+    "scripts/companion-context-arbitration-policy.test.mts",
+    "scripts/p2-85-main-integration.test.mts",
+    "scripts/p2-91b-affect-presentation-crosswalk.test.mts",
+    "scripts/p2-91b-affect-presentation-integration.test.mts",
+    "scripts/p2-91b-environment-contract.test.mts",
+    "scripts/p2-88e-attention-micro-cue.test.mts",
+    "scripts/p2-88e-attention-micro-cue-real-ui.test.mts"
+  ]) {
+    assert.equal(p291bTests.has(path), true, `${path} must run through P2-91B verify`);
+  }
   assert.match(packageJson.scripts["verify:local-assets"], /verify-local-assets\.mjs/u);
   assert.match(packageJson.scripts["verify:local-llm-assets"], /verify-local-llm-assets\.mjs/u);
   assert.match(packageJson.scripts["verify:packaged-assets"], /verify-packaged-assets\.mjs/u);

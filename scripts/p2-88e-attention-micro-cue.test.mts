@@ -123,7 +123,7 @@ test("P2-88E carries only validated commands from main through preload into the 
   assert.match(renderer, /attentionMicroCueController\.handle\(command\)/);
 });
 
-test("P2-88E production wiring is default-off, dialogue-affect gated, and independent of action dispatch", () => {
+test("P2-91B production wiring makes P2-88E default-on with dialogue-affect and main-owner gates", () => {
   const appSource = readFileSync("src/main/app.ts", "utf8");
   const observationStart = appSource.indexOf(
     "const shadowObservation = createDeterministicXitaInteractionCueShadowObservation"
@@ -136,16 +136,25 @@ test("P2-88E production wiring is default-off, dialogue-affect gated, and indepe
   const settingsStart = appSource.indexOf('ipcMain.handle("dialogueAffect:set-settings"');
   const settingsEnd = appSource.indexOf('ipcMain.handle("localRuntime:diagnose-local-model"', settingsStart);
   const settingsSlice = appSource.slice(settingsStart, settingsEnd);
+  const senderStart = appSource.indexOf("function sendAttentionMicroCueCommand");
+  const senderEnd = appSource.indexOf("function getProactiveBubbleRuntimeGates", senderStart);
+  const senderSlice = appSource.slice(senderStart, senderEnd);
 
   assert.match(
     appSource,
-    /const isAttentionMicroCueRolloutEnabled =\s*process\.env\.AI_DESKTOP_PET_ATTENTION_MICRO_CUE_ROLLOUT === "1"/
+    /const isAttentionMicroCueRolloutEnabled = readAttentionMicroCueRolloutEnabled\(\s*process\.env\.AI_DESKTOP_PET_ATTENTION_MICRO_CUE_ROLLOUT\s*\)/
   );
   assert.match(
     acceptedRequestSlice,
     /shadowObservation[\s\S]*isAttentionMicroCueRolloutEnabled[\s\S]*currentDialogueAffectSettings\.enabled[\s\S]*sendAttentionMicroCueCommand\(ATTENTION_MICRO_CUE_START_COMMAND\)/
   );
-  assert.doesNotMatch(acceptedRequestSlice, /petActionDispatchCoordinator|requestPetActionTrigger|sendPetActionTrigger/);
+  assert.doesNotMatch(acceptedRequestSlice, /requestPetActionTrigger|sendPetActionTrigger/);
+  assert.match(senderSlice, /try \{[\s\S]*canStartAttentionMicroCueSafely\(\(\) => \(\{/);
+  assert.match(senderSlice, /catch \{[\s\S]*return false/);
+  assert.match(senderSlice, /affectEnabled: currentDialogueAffectSettings\.enabled/);
+  assert.match(senderSlice, /petReady: hasPetFirstFrame/);
+  assert.match(senderSlice, /petWindow\.isVisible\(\)/);
+  assert.match(senderSlice, /presentationBusy: petActionDispatchCoordinator\?\.getState\(\)\.busy \?\? true/);
   assert.match(
     settingsSlice,
     /!currentDialogueAffectSettings\.enabled[\s\S]*sendAttentionMicroCueCommand\(ATTENTION_MICRO_CUE_CANCEL_COMMAND\)/

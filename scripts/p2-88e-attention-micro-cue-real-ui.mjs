@@ -103,6 +103,153 @@ function normalizeWindowsPath(path) {
   return resolve(path).replaceAll("/", "\\").replace(/\\+$/u, "").toLocaleLowerCase("en-US");
 }
 
+export function runWindowsAcceptanceCommand(file, args, spawn = spawnSync) {
+  const result = spawn(file, args, {
+    cwd: root,
+    encoding: "utf8",
+    timeout: 15_000,
+    windowsHide: true
+  });
+  if (result.error || result.signal || result.status !== 0) {
+    return { ok: false, stdout: String(result.stdout ?? "") };
+  }
+  return { ok: true, stdout: String(result.stdout ?? "") };
+}
+
+const runWindowsCommand = runWindowsAcceptanceCommand;
+
+function readOwnedProcessTree(rootPid, commandRunner = runWindowsCommand) {
+  if (!Number.isSafeInteger(rootPid) || rootPid <= 0) {
+    return { ok: false, processes: [] };
+  }
+  const command = `
+    $owned = New-Object 'System.Collections.Generic.HashSet[int]'
+    [void]$owned.Add(${rootPid})
+    $processes = @(Get-CimInstance Win32_Process)
+    do {
+      $before = $owned.Count
+      $processes | Where-Object { $owned.Contains([int]$_.ParentProcessId) } | ForEach-Object { [void]$owned.Add([int]$_.ProcessId) }
+    } while ($owned.Count -gt $before)
+    @($processes | Where-Object { $owned.Contains([int]$_.ProcessId) } | ForEach-Object { @{ pid = [int]$_.ProcessId; name = [string]$_.Name } }) | ConvertTo-Json -Compress
+  `;
+  const result = commandRunner("powershell.exe", ["-NoProfile", "-Command", command]);
+  if (!result.ok || !result.stdout.trim()) return { ok: false, processes: [] };
+  try {
+    const parsed = JSON.parse(result.stdout.trim());
+    const processes = (Array.isArray(parsed) ? parsed : [parsed]).filter((entry) =>
+      Number.isSafeInteger(entry?.pid) && entry.pid > 0);
+    return processes.length > 0 ? { ok: true, processes } : { ok: false, processes: [] };
+  } catch {
+    return { ok: false, processes: [] };
+  }
+}
+
+function recordOwnedProcessTree(context, discover = readOwnedProcessTree) {
+  const rootPid = Number(context.child?.pid ?? context.p288eRootPid ?? 0);
+  if (!Number.isSafeInteger(rootPid) || rootPid <= 0) return false;
+  context.p288eRootPid = rootPid;
+  context.p288eOwnedPids ??= new Set();
+  context.p288eOwnedLlamaPids ??= new Set();
+  const discovery = discover(rootPid);
+  if (!discovery.ok) return false;
+  for (const process of discovery.processes) {
+    context.p288eOwnedPids.add(process.pid);
+    if (/^llama-server(?:\.exe)?$/iu.test(process.name)) context.p288eOwnedLlamaPids.add(process.pid);
+  }
+  return true;
+}
+
+async function terminateProcessTree(pid, commandRunner = runWindowsCommand) {
+  if (!Number.isSafeInteger(pid) || pid <= 0) return false;
+  return commandRunner("taskkill.exe", ["/PID", String(pid), "/T", "/F"]).ok;
+}
+
+function inspectProcess(pid, commandRunner = runWindowsCommand) {
+  const result = commandRunner("tasklist.exe", ["/FI", `PID eq ${pid}`, "/FO", "CSV", "/NH"]);
+  return {
+    ok: result.ok,
+    alive: result.ok && new RegExp(`"[^\"]+","${pid}"`, "u").test(result.stdout)
+  };
+}
+
+function listeningAcceptancePorts(commandRunner = runWindowsCommand) {
+  const result = commandRunner("netstat.exe", ["-ano", "-p", "tcp"]);
+  return {
+    ok: result.ok,
+    ports: result.ok
+      ? [...result.stdout.matchAll(/^\s*TCP\s+\S+:(9750|9751)\s+\S+\s+LISTENING\s+\d+\s*$/gimu)]
+        .map((match) => Number(match[1]))
+      : []
+  };
+}
+
+async function inspectAttentionResidue(context, processInspector = inspectProcess, portInspector = listeningAcceptancePorts) {
+  const ownedPids = [...(context.p288eOwnedPids ?? [])];
+  const ownedLlamaPids = [...(context.p288eOwnedLlamaPids ?? [])];
+  const processResults = ownedPids.map((pid) => ({ pid, ...processInspector(pid) }));
+  const llamaResults = ownedLlamaPids.map((pid) => ({ pid, ...processInspector(pid) }));
+  const ports = portInspector();
+  return {
+    ok: processResults.every((result) => result.ok) && llamaResults.every((result) => result.ok) && ports.ok,
+    liveOwnedPids: processResults.filter((result) => result.alive).map((result) => result.pid),
+    listeningPorts: [...new Set(ports.ports)],
+    liveOwnedLlamaPids: llamaResults.filter((result) => result.alive).map((result) => result.pid),
+    tmpExists: existsSync(context.runParentDir)
+  };
+}
+
+export async function cleanupAttentionRun(context, dependencies = {}) {
+  const stop = dependencies.stopElectron ?? stopElectron;
+  const terminate = dependencies.terminateProcessTree ?? terminateProcessTree;
+  const discover = dependencies.discoverProcessTree ?? readOwnedProcessTree;
+  const inspectProcessState = dependencies.inspectProcess ?? inspectProcess;
+  const cleanupRun = dependencies.cleanupRun ?? cleanupRealUiRun;
+  const inspect = dependencies.inspectResidue ?? inspectAttentionResidue;
+  const processDiscoveryOk = recordOwnedProcessTree(context, discover);
+  const rootPid = Number(context.p288eRootPid ?? context.child?.pid ?? 0);
+  const ownedPids = [...new Set([rootPid, ...(context.p288eOwnedPids ?? [])])]
+    .filter((pid) => Number.isSafeInteger(pid) && pid > 0);
+  let cleanupError = !processDiscoveryOk;
+  for (const pid of ownedPids) {
+    try {
+      const processState = await inspectProcessState(pid);
+      if (!processState.ok || (processState.alive && await terminate(pid) !== true)) cleanupError = true;
+    } catch { cleanupError = true; }
+  }
+  try { await stop(context); } catch { cleanupError = true; }
+  try { cleanupRun(context); } catch { cleanupError = true; }
+  let residue;
+  try {
+    residue = await inspect(context);
+  } catch {
+    residue = {
+      ok: false,
+      liveOwnedPids: ownedPids,
+      listeningPorts: [],
+      liveOwnedLlamaPids: [...(context.p288eOwnedLlamaPids ?? [])],
+      tmpExists: existsSync(context.runParentDir)
+    };
+  }
+  return {
+    ...residue,
+    ok: !cleanupError && residue.ok === true && residue.liveOwnedPids.length === 0 && residue.listeningPorts.length === 0 &&
+      residue.liveOwnedLlamaPids.length === 0 && residue.tmpExists === false,
+    processDiscoveryOk,
+    rootPid,
+    ownedPids,
+    ownedLlamaPids: [...(context.p288eOwnedLlamaPids ?? [])],
+    runParentDir: context.runParentDir
+  };
+}
+
+export function finalizeAttentionModeResult(result, cleanup) {
+  return {
+    ...result,
+    ok: result?.ok === true && cleanup?.ok === true,
+    cleanup
+  };
+}
+
 async function main() {
   const packResolution = resolveBundledPackRoot();
   if (!packResolution.ok) {
@@ -125,9 +272,9 @@ async function main() {
   };
   try {
     const off = await runMode({ rollout: false, port: 9750, packRoot: packResolution.packRoot });
-    const on = await runMode({ rollout: true, port: 9751, packRoot: packResolution.packRoot });
-    summary.checks = { off, on };
-    summary.ok = off.ok && on.ok;
+    const defaultOn = await runMode({ rollout: true, port: 9751, packRoot: packResolution.packRoot });
+    summary.checks = { off, defaultOn };
+    summary.ok = off.ok && defaultOn.ok;
   } catch (error) {
     summary.failure = classifyFailure(error);
   }
@@ -136,7 +283,7 @@ async function main() {
 }
 
 async function runMode({ rollout, port, packRoot }) {
-  const runName = `p2-88e-attention-micro-cue-real-ui-${rollout ? "on" : "off"}`;
+  const runName = `p2-88e-attention-micro-cue-real-ui-${rollout ? "default" : "off"}`;
   const context = createRealUiRunContext({
     runName,
     port,
@@ -147,20 +294,21 @@ async function runMode({ rollout, port, packRoot }) {
       AI_DESKTOP_PET_MODEL: "",
       AI_DESKTOP_PET_BUNDLED_LLAMA_CPP_ROOT: packRoot,
       AI_DESKTOP_PET_ACCEPTANCE_TELEMETRY: "1",
-      AI_DESKTOP_PET_ATTENTION_MICRO_CUE_ROLLOUT: rollout ? "1" : ""
+      ...(rollout ? {} : { AI_DESKTOP_PET_ATTENTION_MICRO_CUE_ROLLOUT: "0" })
     },
     tmpResiduePatterns: [new RegExp(`^${runName}$`, "i")]
   });
   context.electronArgs = ["--use-angle=swiftshader", "--enable-unsafe-swiftshader"];
 
+  let result;
   try {
-    return await runWithRealUiDeadline(() => runElectronMode(context, rollout), RUN_TIMEOUT_MS);
+    result = await runWithRealUiDeadline(() => runElectronMode(context, rollout), RUN_TIMEOUT_MS);
   } catch (error) {
     let transitionCount = 0;
     try {
       if (context.p288ePet) transitionCount = (await readTransitions(context.p288ePet)).length;
     } catch {}
-    return {
+    result = {
       ok: false,
       rollout,
       failureStage: context.p288eStage ?? "entry",
@@ -168,14 +316,22 @@ async function runMode({ rollout, port, packRoot }) {
       transitionCount
     };
   } finally {
-    await stopElectron(context);
-    cleanupRealUiRun(context);
+    const cleanup = await cleanupAttentionRun(context);
+    result = finalizeAttentionModeResult(result ?? {
+      ok: false,
+      rollout,
+      failureStage: context.p288eStage ?? "entry",
+      failure: "runner_error"
+    }, cleanup);
   }
+  return result;
 }
 
 async function runElectronMode(context, rollout) {
   context.p288eStage = "electron_start";
   startElectron(context);
+  context.p288eRootPid = Number(context.child?.pid ?? 0);
+  recordOwnedProcessTree(context);
   context.p288eStage = "cdp_connect";
   await connectToElectron(context, 45_000);
   context.p288eStage = "pet_window";
@@ -195,6 +351,7 @@ async function runElectronMode(context, rollout) {
   });
   context.p288eStage = "embedded_runtime";
   const handoff = await waitForEmbeddedRuntime(context);
+  recordOwnedProcessTree(context);
   context.p288eStage = "embedded_provider";
   const provider = await waitForEmbeddedProvider(chat, handoff);
   await installTransitionObserver(pet);
@@ -304,18 +461,22 @@ async function runConflict(context, pet, chat) {
     5_000
   );
   const transitionIndex = (await readTransitions(pet)).length;
+  const shadowIndex = readTelemetry(context).length;
   const replyPromise = submitMessage(chat);
-  await waitForTransition(pet, transitionIndex, "owner-active", 5_000);
+  const shadow = await waitForTelemetry(
+    context,
+    shadowIndex,
+    (event) => event.type === SHADOW_EVENT_TYPE,
+    10_000
+  );
   const reply = await replyPromise;
   await sleep(1_200);
-  const transitionEvidence = validateBlockedTransitionSequence(
-    (await readTransitions(pet)).slice(transitionIndex),
-    "owner-active"
-  );
+  const transitions = (await readTransitions(pet)).slice(transitionIndex);
   return {
-    ok: Boolean(owner) && transitionEvidence.ok && reply.completed,
+    ok: Boolean(owner) && Boolean(shadow) && transitions.length === 0 && reply.completed,
     ownerStarted: Boolean(owner),
-    transitionEvidence,
+    shadowObserved: Boolean(shadow),
+    cueTransitionCount: transitions.length,
     realReplyCompleted: reply.completed
   };
 }
