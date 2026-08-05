@@ -4,6 +4,7 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { toPersistentTelemetryEvent } from "../src/shared/telemetry-contract.ts";
 
 const require = createRequire(import.meta.url);
 const { createMemoryReviewStore } = require("../dist/main/services/chat/memory-review-store.js") as typeof import("../src/main/services/chat/memory-review-store");
@@ -210,11 +211,24 @@ test("suppressed and conflicting keys transition create suggestions to blocked w
 
 test("memory capture telemetry uses the post-extraction safe summary only", async () => {
   const appSource = await readFile(join(process.cwd(), "src", "main", "app.ts"), "utf8");
-  const telemetryStart = appSource.indexOf('logTelemetry("memory_auto_capture"');
-  const telemetryEnd = appSource.indexOf("});", telemetryStart);
-  const telemetry = appSource.slice(telemetryStart, telemetryEnd);
+  const captureStart = appSource.indexOf("memoryStoreForRequest.captureAutoMemoriesFromLatestUserMessage({");
+  const activityEnd = appSource.indexOf('event.sender.send("chat:memory-activity"', captureStart);
+  const captureActivityFlow = appSource.slice(captureStart, activityEnd + 500);
 
-  assert.match(telemetry, /enabled: autoMemoryCaptureForActivity\.enabled/);
-  assert.match(telemetry, /capturedCount: autoMemoryCaptureForActivity\.capturedCount/);
-  assert.doesNotMatch(telemetry, /safeCategories|autoMemoryCapture\.capturedCount/);
+  assert.match(captureActivityFlow, /captureAutoMemoriesFromLatestUserMessage\(\{[\s\S]*toChatMemoryActivityAutoCapture\(autoMemoryCapture\)[\s\S]*capturedCount: 1[\s\S]*event\.sender\.send\("chat:memory-activity"/u);
+  assert.match(appSource, /logTelemetry\("memory_auto_capture"\);/u);
+  assert.doesNotMatch(appSource, /logTelemetry\("memory_auto_capture"\s*,/u);
+  assert.match(appSource, /logTelemetry\("memory_auto_capture_failed"\);/u);
+  assert.doesNotMatch(appSource, /logTelemetry\("memory_auto_capture_failed"\s*,/u);
+
+  assert.deepEqual(toPersistentTelemetryEvent("memory_auto_capture", {}), {
+    type: "memory_auto_capture",
+    payload: {}
+  });
+  assert.deepEqual(toPersistentTelemetryEvent("memory_auto_capture_failed", {}), {
+    type: "memory_auto_capture_failed",
+    payload: {}
+  });
+  assert.equal(toPersistentTelemetryEvent("memory_auto_capture", { enabled: true }), null);
+  assert.equal(toPersistentTelemetryEvent("memory_auto_capture", { capturedCount: 1 }), null);
 });

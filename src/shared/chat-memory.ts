@@ -119,10 +119,10 @@ export type MemoryStorage = {
 };
 
 const ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const MAX_TITLE_LENGTH = 80;
-const MAX_CONTENT_LENGTH = 800;
-const MAX_TAG_LENGTH = 24;
-const MAX_TAGS = 8;
+export const MAX_TITLE_LENGTH = 80;
+export const MAX_CONTENT_LENGTH = 800;
+export const MAX_TAG_LENGTH = 24;
+export const MAX_TAGS = 8;
 const MAX_NAMESPACE_LENGTH = 32;
 const MAX_KEY_LENGTH = 48;
 const MAX_CATEGORY_LENGTH = 32;
@@ -134,9 +134,9 @@ const DEFAULT_MEMORY_CONFIDENCE = 1;
 const DEFAULT_MEMORY_OBSERVED_COUNT = 1;
 const DEFAULT_MEMORY_COMPRESSION_STATE: MemoryCompressionState = "raw";
 
-const memorySourceTypes = ["manual-chat", "auto-local-heuristic", "auto-local-model"] as const;
-const memoryImportanceValues = ["key", "general"] as const;
-const memoryCompressionStates = ["raw", "merged", "deduplicated", "budgeted"] as const;
+export const memorySourceTypes = ["manual-chat", "auto-local-heuristic", "auto-local-model"] as const;
+export const memoryImportanceValues = ["key", "general"] as const;
+export const memoryCompressionStates = ["raw", "merged", "deduplicated", "budgeted"] as const;
 
 export function isMemoryId(value: unknown): value is string {
   return typeof value === "string" && ID_PATTERN.test(value);
@@ -188,7 +188,7 @@ export function normalizeMemoryTags(value: unknown): string[] | null {
   return tags;
 }
 
-function normalizeMemoryNamespace(value: unknown): string | null {
+export function normalizeMemoryNamespace(value: unknown): string | null {
   const normalized = normalizeMemoryText(value, MAX_NAMESPACE_LENGTH);
 
   return normalized && /^[a-z0-9][a-z0-9_-]{0,31}$/i.test(normalized)
@@ -196,7 +196,7 @@ function normalizeMemoryNamespace(value: unknown): string | null {
     : null;
 }
 
-function normalizeMemoryKey(value: unknown): string | null {
+export function normalizeMemoryKey(value: unknown): string | null {
   const normalized = normalizeMemoryText(value, MAX_KEY_LENGTH);
 
   return normalized && /^[a-z0-9][a-z0-9:_-]{0,47}$/i.test(normalized)
@@ -204,7 +204,7 @@ function normalizeMemoryKey(value: unknown): string | null {
     : null;
 }
 
-function normalizeMemoryCategory(value: unknown): string | null {
+export function normalizeMemoryCategory(value: unknown): string | null {
   const normalized = normalizeMemoryText(value, MAX_CATEGORY_LENGTH);
 
   return normalized && /^[a-z0-9][a-z0-9_-]{0,31}$/i.test(normalized)
@@ -212,19 +212,19 @@ function normalizeMemoryCategory(value: unknown): string | null {
     : null;
 }
 
-function parseMemorySourceType(value: unknown): MemorySourceType | null {
+export function parseMemorySourceType(value: unknown): MemorySourceType | null {
   return memorySourceTypes.includes(value as MemorySourceType) ? value as MemorySourceType : null;
 }
 
-function parseMemoryImportance(value: unknown): MemoryImportance | null {
+export function parseMemoryImportance(value: unknown): MemoryImportance | null {
   return memoryImportanceValues.includes(value as MemoryImportance) ? value as MemoryImportance : null;
 }
 
-function parseMemoryCompressionState(value: unknown): MemoryCompressionState | null {
+export function parseMemoryCompressionState(value: unknown): MemoryCompressionState | null {
   return memoryCompressionStates.includes(value as MemoryCompressionState) ? value as MemoryCompressionState : null;
 }
 
-function parseMemoryConfidence(value: unknown): number | null {
+export function parseMemoryConfidence(value: unknown): number | null {
   if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 1) {
     return null;
   }

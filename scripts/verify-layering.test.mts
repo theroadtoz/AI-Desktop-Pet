@@ -124,6 +124,34 @@ test("verification scripts keep local assets outside core and register security 
   assert.doesNotMatch(packageJson.scripts.verify, /local-llm|packaged-assets/u);
 });
 
+test("P2-91C2A1 keeps one shared codec authority in main and current history verification", () => {
+  const codecSource = readFileSync(join(repoRoot, "src/shared/memory-history-codec.ts"), "utf8");
+  const appSource = readFileSync(join(repoRoot, "src/main/app.ts"), "utf8");
+  assert.doesNotMatch(codecSource, /from ["'](?:electron|node:fs|node:path|\.\.\/main|\.\.\/preload|\.\.\/renderer)/u);
+  assert.doesNotMatch(codecSource, /history-store|memory-store|memory-review-store|telemetry/u);
+  assert.match(appSource, /from "\.\.\/shared\/memory-history-codec"/u);
+  assert.doesNotMatch(appSource, /function (?:parse|normalize)(?:History|Memory)(?:Card|Summary|Suppression|Review|Conversation|Retention)/u);
+
+  const handlerRegion = appSource.slice(
+    appSource.indexOf('ipcMain.handle("history:list"'),
+    appSource.indexOf('ipcMain.handle("automaticSituation:get"')
+  );
+  assert.doesNotMatch(handlerRegion, /\bisMemoryId\(|\bisHistoryRetentionLimit\(|\bparseMemoryCardDraft\(|\bparseMemoryCardUpdate\(|\bparseMemoryReviewDecisionDraft\(/u);
+  for (const parser of [
+    "parseHistoryConversationList", "parseHistoryIdRequest", "parseHistoryRetentionRequest",
+    "parseMemoryCardDraftRequest", "parseMemoryCardUpdateRequest", "parseMemoryReviewDecisionRequest",
+    "parseMemoryCards", "parseMemorySummary", "parseMemoryReviewCandidates"
+  ]) {
+    assert.match(handlerRegion, new RegExp(`\\b${parser}\\(`, "u"), `${parser} must be used by main handlers`);
+  }
+
+  assert.match(packageJson.scripts["test:p2-91c2-persistence-codec"], /scripts\/p2-91c2-persistence-codec\.test\.mts/u);
+  const historyTests = new Set(testFiles("test:history"));
+  assert.equal(historyTests.has("scripts/p2-91c2-persistence-codec.test.mts"), true);
+  assert.equal(historyTests.has("scripts/p2-87d-memory-review.test.mts"), true);
+  assert.match(packageJson.scripts["verify:core"], /npm run test:history/u);
+});
+
 test("current verification keeps the protected P2-84 coverage while replacing only the migrated authorities", () => {
   const protectedSource = readFileSync(join(repoRoot, P284_PROTECTED_TEST), "utf8");
   const protectedHash = createHash("sha256").update(protectedSource).digest("hex");

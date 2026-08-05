@@ -3,17 +3,36 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 
+function handlerSource(appSource: string, channel: string): string {
+  const start = appSource.indexOf(`ipcMain.handle("${channel}"`);
+  assert.notEqual(start, -1, `missing handler ${channel}`);
+  const next = appSource.indexOf("ipcMain.handle(", start + 16);
+  return appSource.slice(start, next === -1 ? undefined : next);
+}
+
+function assertOrdered(source: string, fragments: readonly string[]): void {
+  let cursor = -1;
+  for (const fragment of fragments) {
+    const index = source.indexOf(fragment, cursor + 1);
+    assert.notEqual(index, -1, `missing ordered fragment: ${fragment}`);
+    cursor = index;
+  }
+}
+
 test("history, memory, automatic situation and user profile IPC are restricted and expose no file access bridge", async () => {
   const appSource = await readFile(join(process.cwd(), "src", "main", "app.ts"), "utf8");
   const preloadSource = await readFile(join(process.cwd(), "dist", "preload", "chat-preload.js"), "utf8");
 
-  assert.match(appSource, /ipcMain\.handle\("history:list", \(event\) => \{\s+if \(!isChatSender\(event\) \|\| !historyStore\)/);
-  assert.match(appSource, /ipcMain\.handle\("history:get", \(event, id: unknown\) => \{\s+if \(!isChatSender\(event\) \|\| !historyStore \|\| !isHistoryId\(id\)\)/);
+  assert.match(appSource, /from "\.\.\/shared\/memory-history-codec"/u);
+  assertOrdered(handlerSource(appSource, "history:list"), ["isChatSender(event)", "historyStore.listConversations()", "parseHistoryConversationList("]);
+  assertOrdered(handlerSource(appSource, "history:get"), ["isChatSender(event)", "parseHistoryIdRequest({ id })", "historyStore.getConversation(", "parseNullableHistoryConversation("]);
+  assertOrdered(handlerSource(appSource, "history:delete"), ["isChatSender(event)", "parseHistoryIdRequest({ id })", "historyStore.deleteConversation(", "parseBooleanResponse("]);
   assert.match(appSource, /ipcMain\.handle\("history:clear", \(event\) => \{\s+if \(!isChatSender\(event\) \|\| !historyStore\)/);
-  assert.match(appSource, /ipcMain\.handle\("history:get-retention", \(event\) => \{\s+if \(!isChatSender\(event\) \|\| !historyStore\)/);
-  assert.match(appSource, /ipcMain\.handle\("history:set-retention", \(event, limit: unknown\) => \{\s+if \(!isChatSender\(event\) \|\| !historyStore \|\| !isHistoryRetentionLimit\(limit\)\)/);
-  assert.match(appSource, /ipcMain\.handle\("memory:list", \(event\) => \{\s+if \(!isChatSender\(event\) \|\| !memoryStore\)/);
-  assert.match(appSource, /ipcMain\.handle\("memory:create", \(event, draft: unknown\) => \{\s+const parsedDraft = parseMemoryCardDraft\(draft\);/);
+  assertOrdered(handlerSource(appSource, "history:get-retention"), ["isChatSender(event)", "historyStore.getRetentionLimit()", "parseHistoryRetentionLimit("]);
+  assertOrdered(handlerSource(appSource, "history:set-retention"), ["isChatSender(event)", "parseHistoryRetentionRequest({ limit })", "historyStore.setRetentionLimit(", "parseHistoryRetentionLimit("]);
+  assertOrdered(handlerSource(appSource, "memory:list"), ["isChatSender(event)", "memoryStore.listCards()", "parseMemoryCards("]);
+  assertOrdered(handlerSource(appSource, "memory:create"), ["isChatSender(event)", "parseMemoryCardDraftRequest({ draft })", "memoryStore.createCard(", "parseMemoryCreateResult("]);
+  assertOrdered(handlerSource(appSource, "memory:confirm-review"), ["isChatSender(event)", "parseMemoryReviewDecisionRequest({ id, update })", "memoryReviewStore.pruneExpiredPendingCandidates()", "parseMemoryReviewDecisionResult("]);
   assert.match(appSource, /ipcMain\.handle\("memory:clear", \(event\) => \{\s+if \(!isChatSender\(event\) \|\| !memoryStore \|\| !memoryReviewStore\)/);
   assert.match(appSource, /ipcMain\.handle\("userProfile:get", \(event\) => \{\s+if \(!isChatSender\(event\) \|\| !userProfileStore\)/);
   assert.match(appSource, /ipcMain\.handle\("userProfile:save", \(event, profile: unknown\) => \{\s+if \(!isChatSender\(event\) \|\| !userProfileStore\)/);

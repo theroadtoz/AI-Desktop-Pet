@@ -62,14 +62,32 @@ import {
   type LowFrequencyCompanionEventId,
   type LowFrequencyCompanionEvent
 } from "../shared/daily-state-orchestration";
-import { isHistoryId, isHistoryRetentionLimit, type HistoryMessage } from "../shared/chat-history";
+import { isHistoryId, type HistoryMessage } from "../shared/chat-history";
 import {
-  isMemoryId,
-  parseMemoryCardDraft,
-  parseMemoryCardUpdate,
-  parseMemoryReviewDecisionDraft,
-  type MemoryCardUpdate
-} from "../shared/chat-memory";
+  parseBooleanResponse,
+  parseHistoryConversationList,
+  parseHistoryIdRequest,
+  parseHistoryRetentionLimit,
+  parseHistoryRetentionRequest,
+  parseMemoryCardDraftRequest,
+  parseMemoryCards,
+  parseMemoryCardUpdateRequest,
+  parseMemoryCreateResult,
+  parseMemoryEnabledRequest,
+  parseMemoryForgetResult,
+  parseMemoryIdRequest,
+  parseMemoryReviewCandidate,
+  parseMemoryReviewCandidates,
+  parseMemoryReviewConfirmationResult,
+  parseMemoryReviewDecisionRequest,
+  parseMemoryReviewDecisionResult,
+  parseMemorySettings,
+  parseMemorySummary,
+  parseMemorySuppressionViews,
+  parseNullableHistoryConversation,
+  parseNullableMemoryCard,
+  parseVoidResponse
+} from "../shared/memory-history-codec";
 import type { DialogueModeId } from "../shared/dialogue-style";
 import type { PresenceModeId } from "../shared/presence-mode";
 import type { AutomaticSituationSnapshot } from "../shared/automatic-situation-context";
@@ -4648,23 +4666,46 @@ app.whenReady().then(async () => {
       throw new Error("Unauthorized history request");
     }
 
-    return historyStore.listConversations();
+    const value = historyStore.listConversations();
+    const response = parseHistoryConversationList(value);
+    if (!response) {
+      throw new Error("Invalid history response");
+    }
+    return response;
   });
 
   ipcMain.handle("history:get", (event, id: unknown) => {
-    if (!isChatSender(event) || !historyStore || !isHistoryId(id)) {
+    if (!isChatSender(event) || !historyStore) {
       throw new Error("Invalid history request");
     }
 
-    return historyStore.getConversation(id);
+    const request = parseHistoryIdRequest({ id });
+    if (!request) {
+      throw new Error("Invalid history request");
+    }
+    const value = historyStore.getConversation(request.id);
+    const response = parseNullableHistoryConversation(value);
+    if (!response) {
+      throw new Error("Invalid history response");
+    }
+    return response.value;
   });
 
   ipcMain.handle("history:delete", (event, id: unknown) => {
-    if (!isChatSender(event) || !historyStore || !isHistoryId(id)) {
+    if (!isChatSender(event) || !historyStore) {
       return false;
     }
 
-    return historyStore.deleteConversation(id);
+    const request = parseHistoryIdRequest({ id });
+    if (!request) {
+      return false;
+    }
+    const value = historyStore.deleteConversation(request.id);
+    const response = parseBooleanResponse(value);
+    if (response === null) {
+      throw new Error("Invalid history response");
+    }
+    return response;
   });
 
   ipcMain.handle("history:clear", (event) => {
@@ -4672,7 +4713,12 @@ app.whenReady().then(async () => {
       throw new Error("Unauthorized history request");
     }
 
-    return historyStore.clearConversations();
+    const value = historyStore.clearConversations();
+    const response = parseBooleanResponse(value);
+    if (response === null) {
+      throw new Error("Invalid history response");
+    }
+    return response;
   });
 
   ipcMain.handle("history:get-retention", (event) => {
@@ -4680,15 +4726,29 @@ app.whenReady().then(async () => {
       throw new Error("Unauthorized history request");
     }
 
-    return historyStore.getRetentionLimit();
+    const value = historyStore.getRetentionLimit();
+    const response = parseHistoryRetentionLimit(value);
+    if (!response) {
+      throw new Error("Invalid history retention response");
+    }
+    return response;
   });
 
   ipcMain.handle("history:set-retention", (event, limit: unknown) => {
-    if (!isChatSender(event) || !historyStore || !isHistoryRetentionLimit(limit)) {
+    if (!isChatSender(event) || !historyStore) {
       throw new Error("Invalid history retention request");
     }
 
-    return historyStore.setRetentionLimit(limit);
+    const request = parseHistoryRetentionRequest({ limit });
+    if (!request) {
+      throw new Error("Invalid history retention request");
+    }
+    const value = historyStore.setRetentionLimit(request.limit);
+    const response = parseHistoryRetentionLimit(value);
+    if (!response) {
+      throw new Error("Invalid history retention response");
+    }
+    return response;
   });
 
   ipcMain.handle("memory:get-settings", (event) => {
@@ -4696,7 +4756,12 @@ app.whenReady().then(async () => {
       throw new Error("Unauthorized memory request");
     }
 
-    return memoryStore.getSettings();
+    const value = memoryStore.getSettings();
+    const response = parseMemorySettings(value);
+    if (!response) {
+      throw new Error("Invalid memory response");
+    }
+    return response;
   });
 
   ipcMain.handle("memory:get-summary", (event) => {
@@ -4704,15 +4769,29 @@ app.whenReady().then(async () => {
       throw new Error("Unauthorized memory request");
     }
 
-    return memoryStore.getSummary();
+    const value = memoryStore.getSummary();
+    const response = parseMemorySummary(value);
+    if (!response) {
+      throw new Error("Invalid memory response");
+    }
+    return response;
   });
 
   ipcMain.handle("memory:set-enabled", (event, enabled: unknown) => {
-    if (!isChatSender(event) || !memoryStore || typeof enabled !== "boolean") {
+    if (!isChatSender(event) || !memoryStore) {
       throw new Error("Invalid memory request");
     }
 
-    return memoryStore.setEnabled(enabled);
+    const request = parseMemoryEnabledRequest({ enabled });
+    if (!request) {
+      throw new Error("Invalid memory request");
+    }
+    const value = memoryStore.setEnabled(request.enabled);
+    const response = parseMemorySettings(value);
+    if (!response) {
+      throw new Error("Invalid memory response");
+    }
+    return response;
   });
 
   ipcMain.handle("memory:list", (event) => {
@@ -4720,51 +4799,97 @@ app.whenReady().then(async () => {
       throw new Error("Unauthorized memory request");
     }
 
-    return memoryStore.listCards();
+    const value = memoryStore.listCards();
+    const response = parseMemoryCards(value);
+    if (!response) {
+      throw new Error("Invalid memory response");
+    }
+    return response;
   });
 
   ipcMain.handle("memory:get", (event, id: unknown) => {
-    if (!isChatSender(event) || !memoryStore || !isMemoryId(id)) {
+    if (!isChatSender(event) || !memoryStore) {
       throw new Error("Invalid memory request");
     }
 
-    return memoryStore.getCard(id);
+    const request = parseMemoryIdRequest({ id });
+    if (!request) {
+      throw new Error("Invalid memory request");
+    }
+    const value = memoryStore.getCard(request.id);
+    const response = parseNullableMemoryCard(value);
+    if (!response) {
+      throw new Error("Invalid memory response");
+    }
+    return response.value;
   });
 
   ipcMain.handle("memory:create", (event, draft: unknown) => {
-    const parsedDraft = parseMemoryCardDraft(draft);
-
-    if (!isChatSender(event) || !memoryStore || !parsedDraft) {
+    if (!isChatSender(event) || !memoryStore) {
       throw new Error("Invalid memory request");
     }
 
-    return memoryStore.createCard(parsedDraft);
+    const request = parseMemoryCardDraftRequest({ draft });
+    if (!request) {
+      throw new Error("Invalid memory request");
+    }
+    const value = memoryStore.createCard(request.draft);
+    const response = parseMemoryCreateResult(value);
+    if (!response) {
+      throw new Error("Invalid memory response");
+    }
+    return response;
   });
 
   ipcMain.handle("memory:update", (event, id: unknown, update: unknown) => {
-    const parsedUpdate: MemoryCardUpdate | null = parseMemoryCardUpdate(update);
-
-    if (!isChatSender(event) || !memoryStore || !isMemoryId(id) || !parsedUpdate) {
+    if (!isChatSender(event) || !memoryStore) {
       throw new Error("Invalid memory request");
     }
 
-    return memoryStore.updateCard(id, parsedUpdate);
+    const request = parseMemoryCardUpdateRequest({ id, update });
+    if (!request) {
+      throw new Error("Invalid memory request");
+    }
+    const value = memoryStore.updateCard(request.id, request.update);
+    const response = parseNullableMemoryCard(value);
+    if (!response) {
+      throw new Error("Invalid memory response");
+    }
+    return response.value;
   });
 
   ipcMain.handle("memory:delete", (event, id: unknown) => {
-    if (!isChatSender(event) || !memoryStore || !isMemoryId(id)) {
+    if (!isChatSender(event) || !memoryStore) {
       return false;
     }
 
-    return memoryStore.deleteCard(id);
+    const request = parseMemoryIdRequest({ id });
+    if (!request) {
+      return false;
+    }
+    const value = memoryStore.deleteCard(request.id);
+    const response = parseBooleanResponse(value);
+    if (response === null) {
+      throw new Error("Invalid memory response");
+    }
+    return response;
   });
 
   ipcMain.handle("memory:forget", (event, id: unknown) => {
-    if (!isChatSender(event) || !memoryStore || !isMemoryId(id)) {
+    if (!isChatSender(event) || !memoryStore) {
       return { status: "not_found" };
     }
 
-    return memoryStore.forgetCard(id);
+    const request = parseMemoryIdRequest({ id });
+    if (!request) {
+      return { status: "not_found" };
+    }
+    const value = memoryStore.forgetCard(request.id);
+    const response = parseMemoryForgetResult(value);
+    if (!response) {
+      throw new Error("Invalid memory response");
+    }
+    return response;
   });
 
   ipcMain.handle("memory:clear", (event) => {
@@ -4781,15 +4906,29 @@ app.whenReady().then(async () => {
       throw new Error("Unauthorized memory request");
     }
 
-    return memoryStore.listSuppressions();
+    const value = memoryStore.listSuppressions();
+    const response = parseMemorySuppressionViews(value);
+    if (!response) {
+      throw new Error("Invalid memory response");
+    }
+    return response;
   });
 
   ipcMain.handle("memory:allow-suppression", (event, id: unknown) => {
-    if (!isChatSender(event) || !memoryStore || !isMemoryId(id)) {
+    if (!isChatSender(event) || !memoryStore) {
       return false;
     }
 
-    return memoryStore.allowSuppression(id);
+    const request = parseMemoryIdRequest({ id });
+    if (!request) {
+      return false;
+    }
+    const value = memoryStore.allowSuppression(request.id);
+    const response = parseBooleanResponse(value);
+    if (response === null) {
+      throw new Error("Invalid memory response");
+    }
+    return response;
   });
 
   ipcMain.handle("memory:clear-suppressions", (event) => {
@@ -4797,7 +4936,12 @@ app.whenReady().then(async () => {
       throw new Error("Unauthorized memory request");
     }
 
-    memoryStore.clearSuppressions();
+    const value = memoryStore.clearSuppressions();
+    const response = parseVoidResponse(value);
+    if (response === null) {
+      throw new Error("Invalid memory response");
+    }
+    return response;
   });
 
   ipcMain.handle("memory:list-reviews", (event) => {
@@ -4805,48 +4949,141 @@ app.whenReady().then(async () => {
       throw new Error("Unauthorized memory review request");
     }
 
-    return memoryReviewStore.listCandidates();
+    const value = memoryReviewStore.listCandidates();
+    const response = parseMemoryReviewCandidates(value);
+    if (!response) {
+      throw new Error("Invalid memory review response");
+    }
+    return response;
   });
 
   ipcMain.handle("memory:confirm-review", (event, id: unknown, update: unknown) => {
-    const parsedUpdate = update === undefined ? undefined : parseMemoryReviewDecisionDraft(update);
-    if (!isChatSender(event) || !memoryStore || !memoryReviewStore || !isMemoryId(id) || (update !== undefined && !parsedUpdate)) {
-      return { status: "not_found" as const };
+    if (!isChatSender(event) || !memoryStore || !memoryReviewStore) {
+      const response = parseMemoryReviewDecisionResult({ status: "not_found" });
+      if (!response) throw new Error("Invalid memory review response");
+      return response;
     }
 
-    memoryReviewStore.pruneExpiredPendingCandidates();
-    const candidate = parsedUpdate
-      ? memoryReviewStore.updatePendingCandidate(id, parsedUpdate)
-      : memoryReviewStore.getCandidate(id);
-    if (!candidate || candidate.status !== "pending-review") {
-      return { status: "not_found" as const };
+    const request = parseMemoryReviewDecisionRequest({ id, update });
+    if (!request) {
+      const response = parseMemoryReviewDecisionResult({ status: "not_found" });
+      if (!response) throw new Error("Invalid memory review response");
+      return response;
+    }
+    const parsedUpdate = request.update;
+    const candidate: unknown = (() => {
+      try {
+        memoryReviewStore.pruneExpiredPendingCandidates();
+        const candidate = parsedUpdate
+          ? memoryReviewStore.updatePendingCandidate(request.id, parsedUpdate)
+          : memoryReviewStore.getCandidate(request.id);
+        return candidate;
+      } catch {
+        throw new Error("Invalid memory review response");
+      }
+    })();
+    if (candidate === null) {
+      const response = parseMemoryReviewDecisionResult({ status: "not_found" });
+      if (!response) throw new Error("Invalid memory review response");
+      return response;
+    }
+    const parsedCandidate = parseMemoryReviewCandidate(candidate);
+    if (!parsedCandidate || parsedCandidate.status !== "pending-review") {
+      throw new Error("Invalid memory review response");
     }
 
-    if (candidate.action !== "create") {
-      memoryReviewStore.setStatus(id, "confirmed");
-      return { status: "confirmed" as const };
+    if (parsedCandidate.action !== "create") {
+      let confirmedCandidate: unknown;
+      try {
+        confirmedCandidate = memoryReviewStore.setStatus(request.id, "confirmed");
+      } catch {
+        throw new Error("Invalid memory review response");
+      }
+      const parsedConfirmedCandidate = parseMemoryReviewCandidate(confirmedCandidate);
+      if (!parsedConfirmedCandidate || parsedConfirmedCandidate.status !== "confirmed") {
+        throw new Error("Invalid memory review response");
+      }
+      const response = parseMemoryReviewDecisionResult({ status: "confirmed" });
+      if (!response) throw new Error("Invalid memory review response");
+      return response;
     }
 
-    const result = memoryStore.confirmReviewedCandidate(candidate);
+    let value: unknown;
+    try {
+      value = memoryStore.confirmReviewedCandidate(parsedCandidate);
+    } catch {
+      throw new Error("Invalid memory review response");
+    }
+    const result = parseMemoryReviewConfirmationResult(value);
+    if (!result) {
+      throw new Error("Invalid memory review response");
+    }
     if (result.status === "created") {
-      memoryReviewStore.setStatus(id, "confirmed");
-      return { status: "confirmed" as const };
+      let confirmedCandidate: unknown;
+      try {
+        confirmedCandidate = memoryReviewStore.setStatus(request.id, "confirmed");
+      } catch {
+        throw new Error("Invalid memory review response");
+      }
+      const parsedConfirmedCandidate = parseMemoryReviewCandidate(confirmedCandidate);
+      if (!parsedConfirmedCandidate || parsedConfirmedCandidate.status !== "confirmed") {
+        throw new Error("Invalid memory review response");
+      }
+      const response = parseMemoryReviewDecisionResult({ status: "confirmed" });
+      if (!response) throw new Error("Invalid memory review response");
+      return response;
     }
     if (result.status === "blocked") {
-      memoryReviewStore.setStatus(id, "blocked");
-      return { status: "blocked" as const };
+      let blockedCandidate: unknown;
+      try {
+        blockedCandidate = memoryReviewStore.setStatus(request.id, "blocked");
+      } catch {
+        throw new Error("Invalid memory review response");
+      }
+      const parsedBlockedCandidate = parseMemoryReviewCandidate(blockedCandidate);
+      if (!parsedBlockedCandidate || parsedBlockedCandidate.status !== "blocked") {
+        throw new Error("Invalid memory review response");
+      }
+      const response = parseMemoryReviewDecisionResult({ status: "blocked" });
+      if (!response) throw new Error("Invalid memory review response");
+      return response;
     }
-    return { status: "disabled" as const };
+    const response = parseMemoryReviewDecisionResult({ status: "disabled" });
+    if (!response) throw new Error("Invalid memory review response");
+    return response;
   });
 
   ipcMain.handle("memory:reject-review", (event, id: unknown) => {
-    if (!isChatSender(event) || !memoryReviewStore || !isMemoryId(id)) {
-      return { status: "not_found" as const };
+    if (!isChatSender(event) || !memoryReviewStore) {
+      const response = parseMemoryReviewDecisionResult({ status: "not_found" });
+      if (!response) throw new Error("Invalid memory review response");
+      return response;
     }
 
-    return memoryReviewStore.setStatus(id, "rejected")
-      ? { status: "rejected" as const }
-      : { status: "not_found" as const };
+    const request = parseMemoryIdRequest({ id });
+    if (!request) {
+      const response = parseMemoryReviewDecisionResult({ status: "not_found" });
+      if (!response) throw new Error("Invalid memory review response");
+      return response;
+    }
+    let value: unknown;
+    try {
+      value = memoryReviewStore.setStatus(request.id, "rejected");
+    } catch {
+      throw new Error("Invalid memory review response");
+    }
+    if (value === null) {
+      const response = parseMemoryReviewDecisionResult({ status: "not_found" });
+      if (!response) throw new Error("Invalid memory review response");
+      return response;
+    }
+    const candidate = parseMemoryReviewCandidate(value);
+    if (!candidate || candidate.status !== "rejected") {
+      throw new Error("Invalid memory review response");
+    }
+    const response = parseMemoryReviewDecisionResult({ status: "rejected" });
+    if (!response) throw new Error("Invalid memory review response");
+    return response;
   });
 
   ipcMain.handle("automaticSituation:get", (event) => {
