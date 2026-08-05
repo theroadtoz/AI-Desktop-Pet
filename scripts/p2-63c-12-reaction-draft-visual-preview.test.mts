@@ -720,12 +720,14 @@ test("arrival-settle assembles the same isolated fixture without dist or local-l
     }
 
     const steps = getIsolatedReactionPreviewBuildSteps(fixtureRoot);
-    assert.deepEqual(steps.map(({ label, args }) => ({ label, args })), [
-      { label: "main", args: ["-p", "tsconfig.main.json"] },
-      { label: "preload", args: ["-p", "tsconfig.preload.json"] },
-      { label: "renderer", args: ["build", "--config", "vite.config.ts"] }
+    assert.deepEqual(steps.map(({ label, args, shell }) => ({ label, args, shell })), [
+      { label: "main", args: ["-p", "tsconfig.main.json"], shell: process.platform === "win32" },
+      { label: "preload", args: ["-p", "tsconfig.preload.json"], shell: process.platform === "win32" },
+      { label: "chat-preload-bundle", args: [join(process.cwd(), "scripts", "build-chat-preload.mjs"), "--root", fixtureRoot], shell: false },
+      { label: "renderer", args: ["build", "--config", "vite.config.ts"], shell: process.platform === "win32" }
     ]);
-    assert.deepEqual(steps.map(({ command }) => basename(command).replace(/\.cmd$/u, "")), ["tsc", "tsc", "vite"]);
+    assert.equal(resolve(steps[2]?.args[2] ?? ""), fixtureRoot);
+    assert.deepEqual(steps.map(({ command }) => basename(command).replace(/\.(?:cmd|exe)$/u, "")), ["tsc", "tsc", "node", "vite"]);
     assert.doesNotMatch(JSON.stringify(steps), /npm|verify|p2-11g/iu);
   } finally {
     rmSync(root, { recursive: true, force: true });

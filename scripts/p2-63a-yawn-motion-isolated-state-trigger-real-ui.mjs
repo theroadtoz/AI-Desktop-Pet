@@ -575,8 +575,13 @@ ${marker}`;
 }
 
 export function injectIsolatedPresenceBridge(source) {
-  const contextBridgeRef = source.includes("electron_1.contextBridge") ? "electron_1.contextBridge" : "contextBridge";
-  const ipcRendererRef = source.includes("electron_1.ipcRenderer") ? "electron_1.ipcRenderer" : "ipcRenderer";
+  const electronRef = source.includes("import_electron.contextBridge")
+    ? "import_electron"
+    : source.includes("electron_1.contextBridge")
+      ? "electron_1"
+      : null;
+  const contextBridgeRef = electronRef ? `${electronRef}.contextBridge` : "contextBridge";
+  const ipcRendererRef = electronRef ? `${electronRef}.ipcRenderer` : "ipcRenderer";
   const typeSuffix = ipcRendererRef === "ipcRenderer" ? ": unknown" : "";
   const marker = `${contextBridgeRef}.exposeInMainWorld("chatApi", api);`;
   const replacement = `${contextBridgeRef}.exposeInMainWorld("__p2_63a", {

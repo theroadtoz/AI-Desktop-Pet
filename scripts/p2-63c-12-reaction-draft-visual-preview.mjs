@@ -528,9 +528,10 @@ function binCommand(name) {
 
 export function getIsolatedReactionPreviewBuildSteps(fixtureRoot) {
   return [
-    { label: "main", command: binCommand("tsc"), args: ["-p", "tsconfig.main.json"] },
-    { label: "preload", command: binCommand("tsc"), args: ["-p", "tsconfig.preload.json"] },
-    { label: "renderer", command: binCommand("vite"), args: ["build", "--config", "vite.config.ts"] }
+    { label: "main", command: binCommand("tsc"), args: ["-p", "tsconfig.main.json"], shell: process.platform === "win32" },
+    { label: "preload", command: binCommand("tsc"), args: ["-p", "tsconfig.preload.json"], shell: process.platform === "win32" },
+    { label: "chat-preload-bundle", command: process.execPath, args: [join(ROOT, "scripts", "build-chat-preload.mjs"), "--root", fixtureRoot], shell: false },
+    { label: "renderer", command: binCommand("vite"), args: ["build", "--config", "vite.config.ts"], shell: process.platform === "win32" }
   ];
 }
 
@@ -539,7 +540,7 @@ function buildIsolatedReactionPreview(fixtureRoot) {
     const result = spawnSync(step.command, step.args, {
       cwd: fixtureRoot,
       env: process.env,
-      shell: process.platform === "win32",
+      shell: step.shell,
       stdio: "inherit"
     });
     if (result.error || result.status !== 0) throw new Error(`isolated-${step.label}-build-failed`);

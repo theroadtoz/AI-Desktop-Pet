@@ -531,7 +531,7 @@ test("isolated transforms bind yawn only on the state_sleep path for the real du
   assert.match(patchedChatPreload, /exposeInMainWorld\("__p2_63a"/u);
   assert.match(patchedChatPreload, /ipcRenderer\.invoke\("__p2_63a:set-presence", modeId\)/u);
   assert.match(patchedCompiledApp, /electron_1\.ipcMain\.handle\("__p2_63a:set-presence"/u);
-  assert.match(patchedCompiledChatPreload, /electron_1\.contextBridge\.exposeInMainWorld\("__p2_63a"/u);
+  assert.match(patchedCompiledChatPreload, /(?:electron_1|import_electron)\.contextBridge\.exposeInMainWorld\("__p2_63a"/u);
   assert.doesNotMatch(runnerSource, /buildIsolatedMainAndPreload/u);
   assert.match(
     patchedMain,

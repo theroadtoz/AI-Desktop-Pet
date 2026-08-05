@@ -63,6 +63,30 @@ import type {
   ProactiveCompanionSettings,
   ProactiveCompanionSettingsUpdate
 } from "../shared/proactive-companion-settings";
+import {
+  isHistoryId as codecIsHistoryId,
+  isMemoryId as codecIsMemoryId,
+  parseBooleanResponse as codecParseBooleanResponse,
+  parseHistoryConversationList as codecParseHistoryConversationList,
+  parseHistoryRetentionLimit as codecParseHistoryRetentionLimit,
+  parseHistoryRetentionRequest as codecParseHistoryRetentionRequest,
+  parseMemoryCard as codecParseMemoryCard,
+  parseMemoryCardDraft as codecParseMemoryCardDraft,
+  parseMemoryCardUpdate as codecParseMemoryCardUpdate,
+  parseMemoryCards as codecParseMemoryCards,
+  parseMemoryCreateResult as codecParseMemoryCreateResult,
+  parseMemoryEnabledRequest as codecParseMemoryEnabledRequest,
+  parseMemoryForgetResult as codecParseMemoryForgetResult,
+  parseMemoryReviewCandidates as codecParseMemoryReviewCandidates,
+  parseMemoryReviewDecisionDraft as codecParseMemoryReviewDecisionDraft,
+  parseMemoryReviewDecisionResult as codecParseMemoryReviewDecisionResult,
+  parseMemorySettings as codecParseMemorySettings,
+  parseMemorySummary as codecParseMemorySummary,
+  parseMemorySuppressionViews as codecParseMemorySuppressionViews,
+  parseNullableHistoryConversation as codecParseNullableHistoryConversation,
+  parseNullableMemoryCard as codecParseNullableMemoryCard,
+  parseVoidResponse as codecParseVoidResponse
+} from "../shared/memory-history-codec";
 
 const petAccessoryPresetIds = ["none", "glasses"] as const;
 const petAccessoryCatalog = [
@@ -958,97 +982,8 @@ function isConfigSetApiKeyRequest(value: unknown): value is ConfigSetApiKeyReque
   );
 }
 
-function isHistoryId(value: unknown): value is string {
-  return typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
-}
-
-function isMemoryId(value: unknown): value is string {
-  return isHistoryId(value);
-}
-
-function normalizeMemoryText(value: unknown, maxLength: number): string | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-
-  const normalized = value.trim().replace(/\s+/g, " ");
-  return normalized.length > 0 ? normalized.slice(0, maxLength) : null;
-}
-
-function normalizeMemoryTags(value: unknown): string[] | null {
-  if (!Array.isArray(value)) {
-    return null;
-  }
-
-  const tags: string[] = [];
-
-  for (const item of value) {
-    const tag = normalizeMemoryText(item, 24);
-
-    if (!tag || tags.includes(tag)) {
-      continue;
-    }
-
-    tags.push(tag);
-
-    if (tags.length >= 8) {
-      break;
-    }
-  }
-
-  return tags;
-}
-
-function normalizeMemoryNamespace(value: unknown): string | null {
-  const normalized = normalizeMemoryText(value, 32);
-
-  return normalized && /^[a-z0-9][a-z0-9_-]{0,31}$/i.test(normalized)
-    ? normalized.toLowerCase()
-    : null;
-}
-
-function normalizeMemoryKey(value: unknown): string | null {
-  const normalized = normalizeMemoryText(value, 48);
-
-  return normalized && /^[a-z0-9][a-z0-9:_-]{0,47}$/i.test(normalized)
-    ? normalized.toLowerCase()
-    : null;
-}
-
-function normalizeMemoryCategory(value: unknown): string | null {
-  const normalized = normalizeMemoryText(value, 32);
-
-  return normalized && /^[a-z0-9][a-z0-9_-]{0,31}$/i.test(normalized)
-    ? normalized.toLowerCase()
-    : null;
-}
-
-function parseMemorySourceType(value: unknown): MemoryCard["sourceType"] | null {
-  return value === "manual-chat" || value === "auto-local-heuristic" || value === "auto-local-model"
-    ? value
-    : null;
-}
-
-function parseMemoryImportance(value: unknown): MemoryCard["importance"] | null {
-  return value === "key" || value === "general" ? value : null;
-}
-
-function parseMemoryCompressionState(value: unknown): MemoryCard["compressionState"] | null {
-  return value === "raw" || value === "merged" || value === "deduplicated" || value === "budgeted"
-    ? value
-    : null;
-}
-
-function parseMemoryConfidence(value: unknown): number | null {
-  if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 1) {
-    return null;
-  }
-
-  return Math.round(value * 100) / 100;
-}
-
-function parsePositiveInteger(value: unknown): number | null {
-  return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : null;
+function isNonNegativeSafeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 }
 
 const unsafeRuntimeFieldNames = new Set([
@@ -1370,405 +1305,6 @@ async function invokeLocalModelDiagnosticSummary(): Promise<LocalModelDiagnostic
   return summary;
 }
 
-function parseMemoryCardDraft(value: unknown): MemoryCardDraft | null {
-  const draft = value as Partial<MemoryCardDraft> | null;
-  const title = normalizeMemoryText(draft?.title, 80);
-  const content = normalizeMemoryText(draft?.content, 800);
-  const tags = normalizeMemoryTags(draft?.tags);
-
-  if (!draft || !title || !content || !tags || !isMemoryId(draft.sourceConversationId)) {
-    return null;
-  }
-
-  return {
-    title,
-    content,
-    tags,
-    sourceConversationId: draft.sourceConversationId
-  };
-}
-
-function parseMemoryCardUpdate(value: unknown): MemoryCardUpdate | null {
-  const update = value as Partial<MemoryCardUpdate> | null;
-
-  if (!update || typeof update !== "object") {
-    return null;
-  }
-
-  const parsed: MemoryCardUpdate = {};
-
-  if ("title" in update) {
-    const title = normalizeMemoryText(update.title, 80);
-
-    if (!title) {
-      return null;
-    }
-
-    parsed.title = title;
-  }
-
-  if ("content" in update) {
-    const content = normalizeMemoryText(update.content, 800);
-
-    if (!content) {
-      return null;
-    }
-
-    parsed.content = content;
-  }
-
-  if ("tags" in update) {
-    const tags = normalizeMemoryTags(update.tags);
-
-    if (!tags) {
-      return null;
-    }
-
-    parsed.tags = tags;
-  }
-
-  if ("enabled" in update) {
-    if (typeof update.enabled !== "boolean") {
-      return null;
-    }
-
-    parsed.enabled = update.enabled;
-  }
-
-  if ("importance" in update) {
-    const importance = parseMemoryImportance(update.importance);
-
-    if (!importance) {
-      return null;
-    }
-
-    parsed.importance = importance;
-  }
-
-  return Object.keys(parsed).length > 0 ? parsed : null;
-}
-
-function parseMemoryCard(value: unknown): MemoryCard | null {
-  const card = value as Partial<MemoryCard> | null;
-  const title = normalizeMemoryText(card?.title, 80);
-  const content = normalizeMemoryText(card?.content, 800);
-  const tags = normalizeMemoryTags(card?.tags);
-  const sourceType = parseMemorySourceType(card?.sourceType);
-  const namespace = normalizeMemoryNamespace(card?.namespace);
-  const key = normalizeMemoryKey(card?.key);
-  const importance = parseMemoryImportance(card?.importance);
-  const category = normalizeMemoryCategory(card?.category);
-  const confidence = parseMemoryConfidence(card?.confidence);
-  const sourceMessageId = card?.sourceMessageId;
-  const observedCount = parsePositiveInteger(card?.observedCount);
-  const lastObservedAt = parsePositiveInteger(card?.lastObservedAt);
-  const compressionState = parseMemoryCompressionState(card?.compressionState);
-  const lastInjectedAt = card?.lastInjectedAt;
-  const injectionCount = card?.injectionCount;
-
-  if (
-    !card ||
-    !isMemoryId(card.id) ||
-    !title ||
-    !content ||
-    !tags ||
-    !sourceType ||
-    !namespace ||
-    !key ||
-    !importance ||
-    !category ||
-    confidence === null ||
-    !(sourceMessageId === null || isMemoryId(sourceMessageId)) ||
-    !isMemoryId(card.sourceConversationId) ||
-    typeof card.createdAt !== "number" ||
-    !Number.isSafeInteger(card.createdAt) ||
-    card.createdAt <= 0 ||
-    typeof card.updatedAt !== "number" ||
-    !Number.isSafeInteger(card.updatedAt) ||
-    card.updatedAt < card.createdAt ||
-    observedCount === null ||
-    lastObservedAt === null ||
-    lastObservedAt < card.createdAt ||
-    !compressionState ||
-    typeof card.enabled !== "boolean" ||
-    typeof card.managedByUser !== "boolean" ||
-    !(
-      lastInjectedAt === null ||
-      (
-        typeof lastInjectedAt === "number" &&
-        Number.isSafeInteger(lastInjectedAt) &&
-        lastInjectedAt > 0
-      )
-    ) ||
-    typeof injectionCount !== "number" ||
-    !Number.isSafeInteger(injectionCount) ||
-    injectionCount < 0
-  ) {
-    return null;
-  }
-
-  return {
-    id: card.id,
-    title,
-    content,
-    tags,
-    sourceConversationId: card.sourceConversationId,
-    sourceType,
-    namespace,
-    key,
-    importance,
-    category,
-    confidence,
-    sourceMessageId,
-    observedCount,
-    lastObservedAt,
-    compressionState,
-    createdAt: card.createdAt,
-    updatedAt: card.updatedAt,
-    enabled: card.enabled,
-    managedByUser: card.managedByUser,
-    lastInjectedAt,
-    injectionCount
-  };
-}
-
-function parseMemorySuppressionView(value: unknown): MemorySuppressionView | null {
-  if (!value || typeof value !== "object" || Array.isArray(value) || !hasExactKeys(value, ["category", "createdAt", "id"])) {
-    return null;
-  }
-
-  const suppression = value as Partial<MemorySuppressionView>;
-  const category = normalizeMemoryCategory(suppression.category);
-
-  if (
-    !isMemoryId(suppression.id) ||
-    !category ||
-    typeof suppression.createdAt !== "number" ||
-    !Number.isSafeInteger(suppression.createdAt) ||
-    suppression.createdAt <= 0
-  ) {
-    return null;
-  }
-
-  return { id: suppression.id, category, createdAt: suppression.createdAt };
-}
-
-function parseMemoryCreateResult(value: unknown): MemoryCreateResult | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return null;
-  }
-
-  if (hasExactKeys(value, ["status"]) && (value as { status?: unknown }).status === "disabled") {
-    return { status: "disabled" };
-  }
-
-  if (hasExactKeys(value, ["card", "status"]) && (value as { status?: unknown }).status === "created") {
-    const card = parseMemoryCard((value as { card?: unknown }).card);
-    return card ? { status: "created", card } : null;
-  }
-
-  return null;
-}
-
-function parseMemoryForgetResult(value: unknown): MemoryForgetResult | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return null;
-  }
-
-  const status = (value as { status?: unknown }).status;
-  if ((status === "manual" || status === "not_found") && hasExactKeys(value, ["status"])) {
-    return { status };
-  }
-  if (status === "forgotten" && hasExactKeys(value, ["status"])) {
-    return { status };
-  }
-
-  return null;
-}
-
-function parseMemoryReviewCandidate(value: unknown): MemoryReviewCandidate | null {
-  if (!value || typeof value !== "object" || Array.isArray(value) || !hasExactKeys(value, [
-    "action", "category", "confidence", "content", "createdAt", "id", "importance", "key", "namespace",
-    "sourceConversationId", "sourceMessageId", "status", "tags", "title", "updatedAt"
-  ])) return null;
-  const candidate = value as Partial<MemoryReviewCandidate>;
-  const title = normalizeMemoryText(candidate.title, 80);
-  const content = normalizeMemoryText(candidate.content, 800);
-  const tags = normalizeMemoryTags(candidate.tags);
-  const namespace = normalizeMemoryNamespace(candidate.namespace);
-  const key = normalizeMemoryKey(candidate.key);
-  const category = normalizeMemoryCategory(candidate.category);
-  const confidence = parseMemoryConfidence(candidate.confidence);
-  const createdAt = parsePositiveInteger(candidate.createdAt);
-  const updatedAt = parsePositiveInteger(candidate.updatedAt);
-  const action = candidate.action === "create" || candidate.action === "update-suggestion" || candidate.action === "revoke-suggestion" || candidate.action === "ignore"
-    ? candidate.action
-    : null;
-  const status = candidate.status === "pending-review" || candidate.status === "confirmed" || candidate.status === "rejected" || candidate.status === "blocked"
-    ? candidate.status
-    : null;
-  if (
-    !title || !content || !tags || !namespace || !key || !category || confidence === null || confidence < 0.7 || !action || !status ||
-    (candidate.importance !== "key" && candidate.importance !== "general") || !isMemoryId(candidate.id) ||
-    !isMemoryId(candidate.sourceConversationId) || !isMemoryId(candidate.sourceMessageId) ||
-    createdAt === null || updatedAt === null || updatedAt < createdAt
-  ) return null;
-  return { ...candidate, title, content, tags, namespace, key, category, confidence, action, status } as MemoryReviewCandidate;
-}
-
-function parseMemoryReviewDecisionDraft(value: unknown): MemoryReviewDecisionDraft | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  const update = value as MemoryReviewDecisionDraft;
-  const parsed: MemoryReviewDecisionDraft = {};
-  if ("title" in update) {
-    const title = normalizeMemoryText(update.title, 80);
-    if (!title) return null;
-    parsed.title = title;
-  }
-  if ("content" in update) {
-    const content = normalizeMemoryText(update.content, 800);
-    if (!content) return null;
-    parsed.content = content;
-  }
-  if ("tags" in update) {
-    const tags = normalizeMemoryTags(update.tags);
-    if (!tags) return null;
-    parsed.tags = tags;
-  }
-  if ("importance" in update) {
-    if (update.importance !== "key" && update.importance !== "general") return null;
-    parsed.importance = update.importance;
-  }
-  return Object.keys(parsed).length > 0 ? parsed : null;
-}
-
-function parseMemoryReviewDecisionResult(value: unknown): MemoryReviewDecisionResult | null {
-  if (!value || typeof value !== "object" || Array.isArray(value) || !hasExactKeys(value, ["status"])) return null;
-  const status = (value as Partial<MemoryReviewDecisionResult>).status;
-  return status === "confirmed" || status === "rejected" || status === "blocked" || status === "disabled" || status === "not_found"
-    ? { status }
-    : null;
-}
-
-function parseCountMap(value: unknown, expectedKeys?: readonly string[]): Record<string, number> | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return null;
-  }
-
-  const entries = Object.entries(value);
-
-  if (
-    entries.some(([key, count]) => (
-      typeof key !== "string" ||
-      typeof count !== "number" ||
-      !Number.isSafeInteger(count) ||
-      count < 0
-    ))
-  ) {
-    return null;
-  }
-
-  if (expectedKeys && expectedKeys.some((key) => !Object.prototype.hasOwnProperty.call(value, key))) {
-    return null;
-  }
-
-  return Object.fromEntries(entries) as Record<string, number>;
-}
-
-function parseMemorySummary(value: unknown): MemorySummary | null {
-  const summary = value as Partial<MemorySummary> | null;
-  const sourceTypeCounts = parseCountMap(summary?.sourceTypeCounts, ["manual-chat", "auto-local-heuristic", "auto-local-model"]);
-  const importanceCounts = parseCountMap(summary?.importanceCounts, ["key", "general"]);
-  const compressionStateCounts = parseCountMap(summary?.compressionStateCounts, ["raw", "merged", "deduplicated", "budgeted"]);
-  const categoryCounts = parseCountMap(summary?.categoryCounts);
-
-  if (
-    !summary ||
-    typeof summary.enabled !== "boolean" ||
-    !isNonNegativeSafeInteger(summary.totalCards) ||
-    !isNonNegativeSafeInteger(summary.enabledCards) ||
-    !isNonNegativeSafeInteger(summary.disabledCards) ||
-    !isNonNegativeSafeInteger(summary.injectableCount) ||
-    !isNonNegativeSafeInteger(summary.injectionBudget) ||
-    !isNonNegativeSafeInteger(summary.compressionThreshold) ||
-    !sourceTypeCounts ||
-    !importanceCounts ||
-    !compressionStateCounts ||
-    !categoryCounts
-  ) {
-    return null;
-  }
-
-  return {
-    enabled: summary.enabled,
-    totalCards: summary.totalCards,
-    enabledCards: summary.enabledCards,
-    disabledCards: summary.disabledCards,
-    injectableCount: summary.injectableCount,
-    injectionBudget: summary.injectionBudget,
-    compressionThreshold: summary.compressionThreshold,
-    sourceTypeCounts: sourceTypeCounts as MemorySummary["sourceTypeCounts"],
-    importanceCounts: importanceCounts as MemorySummary["importanceCounts"],
-    compressionStateCounts: compressionStateCounts as MemorySummary["compressionStateCounts"],
-    categoryCounts
-  };
-}
-
-function isNonNegativeSafeInteger(value: unknown): value is number {
-  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
-}
-
-function isHistoryMessage(value: unknown): value is HistoryMessage {
-  const message = value as Partial<HistoryMessage> | null;
-
-  return Boolean(
-    message &&
-    isHistoryId(message.id) &&
-    (message.role === "user" || message.role === "assistant") &&
-    typeof message.content === "string" &&
-    typeof message.createdAt === "number" &&
-    Number.isSafeInteger(message.createdAt) &&
-    message.createdAt > 0
-  );
-}
-
-function isConversation(value: unknown): value is Conversation {
-  const conversation = value as Partial<Conversation> | null;
-
-  return Boolean(
-    conversation &&
-    isHistoryId(conversation.id) &&
-    typeof conversation.title === "string" &&
-    typeof conversation.createdAt === "number" &&
-    Number.isSafeInteger(conversation.createdAt) &&
-    typeof conversation.updatedAt === "number" &&
-    Number.isSafeInteger(conversation.updatedAt) &&
-    Array.isArray(conversation.messages) &&
-    conversation.messages.every(isHistoryMessage)
-  );
-}
-
-function isConversationSummary(value: unknown): value is ConversationSummary {
-  const conversation = value as Partial<ConversationSummary> | null;
-
-  return Boolean(
-    conversation &&
-    isHistoryId(conversation.id) &&
-    typeof conversation.title === "string" &&
-    typeof conversation.createdAt === "number" &&
-    Number.isSafeInteger(conversation.createdAt) &&
-    typeof conversation.updatedAt === "number" &&
-    Number.isSafeInteger(conversation.updatedAt) &&
-    typeof conversation.messageCount === "number" &&
-    Number.isSafeInteger(conversation.messageCount) &&
-    conversation.messageCount >= 0
-  );
-}
-
-function parseHistoryRetentionLimit(value: unknown): HistoryRetentionLimit | null {
-  return value === 100 || value === 500 || value === 1_000 ? value : null;
-}
-
 function isWebSearchSettings(value: unknown): value is WebSearchSettings {
   const settings = value as Partial<WebSearchSettings> | null;
 
@@ -2045,51 +1581,49 @@ const localRuntimeApi: LocalRuntimeApi = {
 const historyApi: HistoryApi = {
   async listConversations() {
     const conversations: unknown = await ipcRenderer.invoke("history:list");
-
-    if (!Array.isArray(conversations) || !conversations.every(isConversationSummary)) {
+    const parsed = codecParseHistoryConversationList(conversations);
+    if (!parsed) {
       throw new Error("Invalid conversation history response");
     }
-
-    return conversations;
+    return parsed;
   },
   async getConversation(id) {
-    if (!isHistoryId(id)) {
+    if (!codecIsHistoryId(id)) {
       return null;
     }
-
     const conversation: unknown = await ipcRenderer.invoke("history:get", id);
-
-    if (conversation !== null && !isConversation(conversation)) {
+    const parsed = codecParseNullableHistoryConversation(conversation);
+    if (!parsed) {
       throw new Error("Invalid conversation response");
     }
-
-    return conversation;
+    return parsed.value;
   },
   async deleteConversation(id) {
-    if (!isHistoryId(id)) {
+    if (!codecIsHistoryId(id)) {
       return false;
     }
-
-    return Boolean(await ipcRenderer.invoke("history:delete", id));
+    const deleted = codecParseBooleanResponse(await ipcRenderer.invoke("history:delete", id));
+    if (deleted === null) throw new Error("Invalid history delete response");
+    return deleted;
   },
   async clearConversations() {
-    if (await ipcRenderer.invoke("history:clear") !== true) {
+    if (codecParseVoidResponse(await ipcRenderer.invoke("history:clear")) !== undefined) {
       throw new Error("History clear rejected");
     }
   },
   async getRetentionLimit() {
-    const limit = parseHistoryRetentionLimit(await ipcRenderer.invoke("history:get-retention"));
+    const limit = codecParseHistoryRetentionLimit(await ipcRenderer.invoke("history:get-retention"));
     if (!limit) {
       throw new Error("Invalid history retention response");
     }
     return limit;
   },
   async setRetentionLimit(limit) {
-    const parsedLimit = parseHistoryRetentionLimit(limit);
-    if (!parsedLimit) {
+    const request = codecParseHistoryRetentionRequest({ limit });
+    if (!request) {
       throw new Error("Invalid history retention request");
     }
-    const savedLimit = parseHistoryRetentionLimit(await ipcRenderer.invoke("history:set-retention", parsedLimit));
+    const savedLimit = codecParseHistoryRetentionLimit(await ipcRenderer.invoke("history:set-retention", request.limit));
     if (!savedLimit) {
       throw new Error("Invalid history retention response");
     }
@@ -2099,16 +1633,14 @@ const historyApi: HistoryApi = {
 
 const memoryApi: MemoryApi = {
   async getSettings() {
-    const settings = await ipcRenderer.invoke("memory:get-settings");
-
-    if (!settings || typeof settings.enabled !== "boolean") {
+    const settings = codecParseMemorySettings(await ipcRenderer.invoke("memory:get-settings"));
+    if (!settings) {
       throw new Error("Invalid memory settings response");
     }
-
-    return { enabled: settings.enabled };
+    return settings;
   },
   async getSummary() {
-    const summary = parseMemorySummary(await ipcRenderer.invoke("memory:get-summary"));
+    const summary = codecParseMemorySummary(await ipcRenderer.invoke("memory:get-summary"));
 
     if (!summary) {
       throw new Error("Invalid memory summary response");
@@ -2117,60 +1649,41 @@ const memoryApi: MemoryApi = {
     return summary;
   },
   async setEnabled(enabled) {
-    if (typeof enabled !== "boolean") {
+    const request = codecParseMemoryEnabledRequest({ enabled });
+    if (!request) {
       throw new Error("Invalid memory enabled value");
     }
-
-    const settings = await ipcRenderer.invoke("memory:set-enabled", enabled);
-
-    if (!settings || typeof settings.enabled !== "boolean") {
+    const settings = codecParseMemorySettings(await ipcRenderer.invoke("memory:set-enabled", request.enabled));
+    if (!settings) {
       throw new Error("Invalid memory settings response");
     }
-
-    return { enabled: settings.enabled };
+    return settings;
   },
   async listCards() {
-    const cards: unknown = await ipcRenderer.invoke("memory:list");
-
-    if (!Array.isArray(cards)) {
-      throw new Error("Invalid memory list response");
-    }
-
-    const parsedCards = cards.map(parseMemoryCard);
-
-    if (parsedCards.some((card) => card === null)) {
+    const cards = codecParseMemoryCards(await ipcRenderer.invoke("memory:list"));
+    if (!cards) {
       throw new Error("Invalid memory card response");
     }
-
-    return parsedCards as MemoryCard[];
+    return cards;
   },
   async getCard(id) {
-    if (!isMemoryId(id)) {
+    if (!codecIsMemoryId(id)) {
       return null;
     }
-
-    const card: unknown = await ipcRenderer.invoke("memory:get", id);
-
-    if (card === null) {
-      return null;
-    }
-
-    const parsedCard = parseMemoryCard(card);
-
-    if (!parsedCard) {
+    const card = codecParseNullableMemoryCard(await ipcRenderer.invoke("memory:get", id));
+    if (!card) {
       throw new Error("Invalid memory card response");
     }
-
-    return parsedCard;
+    return card.value;
   },
   async createCard(draft) {
-    const parsedDraft = parseMemoryCardDraft(draft);
+    const parsedDraft = codecParseMemoryCardDraft(draft);
 
     if (!parsedDraft) {
       throw new Error("Invalid memory draft");
     }
 
-    const result = parseMemoryCreateResult(await ipcRenderer.invoke("memory:create", parsedDraft));
+    const result = codecParseMemoryCreateResult(await ipcRenderer.invoke("memory:create", parsedDraft));
 
     if (!result) {
       throw new Error("Invalid memory create response");
@@ -2179,9 +1692,9 @@ const memoryApi: MemoryApi = {
     return result;
   },
   async updateCard(id, update) {
-    const parsedUpdate = parseMemoryCardUpdate(update);
+    const parsedUpdate = codecParseMemoryCardUpdate(update);
 
-    if (!isMemoryId(id) || !parsedUpdate) {
+    if (!codecIsMemoryId(id) || !parsedUpdate) {
       return null;
     }
 
@@ -2191,7 +1704,7 @@ const memoryApi: MemoryApi = {
       return null;
     }
 
-    const parsedCard = parseMemoryCard(card);
+    const parsedCard = codecParseMemoryCard(card);
 
     if (!parsedCard) {
       throw new Error("Invalid memory card response");
@@ -2200,18 +1713,18 @@ const memoryApi: MemoryApi = {
     return parsedCard;
   },
   async deleteCard(id) {
-    if (!isMemoryId(id)) {
+    if (!codecIsMemoryId(id)) {
       return false;
     }
-
-    return Boolean(await ipcRenderer.invoke("memory:delete", id));
+    const deleted = codecParseBooleanResponse(await ipcRenderer.invoke("memory:delete", id));
+    if (deleted === null) throw new Error("Invalid memory delete response");
+    return deleted;
   },
   async forgetCard(id) {
-    if (!isMemoryId(id)) {
+    if (!codecIsMemoryId(id)) {
       return { status: "not_found" };
     }
-
-    const result = parseMemoryForgetResult(await ipcRenderer.invoke("memory:forget", id));
+    const result = codecParseMemoryForgetResult(await ipcRenderer.invoke("memory:forget", id));
 
     if (!result) {
       throw new Error("Invalid memory forget response");
@@ -2220,51 +1733,46 @@ const memoryApi: MemoryApi = {
     return result;
   },
   async clearCards() {
-    await ipcRenderer.invoke("memory:clear");
+    if (codecParseVoidResponse(await ipcRenderer.invoke("memory:clear")) !== undefined) {
+      throw new Error("Invalid memory response");
+    }
   },
   async listSuppressions() {
-    const values: unknown = await ipcRenderer.invoke("memory:list-suppressions");
-
-    if (!Array.isArray(values)) {
+    const suppressions = codecParseMemorySuppressionViews(await ipcRenderer.invoke("memory:list-suppressions"));
+    if (!suppressions) {
       throw new Error("Invalid memory suppression response");
     }
-
-    const suppressions = values.map(parseMemorySuppressionView);
-
-    if (suppressions.some((suppression) => suppression === null)) {
-      throw new Error("Invalid memory suppression response");
-    }
-
-    return suppressions as MemorySuppressionView[];
+    return suppressions;
   },
   async allowSuppression(id) {
-    if (!isMemoryId(id)) {
+    if (!codecIsMemoryId(id)) {
       return false;
     }
-
-    return Boolean(await ipcRenderer.invoke("memory:allow-suppression", id));
+    const allowed = codecParseBooleanResponse(await ipcRenderer.invoke("memory:allow-suppression", id));
+    if (allowed === null) throw new Error("Invalid memory suppression response");
+    return allowed;
   },
   async clearSuppressions() {
-    await ipcRenderer.invoke("memory:clear-suppressions");
+    if (codecParseVoidResponse(await ipcRenderer.invoke("memory:clear-suppressions")) !== undefined) {
+      throw new Error("Invalid memory response");
+    }
   },
   async listReviews() {
-    const values: unknown = await ipcRenderer.invoke("memory:list-reviews");
-    if (!Array.isArray(values)) throw new Error("Invalid memory review list response");
-    const reviews = values.map(parseMemoryReviewCandidate);
-    if (reviews.some((review) => review === null)) throw new Error("Invalid memory review response");
-    return reviews as MemoryReviewCandidate[];
+    const reviews = codecParseMemoryReviewCandidates(await ipcRenderer.invoke("memory:list-reviews"));
+    if (!reviews) throw new Error("Invalid memory review response");
+    return reviews;
   },
   async confirmReview(id, update) {
-    if (!isMemoryId(id)) return { status: "not_found" };
-    const parsedUpdate = update === undefined ? undefined : parseMemoryReviewDecisionDraft(update);
+    if (!codecIsMemoryId(id)) return { status: "not_found" };
+    const parsedUpdate = update === undefined ? undefined : codecParseMemoryReviewDecisionDraft(update);
     if (update !== undefined && !parsedUpdate) return { status: "not_found" };
-    const result = parseMemoryReviewDecisionResult(await ipcRenderer.invoke("memory:confirm-review", id, parsedUpdate));
+    const result = codecParseMemoryReviewDecisionResult(await ipcRenderer.invoke("memory:confirm-review", id, parsedUpdate));
     if (!result) throw new Error("Invalid memory review response");
     return result;
   },
   async rejectReview(id) {
-    if (!isMemoryId(id)) return { status: "not_found" };
-    const result = parseMemoryReviewDecisionResult(await ipcRenderer.invoke("memory:reject-review", id));
+    if (!codecIsMemoryId(id)) return { status: "not_found" };
+    const result = codecParseMemoryReviewDecisionResult(await ipcRenderer.invoke("memory:reject-review", id));
     if (!result) throw new Error("Invalid memory review response");
     return result;
   }

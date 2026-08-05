@@ -651,10 +651,12 @@ test("isolated fixture copies bytes and only patches its own app", () => {
     assert.match(transformed.framePipeline, /previewOwnedProbe = previewMotionStarted &&/u);
     assert.match(transformed.framePipeline, /parameterObserved = true/u);
     assert.match(transformed.preset, /\.\.\.APPROVED_MOTION_PRESETS/u);
-    assert.deepEqual(getIsolatedManualPreviewBuildSteps().map(({ label, args }) => ({ label, args })), [
-      { label: "main", args: ["-p", "tsconfig.main.json"] },
-      { label: "preload", args: ["-p", "tsconfig.preload.json"] },
-      { label: "renderer", args: ["build", "--config", "vite.config.ts"] }
+    const stepFixtureRoot = resolve(root, "fixture root");
+    assert.deepEqual(getIsolatedManualPreviewBuildSteps(stepFixtureRoot).map(({ label, args, shell }) => ({ label, args, shell })), [
+      { label: "main", args: ["-p", "tsconfig.main.json"], shell: process.platform === "win32" },
+      { label: "preload", args: ["-p", "tsconfig.preload.json"], shell: process.platform === "win32" },
+      { label: "chat-preload-bundle", args: [join(process.cwd(), "scripts", "build-chat-preload.mjs"), "--root", stepFixtureRoot], shell: false },
+      { label: "renderer", args: ["build", "--config", "vite.config.ts"], shell: process.platform === "win32" }
     ]);
   } finally {
     rmSync(root, { recursive: true, force: true });

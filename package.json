@@ -8,7 +8,7 @@
   "main": "dist/main/app.js",
   "scripts": {
     "dev": "npm run build && electron .",
-    "build": "tsc -p tsconfig.main.json && node scripts/build-bundled-baidu-mcp-server.mjs && tsc -p tsconfig.preload.json && vite build",
+    "build": "tsc -p tsconfig.main.json && node scripts/build-bundled-baidu-mcp-server.mjs && tsc -p tsconfig.preload.json && node scripts/build-chat-preload.mjs && vite build",
     "typecheck": "tsc --noEmit -p tsconfig.renderer.json",
     "audit:accessories": "node --experimental-strip-types -e \"import('./scripts/live2d-accessory-capability-audit.mts').then(async ({ auditWitchAccessoryCapabilities }) => process.stdout.write(JSON.stringify(await auditWitchAccessoryCapabilities(), null, 2) + '\\n'))\"",
     "audit:actions": "node --experimental-strip-types scripts/live2d-action-capability-audit.mts",

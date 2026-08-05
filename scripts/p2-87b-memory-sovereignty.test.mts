@@ -7,6 +7,7 @@ import test from "node:test";
 
 const require = createRequire(import.meta.url);
 const { createMemoryStore } = require("../dist/main/services/chat/memory-store.js") as typeof import("../src/main/services/chat/memory-store");
+const { createMemoryReviewStore } = require("../dist/main/services/chat/memory-review-store.js") as typeof import("../src/main/services/chat/memory-review-store");
 const { parseMemoryCardUpdate, parseMemoryStorage } = require("../dist/shared/chat-memory.js") as typeof import("../src/shared/chat-memory");
 
 function createDraft() {
@@ -39,16 +40,31 @@ test("user-maintained automatic cards retain their content, classification, and 
   try {
     const store = createMemoryStore({ userDataPath });
     store.setEnabled(true);
-    const conversationId = crypto.randomUUID();
-    store.captureAutoMemoriesFromLatestUserMessage({
-      conversationId,
-      messageId: crypto.randomUUID(),
-      content: "请用简体中文回复我"
+    const legacyCapture = store.captureAutoMemoriesFromLatestUserMessage({
+      conversationId: crypto.randomUUID(), messageId: crypto.randomUUID(), content: "请用简体中文回复我"
     });
-    const card = store.listCards()[0];
+    assert.equal(legacyCapture.skippedReason, "no_candidate");
+    assert.equal(legacyCapture.capturedCount, 0);
+    assert.equal(store.listCards().length, 0);
+    const created = store.createCard(createDraft());
+    assert.equal(created.status, "created");
+    const memoryPath = join(userDataPath, "memory", "facts.json");
+    const persisted = JSON.parse(await readFile(memoryPath, "utf8"));
+    Object.assign(persisted.cards[0], {
+      sourceType: "auto-local-heuristic",
+      namespace: "personal",
+      key: "language-preference",
+      category: "language",
+      managedByUser: false
+    });
+    await writeFile(memoryPath, `${JSON.stringify(persisted)}\n`, "utf8");
+    const legacyStore = createMemoryStore({ userDataPath });
+    const card = legacyStore.listCards()[0];
+    assert.equal(card?.sourceType, "auto-local-heuristic");
+    assert.equal(card?.managedByUser, false);
     assert.ok(card);
 
-    const updated = store.updateCard(card.id, {
+    const updated = legacyStore.updateCard(card.id, {
       title: "P287B user maintained title",
       content: "P287B user maintained content",
       tags: ["P287B-user"],
@@ -59,19 +75,30 @@ test("user-maintained automatic cards retain their content, classification, and 
     const userManagedUpdatedAt = updated?.updatedAt;
     const userManagedCompressionState = updated?.compressionState;
 
-    store.captureAutoMemoriesFromLatestUserMessage({
-      conversationId,
-      messageId: crypto.randomUUID(),
-      content: "以后请用简体中文回复我"
+    const reviews = createMemoryReviewStore({ userDataPath });
+    const candidate = reviews.enqueue({
+      action: "create",
+      title: "P287B pending replacement",
+      content: "P287B pending replacement content",
+      tags: ["P287B-review"],
+      namespace: "personal",
+      key: "language-preference",
+      importance: "key",
+      category: "language",
+      confidence: 0.91,
+      sourceConversationId: crypto.randomUUID(),
+      sourceMessageId: crypto.randomUUID()
     });
-    const protectedCard = store.getCard(card.id);
+    assert.equal(candidate.status, "pending-review");
+    assert.deepEqual(legacyStore.confirmReviewedCandidate(candidate), { status: "blocked" });
+    const protectedCard = legacyStore.getCard(card.id);
 
     assert.equal(protectedCard?.title, "P287B user maintained title");
     assert.equal(protectedCard?.content, "P287B user maintained content");
     assert.deepEqual(protectedCard?.tags, ["P287B-user"]);
     assert.equal(protectedCard?.importance, "general");
     assert.equal(protectedCard?.enabled, false);
-    assert.equal(protectedCard?.observedCount, 2);
+    assert.equal(protectedCard?.observedCount, 1);
     assert.equal(protectedCard?.updatedAt, userManagedUpdatedAt);
     assert.equal(protectedCard?.compressionState, userManagedCompressionState);
   } finally {
@@ -85,20 +112,22 @@ test("empty and unknown-only updates cannot claim ownership or change card state
   try {
     const store = createMemoryStore({ userDataPath });
     store.setEnabled(true);
-    store.captureAutoMemoriesFromLatestUserMessage({
-      conversationId: crypto.randomUUID(),
-      messageId: crypto.randomUUID(),
-      content: "请用简体中文回复我"
-    });
-    const before = store.listCards()[0];
+    const created = store.createCard(createDraft());
+    assert.equal(created.status, "created");
+    const memoryPath = join(userDataPath, "memory", "facts.json");
+    const persisted = JSON.parse(await readFile(memoryPath, "utf8"));
+    Object.assign(persisted.cards[0], { sourceType: "auto-local-heuristic", managedByUser: false });
+    await writeFile(memoryPath, `${JSON.stringify(persisted)}\n`, "utf8");
+    const legacyStore = createMemoryStore({ userDataPath });
+    const before = legacyStore.listCards()[0];
     assert.ok(before);
     assert.equal(before.managedByUser, false);
 
     assert.equal(parseMemoryCardUpdate({}), null);
     assert.equal(parseMemoryCardUpdate({ unknown: true }), null);
-    assert.equal(store.updateCard(before.id, {}), null);
-    assert.equal(store.updateCard(before.id, { unknown: true } as never), null);
-    assert.deepEqual(store.getCard(before.id), before);
+    assert.equal(legacyStore.updateCard(before.id, {}), null);
+    assert.equal(legacyStore.updateCard(before.id, { unknown: true } as never), null);
+    assert.deepEqual(legacyStore.getCard(before.id), before);
   } finally {
     await rm(userDataPath, { recursive: true, force: true });
   }
@@ -110,18 +139,28 @@ test("delete permits recapture while forget blocks recapture until the saved typ
   try {
     const store = createMemoryStore({ userDataPath });
     store.setEnabled(true);
-    const conversationId = crypto.randomUUID();
-    const input = () => ({
-      conversationId,
-      messageId: crypto.randomUUID(),
-      content: "请用简体中文回复我"
+    const reviews = createMemoryReviewStore({ userDataPath });
+    const enqueue = () => reviews.enqueue({
+      action: "create",
+      title: "P287B review candidate",
+      content: "P287B review candidate content",
+      tags: ["P287B-review"],
+      namespace: "personal",
+      key: "language-preference",
+      importance: "key",
+      category: "language",
+      confidence: 0.91,
+      sourceConversationId: crypto.randomUUID(),
+      sourceMessageId: crypto.randomUUID()
     });
-
-    store.captureAutoMemoriesFromLatestUserMessage(input());
+    const firstCandidate = enqueue();
+    assert.equal(firstCandidate.status, "pending-review");
+    assert.deepEqual(store.confirmReviewedCandidate(firstCandidate), { status: "created" });
     const first = store.listCards()[0];
     assert.ok(first);
+    assert.equal(first.sourceType, "auto-local-model");
     assert.equal(store.deleteCard(first.id), true);
-    assert.equal(store.captureAutoMemoriesFromLatestUserMessage(input()).capturedCount, 1);
+    assert.deepEqual(store.confirmReviewedCandidate(enqueue()), { status: "created" });
 
     const second = store.listCards()[0];
     assert.ok(second);
@@ -130,8 +169,13 @@ test("delete permits recapture while forget blocks recapture until the saved typ
     assert.deepEqual(Object.keys(forgotten), ["status"]);
     assert.equal(store.listCards().length, 0);
     const restarted = createMemoryStore({ userDataPath });
-    const blocked = restarted.captureAutoMemoriesFromLatestUserMessage(input());
-    assert.equal(blocked.skippedReason, "suppressed");
+    const restartedReviews = createMemoryReviewStore({ userDataPath });
+    const blockedCandidate = restartedReviews.enqueue({
+      action: "create", title: "P287B review candidate", content: "P287B review candidate content", tags: ["P287B-review"],
+      namespace: "personal", key: "language-preference", importance: "key", category: "language", confidence: 0.91,
+      sourceConversationId: crypto.randomUUID(), sourceMessageId: crypto.randomUUID()
+    });
+    assert.deepEqual(restarted.confirmReviewedCandidate(blockedCandidate), { status: "blocked" });
 
     const suppressions = restarted.listSuppressions();
     assert.equal(suppressions.length, 1);
@@ -141,7 +185,11 @@ test("delete permits recapture while forget blocks recapture until the saved typ
 
     assert.equal(restarted.allowSuppression(suppressions[0]!.id), true);
     assert.equal(restarted.allowSuppression(suppressions[0]!.id), false);
-    assert.equal(restarted.captureAutoMemoriesFromLatestUserMessage(input()).capturedCount, 1);
+    assert.deepEqual(restarted.confirmReviewedCandidate(restartedReviews.enqueue({
+      action: "create", title: "P287B review candidate", content: "P287B review candidate content", tags: ["P287B-review"],
+      namespace: "personal", key: "language-preference", importance: "key", category: "language", confidence: 0.91,
+      sourceConversationId: crypto.randomUUID(), sourceMessageId: crypto.randomUUID()
+    })), { status: "created" });
   } finally {
     await rm(userDataPath, { recursive: true, force: true });
   }

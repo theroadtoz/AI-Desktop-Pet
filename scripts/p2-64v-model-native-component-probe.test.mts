@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import test from "node:test";
 import ts from "typescript";
 
@@ -263,9 +263,11 @@ test("P2-64V trigger retries and cleanup removes only its own run", async () => 
 });
 
 test("P2-64V isolated build plan is local and complete", () => {
-  assert.deepEqual(getIsolatedComponentProbeBuildSteps().map(({ label, args }) => ({ label, args })), [
-    { label: "main", args: ["-p", "tsconfig.main.json"] },
-    { label: "preload", args: ["-p", "tsconfig.preload.json"] },
-    { label: "renderer", args: ["build", "--config", "vite.config.ts"] }
+  const fixtureRoot = resolve(ROOT, "fixture root");
+  assert.deepEqual(getIsolatedComponentProbeBuildSteps(fixtureRoot).map(({ label, args, shell }) => ({ label, args, shell })), [
+    { label: "main", args: ["-p", "tsconfig.main.json"], shell: process.platform === "win32" },
+    { label: "preload", args: ["-p", "tsconfig.preload.json"], shell: process.platform === "win32" },
+    { label: "chat-preload-bundle", args: [join(ROOT, "scripts", "build-chat-preload.mjs"), "--root", fixtureRoot], shell: false },
+    { label: "renderer", args: ["build", "--config", "vite.config.ts"], shell: process.platform === "win32" }
   ]);
 });
