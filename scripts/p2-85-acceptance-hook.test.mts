@@ -183,7 +183,8 @@ test("P2-85 app retains only gated bridges, lifecycle forwarding, adapters and t
   assert.match(app, /p285AcceptanceScenarioController\?\.observeRendererActionLifecycle\(/u);
   assert.match(app, /reportDecision\(decision\)\s*\{\s*p285AcceptanceScenarioController\?\.observeProactiveDecision\(decision\);/su);
   assert.match(app, /queueExplicitGameCandidate\(\)\s*\{\s*proactiveBubbleCoordinator\?\.queueSafeCandidateForAcceptance\("explicit_game_started"\);/su);
-  assert.match(app, /reportObservation\(observation\)\s*\{\s*if \(isP285AcceptanceObservation\(observation\)\) \{\s*logTelemetry\("p2_85_acceptance_observation", observation\);/su);
+  assert.match(app, /reportObservation\(observation\)\s*\{\s*if \(isP285AcceptanceObservation\(observation\)\) \{\s*acceptanceEvidence\?\.report\(\{\s*type: "p2_85_acceptance_observation",\s*payload: observation/su);
+  assert.doesNotMatch(app, /logTelemetry\("p2_85_/u);
   assert.match(app, /void p285AcceptanceScenarioController\?\.resetBaseline\(\)\.catch\(\(\) => undefined\);/u);
   assert.match(app, /rejectionReason: "baseline_reset_failed" as P285AcceptanceRejectionReason/u);
   assert.doesNotMatch(app, /function startP285ChatOpenedReplaceActiveObservation/u);

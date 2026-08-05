@@ -6,6 +6,10 @@ import test from "node:test";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const appSource = readFileSync(join(repoRoot, "src/main/app.ts"), "utf8");
+const genericControllerSource = readFileSync(
+  join(repoRoot, "src/main/services/affect/reply-completion-affect-action-controller.ts"),
+  "utf8"
+);
 
 function functionBody(name: string, nextName: string): string {
   const start = appSource.indexOf(`function ${name}`);
@@ -20,12 +24,16 @@ test("P2-85 reply action resolution selects one intent before dispatch", () => {
 
   const resolver = functionBody("resolveDialogueReplyActionReason", "syncAutomaticPresenceLifecycle");
   assert.match(resolver, /createCompanionContextArbitrationInput\("reply-completion-affect-action"\)/);
-  assert.match(resolver, /createCompanionContextArbitrationInput\("reply-completion-action"\)/);
+  assert.doesNotMatch(resolver, /createCompanionContextArbitrationInput\("reply-completion-action"\)/);
   assert.doesNotMatch(resolver, /requestPetActionTriggerWithResult|sendPetActionTrigger/);
-  assert.match(resolver, /resolution\?\.replyAction === "suppressed"/);
-  assert.match(resolver, /resolution\?\.replyAction === "affect"/);
-  assert.match(resolver, /return resolution\.action\?\.reason \?\? null/);
-  assert.match(resolver, /return replyDecision\.decision === "allow" \? "chat_reply_completed" : null/);
+  assert.match(resolver, /resolution\?\.replyAction !== "affect"/);
+  assert.match(resolver, /resolution\.action\?\.reason \?\? null/);
+  assert.match(genericControllerSource, /registerGenericCompletion/);
+  assert.match(genericControllerSource, /publishAffectTerminalPresentation/);
+  assert.match(genericControllerSource, /input\.arbitration\.reason === "presentation_busy"/);
+  assert.match(genericControllerSource, /handleGenericLifecycle/);
+  assert.match(genericControllerSource, /replaceScheduledPurpose\("generic_initial_settle"/);
+  assert.match(genericControllerSource, /replaceScheduledPurpose\("affect_cooldown_retry"/);
 
   const completionStart = appSource.indexOf("const shouldRequestReplyWarmSettle =");
   const completionEnd = appSource.indexOf('logTelemetry("chat_stream_completed"', completionStart);
@@ -38,6 +46,10 @@ test("P2-85 reply action resolution selects one intent before dispatch", () => {
   assert.doesNotMatch(completion, /if \(!affectActionRequested\)/);
   assert.match(completion, /dialogueReplyActionReason === affectPresentation\?\.action\?\.reason/);
   assert.match(completion, /attempt\.coordinatorAttempted/);
+  assert.match(completion, /replyCompletionAffectActionController\.registerGenericCompletion\(\{/);
+  assert.match(completion, /readSnapshot: readGenericReplyCompletionLiveSnapshot/);
+  assert.match(completion, /dispatch: dispatchGenericReplyCompletionAction/);
+  assert.match(completion, /publish: publishPetPresentation/);
 });
 
 test("P2-85 keeps chat-visible reply behavior through distinct affect and generic policy gates", () => {
@@ -47,7 +59,39 @@ test("P2-85 keeps chat-visible reply behavior through distinct affect and generi
 
   const resolver = functionBody("resolveDialogueReplyActionReason", "syncAutomaticPresenceLifecycle");
   assert.match(resolver, /createCompanionContextArbitrationInput\("reply-completion-affect-action"\)/);
-  assert.match(resolver, /createCompanionContextArbitrationInput\("reply-completion-action"\)/);
+  assert.doesNotMatch(resolver, /createCompanionContextArbitrationInput\("reply-completion-action"\)/);
+  assert.match(appSource, /replyCompletionAffectActionController\.registerGenericCompletion\(\{[\s\S]*createCompanionContextArbitrationInput\("reply-completion-action"\)/);
+  assert.match(appSource, /replyCompletionAffectActionController\.handleGenericLifecycle\(\{[\s\S]*readSnapshot: readGenericReplyCompletionLiveSnapshot/);
+  assert.doesNotMatch(appSource, /deferReplyCompletionGenericActionIfEligible|dispatchDeferredReplyCompletionGenericAction/);
+});
+
+test("P2-91C1 generic delegation mutation gate rejects inline app policy and missing controller seams", () => {
+  const isThinDelegation = (source: string, controllerSource: string) =>
+    source.includes("replyCompletionAffectActionController.registerGenericCompletion({") &&
+    source.includes("replyCompletionAffectActionController.handleGenericLifecycle({") &&
+    source.includes("readSnapshot: readGenericReplyCompletionLiveSnapshot") &&
+    !source.includes("deferReplyCompletionGenericActionIfEligible") &&
+    !source.includes("dispatchDeferredReplyCompletionGenericAction") &&
+    controllerSource.includes("registerGenericCompletion") &&
+    controllerSource.includes("handleGenericLifecycle") &&
+    controllerSource.includes('replaceScheduledPurpose("generic_initial_settle"') &&
+    controllerSource.includes('replaceScheduledPurpose("affect_cooldown_retry"') &&
+    controllerSource.includes("scheduleGenericInitialSettle") &&
+    controllerSource.includes('input.arbitration.reason === "presentation_busy"');
+
+  assert.equal(isThinDelegation(appSource, genericControllerSource), true);
+  assert.equal(isThinDelegation(
+    appSource.replace("replyCompletionAffectActionController.registerGenericCompletion({", "({"),
+    genericControllerSource
+  ), false);
+  assert.equal(isThinDelegation(
+    `${appSource}\nfunction deferReplyCompletionGenericActionIfEligible() {}`,
+    genericControllerSource
+  ), false);
+  assert.equal(isThinDelegation(
+    appSource,
+    genericControllerSource.replaceAll("handleGenericLifecycle", "removedGenericLifecycle")
+  ), false);
 });
 
 test("P2-85 affect band keeps low concern and disabled affect at default", () => {

@@ -28,6 +28,10 @@ import {
   type PetTelemetryEventType
 } from "../src/shared/pet-telemetry-contract.ts";
 import {
+  encodePersistentTelemetryEvent,
+  toPersistentTelemetryEvent
+} from "../src/shared/telemetry-contract.ts";
+import {
   PET_BODY_POOL_ACTION_TYPES,
   PET_EXPRESSION_PRESET_CATALOG,
   PET_INTERACTION_ACTION_CATALOG,
@@ -1207,7 +1211,8 @@ test("interaction action player owns start, finish, restore, and finished teleme
     type: "pet_interaction_action_finished",
     payload: {
       type: "reading",
-      reason: "click_body"
+      reason: "click_body",
+      terminalStatus: "completed"
     }
   });
 });
@@ -1265,6 +1270,19 @@ test("interaction action player applies manifest pose targets and restores them 
     "resumeLook",
     "applyPresentation:neutral:none"
   ]);
+});
+
+test("interaction action player reports completed for non-motion natural completion", () => {
+  const harness = createFakeInteractionActionPlayer();
+  const action = getPetInteractionAction("greeting");
+
+  assert.equal(harness.player.playAction(action, "click_body"), true);
+  harness.timers[0]?.callback();
+
+  assert.equal(harness.player.isActive(), false);
+  assert.equal(harness.telemetry.filter((event) => event.type === "pet_interaction_action_started").length, 1);
+  assert.equal(harness.telemetry.filter((event) => event.type === "pet_interaction_action_finished").length, 1);
+  assert.equal(harness.telemetry.at(-1)?.payload.terminalStatus, "completed");
 });
 
 test("interaction action player waits for native completion without stopping motion", async () => {
@@ -1385,7 +1403,7 @@ test("interaction action player times out a native motion load that never resolv
   assert.equal(harness.player.playAction(motionAction, "state_sleep"), true);
   assert.equal(harness.timers.length, 1);
   assert.equal(harness.timers[0]?.delayMs, 2_000);
-  assert.equal(harness.telemetry.some((event) => event.type === "pet_interaction_action_started"), false);
+  assert.equal(harness.telemetry.some((event) => event.type === "pet_interaction_action_started"), true);
 
   harness.timers[0]?.callback();
   harness.timers[0]?.callback();
@@ -1418,7 +1436,7 @@ test("interaction action player cancels a loading motion without reporting nativ
   assert.equal(harness.calls.filter((call) => call === "stopMotion:interrupted").length, 1);
   assert.equal(harness.calls.filter((call) => call === "restoreParts").length, 1);
   assert.equal(harness.telemetry.at(-1)?.type, "pet_interaction_action_finished");
-  assert.equal(Object.hasOwn(harness.telemetry.at(-1)?.payload ?? {}, "terminalStatus"), false);
+  assert.equal(harness.telemetry.at(-1)?.payload.terminalStatus, "interrupted");
 
   resolveResult({
     status: "started",
@@ -1432,7 +1450,7 @@ test("interaction action player cancels a loading motion without reporting nativ
   await Promise.resolve();
 
   assert.equal(harness.calls.filter((call) => call === "restoreParts").length, 1);
-  assert.equal(harness.telemetry.filter((event) => event.type === "pet_interaction_action_started").length, 0);
+  assert.equal(harness.telemetry.filter((event) => event.type === "pet_interaction_action_started").length, 1);
   assert.equal(harness.telemetry.filter((event) => event.type === "pet_interaction_action_finished").length, 1);
 });
 
@@ -1457,7 +1475,7 @@ test("interaction action player does not report native interruption while motion
 
   assert.equal(harness.calls.filter((call) => call === "stopMotion:interrupted").length, 1);
   assert.equal(harness.calls.filter((call) => call === "restoreParts").length, 1);
-  assert.equal(Object.hasOwn(harness.telemetry.at(-1)?.payload ?? {}, "terminalStatus"), false);
+  assert.equal(harness.telemetry.at(-1)?.payload.terminalStatus, "interrupted");
 
   motion.settle("interrupted");
   await Promise.resolve();
@@ -1491,7 +1509,7 @@ test("interaction action player ignores late playback and terminal identities af
 
   assert.equal(harness.calls.filter((call) => call === "stopMotion:timed_out").length, 1);
   assert.equal(harness.calls.filter((call) => call === "restoreParts").length, 1);
-  assert.equal(harness.telemetry.filter((event) => event.type === "pet_interaction_action_started").length, 0);
+  assert.equal(harness.telemetry.filter((event) => event.type === "pet_interaction_action_started").length, 1);
   assert.equal(harness.telemetry.filter((event) => event.type === "pet_interaction_action_finished").length, 1);
   assert.equal(harness.telemetry.at(-1)?.payload.terminalStatus, "timed_out");
 });
@@ -1709,7 +1727,7 @@ test("interaction action player falls back to declared action duration when nati
 
       assert.equal(harness.calls.filter((call) => call === "restoreParts").length, 1);
       assert.equal(harness.telemetry.filter((event) => event.type === "pet_interaction_action_finished").length, 1);
-      assert.equal(Object.hasOwn(harness.telemetry.at(-1)?.payload ?? {}, "terminalStatus"), false);
+      assert.equal(harness.telemetry.at(-1)?.payload.terminalStatus, "completed");
       assert.equal(harness.telemetry.at(-1)?.payload.motionPresetId, "future-wave");
     });
   }
@@ -1730,6 +1748,8 @@ test("interaction action player ignores a late native playback Promise after dis
   harness.player.playAction(motionAction, "click_body");
   harness.player.dispose();
   assert.equal(harness.calls.filter((call) => call === "stopMotion:interrupted").length, 1);
+  assert.equal(harness.telemetry.filter((event) => event.type === "pet_interaction_action_finished").length, 1);
+  assert.equal(harness.telemetry.at(-1)?.payload.terminalStatus, "interrupted");
   resolveResult({
     status: "started",
     motionPresetId: "future-wave",
@@ -1743,7 +1763,40 @@ test("interaction action player ignores a late native playback Promise after dis
 
   assert.equal(harness.calls.filter((call) => call === "restoreParts").length, 1);
   assert.equal(harness.calls.filter((call) => call === "applyPresentation:neutral:none").length, 1);
-  assert.equal(harness.telemetry.filter((event) => event.type === "pet_interaction_action_finished").length, 0);
+  assert.equal(harness.telemetry.filter((event) => event.type === "pet_interaction_action_finished").length, 1);
+});
+
+test("interaction lifecycle sanitize to persistent boundary strips ids and requires terminal", () => {
+  const rendererEvent = parsePetRendererTelemetryEvent({
+    type: "pet_interaction_action_finished",
+    payload: {
+      type: "bodyAttentionTurn",
+      reason: "click_body",
+      requestId: "req_123-ABC",
+      actionInstanceId: "req_456-DEF",
+      terminalStatus: "completed"
+    }
+  });
+  assert.ok(rendererEvent);
+  const persistent = toPersistentTelemetryEvent(rendererEvent.type, {
+    type: rendererEvent.payload?.type,
+    terminalStatus: rendererEvent.payload?.terminalStatus,
+    ...(rendererEvent.payload?.requestId ? { requestId: rendererEvent.payload.requestId } : {}),
+    ...(rendererEvent.payload?.actionInstanceId ? { actionInstanceId: rendererEvent.payload.actionInstanceId } : {})
+  });
+  assert.ok(persistent);
+  const encoded = encodePersistentTelemetryEvent(persistent, "2026-08-04T00:00:00.000Z");
+  assert.ok(encoded);
+  assert.deepEqual(JSON.parse(encoded).payload, {
+    actionType: "bodyAttentionTurn",
+    terminalStatus: "completed"
+  });
+  assert.equal(encoded.includes("requestId"), false);
+  assert.equal(encoded.includes("actionInstanceId"), false);
+  assert.equal(toPersistentTelemetryEvent("pet_interaction_action_finished", {
+    type: "bodyAttentionTurn",
+    requestId: "pet-action:bodyAttentionTurn:1"
+  }), null);
 });
 
 test("interaction action player prevents stacking and reports active action skips", () => {
@@ -2035,7 +2088,8 @@ test("interaction action player preserves safe request ids through lifecycle tel
     payload: {
       type: "greeting",
       reason: "chat_opened",
-      requestId: "req_123-ABC"
+      requestId: "req_123-ABC",
+      terminalStatus: "completed"
     }
   });
 });

@@ -380,7 +380,22 @@ test("main runtime routes proactive bubbles through the unified coordinator", ()
     appSource,
     /proactiveBubbleCoordinator\?\.onActionLifecycle\(\s*lifecycleRequestId === undefined\s*\?\s*\{ status: "started", reason: actionReason \}\s*:\s*\{ status: "started", reason: actionReason, requestId: lifecycleRequestId \}\s*\)/
   );
-  assert.match(appSource, /logTelemetry\("proactive_bubble_candidate", \{/);
+  const reportDecisionIndex = appSource.indexOf("    reportDecision(decision) {");
+  const reportDecisionEndIndex = appSource.indexOf(
+    "  proactiveBubbleCoordinator.updateSettings",
+    reportDecisionIndex
+  );
+  const reportDecisionSource = appSource.slice(reportDecisionIndex, reportDecisionEndIndex);
+  assert.notEqual(reportDecisionIndex, -1);
+  assert.notEqual(reportDecisionEndIndex, -1);
+  assert.match(
+    reportDecisionSource,
+    /observeProactiveDecision\(decision\);[\s\S]*logTelemetry\("proactive_bubble_candidate"\);/
+  );
+  assert.doesNotMatch(
+    reportDecisionSource,
+    /logTelemetry\("proactive_bubble_candidate"\s*,\s*\{/
+  );
   assert.match(appSource, /function flushStartupProactiveSpeechBubbleCandidate\(\)/);
   assert.match(appSource, /function flushStartupProactiveSpeechBubbleCandidate\(\)[\s\S]*proactiveBubbleCoordinator\?\.onFirstFrame\(\);[\s\S]*scheduleIdleProactiveSpeechBubble\(\);/);
   assert.match(appSource, /petTelemetryEvent\.payload\?\.reason === "startup_first_visible_frame"[\s\S]*pet_interaction_action_finished/);

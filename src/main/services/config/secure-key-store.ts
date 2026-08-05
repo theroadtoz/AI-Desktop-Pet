@@ -1,7 +1,11 @@
 import { app, safeStorage } from "electron";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import type { TelemetryPayload } from "../telemetry";
+import {
+  toPersistentTelemetryEvent,
+  type PersistentTelemetryLogger,
+  type TelemetryEventType
+} from "../../../shared/telemetry-contract";
 
 type StoredKey = {
   encrypted?: string;
@@ -9,8 +13,6 @@ type StoredKey = {
 };
 
 type KeyStoreFile = Record<string, StoredKey>;
-
-type TelemetryLogger = (type: string, payload?: TelemetryPayload) => void;
 
 export type SecureKeyStore = {
   setApiKey(apiKeyRef: string, apiKey: string): void;
@@ -22,13 +24,14 @@ export type SecureKeyStore = {
 
 export function createSecureKeyStore(options: {
   userDataPath?: string;
-  logTelemetry?: TelemetryLogger;
+  logTelemetry?: PersistentTelemetryLogger;
 } = {}): SecureKeyStore {
   const userDataPath = options.userDataPath ?? app.getPath("userData");
   const storePath = join(userDataPath, "secrets", "provider-keys.json");
 
-  function log(type: string, payload?: TelemetryPayload): void {
-    options.logTelemetry?.(type, payload);
+  function log(type: TelemetryEventType, payload: unknown = {}): void {
+    const event = toPersistentTelemetryEvent(type, payload);
+    if (event) options.logTelemetry?.(event);
   }
 
   function readStore(): KeyStoreFile {
@@ -65,14 +68,14 @@ export function createSecureKeyStore(options: {
         };
       } else {
         console.warn("[secure-key-store] safeStorage encryption is unavailable; using dev-only plaintext fallback");
-        log("secure_key_store_unencrypted_fallback", { apiKeyRef });
+        log("secure_key_store_unencrypted_fallback", { configured: true });
         store[apiKeyRef] = {
           plainTextDevOnly: apiKey
         };
       }
 
       writeStore(store);
-      log("secure_key_saved", { apiKeyRef, hasApiKey: true });
+      log("secure_key_saved", { configured: true });
     },
     getApiKey(apiKeyRef) {
       assertValidApiKeyRef(apiKeyRef);
@@ -111,7 +114,7 @@ export function createSecureKeyStore(options: {
 
       delete store[apiKeyRef];
       writeStore(store);
-      log("secure_key_deleted", { apiKeyRef, hasApiKey: false });
+      log("secure_key_deleted", { configured: false });
       return true;
     },
     getStorePath() {
@@ -143,4 +146,3 @@ function isKeyStoreFile(value: unknown): value is KeyStoreFile {
     )
   ));
 }
-

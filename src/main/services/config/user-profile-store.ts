@@ -2,9 +2,11 @@ import { app } from "electron";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { parseUserProfile, parseUserProfileInput, type UserProfile } from "../../../shared/user-profile";
-import type { TelemetryPayload } from "../telemetry";
-
-type TelemetryLogger = (type: string, payload?: TelemetryPayload) => void;
+import {
+  toPersistentTelemetryEvent,
+  type PersistentTelemetryLogger,
+  type TelemetryEventType
+} from "../../../shared/telemetry-contract";
 
 export type UserProfileStore = {
   getProfile(): UserProfile | null;
@@ -15,13 +17,14 @@ export type UserProfileStore = {
 
 export function createUserProfileStore(options: {
   userDataPath?: string;
-  logTelemetry?: TelemetryLogger;
+  logTelemetry?: PersistentTelemetryLogger;
 } = {}): UserProfileStore {
   const userDataPath = options.userDataPath ?? app.getPath("userData");
   const profilePath = join(userDataPath, "config", "user-profile.json");
 
-  function log(type: string, payload?: TelemetryPayload): void {
-    options.logTelemetry?.(type, payload);
+  function log(type: TelemetryEventType, payload: unknown = {}): void {
+    const event = toPersistentTelemetryEvent(type, payload);
+    if (event) options.logTelemetry?.(event);
   }
 
   return {

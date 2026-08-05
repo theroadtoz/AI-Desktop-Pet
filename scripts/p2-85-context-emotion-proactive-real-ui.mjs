@@ -1,16 +1,18 @@
 import {
   assertNoScreenshotResidue,
+  assertRealUiRunParentRemoved,
   cleanupRealUiRun,
   connectToElectron,
   createRealUiRunContext,
   evaluate,
+  readAcceptanceEvidenceForContext,
   sleep,
   startElectron,
   waitFor,
   waitForChildExit,
   waitForWindow
 } from "./support/real-ui-harness.mjs";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -122,10 +124,6 @@ function schemaInvalid() {
   return { ok: false, reason: "p2_85_telemetry_schema_invalid" };
 }
 
-function telemetryIgnored() {
-  return { ok: false, ignored: true, reason: "p2_85_telemetry_ignored" };
-}
-
 function hasExactKeys(value, keys) {
   const actual = Object.keys(value).sort();
   const expected = [...keys].sort();
@@ -140,9 +138,7 @@ function isBoolean(value) {
   return typeof value === "boolean";
 }
 
-function isSafeTelemetryTimestamp(value) {
-  return typeof value === "string" && Number.isFinite(Date.parse(value));
-}
+const SAFE_RUN_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 
 export function inspectP285AcceptanceHooks({ appSource, scenarioSource, petPreloadSource, ipcContractSource }) {
   const missing = [];
@@ -248,7 +244,7 @@ export function assertSafeP285Observation(payload) {
 export function assertSafeP285AcceptanceTelemetryEvent(event) {
   if (!event || typeof event !== "object" || Array.isArray(event)) return schemaInvalid();
   if (event.type === "p2_85_acceptance_rejection") {
-    return hasExactKeys(event, ["timestamp", "type", "payload"]) && isSafeTelemetryTimestamp(event.timestamp) && event.payload &&
+    return hasExactKeys(event, ["runId", "suite", "type", "payload"]) && SAFE_RUN_ID.test(event.runId) && event.suite === "p2-85" && event.payload &&
       typeof event.payload === "object" && !Array.isArray(event.payload) &&
       hasExactKeys(event.payload, ["scenarioId", "rejectionReason"]) &&
       P2_85_SCENARIO_IDS.includes(event.payload.scenarioId) &&
@@ -257,18 +253,17 @@ export function assertSafeP285AcceptanceTelemetryEvent(event) {
       : schemaInvalid();
   }
   if (event.type === "p2_85_acceptance_observation") {
-    return hasExactKeys(event, ["timestamp", "type", "payload"]) && isSafeTelemetryTimestamp(event.timestamp)
+    return hasExactKeys(event, ["runId", "suite", "type", "payload"]) && SAFE_RUN_ID.test(event.runId) && event.suite === "p2-85"
       ? assertSafeP285Observation(event.payload)
       : schemaInvalid();
   }
-  return typeof event.type === "string" && !event.type.startsWith("p2_85_")
-    ? telemetryIgnored()
-    : schemaInvalid();
+  return schemaInvalid();
 }
 
 function isP285SharedLifecycleEvent(event) {
   return Boolean(event && typeof event === "object" && !Array.isArray(event) &&
-    P2_85_SHARED_LIFECYCLE_EVENT_TYPES.has(event.type));
+    hasExactKeys(event, ["runId", "suite", "type", "payload"]) && SAFE_RUN_ID.test(event.runId) &&
+    event.suite === "p2-85" && P2_85_SHARED_LIFECYCLE_EVENT_TYPES.has(event.type));
 }
 
 export function selectP285EvidenceEvents(events) {
@@ -283,7 +278,7 @@ export function selectP285EvidenceEvents(events) {
       selected.push(event);
       continue;
     }
-    if (!safety.ignored) return { ok: false, events: selected };
+    return { ok: false, events: selected };
   }
   return { ok: true, events: selected };
 }
@@ -336,21 +331,9 @@ function isActionTerminal(event) {
 }
 
 export function readP285Telemetry(context) {
-  const logDir = join(context.appDataDir, "logs");
-  if (!existsSync(logDir)) return [];
-  return readdirSync(logDir)
-    .filter((name) => name.startsWith("telemetry-") && name.endsWith(".jsonl"))
-    .sort()
-    .flatMap((name) => readFileSync(join(logDir, name), "utf8")
-      .split(/\r?\n/u)
-      .map((line) => {
-        try {
-          return line ? JSON.parse(line) : null;
-        } catch {
-          return null;
-        }
-      })
-      .filter(Boolean));
+  const result = readAcceptanceEvidenceForContext(context, "p2-85");
+  if (!result.ok) throw new Error("p2_85_evidence_invalid");
+  return result.events;
 }
 
 export async function waitForP285Observation(context, startIndex, scenarioId) {
@@ -535,6 +518,7 @@ export async function cleanupP285ProductionContext(context) {
   } finally {
     cleanupRealUiRun(context);
   }
+  assertRealUiRunParentRemoved(context);
   return { electronStopped, runnerTmpRemoved: !existsSync(context.runParentDir) };
 }
 

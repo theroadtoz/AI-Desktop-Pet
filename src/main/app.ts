@@ -220,7 +220,10 @@ import {
   selectAffectPresentationCrosswalk
 } from "./services/affect/affect-presentation-crosswalk";
 import { createDeterministicXitaInteractionCueShadowObservation } from "./services/affect/deterministic-xita-interaction-cue";
-import { createReplyCompletionAffectActionController } from "./services/affect/reply-completion-affect-action-controller";
+import {
+  createReplyCompletionAffectActionController,
+  type GenericReplyCompletionDispatchResult
+} from "./services/affect/reply-completion-affect-action-controller";
 import { createReplyCompletionAffectRetryScheduler } from "./services/affect/reply-completion-affect-retry-scheduler";
 import {
   resolveCompanionContextArbitration,
@@ -283,7 +286,13 @@ import { createShortcutPreferencesStore, type ShortcutPreferencesStore } from ".
 import { registerModelAssetProtocol } from "./services/model-asset-protocol";
 import { createPointerController, type PointerController } from "./services/pointer-controller";
 import { createShortcutRegistry, type ShortcutRegistry } from "./services/shortcut-registry";
-import { createTelemetryService, type TelemetryPayload, type TelemetryService } from "./services/telemetry";
+import { createTelemetryService, type TelemetryService } from "./services/telemetry";
+import { createAcceptanceEvidenceService } from "./services/acceptance-evidence";
+import {
+  toPersistentTelemetryEvent,
+  type PersistentTelemetryEvent,
+  type TelemetryEventType
+} from "../shared/telemetry-contract";
 import {
   createPetActionDispatchCoordinator,
   type PetActionDispatchCoordinator,
@@ -323,6 +332,7 @@ let petWindow: BrowserWindow | null = null;
 let chatWindow: BrowserWindow | null = null;
 let pointerController: PointerController | null = null;
 let telemetry: TelemetryService | null = null;
+let acceptanceEvidence: ReturnType<typeof createAcceptanceEvidenceService> | null = null;
 let chatEngine: ChatEngine | null = null;
 let providerConfigStore: ProviderConfigStore | null = null;
 let secureKeyStore: SecureKeyStore | null = null;
@@ -385,7 +395,6 @@ let hasHandledStartupProactiveSpeechBubble = false;
 
 function cancelReplyCompletionAffectAction(): void {
   replyCompletionAffectActionController.cancel();
-  replyCompletionAffectRetryScheduler.cancel();
 }
 let proactiveSpeechBubbleTick = 0;
 let proactiveSpeechBubbleVisibleUntil = 0;
@@ -405,8 +414,17 @@ let petActionDispatchCoordinator: PetActionDispatchCoordinator | null = createPe
   now: () => Date.now(),
   createRequestId: () => randomUUID().replaceAll("-", "")
 });
-const replyCompletionAffectActionController = createReplyCompletionAffectActionController();
 const replyCompletionAffectRetryScheduler = createReplyCompletionAffectRetryScheduler();
+const replyCompletionAffectActionController = createReplyCompletionAffectActionController({
+  scheduler: {
+    schedule(_purpose, callback) {
+      return replyCompletionAffectRetryScheduler.schedule(callback);
+    },
+    cancel() {
+      replyCompletionAffectRetryScheduler.cancel();
+    }
+  }
+});
 
 type SourcedLowFrequencyCompanionEvent = {
   eventId: LowFrequencyCompanionEventId;
@@ -591,11 +609,7 @@ function canRecoverPetRenderer(): boolean {
   ));
 
   if (petRendererRecoveryTimes.length >= PET_RENDERER_MAX_RECOVERIES) {
-    logTelemetry("recovery_limit_reached", {
-      source: "pet_renderer",
-      limit: PET_RENDERER_MAX_RECOVERIES,
-      windowMs: PET_RENDERER_RECOVERY_WINDOW_MS
-    });
+    logTelemetry("recovery_limit_reached");
     console.warn("[pet] renderer recovery limit reached; automatic rebuild stopped", {
       limit: PET_RENDERER_MAX_RECOVERIES,
       windowMs: PET_RENDERER_RECOVERY_WINDOW_MS
@@ -637,6 +651,8 @@ function createRecoverablePetWindow(): BrowserWindow {
   nextPetWindow.on("closed", () => {
     if (petWindow === nextPetWindow) {
       desktopContextMonitor.setRendererReady(false);
+      cancelReplyCompletionAffectAction();
+      latestCompletedChatRequestVersion = null;
     }
   });
 
@@ -656,14 +672,8 @@ function showExistingPetWindow(reason: string): BrowserWindow | null {
   }
 
   restorePetWindowOnTop(petWindow);
-  logTelemetry("pet_window_duplicate_prevented", {
-    reason,
-    desktopPetWindowCount: getDesktopPetWindowCount()
-  });
-  logTelemetry("pet_window_reuse", {
-    reason,
-    desktopPetWindowCount: getDesktopPetWindowCount()
-  });
+  logTelemetry("pet_window_duplicate_prevented");
+  logTelemetry("pet_window_reuse");
   logWindowSnapshot(`pet_reuse_${reason}`);
   return petWindow;
 }
@@ -681,16 +691,20 @@ function ensurePetWindow(reason: string): BrowserWindow {
   petWindow = createRecoverablePetWindow();
   pointerController = createPointerControllerForWindow(petWindow);
   pointerController.setLocked(isPetLocked);
-  logTelemetry("pet_window_created", {
-    reason,
-    desktopPetWindowCount: getDesktopPetWindowCount()
-  });
+  logTelemetry("pet_window_created");
   logWindowSnapshot(`pet_created_${reason}`);
   return petWindow;
 }
 
-function logTelemetry(type: string, payload: TelemetryPayload = {}): void {
-  telemetry?.logEvent(type, payload);
+function logPersistentTelemetry(event: PersistentTelemetryEvent): void {
+  telemetry?.logEvent(event);
+}
+
+function logTelemetry(type: TelemetryEventType, payload: unknown = {}): void {
+  const event = toPersistentTelemetryEvent(type, payload);
+  if (event) {
+    logPersistentTelemetry(event);
+  }
 }
 
 function readProactiveSpeechBubbleIdleIntervalMs(value: string | undefined, isAcceptance: boolean): number {
@@ -750,7 +764,7 @@ async function startBundledLlamaCppRuntimeNow(options: {
 } = {}): Promise<BundledLlamaCppRuntimeSafeSummary> {
   const resolved = resolveBundledLlamaCppRuntime();
   latestBundledLlamaCppRuntimeSummary = resolved.safeSummary;
-  logTelemetry("bundled_llama_cpp_runtime_resolved", resolved.safeSummary);
+  logTelemetry("bundled_llama_cpp_runtime_resolved");
 
   if (!resolved.config) {
     if (bundledLlamaCppProviderConfig) {
@@ -767,7 +781,7 @@ async function startBundledLlamaCppRuntimeNow(options: {
     const summary = await runtime.start();
     const bundledSummary = mergeBundledRuntimeSummary(resolved.safeSummary, summary);
     latestBundledLlamaCppRuntimeSummary = bundledSummary;
-    logTelemetry("bundled_llama_cpp_runtime_status", bundledSummary);
+    logTelemetry("bundled_llama_cpp_runtime_status");
 
     if (bundledLlamaCppRuntime !== runtime) {
       return latestBundledLlamaCppRuntimeSummary;
@@ -787,7 +801,7 @@ async function startBundledLlamaCppRuntimeNow(options: {
     }
 
     bundledLlamaCppProviderConfig = handoff.providerConfig;
-    logTelemetry("bundled_llama_cpp_provider_handoff", handoff.safeSummary);
+    logTelemetry("bundled_llama_cpp_provider_handoff");
     options.refreshProvider?.();
     return bundledSummary;
   } catch {
@@ -805,7 +819,7 @@ async function startBundledLlamaCppRuntimeNow(options: {
       modelConfigured: true
     });
     latestBundledLlamaCppRuntimeSummary = errorSummary;
-    logTelemetry("bundled_llama_cpp_runtime_status", errorSummary);
+    logTelemetry("bundled_llama_cpp_runtime_status");
     return errorSummary;
   }
 }
@@ -853,7 +867,7 @@ async function startLlamaCppRuntimeNow(options: {
     }
 
     latestLlamaCppRuntimeSummary = llamaCppRuntimeSettingsStore?.getSafeSettingsView(summary) ?? summary;
-    logTelemetry("llama_cpp_runtime_status", summary);
+    logTelemetry("llama_cpp_runtime_status");
     const handoff = createLlamaCppProviderHandoff(summary, runtime.getBaseURL());
 
     if (!handoff) {
@@ -865,7 +879,7 @@ async function startLlamaCppRuntimeNow(options: {
     }
 
     managedLlamaCppProviderConfig = handoff.providerConfig;
-    logTelemetry("llama_cpp_provider_handoff", handoff.safeSummary);
+    logTelemetry("llama_cpp_provider_handoff");
     options.refreshProvider?.();
     return latestLlamaCppRuntimeSummary;
   } catch {
@@ -883,7 +897,7 @@ async function startLlamaCppRuntimeNow(options: {
       modelConfigured: Boolean(config.modelPath)
     };
     latestLlamaCppRuntimeSummary = llamaCppRuntimeSettingsStore?.getSafeSettingsView(errorSummary) ?? errorSummary;
-    logTelemetry("llama_cpp_runtime_status", errorSummary);
+    logTelemetry("llama_cpp_runtime_status");
     return latestLlamaCppRuntimeSummary;
   }
 }
@@ -905,7 +919,7 @@ async function stopLlamaCppRuntime(): Promise<LlamaCppRuntimeSummary | null> {
         llamaCppRuntime = null;
       }
       latestLlamaCppRuntimeSummary = llamaCppRuntimeSettingsStore?.getSafeSettingsView(summary) ?? summary;
-      logTelemetry("llama_cpp_runtime_stopped", summary);
+      logTelemetry("llama_cpp_runtime_stopped");
       return latestLlamaCppRuntimeSummary;
     })
     .catch(() => {
@@ -918,7 +932,7 @@ async function stopLlamaCppRuntime(): Promise<LlamaCppRuntimeSummary | null> {
         modelConfigured: false
       };
       latestLlamaCppRuntimeSummary = llamaCppRuntimeSettingsStore?.getSafeSettingsView(errorSummary) ?? errorSummary;
-      logTelemetry("llama_cpp_runtime_stopped", errorSummary);
+      logTelemetry("llama_cpp_runtime_stopped");
       return latestLlamaCppRuntimeSummary;
     });
 }
@@ -1006,40 +1020,31 @@ function createLocalModelDiagnosticFailureSummary(): LocalModelDiagnosticSafeSum
 }
 
 function logLocalModelDiagnosticSummary(summary: LocalModelDiagnosticSafeSummary): void {
-  logTelemetry("local_model_diagnostic_completed", {
-    ok: summary.ok,
-    status: summary.status,
-    recommendedRuntime: summary.recommendedRuntime,
-    durationMs: summary.durationMs,
-    runtimeCount: summary.runtimes.length,
-    readyRuntimeCount: summary.runtimes.filter((runtime) => runtime.status === "ready").length,
-    runtimes: summary.runtimes.map((runtime) => ({
-      id: runtime.id,
-      status: runtime.status,
-      baseURLHost: runtime.baseURLHost,
-      model: runtime.model,
-      commandFound: runtime.commandFound,
-      processFound: runtime.processFound,
-      tcpReachable: runtime.tcpReachable,
-      modelsStatus: runtime.modelsStatus,
-      chatStatus: runtime.chatStatus,
-      modelCount: runtime.modelCount,
-      firstTokenMs: runtime.firstTokenMs,
-      replyLength: runtime.replyLength,
-      durationMs: runtime.durationMs,
-      managedEnabled: runtime.managedEnabled,
-      bundled: runtime.bundled,
-      resourceSource: runtime.resourceSource,
-      manifestFound: runtime.manifestFound,
-      executableConfigured: runtime.executableConfigured,
-      modelConfigured: runtime.modelConfigured
-    }))
-  });
+  void summary;
+  logTelemetry("local_model_diagnostic_completed");
 }
 
 function logPetTelemetry(event: { type: PetTelemetryEventType; payload?: unknown }): void {
   const safeEvent = sanitizePetTelemetryEvent(event);
-  logTelemetry(safeEvent.type, safeEvent.payload);
+  if (
+    safeEvent.type === "pet_interaction_action_started" ||
+    safeEvent.type === "pet_interaction_action_finished" ||
+    safeEvent.type === "pet_interaction_action_skipped"
+  ) {
+    logTelemetry(safeEvent.type, {
+      type: safeEvent.payload?.type,
+      ...(safeEvent.type === "pet_interaction_action_finished"
+        ? { terminalStatus: safeEvent.payload?.terminalStatus }
+        : {}),
+      ...(safeEvent.type === "pet_interaction_action_skipped"
+        ? { skipReason: safeEvent.payload?.skipReason }
+        : {}),
+      ...(safeEvent.payload?.requestId ? { requestId: safeEvent.payload.requestId } : {}),
+      ...(safeEvent.payload?.actionInstanceId ? { actionInstanceId: safeEvent.payload.actionInstanceId } : {})
+    });
+    return;
+  }
+  logTelemetry(safeEvent.type);
 }
 
 type PetActionTriggerAttempt =
@@ -1096,19 +1101,18 @@ function logDialogueAffectDecision(
   status: "applied" | "suppressed" | "corrected",
   confidenceBand: "low" | "medium" | "high"
 ): void {
-  logTelemetry("dialogue_affect_decision", {
-    enabled: currentDialogueAffectSettings.enabled,
-    status,
-    confidenceBand,
-    transitionReason: xitaAffectCoordinator?.getSnapshot().transitionReason ?? "restart-recovery"
-  });
+  void status;
+  void confidenceBand;
+  logTelemetry("dialogue_affect_decision");
 }
 
 function logDialogueAffectActionDispatch(result: PetActionDispatchResult): void {
-  logTelemetry("dialogue_affect_action_dispatch", {
-    status: result.accepted ? "accepted" : "suppressed",
-    reason: result.accepted ? "accepted" : result.reason,
-    ...(result.accepted ? { requestId: result.requestId } : {})
+  logTelemetry("dialogue_affect_action_dispatch");
+  acceptanceEvidence?.report({
+    type: "dialogue_affect_action_dispatch",
+    payload: result.accepted
+      ? { status: "accepted", reason: "accepted", requestId: result.requestId }
+      : { status: "rejected", reason: result.reason }
   });
 }
 
@@ -1118,11 +1122,7 @@ function logP284AcceptanceObservation(
   if (!isP284AcceptanceObservationEnabled) {
     return;
   }
-  logTelemetry("p2_84_acceptance_observation", {
-    enabled: currentDialogueAffectSettings.enabled,
-    dialogueContextApplied: Boolean(presentation?.dialogueContextId),
-    actionIntentPresent: Boolean(presentation?.action)
-  });
+  void presentation;
 }
 
 function resetDialogueAffectToCalm(): void {
@@ -1344,41 +1344,20 @@ function resolveDialogueReplyActionReason(
   resolution: AffectDialoguePresentationResolution | null,
   shouldRequestReplyWarmSettle: boolean
 ): PetActionTriggerReason | null {
-  if (!shouldRequestReplyWarmSettle) return null;
-
-  if (resolution?.replyAction === "suppressed") {
+  if (!shouldRequestReplyWarmSettle || resolution?.replyAction !== "affect") {
     return null;
   }
 
-  if (resolution?.replyAction === "affect") {
-    const legacyDecision = resolveCompanionContextArbitration(
-      createCompanionContextArbitrationInput("affect-action")
-    );
-    const affectDecision = legacyDecision.decision === "suppress" &&
-      legacyDecision.reason === "affect_action_chat_visible"
-      ? resolveCompanionContextArbitration(
-        createCompanionContextArbitrationInput("reply-completion-affect-action")
-      )
-      : legacyDecision;
-    if (isP288bAcceptanceFixtureEnabled) {
-      const dispatchState = petActionDispatchCoordinator?.getState();
-      logTelemetry("p2_88b_affect_reply_action_gate", {
-        decision: affectDecision.decision,
-        reason: affectDecision.reason,
-        activeMainReason: dispatchState?.activeMainRequest?.reason ?? null,
-        localBusyReason: dispatchState?.localBusyReason ?? null
-      });
-    }
-    if (affectDecision.decision === "allow") {
-      return resolution.action?.reason ?? null;
-    }
-    return null;
-  }
-
-  const replyDecision = resolveCompanionContextArbitration(
-    createCompanionContextArbitrationInput("reply-completion-action")
+  const legacyDecision = resolveCompanionContextArbitration(
+    createCompanionContextArbitrationInput("affect-action")
   );
-  return replyDecision.decision === "allow" ? "chat_reply_completed" : null;
+  const affectDecision = legacyDecision.decision === "suppress" &&
+    legacyDecision.reason === "affect_action_chat_visible"
+    ? resolveCompanionContextArbitration(
+      createCompanionContextArbitrationInput("reply-completion-affect-action")
+    )
+    : legacyDecision;
+  return affectDecision.decision === "allow" ? resolution.action?.reason ?? null : null;
 }
 
 function syncAutomaticPresenceLifecycle(): AutomaticSituationSnapshot | null {
@@ -1424,6 +1403,18 @@ function deferReplyCompletionAffectActionIfEligible(
     )
     : legacyDecision;
   const activeRequest = petActionDispatchCoordinator?.getState().activeMainRequest;
+  const dispatchState = petActionDispatchCoordinator?.getState();
+  if (isP288bAcceptanceFixtureEnabled) {
+    acceptanceEvidence?.report({
+      type: "p2_88b_affect_reply_action_gate",
+      payload: {
+        decision: decision.decision,
+        reason: decision.reason,
+        activeMainReason: dispatchState?.activeMainRequest?.reason ?? null,
+        localBusyReason: dispatchState?.localBusyReason ?? null
+      }
+    });
+  }
   if (
     decision.decision === "suppress" &&
     decision.reason === "presentation_busy" &&
@@ -1485,12 +1476,44 @@ function dispatchDeferredReplyCompletionAffectAction(input: {
   }
 }
 
+function dispatchGenericReplyCompletionAction(): GenericReplyCompletionDispatchResult {
+  const attempt = requestPetActionTriggerWithResult("chat_reply_completed");
+  if (!attempt.coordinatorAttempted) {
+    return {
+      accepted: false,
+      reason: attempt.reason === "throttled" ? "throttled" : "failed"
+    };
+  }
+  if (attempt.result.accepted) {
+    return attempt.result;
+  }
+  return {
+    accepted: false,
+    reason: attempt.result.reason === "busy"
+      ? "busy"
+      : attempt.result.reason === "send_failed"
+        ? "send_failed"
+        : "rejected"
+  };
+}
+
+function readGenericReplyCompletionLiveSnapshot() {
+  return {
+    latestCompletedRequestVersion: latestCompletedChatRequestVersion,
+    activeRequestVersion: activeChatRequestVersion,
+    hasActiveStream: chatEngine?.hasActiveStream() ?? false,
+    arbitration: resolveCompanionContextArbitration(
+      createCompanionContextArbitrationInput("reply-completion-action")
+    )
+  };
+}
+
 function scheduleReplyCompletionAffectGlobalCooldownRetry(input: {
   requestId: string;
   requestVersion: number;
   reason: "state_idle";
 }): void {
-  replyCompletionAffectRetryScheduler.schedule(() => {
+  replyCompletionAffectActionController.scheduleAffectCooldownRetry(() => {
     const affect = xitaAffectCoordinator?.getSnapshot();
     if (
       latestCompletedChatRequestVersion !== input.requestVersion ||
@@ -1564,15 +1587,7 @@ function applyAutomaticSituationSnapshot(snapshot: AutomaticSituationSnapshot): 
     petWindow.webContents.send("automaticSituation:changed", snapshot);
   }
   if (previousDialogueContextId !== currentDialogueModeId || previousPresenceStateId !== currentPresenceModeId) {
-    logTelemetry("automatic_situation_changed", {
-      previousConversationContextId: previousDialogueContextId,
-      conversationContextId: currentDialogueModeId,
-      conversationSource: snapshot.conversationSource,
-      previousPresenceStateId,
-      presenceStateId: currentPresenceModeId,
-      presenceSource: snapshot.presenceSource,
-      revision: snapshot.revision
-    });
+    logTelemetry("automatic_situation_changed");
     if (!isSynchronizingCoarseUserState) {
       scheduleIdleProactiveSpeechBubble();
     }
@@ -1606,16 +1621,10 @@ function logProactiveSpeechBubbleDecision(
   payload: Pick<ProactiveSpeechBubblePayload, "lineId" | "reason" | "durationMs">,
   extra: Record<string, unknown> = {}
 ): void {
-  logTelemetry("proactive_speech_bubble", {
-    status,
-    lineId: payload.lineId,
-    reason: payload.reason,
-    durationMs: payload.durationMs,
-    presenceModeId: currentPresenceModeId,
-    dialogueModeId: currentDialogueModeId,
-    cadence: currentProactiveCompanionSettings.cadence,
-    ...extra
-  });
+  void status;
+  void payload;
+  void extra;
+  logTelemetry("proactive_speech_bubble");
 }
 
 function logLowFrequencyCompanionEventDecision(
@@ -1629,24 +1638,10 @@ function logLowFrequencyCompanionEventDecision(
     actionStateId?: PetActionStateId | undefined;
   } = {}
 ): void {
-  const actionStateId = event
-    ? extra.actionStateId ?? getEffectiveLowFrequencyCompanionActionStateId(event)
-    : null;
-  logTelemetry("low_frequency_companion_event", {
-    eventId: event?.eventId ?? lastLowFrequencyCompanionEventId ?? null,
-    reason: event?.bubbleReason ?? "idle_presence",
-    stateId: actionStateId,
-    actionType: actionStateId ? getPetActionStateActionType(actionStateId) : null,
-    modeId: currentDialogueModeId,
-    presenceModeId: currentPresenceModeId,
-    status,
-    skipReason: extra.skipReason,
-    safeSummaryLabel: event?.safeSummaryLabel ?? null,
-    interruptPolicy: event?.interruptPolicy ?? null,
-    durationMs: extra.durationMs,
-    elapsedSinceLastEventMs: extra.elapsedSinceLastEventMs,
-    minimumIntervalMs: extra.minimumIntervalMs ?? event?.minimumIntervalMs
-  });
+  void status;
+  void event;
+  void extra;
+  logTelemetry("low_frequency_companion_event");
 }
 
 function isChatVisible(): boolean {
@@ -2096,10 +2091,7 @@ function createPointerControllerForWindow(window: BrowserWindow): PointerControl
       isChatInteractionActive
     }),
     onOverlayRegionHitChanged: (isHit) => {
-      logTelemetry("proactive_bubble_overlay_hit_changed", {
-        overlayHitState: isHit ? "active" : "inactive",
-        overlayHitAuthority: "main_poll"
-      });
+      logTelemetry("proactive_bubble_overlay_hit_changed");
     },
     onWindowMotionCandidate: (candidate) => {
       logPetTelemetry({
@@ -2202,11 +2194,7 @@ function transitionPetRole(
   if (options.publish !== false) {
     publishPetPresentation(currentPetPresentationIntent);
   }
-  logTelemetry("pet_role_transition", {
-    state: petRoleSnapshot.state,
-    requestVersion: petRoleSnapshot.activeRequestVersion,
-    event: event.type
-  });
+  logTelemetry("pet_role_transition");
   return true;
 }
 
@@ -2217,53 +2205,12 @@ function settleInterruptedRole(): void {
 }
 
 function logStartupInfo(): void {
-  logTelemetry("startup", {
-    appVersion: app.getVersion(),
-    electronVersion: process.versions.electron,
-    chromiumVersion: process.versions.chrome,
-    nodeVersion: process.versions.node,
-    platform: process.platform,
-    arch: process.arch,
-    windowsRelease: process.platform === "win32" ? getOsRelease() : undefined,
-    userDataPath: app.getPath("userData")
-  });
-}
-
-function getDisplaySnapshot(): TelemetryPayload[] {
-  return screen.getAllDisplays().map((display) => ({
-    id: display.id,
-    bounds: display.bounds,
-    workArea: display.workArea,
-    scaleFactor: display.scaleFactor
-  }));
-}
-
-function getWindowSnapshot(window: BrowserWindow | null, extras: TelemetryPayload = {}): TelemetryPayload | null {
-  if (!window || window.isDestroyed()) {
-    return null;
-  }
-
-  return {
-    bounds: window.getBounds(),
-    visible: window.isVisible(),
-    alwaysOnTop: window.isAlwaysOnTop(),
-    focusable: window.isFocusable(),
-    ...extras
-  };
+  logTelemetry("startup");
 }
 
 function logWindowSnapshot(reason: string): void {
-  logTelemetry("window_snapshot", {
-    reason,
-    displays: getDisplaySnapshot(),
-    petWindow: getWindowSnapshot(petWindow, {
-      ignoreMouseEvents: pointerController?.isIgnoringMouseEvents() ?? true,
-      isLocked: pointerController?.isLocked() ?? isPetLocked
-    }),
-    chatWindow: getWindowSnapshot(chatWindow, {
-      ignoreMouseEvents: false
-    })
-  });
+  void reason;
+  logTelemetry("window_snapshot");
 }
 
 function logAcceptanceWindowSnapshot(reason: string): void {
@@ -2275,10 +2222,7 @@ function logAcceptanceWindowSnapshot(reason: string): void {
 function setPetLocked(nextIsLocked: boolean, reason: string): { isLocked: boolean } {
   isPetLocked = nextIsLocked;
   pointerController?.setLocked(isPetLocked);
-  logTelemetry("pet_lock_changed", {
-    isLocked: isPetLocked,
-    reason
-  });
+  logTelemetry("pet_lock_changed");
   logWindowSnapshot(reason);
   notifyChatPetLockChanged({ isLocked: isPetLocked });
   return { isLocked: isPetLocked };
@@ -2332,25 +2276,7 @@ function startPerformanceHeartbeat(): void {
       timeBand: getRuntimeProactiveSpeechBubbleTimeBand()
     });
 
-    logTelemetry("performance_heartbeat", {
-      processMetrics: app.getAppMetrics().map((metric) => ({
-        pid: metric.pid,
-        type: metric.type,
-        cpu: metric.cpu,
-        memory: metric.memory
-      })),
-      petWindowVisible: Boolean(petWindow && !petWindow.isDestroyed() && petWindow.isVisible()),
-      chatWindowVisible: Boolean(chatWindow && !chatWindow.isDestroyed() && chatWindow.isVisible()),
-      windowSnapshot: isAcceptanceTelemetryEnabled ? {
-        petWindow: getWindowSnapshot(petWindow, {
-          ignoreMouseEvents: pointerController?.isIgnoringMouseEvents() ?? true,
-          isLocked: pointerController?.isLocked() ?? isPetLocked
-        }),
-        chatWindow: getWindowSnapshot(chatWindow, {
-          ignoreMouseEvents: false
-        })
-      } : undefined
-    });
+    logTelemetry("performance_heartbeat");
   }, 5_000);
   performanceHeartbeat.unref();
 }
@@ -2362,15 +2288,12 @@ function registerDiagnosticShortcuts(): void {
     onTriggered: () => {
       const delivered = sendWebGLDiagnosticTrigger(petWindow);
 
-      logTelemetry("diagnostic_shortcut_triggered", {
-        accelerator: result.accelerator,
-        action: "inject_webgl_context_loss",
-        delivered
-      });
+      void delivered;
+      logTelemetry("diagnostic_shortcut_triggered");
     }
   });
 
-  logTelemetry("diagnostic_shortcut_registration", result);
+  logTelemetry("diagnostic_shortcut_registration");
 }
 
 function createUserShortcutRegistry(): ShortcutRegistry | null {
@@ -2388,18 +2311,13 @@ function createUserShortcutRegistry(): ShortcutRegistry | null {
       togglePetLock: () => {
         const nextState = setPetLocked(!isPetLocked, "global_lock_shortcut_toggle");
 
-        logTelemetry("pet_lock_shortcut_triggered", {
-          accelerator: shortcutRegistry
-            ?.getShortcutViews()
-            .find((shortcut) => shortcut.id === "togglePetLock")
-            ?.accelerator,
-          isLocked: nextState.isLocked,
-          chatWindowNotified: Boolean(chatWindow && !chatWindow.isDestroyed())
-        });
+        void nextState;
+        logTelemetry("pet_lock_shortcut_triggered");
       }
     },
     onRegistrationResult: (result) => {
-      logTelemetry("pet_lock_shortcut_registration", result);
+      void result;
+      logTelemetry("pet_lock_shortcut_registration");
     },
     onPreferencesChanged: (preferences) => {
       publishScaleWheelModifier(preferences);
@@ -2426,36 +2344,6 @@ function publishScaleWheelModifier(preferences = getCurrentShortcutPreferences()
 
 function readNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
-}
-
-function sanitizeRenderHealth(state: RenderHealth): TelemetryPayload {
-  const safeEvent = sanitizePetTelemetryEvent({
-    type: "pet_health",
-    payload: {
-      renderer: state.renderer,
-      framesPerSecond: state.framesPerSecond,
-      isContextLost: state.isContextLost,
-      canvasWidth: state.canvasWidth,
-      canvasHeight: state.canvasHeight,
-      nonTransparentPixels: state.nonTransparentPixels,
-      opaqueBlackPixels: state.opaqueBlackPixels,
-      firstFrameMs: state.firstFrameMs,
-      renderStartMs: state.renderStartMs,
-      recoveryCount: state.recoveryCount,
-      rendererTimestamp: state.timestamp
-    }
-  });
-
-  return safeEvent.payload ?? {};
-}
-
-function sanitizeFirstFrame(info: PetFirstFrameInfo): TelemetryPayload {
-  return {
-    firstFrameMs: readNumber(info.firstFrameMs),
-    renderStartMs: readNumber(info.renderStartMs),
-    renderer: info.renderer,
-    recoveryCount: readNumber(info.recoveryCount)
-  };
 }
 
 function isChatSendRequest(value: unknown): value is ChatSendRequest {
@@ -2823,10 +2711,7 @@ function rebuildPetWindow(recoverySource?: string): void {
   pointerController = createPointerControllerForWindow(petWindow);
   pointerController.setLocked(isPetLocked);
   logWindowSnapshot(recoverySource ? "pet_rebuild" : "pet_created");
-  logTelemetry(recoverySource ? "pet_window_rebuilt" : "pet_window_created", {
-    reason: recoverySource ?? "rebuild_pet_window",
-    desktopPetWindowCount: getDesktopPetWindowCount()
-  });
+  logTelemetry(recoverySource ? "pet_window_rebuilt" : "pet_window_created");
 
   if (recoverySource) {
     logPetTelemetry({
@@ -2869,8 +2754,17 @@ app.whenReady().then(async () => {
     return;
   }
 
+  acceptanceEvidence = createAcceptanceEvidenceService({
+    userDataPath: app.getPath("userData"),
+    isPackaged: app.isPackaged,
+    acceptanceTelemetryEnabled: isAcceptanceTelemetryEnabled,
+    runId: process.env.AI_DESKTOP_PET_ACCEPTANCE_RUN_ID,
+    p285ObservationEnabled: isP285AcceptanceObservationEnabled,
+    p285FixtureEnabled: isP285AcceptanceFixtureEnabled,
+    p288bFixtureEnabled: isP288bAcceptanceFixtureEnabled
+  });
   telemetry = createTelemetryService();
-  providerConfigStore = createProviderConfigStore({ logTelemetry });
+  providerConfigStore = createProviderConfigStore({ logTelemetry: logPersistentTelemetry });
   petPresentationStore = createPetPresentationStore();
   currentPetPresentationPreferences = petPresentationStore.getPreferences();
   currentPetPresentationIntent = withCurrentAccessorySelection(currentPetPresentationIntent);
@@ -2934,11 +2828,7 @@ app.whenReady().then(async () => {
     } catch {
       console.warn("[affect] Xita state save failed");
     }
-    logTelemetry("xita_affect_transition", {
-      enabled: currentDialogueAffectSettings.enabled,
-      status: currentDialogueAffectSettings.enabled ? "applied" : "suppressed",
-      transitionReason: snapshot.transitionReason
-    });
+    logTelemetry("xita_affect_transition");
   });
   if (!currentDialogueAffectSettings.enabled) {
     resetDialogueAffectToCalm();
@@ -3022,13 +2912,7 @@ app.whenReady().then(async () => {
     },
     reportDecision(decision) {
       p285AcceptanceScenarioController?.observeProactiveDecision(decision);
-      logTelemetry("proactive_bubble_candidate", {
-        candidateId: decision.candidateId,
-        status: decision.state,
-        lineId: decision.lineId,
-        reason: decision.reason,
-        skipReason: decision.skipReason
-      });
+      logTelemetry("proactive_bubble_candidate");
     }
   });
   proactiveBubbleCoordinator.updateSettings(currentProactiveCompanionSettings);
@@ -3095,9 +2979,9 @@ app.whenReady().then(async () => {
   powerMonitor.on("suspend", handleSystemSuspend);
   powerMonitor.on("resume", handleSystemResume);
   shortcutPreferencesStore = createShortcutPreferencesStore();
-  userProfileStore = createUserProfileStore({ logTelemetry });
+  userProfileStore = createUserProfileStore({ logTelemetry: logPersistentTelemetry });
   shortcutRegistry = createUserShortcutRegistry();
-  secureKeyStore = createSecureKeyStore({ logTelemetry });
+  secureKeyStore = createSecureKeyStore({ logTelemetry: logPersistentTelemetry });
   llamaCppRuntimeSettingsStore = createLlamaCppRuntimeSettingsStore({
     userDataPath: app.getPath("userData")
   });
@@ -3211,7 +3095,10 @@ app.whenReady().then(async () => {
     rejectionReason: unknown
   ): void => {
     if (!isP285AcceptanceRejectionReason(rejectionReason)) return;
-    logTelemetry("p2_85_acceptance_rejection", { scenarioId, rejectionReason });
+    acceptanceEvidence?.report({
+      type: "p2_85_acceptance_rejection",
+      payload: { scenarioId, rejectionReason }
+    });
   };
 
   openChatWindowAdapter = openChatWindow;
@@ -3259,7 +3146,10 @@ app.whenReady().then(async () => {
       resolveArbitration: resolveCompanionContextArbitration,
       reportObservation(observation) {
         if (isP285AcceptanceObservation(observation)) {
-          logTelemetry("p2_85_acceptance_observation", observation);
+          acceptanceEvidence?.report({
+            type: "p2_85_acceptance_observation",
+            payload: observation
+          });
         }
       }
     });
@@ -3327,22 +3217,13 @@ app.whenReady().then(async () => {
       return;
     }
 
-    const startedAt = Date.now();
-    logTelemetry("bundled_llama_cpp_chat_wait_started", {
-      providerId: "local-openai-compatible",
-      localPresetId: "embedded-llama-cpp"
-    });
+    logTelemetry("bundled_llama_cpp_chat_wait_started");
 
     try {
       await startup;
     } finally {
       refreshCurrentProvider?.();
-      logTelemetry("bundled_llama_cpp_chat_wait_completed", {
-        providerId: chatEngine?.getProviderId() ?? "unknown",
-        localPresetId: "embedded-llama-cpp",
-        runtimeStatus: latestBundledLlamaCppRuntimeSummary?.status ?? "unknown",
-        durationMs: Date.now() - startedAt
-      });
+      logTelemetry("bundled_llama_cpp_chat_wait_completed");
     }
   }
 
@@ -3450,17 +3331,14 @@ app.whenReady().then(async () => {
     return createChatProviderFromConfig({
       config: getRuntimeProviderConfig(),
       getApiKey,
-      logTelemetry
+      logTelemetry: logPersistentTelemetry
     });
   }
 
   function warmUpWebSearchMcpConnection(): void {
     const providerConfig = getRuntimeProviderConfig();
     if (providerConfig.providerId === "fake" && !isStartupLocalFallbackConfig(providerConfig)) {
-      logTelemetry("web_search_startup_connection_skipped", {
-        reason: "fake_provider",
-        enabled: webSearchSettingsStore?.getSettings().enabled === true
-      });
+      logTelemetry("web_search_startup_connection_skipped");
       return;
     }
 
@@ -3470,23 +3348,10 @@ app.whenReady().then(async () => {
     }
 
     void testMcpSearchConnection(settings).then((result) => {
-      logTelemetry("web_search_startup_connection_tested", {
-        enabled: result.enabled,
-        commandConfigured: result.commandConfigured,
-        status: result.status,
-        toolName: result.toolName,
-        toolFound: result.toolFound,
-        toolCount: result.toolCount
-      });
+      void result;
+      logTelemetry("web_search_startup_connection_tested");
     }).catch(() => {
-      logTelemetry("web_search_startup_connection_tested", {
-        enabled: settings.enabled,
-        commandConfigured: Boolean(settings.command),
-        status: "failed",
-        toolName: settings.toolName,
-        toolFound: false,
-        toolCount: 0
-      });
+      logTelemetry("web_search_startup_connection_tested");
     });
   }
 
@@ -3506,12 +3371,7 @@ app.whenReady().then(async () => {
     });
 
     if (!settings || decision.status === "blocked") {
-      logTelemetry("web_search_blocked", {
-        enabled: settings?.enabled === true,
-        commandConfigured: Boolean(settings?.command),
-        status: decision.status,
-        reasonCodes: decision.reasonCodes
-      });
+      logTelemetry("web_search_blocked");
       return {
         status: decision.status,
         reasonCodes: decision.reasonCodes,
@@ -3519,14 +3379,7 @@ app.whenReady().then(async () => {
       };
     }
 
-    const startedAt = Date.now();
-    logTelemetry("web_search_started", {
-      status: decision.status,
-      reasonCodes: decision.reasonCodes,
-      toolName: settings.toolName,
-      commandConfigured: Boolean(settings.command),
-      maxResults: settings.maxResults
-    });
+    logTelemetry("web_search_started");
 
     try {
       const provider = createMcpSearchProvider(settings);
@@ -3534,13 +3387,7 @@ app.whenReady().then(async () => {
         query: decision.safeQuery,
         maxResults: settings.maxResults
       });
-      logTelemetry("web_search_completed", {
-        status: decision.status,
-        reasonCodes: decision.reasonCodes,
-        toolName: settings.toolName,
-        resultCount: results.length,
-        durationMs: Date.now() - startedAt
-      });
+      logTelemetry("web_search_completed");
 
       return {
         ...(results.length > 0
@@ -3558,14 +3405,7 @@ app.whenReady().then(async () => {
       };
     } catch (error: unknown) {
       const errorType = getWebSearchErrorType(error);
-      logTelemetry("web_search_failed", {
-        status: decision.status,
-        reasonCodes: decision.reasonCodes,
-        toolName: settings.toolName,
-        resultCount: 0,
-        durationMs: Date.now() - startedAt,
-        errorType
-      });
+      logTelemetry("web_search_failed");
 
       return {
         status: "failed",
@@ -3621,11 +3461,7 @@ app.whenReady().then(async () => {
       scheduleIdleProactiveSpeechBubble();
     }
 
-    logTelemetry("proactive_companion_settings_changed", {
-      cadence: currentProactiveCompanionSettings.cadence,
-      memorySourceBubbles: currentProactiveCompanionSettings.memorySourceBubbles,
-      searchSourceBubbles: currentProactiveCompanionSettings.searchSourceBubbles
-    });
+    logTelemetry("proactive_companion_settings_changed");
     notifyChatProactiveCompanionSettingsChanged(currentProactiveCompanionSettings);
     return currentProactiveCompanionSettings;
   }
@@ -3800,19 +3636,13 @@ app.whenReady().then(async () => {
     }
     if (value === null) {
       pointerController?.setOverlayHitRegion(null);
-      logTelemetry("proactive_bubble_overlay_region_changed", {
-        regionState: "cleared",
-        authority: "main"
-      });
+      logTelemetry("proactive_bubble_overlay_region_changed");
       return;
     }
     const [contentWidth = 0, contentHeight = 0] = petWindow.getContentSize();
     const region = parsePetOverlayHitRegion(value, contentWidth, contentHeight);
     pointerController?.setOverlayHitRegion(region);
-    logTelemetry("proactive_bubble_overlay_region_changed", {
-      regionState: region ? "registered" : "rejected",
-      authority: "main"
-    });
+    logTelemetry("proactive_bubble_overlay_region_changed");
   });
 
   ipcMain.on("pet:drag-start", (event) => {
@@ -3853,7 +3683,8 @@ app.whenReady().then(async () => {
       return;
     }
 
-    logTelemetry("first_frame", sanitizeFirstFrame(info));
+    void info;
+    logTelemetry("first_frame");
     console.info("[pet] first frame reported");
     hasPetFirstFrame = true;
     refreshProactiveBubbleRuntimeGates();
@@ -3866,9 +3697,9 @@ app.whenReady().then(async () => {
       return;
     }
 
-    const healthPayload = sanitizeRenderHealth(state);
-    logTelemetry("pet_health", healthPayload);
-    console.info("[pet] health", healthPayload);
+    void state;
+    logTelemetry("pet_health");
+    console.info("[pet] health reported");
   });
 
   ipcMain.on("pet:telemetry", (event, rendererEvent: unknown) => {
@@ -3878,7 +3709,29 @@ app.whenReady().then(async () => {
       return;
     }
 
-    logTelemetry(petTelemetryEvent.type, petTelemetryEvent.payload);
+    logPetTelemetry(petTelemetryEvent);
+    if (
+      petTelemetryEvent.type === "pet_interaction_action_started" ||
+      petTelemetryEvent.type === "pet_interaction_action_finished" ||
+      petTelemetryEvent.type === "pet_interaction_action_skipped"
+    ) {
+      acceptanceEvidence?.report({
+        type: petTelemetryEvent.type,
+        payload: {
+          actionType: petTelemetryEvent.payload?.type,
+          reason: petTelemetryEvent.payload?.reason,
+          ...(petTelemetryEvent.payload?.requestId
+            ? { requestId: petTelemetryEvent.payload.requestId }
+            : { actionInstanceId: petTelemetryEvent.payload?.actionInstanceId }),
+          ...(petTelemetryEvent.type === "pet_interaction_action_finished"
+            ? { terminalStatus: petTelemetryEvent.payload?.terminalStatus }
+            : {}),
+          ...(petTelemetryEvent.type === "pet_interaction_action_skipped"
+            ? { skipReason: petTelemetryEvent.payload?.skipReason }
+            : {})
+        }
+      });
+    }
     const actionReason = petTelemetryEvent.payload?.reason;
     const requestId = petTelemetryEvent.payload?.requestId;
     const actionInstanceId = petTelemetryEvent.payload?.actionInstanceId;
@@ -3908,6 +3761,14 @@ app.whenReady().then(async () => {
         lifecycleResult,
         requestId: lifecycleRequestId,
         reason: typeof actionReason === "string" ? actionReason : ""
+      });
+      replyCompletionAffectActionController.handleGenericLifecycle({
+        lifecycleResult,
+        requestId: lifecycleRequestId,
+        reason: typeof actionReason === "string" ? actionReason : ""
+      }, {
+        readSnapshot: readGenericReplyCompletionLiveSnapshot,
+        dispatch: dispatchGenericReplyCompletionAction
       });
       if (petTelemetryEvent.type === "pet_interaction_action_skipped") {
         const retry = replyCompletionAffectActionController.consumeGlobalCooldownSkip({
@@ -4097,14 +3958,7 @@ app.whenReady().then(async () => {
     let replyLength = 0;
 
     if (chatEngineForRequest.hasActiveStream()) {
-      logTelemetry("chat_stream_failed", {
-        providerId,
-        conversationId: request.conversationId,
-        messageCount: request.messages.length,
-        replyLength,
-        durationMs: 0,
-        errorType: "busy"
-      });
+      logTelemetry("chat_stream_failed");
       event.sender.send("chat:stream-error", {
         requestVersion: request.requestVersion,
         message: getChatErrorMessage("busy"),
@@ -4162,7 +4016,7 @@ app.whenReady().then(async () => {
         currentDialogueAffectSettings.enabled
       );
       if (shadowObservation) {
-        logTelemetry("xita_interaction_cue_shadow_observed", shadowObservation);
+        logTelemetry("xita_interaction_cue_shadow_observed");
         if (isAttentionMicroCueRolloutEnabled && currentDialogueAffectSettings.enabled) {
           sendAttentionMicroCueCommand(ATTENTION_MICRO_CUE_START_COMMAND);
         }
@@ -4207,23 +4061,10 @@ app.whenReady().then(async () => {
             };
           }
         }
-        logTelemetry("memory_auto_capture", {
-          enabled: autoMemoryCaptureForActivity.enabled,
-          skippedReason: autoMemoryCaptureForActivity.skippedReason,
-          capturedCount: autoMemoryCaptureForActivity.capturedCount,
-          keyCount: autoMemoryCaptureForActivity.keyCount,
-          generalCount: autoMemoryCaptureForActivity.generalCount,
-          mergedCount: autoMemoryCaptureForActivity.mergedCount,
-          deduplicatedCount: autoMemoryCaptureForActivity.deduplicatedCount,
-          compressionTriggered: autoMemoryCaptureForActivity.compressionTriggered,
-          totalCards: autoMemoryCaptureForActivity.totalCards,
-          injectionBudget: autoMemoryCaptureForActivity.injectionBudget
-        });
+        logTelemetry("memory_auto_capture");
       } catch {
         autoMemoryCaptureForActivity = createFailedMemoryActivityAutoCapture(memoryStoreForRequest);
-        logTelemetry("memory_auto_capture_failed", {
-          errorType: "failed"
-        });
+        logTelemetry("memory_auto_capture_failed");
       }
     } catch {
       transitionPetRole({ type: "request:failed", requestVersion: request.requestVersion });
@@ -4286,13 +4127,7 @@ app.whenReady().then(async () => {
         modeId: situationSnapshotForRequest.conversationContextId,
         styleId: "gentle-desktop-companion-v1" as const
       };
-      logTelemetry("automatic_situation_snapshot_used", {
-        requestVersion: request.requestVersion,
-        conversationContextId: situationSnapshotForRequest.conversationContextId,
-        conversationSource: situationSnapshotForRequest.conversationSource,
-        presenceStateId: situationSnapshotForRequest.presenceStateId,
-        presenceSource: situationSnapshotForRequest.presenceSource
-      });
+      logTelemetry("automatic_situation_snapshot_used");
       const webSearchCitation = createWebSearchCitationPayload(webSearchResolution.context);
       const webSearchCitationCount = webSearchCitation?.citations.length ?? 0;
       if (webSearchCitationCount > 0) {
@@ -4319,22 +4154,7 @@ app.whenReady().then(async () => {
         contextBudgetSummary: contextBudget.summary
       }));
 
-      logTelemetry("chat_stream_started", {
-        providerId,
-        conversationId: request.conversationId,
-        messageCount: request.messages.length,
-        originalMessageCount: contextBudget.summary.originalMessageCount,
-        providerMessageCount: contextBudget.summary.providerMessageCount,
-        compressed: contextBudget.summary.compressed,
-        summaryMessageCount: contextBudget.summary.summaryMessageCount,
-        summarizedMessageCount: contextBudget.summary.summarizedMessageCount,
-        recentMessageCount: contextBudget.summary.recentMessageCount,
-        memoryInjectionCount: memoryContext.count,
-        webSearchStatus: webSearchResolution.status,
-        webSearchReasonCodes: webSearchResolution.reasonCodes,
-        webSearchResultCount: webSearchResolution.resultCount,
-        ...(webSearchResolution.errorType ? { webSearchErrorType: webSearchResolution.errorType } : {})
-      });
+      logTelemetry("chat_stream_started");
 
       const webSearchFailurePrompt = getWebSearchFailurePrompt(webSearchResolution.errorType);
       const promptTemplateProfile = providerId === "local-openai-compatible" ? "local-small-model" : "cloud-chat";
@@ -4417,10 +4237,7 @@ app.whenReady().then(async () => {
           mappedContextBudget = measuredWithSemanticSummary;
         }
       }
-      logTelemetry("chat_context_semantic_summary", {
-        status: semanticSummary.status,
-        withinBudget: mappedContextBudget.withinBudget
-      });
+      logTelemetry("chat_context_semantic_summary");
       if (!mappedContextBudget.withinBudget) {
         throw new Error("P2-87C context budget exceeded");
       }
@@ -4509,67 +4326,70 @@ app.whenReady().then(async () => {
         hasSearchCitation: Boolean(webSearchCitation?.citations.length),
         intensity: result.intensity
       });
-      const dialogueReplyActionReason = resolveDialogueReplyActionReason(
-        affectPresentation,
-        shouldRequestReplyWarmSettle
-      );
-      let acceptedActionReason: PetActionTriggerReason | null = null;
-      if (dialogueReplyActionReason) {
-        const attempt = requestPetActionTriggerWithResult(dialogueReplyActionReason);
-        if (attempt.coordinatorAttempted && attempt.result.accepted) {
-          acceptedActionReason = dialogueReplyActionReason;
-        }
-        if (
-          dialogueReplyActionReason === affectPresentation?.action?.reason
-        ) {
-          if (attempt.coordinatorAttempted) {
-            logDialogueAffectActionDispatch(attempt.result);
-            if (attempt.result.accepted && dialogueReplyActionReason === "state_idle") {
-              replyCompletionAffectActionController.trackAccepted({
-                requestId: attempt.result.requestId,
-                requestVersion: request.requestVersion,
-                reason: "state_idle"
-              });
+      const genericDispatchState = petActionDispatchCoordinator?.getState();
+      const genericCompletion = replyCompletionAffectActionController.registerGenericCompletion({
+        shouldRequestReplyWarmSettle,
+        replyAction: affectPresentation?.replyAction ?? null,
+        requestVersion: request.requestVersion,
+        arbitration: resolveCompanionContextArbitration(
+          createCompanionContextArbitrationInput("reply-completion-action")
+        ),
+        activeMainRequest: genericDispatchState?.activeMainRequest ?? null,
+        terminalIntent: currentPetPresentationIntent
+      }, {
+        readSnapshot: readGenericReplyCompletionLiveSnapshot,
+        dispatch: dispatchGenericReplyCompletionAction,
+        publish: publishPetPresentation
+      });
+      if (genericCompletion.status !== "ignored") {
+        currentPetPresentationIntent = genericCompletion.terminalIntent;
+      } else {
+        const dialogueReplyActionReason = resolveDialogueReplyActionReason(
+          affectPresentation,
+          shouldRequestReplyWarmSettle
+        );
+        let acceptedActionReason: PetActionTriggerReason | null = null;
+        if (dialogueReplyActionReason) {
+          const attempt = requestPetActionTriggerWithResult(dialogueReplyActionReason);
+          if (attempt.coordinatorAttempted && attempt.result.accepted) {
+            acceptedActionReason = dialogueReplyActionReason;
+          }
+          if (
+            dialogueReplyActionReason === affectPresentation?.action?.reason
+          ) {
+            if (attempt.coordinatorAttempted) {
+              logDialogueAffectActionDispatch(attempt.result);
+              if (attempt.result.accepted && dialogueReplyActionReason === "state_idle") {
+                replyCompletionAffectActionController.trackAccepted({
+                  requestId: attempt.result.requestId,
+                  requestVersion: request.requestVersion,
+                  reason: "state_idle"
+                });
+              }
+            } else if (isP288bAcceptanceFixtureEnabled) {
+              logTelemetry("dialogue_affect_action_dispatch");
             }
-          } else if (isP288bAcceptanceFixtureEnabled) {
-            logTelemetry("dialogue_affect_action_dispatch", {
-              status: "suppressed",
-              reason: attempt.reason
-            });
           }
         }
+        const deferredActionPending = deferReplyCompletionAffectActionIfEligible(
+          affectPresentation,
+          shouldRequestReplyWarmSettle,
+          request.requestVersion
+        );
+        const presentationPlan = selectAffectPresentationCrosswalk({
+          acceptedAction: acceptedActionReason ? { reason: acceptedActionReason } : null,
+          actionPending: deferredActionPending,
+          emotion: replyExpression,
+          xita: xitaPresentation
+        });
+        currentPetPresentationIntent = publishAffectTerminalPresentation(
+          presentationPlan,
+          currentPetPresentationIntent,
+          publishPetPresentation
+        );
       }
-      const deferredActionPending = deferReplyCompletionAffectActionIfEligible(
-        affectPresentation,
-        shouldRequestReplyWarmSettle,
-        request.requestVersion
-      );
-      const presentationPlan = selectAffectPresentationCrosswalk({
-        acceptedAction: acceptedActionReason ? { reason: acceptedActionReason } : null,
-        actionPending: deferredActionPending,
-        emotion: replyExpression,
-        xita: xitaPresentation
-      });
-      currentPetPresentationIntent = publishAffectTerminalPresentation(
-        presentationPlan,
-        currentPetPresentationIntent,
-        publishPetPresentation
-      );
 
-      logTelemetry("chat_stream_completed", {
-        providerId,
-        conversationId: request.conversationId,
-        messageCount: request.messages.length,
-        replyLength: result.text.length,
-        durationMs: Date.now() - startedAt,
-        emotion: result.emotion,
-        intensity: result.intensity,
-        presentationMode: presentationPlan.kind === "expression"
-          ? presentationPlan.expression.mode
-          : "neutral",
-        emphasisExpressionTriggered: presentationPlan.kind === "expression" &&
-          presentationPlan.expression.mode === "emphasis"
-      });
+      logTelemetry("chat_stream_completed");
       event.sender.send("chat:stream-done", {
         ...result,
         requestVersion: request.requestVersion,
@@ -4579,16 +4399,7 @@ app.whenReady().then(async () => {
         messageId: submittedMessage.id,
         text: submittedMessage.content
       }).then((classification) => {
-        logTelemetry("automatic_situation_classified", {
-          requestVersion: request.requestVersion,
-          accepted: classification.accepted,
-          result: classification.reason,
-          conversationContextId: classification.snapshot.conversationContextId,
-          conversationSource: classification.snapshot.conversationSource,
-          presenceStateId: classification.snapshot.presenceStateId,
-          presenceSource: classification.snapshot.presenceSource,
-          confidence: classification.snapshot.confidence
-        });
+        logTelemetry("automatic_situation_classified");
       });
     }).catch((error: unknown) => {
       const errorType = getChatErrorType(error);
@@ -4604,14 +4415,7 @@ app.whenReady().then(async () => {
       }
       clearChatReplySustainTimer();
 
-      logTelemetry(eventType, {
-        providerId,
-        conversationId: request.conversationId,
-        messageCount: request.messages.length,
-        replyLength,
-        durationMs: Date.now() - startedAt,
-        errorType
-      });
+      logTelemetry(eventType);
       event.sender.send("chat:stream-error", {
         requestVersion: request.requestVersion,
         message: getChatErrorMessage(errorType),
@@ -4677,14 +4481,7 @@ app.whenReady().then(async () => {
       ? webSearchSettingsStore.getSettings()
       : normalizeWebSearchSettings(update);
     const result = await testMcpSearchConnection(settings);
-    logTelemetry("web_search_connection_tested", {
-      enabled: result.enabled,
-      commandConfigured: result.commandConfigured,
-      status: result.status,
-      toolName: result.toolName,
-      toolFound: result.toolFound,
-      toolCount: result.toolCount
-    });
+    logTelemetry("web_search_connection_tested");
     return result;
   });
 
@@ -4694,14 +4491,7 @@ app.whenReady().then(async () => {
     }
 
     const settings = webSearchSettingsStore.saveSettings(update);
-    logTelemetry("web_search_settings_updated", {
-      enabled: settings.enabled,
-      commandConfigured: Boolean(settings.command),
-      argsCount: settings.args.length,
-      toolName: settings.toolName,
-      timeoutMs: settings.timeoutMs,
-      maxResults: settings.maxResults
-    });
+    logTelemetry("web_search_settings_updated");
     return settings;
   });
 
@@ -5148,7 +4938,7 @@ app.whenReady().then(async () => {
     return checkProviderHealth({
       request,
       apiKey: request.providerId === "openai-compatible" ? getApiKey(DEFAULT_API_KEY_REF) : null,
-      logTelemetry
+      logTelemetry: logPersistentTelemetry
     });
   });
 

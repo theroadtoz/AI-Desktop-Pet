@@ -21,6 +21,8 @@ import {
 } from "./p2-85-context-emotion-proactive-real-ui.mjs";
 
 const source = readFileSync("scripts/p2-85-context-emotion-proactive-real-ui.mjs", "utf8");
+const runId = "123e4567-e89b-42d3-a456-426614174000";
+const evidence = (type, payload) => ({ runId, suite: "p2-85", type, payload });
 
 test("P2-85 runner names only closed production scenarios and its evidence boundary", () => {
   assert.deepEqual(P2_85_SCENARIO_IDS, [
@@ -43,6 +45,9 @@ test("P2-85 runner names only closed production scenarios and its evidence bound
   assert.doesNotMatch(source, /logTelemetry\(\s*["']pet_interaction_action_/u);
   assert.match(source, /assertNoScreenshotResidue/);
   assert.match(source, /cleanupRealUiRun/);
+  assert.match(source, /readAcceptanceEvidenceForContext\(context, "p2-85"\)/u);
+  assert.match(source, /assertRealUiRunParentRemoved\(context\)/u);
+  assert.doesNotMatch(source, /AI_DESKTOP_PET_ACCEPTANCE_EVIDENCE_(?:PATH|DIR|FILE)/u);
   assert.doesNotMatch(source, /Input\.dispatchMouseEvent|\.click\s*\(/);
 });
 
@@ -62,16 +67,12 @@ test("P2-85 runner reports a safe startup failure category without serializing e
 });
 
 test("P2-85 runner reads only a closed rejection reason for a known scenario", () => {
-  assert.equal(readP285SafeRejection([{
-    timestamp: "2026-07-25T00:00:00.000Z",
-    type: "p2_85_acceptance_rejection",
-    payload: { scenarioId: "reply_visible_generic_once", rejectionReason: "reply_dispatch_rejected" }
-  }], "reply_visible_generic_once"), "reply_dispatch_rejected");
-  assert.equal(readP285SafeRejection([{
-    timestamp: "2026-07-25T00:00:00.000Z",
-    type: "p2_85_acceptance_rejection",
-    payload: { scenarioId: "reply_visible_generic_once", rejectionReason: "private_detail" }
-  }], "reply_visible_generic_once"), null);
+  assert.equal(readP285SafeRejection([evidence("p2_85_acceptance_rejection", {
+    scenarioId: "reply_visible_generic_once", rejectionReason: "reply_dispatch_rejected"
+  })], "reply_visible_generic_once"), "reply_dispatch_rejected");
+  assert.equal(readP285SafeRejection([evidence("p2_85_acceptance_rejection", {
+    scenarioId: "reply_visible_generic_once", rejectionReason: "private_detail"
+  })], "reply_visible_generic_once"), null);
   assert.doesNotMatch(source, /rejectionReason:\s*error\.message/u);
 });
 
@@ -163,7 +164,6 @@ test("P2-85 runner fails closed until every triple-gated fixture hook exists", (
 });
 
 test("P2-86 runner accepts only exact P2-85 telemetry schemas and bounded lifecycle evidence", async () => {
-  const timestamp = "2026-07-25T00:00:00.000Z";
   const requestId = "0123456789abcdef0123456789abcdef";
   const chatObservation = {
     scenarioId: "chat_opened_replace_active",
@@ -211,41 +211,31 @@ test("P2-86 runner accepts only exact P2-85 telemetry schemas and bounded lifecy
     proactiveCandidateOutcome: "untrusted",
     automaticModeActionCount: 0
   }).ok, false);
-  assert.deepEqual(assertSafeP285AcceptanceTelemetryEvent({
-    timestamp,
-    type: "p2_85_acceptance_observation",
-    payload: chatObservation
-  }), { ok: true, reason: null });
-  assert.deepEqual(assertSafeP285AcceptanceTelemetryEvent({
-    timestamp,
-    type: "p2_85_unknown",
-    payload: {}
-  }), { ok: false, reason: "p2_85_telemetry_schema_invalid" });
-  assert.deepEqual(assertSafeP285AcceptanceTelemetryEvent({
-    timestamp,
-    type: "unrelated_event",
-    payload: { text: "private" }
-  }), { ok: false, ignored: true, reason: "p2_85_telemetry_ignored" });
+  assert.deepEqual(assertSafeP285AcceptanceTelemetryEvent(
+    evidence("p2_85_acceptance_observation", chatObservation)
+  ), { ok: true, reason: null });
+  assert.deepEqual(assertSafeP285AcceptanceTelemetryEvent(
+    evidence("p2_85_unknown", {})
+  ), { ok: false, reason: "p2_85_telemetry_schema_invalid" });
+  assert.deepEqual(assertSafeP285AcceptanceTelemetryEvent(
+    evidence("unrelated_event", { text: "private" })
+  ), { ok: false, reason: "p2_85_telemetry_schema_invalid" });
   const selection = selectP285EvidenceEvents([
-    { timestamp, type: "unrelated_event", payload: { text: "private" } },
-    { type: "pet_interaction_action_finished", payload: { requestId } },
-    { timestamp, type: "p2_85_acceptance_observation", payload: chatObservation }
+    evidence("pet_interaction_action_finished", {
+      actionType: "softSmile", reason: "state_idle", requestId, terminalStatus: "completed"
+    }),
+    evidence("p2_85_acceptance_observation", chatObservation)
   ]);
   assert.equal(selection.ok, true);
   assert.deepEqual(selection.events.map((event) => event.type), [
     "pet_interaction_action_finished",
     "p2_85_acceptance_observation"
   ]);
-  assert.equal(selectP285EvidenceEvents([{
-    timestamp,
-    type: "p2_85_unknown",
-    payload: {}
-  }]).ok, false);
+  assert.equal(selectP285EvidenceEvents([evidence("p2_85_unknown", {})]).ok, false);
 
-  const lifecycle = [{
-    type: "pet_interaction_action_finished",
-    payload: { requestId }
-  }];
+  const lifecycle = [evidence("pet_interaction_action_finished", {
+    actionType: "softSmile", reason: "state_idle", requestId, terminalStatus: "completed"
+  })];
   assert.equal(validateScenarioObservation("chat_opened_replace_active", {
     scenarioId: "chat_opened_replace_active",
     requestId,

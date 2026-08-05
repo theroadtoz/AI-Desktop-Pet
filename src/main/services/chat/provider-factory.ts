@@ -1,36 +1,32 @@
 import type { ChatProvider } from "../../../shared/chat-provider";
-import type { LocalProviderPresetId, ProviderConfig, ProviderId } from "../../../shared/provider-config";
-import type { TelemetryPayload } from "../telemetry";
+import type { ProviderConfig, ProviderId } from "../../../shared/provider-config";
+import {
+  toPersistentTelemetryEvent,
+  type PersistentTelemetryLogger,
+  type TelemetryEventType
+} from "../../../shared/telemetry-contract";
 import { createFakeChatProvider } from "./fake-provider";
 import {
   createOpenAICompatibleProvider,
   type OpenAICompatibleProviderOptions
 } from "./openai-compatible-provider";
 
-type TelemetryLogger = (type: string, payload?: TelemetryPayload) => void;
 type RealProviderId = Extract<ProviderId, "openai-compatible" | "local-openai-compatible">;
 type UnavailableProviderReason = "missing_api_key" | "invalid_config";
 
 export function createChatProviderFromConfig(options: {
   config: ProviderConfig;
   getApiKey(apiKeyRef: string): string | null;
-  logTelemetry?: TelemetryLogger;
+  logTelemetry?: PersistentTelemetryLogger;
 }): ChatProvider {
   if (options.config.providerId === "fake") {
-    options.logTelemetry?.("provider_selected", { providerId: "fake" });
+    logProviderEvent(options.logTelemetry, "provider_selected");
     return createFakeChatProvider();
   }
 
-  const baseURLHost = readBaseURLHost(options.config.baseURL);
-
   if (options.config.providerId === "local-openai-compatible") {
     try {
-      options.logTelemetry?.("provider_selected", {
-        providerId: "local-openai-compatible",
-        model: options.config.model,
-        baseURLHost,
-        localPresetId: options.config.localPresetId
-      });
+      logProviderEvent(options.logTelemetry, "provider_selected");
 
       const providerOptions: OpenAICompatibleProviderOptions = {
         providerId: "local-openai-compatible",
@@ -47,34 +43,18 @@ export function createChatProviderFromConfig(options: {
 
       return createOpenAICompatibleProvider(providerOptions);
     } catch {
-      logUnavailable(options.logTelemetry, {
-        providerId: "local-openai-compatible",
-        model: options.config.model,
-        baseURLHost,
-        localPresetId: options.config.localPresetId,
-        errorType: "invalid_config"
-      });
+      logUnavailable(options.logTelemetry);
       return createUnavailableChatProvider({
         providerId: "local-openai-compatible",
-        model: options.config.model,
-        baseURLHost,
-        localPresetId: options.config.localPresetId,
         reason: "invalid_config",
         logTelemetry: options.logTelemetry
       });
     }
   }
 
-  logUnavailable(options.logTelemetry, {
-    providerId: "openai-compatible",
-    model: options.config.model,
-    baseURLHost,
-    errorType: "external_model_disabled"
-  });
+  logUnavailable(options.logTelemetry);
   return createUnavailableChatProvider({
     providerId: "openai-compatible",
-    model: options.config.model,
-    baseURLHost,
     reason: "invalid_config",
     logTelemetry: options.logTelemetry
   });
@@ -82,22 +62,13 @@ export function createChatProviderFromConfig(options: {
 
 function createUnavailableChatProvider(options: {
   providerId: RealProviderId;
-  model: string;
-  baseURLHost?: string | undefined;
-  localPresetId?: LocalProviderPresetId | undefined;
   reason: UnavailableProviderReason;
-  logTelemetry?: TelemetryLogger | undefined;
+  logTelemetry?: PersistentTelemetryLogger | undefined;
 }): ChatProvider {
   return {
     id: options.providerId,
     async streamReply() {
-      options.logTelemetry?.("provider_unavailable_reply_blocked", {
-        providerId: options.providerId,
-        model: options.model,
-        baseURLHost: options.baseURLHost,
-        localPresetId: options.localPresetId,
-        errorType: options.reason
-      });
+      logProviderEvent(options.logTelemetry, "provider_unavailable_reply_blocked");
       throw createUnavailableProviderError(options.reason);
     }
   };
@@ -110,18 +81,12 @@ function createUnavailableProviderError(reason: UnavailableProviderReason): Erro
 }
 
 function logUnavailable(
-  logTelemetry: TelemetryLogger | undefined,
-  payload: TelemetryPayload
+  logTelemetry: PersistentTelemetryLogger | undefined
 ): void {
-  logTelemetry?.("provider_unavailable", {
-    ...payload
-  });
+  logProviderEvent(logTelemetry, "provider_unavailable");
 }
 
-function readBaseURLHost(baseURL: string): string | undefined {
-  try {
-    return new URL(baseURL).host;
-  } catch {
-    return undefined;
-  }
+function logProviderEvent(logTelemetry: PersistentTelemetryLogger | undefined, type: TelemetryEventType): void {
+  const event = toPersistentTelemetryEvent(type, {});
+  if (event) logTelemetry?.(event);
 }

@@ -1,9 +1,12 @@
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(fileURLToPath(new URL("../..", import.meta.url)));
+const require = createRequire(import.meta.url);
 const TARGET_COUNT_CAP = 8;
 
 export class TargetDiscoveryError extends Error {
@@ -11,6 +14,15 @@ export class TargetDiscoveryError extends Error {
     super(code);
     this.name = "TargetDiscoveryError";
     this.code = code;
+    this.metadata = metadata;
+  }
+}
+
+export class RealUiHarnessError extends Error {
+  constructor(category, metadata = {}) {
+    super(category);
+    this.name = "RealUiHarnessError";
+    this.category = category;
     this.metadata = metadata;
   }
 }
@@ -71,11 +83,326 @@ export function sleep(ms) {
   return new Promise((resolveSleep) => setTimeout(resolveSleep, ms));
 }
 
+export function createRunDeadline(timeoutMs = 70_000, dependencies = {}) {
+  const now = dependencies.now ?? Date.now;
+  const deadlineAt = now() + timeoutMs;
+  return {
+    remaining(stageLimitMs = Number.POSITIVE_INFINITY) {
+      const remainingMs = deadlineAt - now();
+      if (remainingMs <= 0) throw new RealUiHarnessError("run_timeout");
+      return Math.max(1, Math.min(stageLimitMs, remainingMs));
+    }
+  };
+}
+
+const ACTION_TERMINAL_STATUSES = ["completed", "interrupted", "timed_out", "failed"];
+const BODY_STATES = ["pending", "started", "skipped", "completed"];
+const BODY_SKIP_REASONS = [
+  "active_action",
+  "global_cooldown",
+  "head_pat_cooldown",
+  "same_action_cooldown",
+  "window_shake_feedback_cooldown"
+];
+
+function isPlainRecord(value) {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+export function createSafeBodyAttemptResult(value, actionTypes) {
+  if (!isPlainRecord(value) || !Array.isArray(actionTypes)) return null;
+  const exactKeys = ["attempt", "bodyState", "bodySkipReason", "competingActionType", "terminal", "idle"];
+  const keys = Object.keys(value);
+  if (keys.length !== exactKeys.length || keys.some((key) => !exactKeys.includes(key))) return null;
+  if (!Number.isInteger(value.attempt) || value.attempt < 1 || value.attempt > 3) return null;
+  if (!BODY_STATES.includes(value.bodyState)) return null;
+  if (value.bodySkipReason !== null && !BODY_SKIP_REASONS.includes(value.bodySkipReason)) return null;
+  if (value.competingActionType !== null && !actionTypes.includes(value.competingActionType)) return null;
+  if (value.terminal !== null && !ACTION_TERMINAL_STATUSES.includes(value.terminal)) return null;
+  if (typeof value.idle !== "boolean") return null;
+  return {
+    attempt: value.attempt,
+    bodyState: value.bodyState,
+    bodySkipReason: value.bodySkipReason,
+    competingActionType: value.competingActionType,
+    terminal: value.terminal,
+    idle: value.idle
+  };
+}
+
+function safeBodyResultOrThrow(value, actionTypes) {
+  const safe = createSafeBodyAttemptResult(value, actionTypes);
+  if (!safe) throw new RealUiHarnessError("product_assertion");
+  return safe;
+}
+
+export function summarizeActionLifecycle(events, afterIndex = 0, actionType = "bodyAttentionTurn") {
+  const summary = {
+    bodyStarted: 0,
+    bodyFinished: 0,
+    bodySkipped: 0,
+    otherStarted: 0,
+    otherFinished: 0,
+    otherSkipped: 0,
+    active: 0,
+    missingTerminal: 0,
+    unmatchedFinished: 0,
+    terminal: { completed: 0, interrupted: 0, timed_out: 0, failed: 0 }
+  };
+  const unmatchedByType = new Map();
+  for (const event of events.slice(afterIndex)) {
+    const eventActionType = event?.payload?.actionType;
+    const kind = eventActionType === actionType ? "body" : "other";
+    if (event?.type === "pet_interaction_action_started") {
+      summary[`${kind}Started`] += 1;
+      summary.active += 1;
+      unmatchedByType.set(eventActionType, (unmatchedByType.get(eventActionType) ?? 0) + 1);
+    }
+    if (event?.type === "pet_interaction_action_skipped") summary[`${kind}Skipped`] += 1;
+    if (event?.type === "pet_interaction_action_finished") {
+      summary[`${kind}Finished`] += 1;
+      const terminalStatus = event?.payload?.terminalStatus;
+      if (!ACTION_TERMINAL_STATUSES.includes(terminalStatus)) {
+        summary.missingTerminal += 1;
+        continue;
+      }
+      summary.terminal[terminalStatus] += 1;
+      const unmatched = unmatchedByType.get(eventActionType) ?? 0;
+      if (unmatched === 0) {
+        summary.unmatchedFinished += 1;
+        continue;
+      }
+      unmatchedByType.set(eventActionType, unmatched - 1);
+      summary.active -= 1;
+    }
+  }
+  return summary;
+}
+
+function stageDeadline(deadline, stageTimeoutMs, now) {
+  return now() + deadline.remaining(stageTimeoutMs);
+}
+
+function remainingStageMs(deadline, stageEndsAt, now) {
+  const stageRemaining = stageEndsAt - now();
+  if (stageRemaining <= 0) throw new RealUiHarnessError("run_timeout");
+  return Math.min(stageRemaining, deadline.remaining(stageRemaining));
+}
+
+function remainingLifecycleStageMs(options, stageEndsAt, now, summary) {
+  try {
+    return remainingStageMs(options.deadline, stageEndsAt, now);
+  } catch (error) {
+    if (error instanceof RealUiHarnessError && error.category === "run_timeout" && summary.active > 0) {
+      options.onProgress?.({
+        ...summary,
+        missingTerminal: summary.missingTerminal + summary.active
+      });
+    }
+    throw error;
+  }
+}
+
+export async function waitForActionLifecycleIdle(options) {
+  const now = options.now ?? Date.now;
+  const sleepImpl = options.sleep ?? sleep;
+  const pollMs = options.pollMs ?? 50;
+  const stableMs = options.stableMs ?? 550;
+  const stageEndsAt = stageDeadline(options.deadline, options.stageTimeoutMs ?? 15_000, now);
+  let idleSince = null;
+  while (true) {
+    const summary = summarizeActionLifecycle(options.readEvents(), 0, options.actionType);
+    options.onProgress?.(summary);
+    if (summary.unmatchedFinished > 0 || summary.missingTerminal > 0) {
+      throw new RealUiHarnessError("product_assertion");
+    }
+    if (summary.active === 0) {
+      idleSince ??= now();
+      if (now() - idleSince >= stableMs) return summary;
+    } else {
+      idleSince = null;
+    }
+    const remainingMs = remainingLifecycleStageMs(options, stageEndsAt, now, summary);
+    await sleepImpl(Math.min(pollMs, remainingMs));
+  }
+}
+
+export async function waitForActionLifecycleResult(options) {
+  const now = options.now ?? Date.now;
+  const sleepImpl = options.sleep ?? sleep;
+  const pollMs = options.pollMs ?? 50;
+  const stageEndsAt = stageDeadline(options.deadline, options.stageTimeoutMs ?? 15_000, now);
+  while (true) {
+    const events = options.readEvents().slice(options.afterIndex);
+    const summary = summarizeActionLifecycle(events, 0, options.actionType);
+    options.onProgress?.(summary);
+    if (summary.unmatchedFinished > 0 || summary.missingTerminal > 0) {
+      throw new RealUiHarnessError("product_assertion");
+    }
+    let started = false;
+    for (const event of events) {
+      if (event?.payload?.actionType !== options.actionType) continue;
+      if (event.type === "pet_interaction_action_skipped") {
+        throw new RealUiHarnessError("product_assertion");
+      }
+      if (event.type === "pet_interaction_action_started") started = true;
+      if (event.type === "pet_interaction_action_finished") {
+        if (!ACTION_TERMINAL_STATUSES.includes(event?.payload?.terminalStatus)) {
+          throw new RealUiHarnessError("product_assertion");
+        }
+        if (started) return summary;
+      }
+    }
+    const remainingMs = remainingLifecycleStageMs(options, stageEndsAt, now, summary);
+    await sleepImpl(Math.min(pollMs, remainingMs));
+  }
+}
+
+function inspectBodyAttempt(events, actionType, actionTypes) {
+  const allowedTypes = new Set(actionTypes);
+  const bodyEvents = events.filter((event) => event?.payload?.actionType === actionType);
+  const bodyStarted = bodyEvents.filter((event) => event.type === "pet_interaction_action_started");
+  const bodyFinished = bodyEvents.filter((event) => event.type === "pet_interaction_action_finished");
+  const bodySkipped = bodyEvents.filter((event) => event.type === "pet_interaction_action_skipped");
+  if (bodyStarted.length > 1 || bodyFinished.length > 1 || bodySkipped.length > 1) {
+    throw new RealUiHarnessError("product_assertion");
+  }
+  if (bodyStarted.length > 0 && bodySkipped.length > 0) throw new RealUiHarnessError("product_assertion");
+  if (bodyFinished.length > 0 && bodyStarted.length === 0) throw new RealUiHarnessError("product_assertion");
+  if (bodyStarted.length > 0) {
+    const startedIndex = events.indexOf(bodyStarted[0]);
+    const finishedIndex = bodyFinished.length > 0 ? events.indexOf(bodyFinished[0]) : -1;
+    if (finishedIndex >= 0 && finishedIndex < startedIndex) throw new RealUiHarnessError("product_assertion");
+    return {
+      kind: "started",
+      terminal: bodyFinished[0]?.payload?.terminalStatus ?? null
+    };
+  }
+  if (bodySkipped.length === 0) return { kind: "pending" };
+
+  const skipReason = bodySkipped[0]?.payload?.skipReason;
+  if (!BODY_SKIP_REASONS.includes(skipReason)) throw new RealUiHarnessError("product_assertion");
+  if (skipReason !== "active_action" && skipReason !== "global_cooldown") {
+    throw new RealUiHarnessError("product_assertion");
+  }
+  const isConcreteCompetitor = (event) => {
+    const type = event?.payload?.actionType;
+    return type !== actionType && allowedTypes.has(type);
+  };
+  if (skipReason === "active_action") {
+    const starts = events.filter((event) => event?.type === "pet_interaction_action_started" && isConcreteCompetitor(event));
+    const competingTypes = [...new Set(starts.map((event) => event.payload.actionType))];
+    if (competingTypes.length !== 1) throw new RealUiHarnessError("product_assertion");
+    const competingActionType = competingTypes[0];
+    const startIndex = events.indexOf(starts[0]);
+    const finishes = events.filter((event, index) => (
+      index > startIndex && event?.type === "pet_interaction_action_finished" && event?.payload?.actionType === competingActionType
+    ));
+    if (finishes.length > 1) throw new RealUiHarnessError("product_assertion");
+    const terminal = finishes[0]?.payload?.terminalStatus ?? null;
+    if (terminal !== null && !ACTION_TERMINAL_STATUSES.includes(terminal)) {
+      throw new RealUiHarnessError("product_assertion");
+    }
+    return { kind: "contention", skipReason, competingActionType, terminal };
+  }
+
+  const finishes = events.filter((event) => event?.type === "pet_interaction_action_finished" && isConcreteCompetitor(event));
+  if (finishes.length === 0) throw new RealUiHarnessError("product_assertion");
+  const finish = finishes.at(-1);
+  const terminal = finish?.payload?.terminalStatus;
+  if (!ACTION_TERMINAL_STATUSES.includes(terminal)) throw new RealUiHarnessError("product_assertion");
+  return {
+    kind: "contention",
+    skipReason,
+    competingActionType: finish.payload.actionType,
+    terminal
+  };
+}
+
+export async function runBodyActionAcceptance(options) {
+  const now = options.now ?? Date.now;
+  const sleepImpl = options.sleep ?? sleep;
+  const pollMs = options.pollMs ?? 50;
+  const stableMs = options.stableMs ?? 550;
+  const actionTypes = [...new Set(options.actionTypes ?? [])];
+  if (!actionTypes.includes(options.actionType)) throw new RealUiHarnessError("product_assertion");
+  const publish = (value) => {
+    const safe = safeBodyResultOrThrow(value, actionTypes);
+    options.onProgress?.(safe);
+    return safe;
+  };
+
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    options.deadline.remaining();
+    const afterIndex = options.readEvents().length;
+    publish({
+      attempt, bodyState: "pending", bodySkipReason: null,
+      competingActionType: null, terminal: null, idle: false
+    });
+    if (await options.trigger(attempt) !== true) throw new RealUiHarnessError("product_assertion");
+
+    let contention = null;
+    while (true) {
+      const attemptEvents = options.readEvents().slice(afterIndex);
+      const observation = inspectBodyAttempt(attemptEvents, options.actionType, actionTypes);
+      if (observation.kind === "started") {
+        if (observation.terminal === null) {
+          publish({
+            attempt, bodyState: "started", bodySkipReason: null,
+            competingActionType: null, terminal: null, idle: false
+          });
+        } else {
+          const result = publish({
+            attempt,
+            bodyState: observation.terminal === "completed" ? "completed" : "started",
+            bodySkipReason: null,
+            competingActionType: null,
+            terminal: observation.terminal,
+            idle: false
+          });
+          if (observation.terminal !== "completed") throw new RealUiHarnessError("product_assertion");
+          return result;
+        }
+      }
+      if (observation.kind === "contention") {
+        contention = observation;
+        publish({
+          attempt, bodyState: "skipped", bodySkipReason: contention.skipReason,
+          competingActionType: contention.competingActionType, terminal: contention.terminal, idle: false
+        });
+        if (contention.terminal !== null) break;
+      }
+      const remainingMs = options.deadline.remaining();
+      await sleepImpl(Math.min(pollMs, remainingMs));
+    }
+
+    await waitForActionLifecycleIdle({
+      readEvents: options.readEvents,
+      actionType: options.actionType,
+      deadline: options.deadline,
+      stageTimeoutMs: options.deadline.remaining(),
+      stableMs,
+      pollMs,
+      now,
+      sleep: sleepImpl
+    });
+    publish({
+      attempt, bodyState: "skipped", bodySkipReason: contention.skipReason,
+      competingActionType: contention.competingActionType, terminal: contention.terminal, idle: true
+    });
+    if (attempt === 3) throw new RealUiHarnessError("persistent_contention");
+  }
+  throw new RealUiHarnessError("persistent_contention");
+}
+
 export function createRealUiRunContext({
   runName,
   appDataDir,
   port = 9534,
   env = {},
+  structuredFailures = false,
   screenshotPatterns,
   tmpResiduePatterns
 }) {
@@ -83,6 +410,7 @@ export function createRealUiRunContext({
   const runParentDir = join(root, ".tmp", runName);
   const runDir = join(runParentDir, stamp);
   const resolvedAppDataDir = appDataDir ?? join(runDir, "user-data");
+  const acceptanceRunId = randomUUID().toLowerCase();
   const prefix = runName.split("-").slice(0, 2).join("-");
 
   mkdirSync(runDir, { recursive: true });
@@ -97,7 +425,10 @@ export function createRealUiRunContext({
     resultPath: join(runDir, "result.json"),
     progressPath: join(runDir, "progress.log"),
     port,
-    env,
+    cdpEndpointOwned: false,
+    structuredFailures,
+    acceptanceRunId,
+    env: { ...env, AI_DESKTOP_PET_ACCEPTANCE_RUN_ID: acceptanceRunId },
     child: null,
     pages: [],
     screenshotPatterns: screenshotPatterns ?? [
@@ -124,23 +455,44 @@ export async function waitForJsonWithDependencies(url, timeoutMs, dependencies =
   let lastError = null;
 
   while (now() < deadline) {
+    if (dependencies.child && childHasExited(dependencies.child)) {
+      throw new RealUiHarnessError("child_exit");
+    }
     try {
       const remainingMs = Math.max(1, deadline - now());
-      const response = await fetchImpl(url, { signal: AbortSignal.timeout(remainingMs) });
-      if (!response.ok) throw new Error(`${url} -> ${response.status}`);
-      return await response.json();
+      const response = await waitForFetchOrChildExit(
+        fetchImpl(url, { signal: AbortSignal.timeout(remainingMs) }),
+        dependencies.child
+      );
+      if (!response.ok) {
+        if (dependencies.structuredFailures) {
+          throw new RealUiHarnessError("http_error", { status: normalizeHttpStatus(response.status) });
+        }
+        throw new Error(`${url} -> ${response.status}`);
+      }
+      try {
+        return await response.json();
+      } catch (error) {
+        if (dependencies.structuredFailures) {
+          throw new RealUiHarnessError("invalid_json");
+        }
+        throw error;
+      }
     } catch (error) {
+      if (error instanceof RealUiHarnessError) throw error;
       lastError = error;
       const retryDelayMs = Math.min(300, Math.max(0, deadline - now()));
       if (retryDelayMs > 0) await sleepForRetry(retryDelayMs);
     }
   }
 
+  if (dependencies.structuredFailures) {
+    if (dependencies.child && childHasExited(dependencies.child)) {
+      throw new RealUiHarnessError("child_exit");
+    }
+    throw new RealUiHarnessError("target_timeout");
+  }
   throw lastError ?? new Error(`Timed out waiting for ${url}`);
-}
-
-async function waitForJson(url, timeoutMs) {
-  return waitForJsonWithDependencies(url, timeoutMs);
 }
 
 export class CdpClientError extends Error {
@@ -305,10 +657,11 @@ function asCdp(page) {
   return page?.cdp ?? page;
 }
 
-export function startElectron(context) {
+export function startElectron(context, dependencies = {}) {
   const electronExe = join(root, "node_modules", "electron", "dist", "electron.exe");
   const electronCmd = existsSync(electronExe) ? electronExe : join(root, "node_modules", ".bin", "electron.cmd");
-  const child = spawn(electronCmd, [
+  const spawnImpl = dependencies.spawnImpl ?? spawn;
+  const child = spawnImpl(electronCmd, [
     ".",
     `--remote-debugging-port=${context.port}`,
     ...(context.electronArgs ?? [])
@@ -330,31 +683,51 @@ export function startElectron(context) {
   });
 
   child.stdout.on("data", (chunk) => writeFileSync(join(context.runDir, "electron.stdout.log"), chunk, { flag: "a" }));
-  child.stderr.on("data", (chunk) => writeFileSync(join(context.runDir, "electron.stderr.log"), chunk, { flag: "a" }));
+  child.stderr.on("data", (chunk) => {
+    writeFileSync(join(context.runDir, "electron.stderr.log"), chunk, { flag: "a" });
+    captureOwnedCdpEndpoint(context, chunk);
+  });
+  child.once("exit", () => {
+    context.childExitObserved = true;
+  });
   writeFileSync(join(context.runDir, "electron.pid"), String(child.pid ?? ""));
   context.child = child;
   return child;
 }
 
 export async function connectToElectron(context, timeoutMs = 30_000) {
-  return waitForJson(`http://127.0.0.1:${context.port}/json/version`, timeoutMs);
+  const deadline = Date.now() + timeoutMs;
+  if (context.port === 0) {
+    await waitForOwnedCdpEndpoint(context, timeoutMs);
+  }
+  return waitForJsonWithDependencies(`http://127.0.0.1:${context.port}/json/version`, Math.max(1, deadline - Date.now()), {
+    child: context.child,
+    structuredFailures: context.structuredFailures
+  });
 }
 
 export async function getPageByUrlPartWithDependencies(context, urlPart, timeoutMs = 30_000, dependencies = {}) {
   const now = dependencies.now ?? Date.now;
   const sleepForRetry = dependencies.sleep ?? sleep;
   const listTargets = dependencies.listTargets ?? ((remainingMs) => (
-    waitForJson(`http://127.0.0.1:${context.port}/json/list`, Math.min(10_000, remainingMs))
+    waitForJsonWithDependencies(`http://127.0.0.1:${context.port}/json/list`, Math.min(10_000, remainingMs), {
+      child: context.child,
+      structuredFailures: context.structuredFailures
+    })
   ));
   const createCdp = dependencies.createCdp ?? ((webSocketDebuggerUrl) => new CdpClient(webSocketDebuggerUrl));
   const deadline = now() + timeoutMs;
   let lastReadableMetadata = null;
   let sessionClosedListRetryUsed = false;
   while (now() < deadline) {
+    if (context.structuredFailures && context.child && childHasExited(context.child)) {
+      throw new RealUiHarnessError("child_exit");
+    }
     let targets;
     try {
       targets = await listTargets(Math.max(1, deadline - now()));
-    } catch {
+    } catch (error) {
+      if (error instanceof RealUiHarnessError) throw error;
       if (now() < deadline) await sleepForRetry(Math.min(300, Math.max(0, deadline - now())));
       continue;
     }
@@ -417,6 +790,12 @@ export async function getPageByUrlPartWithDependencies(context, urlPart, timeout
       throw new TargetDiscoveryError("target_entry_shape_invalid", metadata);
     }
     await sleepForRetry(Math.min(300, Math.max(0, deadline - now())));
+  }
+  if (context.structuredFailures) {
+    if (context.child && childHasExited(context.child)) {
+      throw new RealUiHarnessError("child_exit");
+    }
+    throw new RealUiHarnessError("target_timeout", lastReadableMetadata ?? emptyTargetMetadata());
   }
   throw new TargetDiscoveryError(
     lastReadableMetadata ? "target_not_found" : "target_list_unreadable",
@@ -775,6 +1154,27 @@ export function cleanupRealUiRun(context) {
     throw new Error(`Refusing to clean outside .tmp: ${context.runParentDir}`);
   }
   rmSync(context.runParentDir, { recursive: true, force: true });
+  assertRealUiRunParentRemoved(context);
+}
+
+export function assertRealUiRunParentRemoved(context) {
+  for (const path of [
+    context.runParentDir,
+    context.runDir,
+    context.appDataDir,
+    join(context.appDataDir, "acceptance-evidence")
+  ]) {
+    if (existsSync(path)) throw new Error("real_ui_run_parent_cleanup_failed");
+  }
+}
+
+export function readAcceptanceEvidenceForContext(context, expectedSuite) {
+  const { readAcceptanceEvidence } = require("../../dist/main/services/acceptance-evidence.js");
+  return readAcceptanceEvidence({
+    userDataPath: context.appDataDir,
+    runId: context.acceptanceRunId,
+    expectedSuite
+  });
 }
 
 export async function waitForChildExit(child, timeoutMs = 10_000) {
@@ -819,6 +1219,98 @@ export async function stopElectron(context) {
     child.kill();
   }
   await waitForChildExit(child);
+}
+
+export async function runStructuredRealUiAcceptance({ initialResult, execute, cleanupSteps, emit }) {
+  let result = { ok: false, ...initialResult };
+  let failure = null;
+  try {
+    const executionResult = await execute();
+    result = { ...result, ...executionResult, ok: true };
+  } catch (error) {
+    failure = classifyRealUiFailure(error);
+  }
+
+  let cleaned = true;
+  for (const cleanupStep of cleanupSteps) {
+    try {
+      await cleanupStep();
+    } catch {
+      cleaned = false;
+    }
+  }
+  if (!cleaned) {
+    failure = { category: "cleanup_failure" };
+  }
+  if (failure) {
+    result = { ...result, ok: false, failure, cleaned };
+  } else {
+    result = { ...result, ok: true, cleaned };
+  }
+  emit(`${JSON.stringify(result)}\n`);
+  return result;
+}
+
+function classifyRealUiFailure(error) {
+  if (error instanceof RealUiHarnessError) {
+    return { category: error.category };
+  }
+  if (error instanceof TargetDiscoveryError) {
+    return { category: "target_timeout" };
+  }
+  if (error?.name === "AssertionError" || error?.code === "ERR_ASSERTION") {
+    return { category: "product_assertion" };
+  }
+  return { category: "runner_error" };
+}
+
+function captureOwnedCdpEndpoint(context, chunk) {
+  if (context.port !== 0 || context.cdpEndpointOwned) return;
+  const previous = context.cdpAnnouncementBuffer ?? "";
+  const text = `${previous}${String(chunk)}`.slice(-4096);
+  context.cdpAnnouncementBuffer = text;
+  const match = /DevTools listening on ws:\/\/127\.0\.0\.1:(\d{1,5})\/devtools\/browser\/[A-Za-z0-9-]+/u.exec(text);
+  if (!match) return;
+  const port = Number(match[1]);
+  if (!Number.isInteger(port) || port < 1 || port > 65_535) return;
+  context.port = port;
+  context.cdpEndpointOwned = true;
+  context.cdpAnnouncementBuffer = "";
+}
+
+async function waitForOwnedCdpEndpoint(context, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (!context.cdpEndpointOwned && Date.now() < deadline) {
+    if (context.child && childHasExited(context.child)) {
+      throw new RealUiHarnessError("child_exit");
+    }
+    await sleep(Math.min(50, Math.max(1, deadline - Date.now())));
+  }
+  if (!context.cdpEndpointOwned) throw new RealUiHarnessError("target_timeout");
+}
+
+function childHasExited(child) {
+  return child.exitCode !== null || child.signalCode !== null;
+}
+
+function waitForFetchOrChildExit(fetchPromise, child) {
+  if (!child?.once || !child?.removeListener) return fetchPromise;
+  return new Promise((resolveFetch, rejectFetch) => {
+    const onExit = () => finish(rejectFetch, new RealUiHarnessError("child_exit"));
+    const finish = (settle, value) => {
+      child.removeListener("exit", onExit);
+      settle(value);
+    };
+    child.once("exit", onExit);
+    Promise.resolve(fetchPromise).then(
+      (response) => finish(resolveFetch, response),
+      (error) => finish(rejectFetch, error)
+    );
+  });
+}
+
+function normalizeHttpStatus(status) {
+  return Number.isInteger(status) && status >= 100 && status <= 599 ? status : 0;
 }
 
 function isInside(targetPath, parentPath) {

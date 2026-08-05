@@ -3,15 +3,16 @@ import type {
   ProviderHealthResult,
   ProviderHealthStatus
 } from "../../../shared/provider-health";
-import type { TelemetryPayload } from "../telemetry";
-
-type TelemetryLogger = (type: string, payload?: TelemetryPayload) => void;
+import {
+  toPersistentTelemetryEvent,
+  type PersistentTelemetryLogger
+} from "../../../shared/telemetry-contract";
 
 export type ProviderHealthCheckOptions = {
   request: ProviderHealthCheckRequest;
   apiKey?: string | null;
   signal?: AbortSignal;
-  logTelemetry?: TelemetryLogger;
+  logTelemetry?: PersistentTelemetryLogger;
 };
 
 type ModelsListResponse = {
@@ -157,15 +158,11 @@ function logHealth(
   result: ProviderHealthResult,
   durationMs: number
 ): void {
-  options.logTelemetry?.("provider_health_checked", {
-    providerId: result.providerId,
+  const event = toPersistentTelemetryEvent("provider_health_checked", {
     status: result.status,
-    model: result.model,
-    baseURLHost: result.baseURLHost,
-    localPresetId: result.localPresetId,
-    modelCount: result.modelCount,
-    durationMs
+    latencyBucketMs: Math.min(600_000, Math.floor(Math.max(0, durationMs) / 100) * 100)
   });
+  if (event) options.logTelemetry?.(event);
 }
 
 function readBaseURLHost(baseURL: string): string | undefined {

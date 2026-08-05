@@ -56,11 +56,23 @@ test("preload and main keep the overlay region IPC closed and bounded", () => {
   assert.match(appSource, /petWindow\.getContentSize\(\)/);
   assert.match(appSource, /region\.right! > contentWidth \|\| region\.bottom! > contentHeight/);
   assert.match(appSource, /pointerController\?\.setOverlayHitRegion\(region\)/);
-  assert.match(appSource, /proactive_bubble_overlay_region_changed/);
-  assert.match(appSource, /regionState: region \? "registered" : "rejected"/);
-  assert.match(appSource, /regionState: "cleared"/);
-  assert.match(appSource, /authority: "main"/);
-  assert.doesNotMatch(appSource, /proactive_bubble_overlay_region_changed", \{[\s\S]{0,180}(rect|left|top|right|bottom|width|height)/);
+  const regionHandlerIndex = appSource.indexOf('ipcMain.on("pet:bubble-hit-region-change"');
+  const regionHandlerEndIndex = appSource.indexOf('ipcMain.on("pet:drag-start"', regionHandlerIndex);
+  const regionHandlerSource = appSource.slice(regionHandlerIndex, regionHandlerEndIndex);
+  assert.notEqual(regionHandlerIndex, -1);
+  assert.notEqual(regionHandlerEndIndex, -1);
+  assert.match(
+    regionHandlerSource,
+    /if \(value === null\) \{[\s\S]*setOverlayHitRegion\(null\);[\s\S]*logTelemetry\("proactive_bubble_overlay_region_changed"\);[\s\S]*return;/
+  );
+  assert.match(
+    regionHandlerSource,
+    /const region = parsePetOverlayHitRegion\(value, contentWidth, contentHeight\);[\s\S]*setOverlayHitRegion\(region\);[\s\S]*logTelemetry\("proactive_bubble_overlay_region_changed"\);/
+  );
+  assert.doesNotMatch(
+    regionHandlerSource,
+    /logTelemetry\("proactive_bubble_overlay_region_changed"\s*,/
+  );
 });
 
 test("pointer controller polls the authoritative region independently from renderer hover", () => {
@@ -70,7 +82,19 @@ test("pointer controller polls the authoritative region independently from rende
   assert.match(pointerControllerSource, /isScreenPointInOverlayHitRegion\(cursor, bounds, overlayHitRegion\)/);
   assert.match(pointerControllerSource, /onOverlayRegionHitChanged\?\.\(nextIsHit\)/);
   assert.match(appSource, /onOverlayRegionHitChanged: \(isHit\) =>/);
-  assert.match(appSource, /overlayHitAuthority: "main_poll"/);
+  const hitCallbackIndex = appSource.indexOf("    onOverlayRegionHitChanged: (isHit) => {");
+  const hitCallbackEndIndex = appSource.indexOf("    onWindowMotionCandidate:", hitCallbackIndex);
+  const hitCallbackSource = appSource.slice(hitCallbackIndex, hitCallbackEndIndex);
+  assert.notEqual(hitCallbackIndex, -1);
+  assert.notEqual(hitCallbackEndIndex, -1);
+  assert.match(
+    hitCallbackSource,
+    /onOverlayRegionHitChanged: \(isHit\) => \{[\s\S]*logTelemetry\("proactive_bubble_overlay_hit_changed"\);/
+  );
+  assert.doesNotMatch(
+    hitCallbackSource,
+    /logTelemetry\("proactive_bubble_overlay_hit_changed"\s*,/
+  );
 });
 
 test("main overlay hit diagnostic keeps only authority and state enums", () => {

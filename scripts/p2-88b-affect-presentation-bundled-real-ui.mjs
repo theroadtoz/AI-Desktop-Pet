@@ -1,14 +1,16 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   assertNoScreenshotResidue,
+  assertRealUiRunParentRemoved,
   cleanupRealUiRun,
   click,
   connectToElectron,
   createRealUiRunContext,
   evaluate,
+  readAcceptanceEvidenceForContext,
   sleep,
   startElectron,
   stopElectron,
@@ -33,6 +35,37 @@ const packRoot = resolve(
 const FIXTURE_MESSAGE = "__p2_88b_medium_happy_fixture__，以后回复短一点。";
 const RUNTIME_TIMEOUT_MS = 180_000;
 const RUN_TIMEOUT_MS = 660_000;
+export const FIRST_GENERIC_LIFECYCLE_TIMEOUT_MS = 15_000;
+const MAX_BUNDLED_DIAGNOSTIC_COUNT = 10_000;
+const DIAGNOSTIC_EVENT_TYPES = new Set([
+  "p2_88b_affect_reply_action_gate",
+  "dialogue_affect_action_dispatch",
+  "pet_interaction_action_started",
+  "pet_interaction_action_finished",
+  "pet_interaction_action_skipped"
+]);
+const DIAGNOSTIC_ACTION_TYPES = new Set([
+  "appearance", "headPat", "bodyAttentionTurn", "dialogueOpenWelcome", "replyWarmSettle",
+  "musicListenSway", "gamePresenceGlance", "searchNoteSettle", "returnFromIdle",
+  "eveningWindowGlance", "longWorkRecovery", "greeting", "listen", "curiousTilt",
+  "softSmile", "quietNod", "shySmile", "lookAway", "thinking", "replyThinking",
+  "playGame", "gameReady", "gameCheerLite", "reading", "readingIdle", "readingThink",
+  "focus", "workFocus", "doze", "sleepySettle", "edgeGlance", "flusteredGlance", "replySustain"
+]);
+const DIAGNOSTIC_INTERACTION_REASONS = new Set([
+  "startup_first_visible_frame", "click_head", "click_body", "window_shake_feedback",
+  "chat_opened", "chat_input_focus", "chat_reply_waiting", "pet_edge_settled",
+  "rapid_touch_combo", "chat_reply_sustain", "chat_reply_completed",
+  "state_music_playing_stable", "state_game_presence_stable", "return_from_idle",
+  "evening_companion_tick", "long_work_session_complete", "state_idle", "state_greet",
+  "state_listen", "state_think", "state_reply_sustain", "state_sleep", "state_work",
+  "state_game", "state_read", "state_edge", "state_flustered", "state_local_model_busy",
+  "state_memory_injected", "state_memory_skipped", "state_search_cited", "state_proactive_bubble_visible"
+]);
+const DIAGNOSTIC_DISPATCH_REASONS = new Set([
+  "accepted", "busy", "invalid_policy", "unsafe_request_id", "duplicate_request_id",
+  "request_id_failed", "send_failed"
+]);
 const PET_RENDERER_READY_EXPRESSION = `(() => {
   const canvas = document.querySelector("#pet-canvas");
   return Boolean(window.petApi && canvas && canvas.width > 0 && canvas.height > 0);
@@ -110,11 +143,13 @@ async function main() {
       visualReviewHandshakeEnabled: context.p288VisualReviewHandshakeEnabled ?? false,
       visualReviewDecision: context.p288VisualReviewDecision ?? "not_requested",
       humanVisualReviewConfirmed: context.p288HumanVisualReviewConfirmed ?? false,
+      firstLifecycleDiagnostic: context.p288FirstLifecycleDiagnostic ?? null,
       validation
     };
   } finally {
     try {
       await cleanup(context);
+      assertRealUiRunParentRemoved(context);
     } catch {
       summary = { ...summary, ok: false, failure: "visual_evidence_cleanup_failed" };
     }
@@ -150,14 +185,27 @@ async function run(context, validation) {
   const chat = await waitForWindow(context, "renderer/chat/index.html", 45_000);
   await waitFor(chat, "Boolean(window.configApi?.getProviderStatus)", { timeoutMs: 30_000 });
 
-  context.p288Stage = "runtime_handoff";
-  const handoff = await waitForEmbeddedRuntime(context);
-  const provider = await waitForEmbeddedProvider(chat, handoff);
+  context.p288Stage = "provider_status";
+  const provider = await waitForEmbeddedProvider(chat, validation);
+
+  context.p288Stage = "initial_idle";
+  await waitForActionIdle(context, 12_000);
 
   context.p288Stage = "first_fixture";
   const firstStart = readTelemetry(context).length;
-  await sendMessage(chat, FIXTURE_MESSAGE);
-  await waitForFirstReplyCompletionActionIdle(context, firstStart, RUNTIME_TIMEOUT_MS);
+  let replyUiCompleted = false;
+  try {
+    await sendMessage(chat, FIXTURE_MESSAGE);
+    replyUiCompleted = true;
+    await waitForFirstReplyCompletionActionIdle(context, firstStart);
+  } catch (error) {
+    if (!replyUiCompleted) {
+      context.p288FirstLifecycleDiagnostic = createBundledFirstLifecycleDiagnostic({
+        replyUiCompleted: false
+      });
+    }
+    throw error;
+  }
   const firstEvents = readTelemetry(context).slice(firstStart);
   const firstSignalHeld = !firstEvents.some((event) => isStarted(event, "state_idle"));
 
@@ -303,7 +351,7 @@ async function run(context, validation) {
     event.type === "dialogue_affect_action_dispatch" ||
     isStarted(event) || isTerminal(event)
   );
-  const providerEmbedded = provider?.providerId === "local-openai-compatible" && provider?.isFallback === false;
+  const providerEmbedded = isExactBundledProviderStatus(provider, validation);
   const noBodyLeak = !JSON.stringify(relevant).includes(FIXTURE_MESSAGE);
   const acceptedDispatchCount = relevant.filter(
     (event) => event.type === "dialogue_affect_action_dispatch" && event.payload?.status === "accepted"
@@ -336,7 +384,7 @@ async function run(context, validation) {
       )) &&
       noBodyLeak,
     mode: "bundled-local-qwen-real-ui",
-    model: handoff.alias ?? validation.alias ?? "unknown",
+    model: validation.alias,
     evidenceBoundary: "real bundled local-provider reply verifies natural reply-completion idle action lifecycle, not real emotion understanding",
     checks: {
       firstSignalHeld,
@@ -389,23 +437,20 @@ async function sendMessage(page, message) {
   throw new Error("send_timeout");
 }
 
-async function waitForEmbeddedRuntime(context) {
-  const deadline = Date.now() + RUNTIME_TIMEOUT_MS;
-  while (Date.now() < deadline) {
-    const entries = readTelemetry(context);
-    const runtime = [...entries].reverse().find((entry) => entry.type === "bundled_llama_cpp_runtime_status" && entry.payload?.status === "ready")?.payload;
-    const handoff = [...entries].reverse().find((entry) => entry.type === "bundled_llama_cpp_provider_handoff")?.payload;
-    if (runtime?.status === "ready" && handoff?.providerId === "local-openai-compatible" && handoff?.localPresetId === "embedded-llama-cpp") return handoff;
-    await sleep(400);
-  }
-  throw new Error("embedded_runtime_timeout");
+export function isExactBundledProviderStatus(provider, validation) {
+  return validation?.ok === true &&
+    typeof validation.alias === "string" &&
+    validation.alias.length > 0 &&
+    provider?.providerId === "local-openai-compatible" &&
+    provider.model === validation.alias &&
+    provider.isFallback === false;
 }
 
-async function waitForEmbeddedProvider(page, handoff) {
+async function waitForEmbeddedProvider(page, validation) {
   const deadline = Date.now() + RUNTIME_TIMEOUT_MS;
   while (Date.now() < deadline) {
     const provider = await evaluate(page, "window.configApi.getProviderStatus()");
-    if (provider?.providerId === "local-openai-compatible" && provider?.model === handoff?.alias && provider?.isFallback === false) return provider;
+    if (isExactBundledProviderStatus(provider, validation)) return provider;
     await sleep(400);
   }
   throw new Error("embedded_provider_timeout");
@@ -421,23 +466,166 @@ async function waitForTelemetry(context, startIndex, predicate, timeoutMs) {
   throw new Error("telemetry_wait_timeout");
 }
 
-async function waitForFirstReplyCompletionActionIdle(context, startIndex, timeoutMs) {
-  const started = await waitForTelemetry(
-    context,
-    startIndex,
-    (event) => isStarted(event, "chat_reply_completed"),
-    timeoutMs
+async function waitForFirstReplyCompletionActionIdle(context, startIndex) {
+  const atReplyDone = readBundledFirstLifecycleSnapshot(context, startIndex);
+  const deadline = Date.now() + FIRST_GENERIC_LIFECYCLE_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    const events = readTelemetry(context).slice(startIndex);
+    if (hasExactFirstGenericReplyLifecycle(events)) {
+      await waitForActionIdle(context, Math.max(1, deadline - Date.now()));
+      return;
+    }
+    await sleep(50);
+  }
+  const atTimeout = readBundledFirstLifecycleSnapshot(context, startIndex);
+  context.p288FirstLifecycleDiagnostic = createBundledFirstLifecycleDiagnostic({
+    replyUiCompleted: true,
+    events: readTelemetry(context).slice(startIndex),
+    atReplyDone,
+    atTimeout
+  });
+  throw new Error("first_generic_reply_lifecycle_incomplete");
+}
+
+function readBundledFirstLifecycleSnapshot(context, firstStart) {
+  const result = readAcceptanceEvidenceForContext(context, "p2-88b");
+  if (!result.ok) throw new Error("acceptance_evidence_invalid");
+  const fileExists = existsSync(join(
+    context.appDataDir,
+    "acceptance-evidence",
+    `${context.acceptanceRunId}.ndjson`
+  ));
+  return createBundledFirstLifecycleSnapshot({ fileExists, events: result.events, firstStart });
+}
+
+export function createBundledFirstLifecycleSnapshot({ fileExists, events, firstStart }) {
+  if (typeof fileExists !== "boolean" || !Array.isArray(events) ||
+    !Number.isSafeInteger(firstStart) || firstStart < 0 || firstStart > events.length ||
+    events.length > MAX_BUNDLED_DIAGNOSTIC_COUNT) {
+    throw new Error("bundled_diagnostic_snapshot_invalid");
+  }
+  const sinceStart = events.slice(firstStart);
+  const tuples = new Map();
+  for (const event of sinceStart) {
+    const tuple = projectBundledEvidenceTuple(event);
+    if (!tuple) throw new Error("bundled_diagnostic_event_invalid");
+    const key = JSON.stringify(tuple);
+    tuples.set(key, { ...tuple, count: (tuples.get(key)?.count ?? 0) + 1 });
+  }
+  const snapshot = {
+    fileExists,
+    parsedCount: events.length,
+    sinceStartCount: sinceStart.length,
+    events: [...tuples.values()].sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)))
+  };
+  if (!isSafeBundledFirstLifecycleSnapshot(snapshot)) throw new Error("bundled_diagnostic_snapshot_unsafe");
+  return snapshot;
+}
+
+function projectBundledEvidenceTuple(event) {
+  if (!event || typeof event !== "object" || !DIAGNOSTIC_EVENT_TYPES.has(event.type) ||
+    !event.payload || typeof event.payload !== "object") return null;
+  const { payload } = event;
+  const tuple = { type: event.type };
+  if (event.type === "p2_88b_affect_reply_action_gate") {
+    if (payload.reason !== "allowed" && payload.reason !== "presentation_busy") return null;
+    return { ...tuple, reason: payload.reason };
+  }
+  if (event.type === "dialogue_affect_action_dispatch") {
+    if ((payload.status !== "accepted" && payload.status !== "rejected") || !DIAGNOSTIC_DISPATCH_REASONS.has(payload.reason)) return null;
+    return { ...tuple, status: payload.status, reason: payload.reason };
+  }
+  if (!DIAGNOSTIC_ACTION_TYPES.has(payload.actionType) || !DIAGNOSTIC_INTERACTION_REASONS.has(payload.reason)) return null;
+  if (event.type === "pet_interaction_action_skipped") {
+    if (payload.skipReason !== "global_cooldown") return null;
+    return { ...tuple, actionType: payload.actionType, reason: payload.reason, skipReason: payload.skipReason };
+  }
+  return { ...tuple, actionType: payload.actionType, reason: payload.reason };
+}
+
+function isSafeBundledFirstLifecycleSnapshot(value) {
+  if (!value || typeof value !== "object") return false;
+  const keys = Object.keys(value).sort();
+  if (keys.length !== 4 || keys.join(",") !== "events,fileExists,parsedCount,sinceStartCount" ||
+    typeof value.fileExists !== "boolean" || !isDiagnosticCount(value.parsedCount) ||
+    !isDiagnosticCount(value.sinceStartCount) || value.sinceStartCount > value.parsedCount ||
+    !Array.isArray(value.events)) return false;
+  return value.events.every((event) => isSafeBundledEvidenceTuple(event));
+}
+
+function isSafeBundledEvidenceTuple(value) {
+  if (!value || typeof value !== "object" || !DIAGNOSTIC_EVENT_TYPES.has(value.type) || !isDiagnosticCount(value.count) || value.count === 0) return false;
+  const keys = Object.keys(value).sort();
+  if (value.type === "p2_88b_affect_reply_action_gate") {
+    return keys.join(",") === "count,reason,type" && (value.reason === "allowed" || value.reason === "presentation_busy");
+  }
+  if (value.type === "dialogue_affect_action_dispatch") {
+    return keys.join(",") === "count,reason,status,type" &&
+      (value.status === "accepted" || value.status === "rejected") && DIAGNOSTIC_DISPATCH_REASONS.has(value.reason);
+  }
+  if (value.type === "pet_interaction_action_skipped") {
+    return keys.join(",") === "actionType,count,reason,skipReason,type" &&
+      value.skipReason === "global_cooldown" &&
+      DIAGNOSTIC_ACTION_TYPES.has(value.actionType) && DIAGNOSTIC_INTERACTION_REASONS.has(value.reason);
+  }
+  return keys.join(",") === "actionType,count,reason,type" &&
+    DIAGNOSTIC_ACTION_TYPES.has(value.actionType) && DIAGNOSTIC_INTERACTION_REASONS.has(value.reason);
+}
+
+function isDiagnosticCount(value) {
+  return Number.isSafeInteger(value) && value >= 0 && value <= MAX_BUNDLED_DIAGNOSTIC_COUNT;
+}
+
+export function createBundledFirstLifecycleDiagnostic({ replyUiCompleted, events = [], atReplyDone, atTimeout }) {
+  if (replyUiCompleted !== true) return { classification: "reply_incomplete" };
+  if (!isSafeBundledFirstLifecycleSnapshot(atReplyDone) || !isSafeBundledFirstLifecycleSnapshot(atTimeout) || !Array.isArray(events)) {
+    throw new Error("bundled_diagnostic_input_invalid");
+  }
+  let classification;
+  const gate = events.find((event) => event.type === "p2_88b_affect_reply_action_gate");
+  const skippedGlobalCooldown = events.some((event) =>
+    event.type === "pet_interaction_action_skipped" &&
+    event.payload?.reason === "chat_reply_completed" &&
+    event.payload?.skipReason === "global_cooldown"
   );
-  await waitForTelemetry(
-    context,
-    startIndex,
-    (event) =>
-      isTerminal(event) &&
+  if (skippedGlobalCooldown) {
+    classification = "skipped_global_cooldown";
+  } else if (!gate) {
+    classification = "gate_absent";
+  } else if (gate.payload?.reason === "presentation_busy" ||
+    events.some((event) => event.type === "dialogue_affect_action_dispatch" && event.payload?.reason === "busy")) {
+    classification = "presentation_busy";
+  } else if (gate.payload?.decision !== "allow" || gate.payload?.reason !== "allowed") {
+    classification = "non_warm";
+  } else if (events.some((event) => event.type === "dialogue_affect_action_dispatch" && event.payload?.status === "accepted" && event.payload?.reason === "accepted")) {
+    classification = "mapping_gap";
+  } else {
+    throw new Error("bundled_diagnostic_classification_unknown");
+  }
+  const diagnostic = { classification, atReplyDone, atTimeout };
+  if (!isSafeBundledFirstLifecycleDiagnostic(diagnostic)) throw new Error("bundled_diagnostic_output_unsafe");
+  return diagnostic;
+}
+
+export function isSafeBundledFirstLifecycleDiagnostic(value) {
+  if (!value || typeof value !== "object" || typeof value.classification !== "string") return false;
+  if (value.classification === "reply_incomplete") return Object.keys(value).length === 1;
+  if (!new Set(["gate_absent", "presentation_busy", "non_warm", "mapping_gap", "skipped_global_cooldown"]).has(value.classification)) return false;
+  const keys = Object.keys(value).sort();
+  return keys.join(",") === "atReplyDone,atTimeout,classification" &&
+    isSafeBundledFirstLifecycleSnapshot(value.atReplyDone) && isSafeBundledFirstLifecycleSnapshot(value.atTimeout);
+}
+
+export function hasExactFirstGenericReplyLifecycle(events) {
+  const started = events.filter((event) => isStarted(event, "chat_reply_completed"));
+  if (started.length !== 1) return false;
+  const requestId = started[0].payload.requestId;
+  const terminals = events.filter(
+    (event) => isTerminal(event) &&
       event.payload?.reason === "chat_reply_completed" &&
-      event.payload?.requestId === started.payload?.requestId,
-    timeoutMs
+      event.payload?.requestId === requestId
   );
-  await waitForActionIdle(context, timeoutMs);
+  return terminals.length === 1 && terminals[0].type === "pet_interaction_action_finished";
 }
 
 async function waitForActionIdle(context, timeoutMs) {
@@ -456,13 +644,9 @@ async function waitForActionIdle(context, timeoutMs) {
 }
 
 function readTelemetry(context) {
-  const logDir = join(context.appDataDir, "logs");
-  if (!existsSync(logDir)) return [];
-  return readdirSync(logDir).filter((name) => name.startsWith("telemetry-") && name.endsWith(".jsonl"))
-    .map((name) => join(logDir, name)).sort((a, b) => statSync(a).mtimeMs - statSync(b).mtimeMs)
-    .flatMap((path) => readFileSync(path, "utf8").split(/\r?\n/u).flatMap((line) => {
-      try { return line ? [JSON.parse(line)] : []; } catch { return []; }
-    }));
+  const result = readAcceptanceEvidenceForContext(context, "p2-88b");
+  if (!result.ok) throw new Error("acceptance_evidence_invalid");
+  return result.events;
 }
 
 function isStarted(event, reason) {
@@ -494,7 +678,7 @@ async function waitForStartupAppearanceFinished(context, timeoutMs) {
     0,
     (event) =>
       event.type === "pet_interaction_action_finished" &&
-      event.payload?.type === "appearance",
+      event.payload?.actionType === "appearance",
     timeoutMs
   );
 }

@@ -8,14 +8,16 @@ import {
   type LocalProviderPresetId,
   type ProviderConfig
 } from "../../../shared/provider-config";
-import type { TelemetryPayload } from "../telemetry";
+import {
+  toPersistentTelemetryEvent,
+  type PersistentTelemetryLogger,
+  type TelemetryEventType
+} from "../../../shared/telemetry-contract";
 
 export const DEFAULT_PROVIDER_CONFIG: LocalOpenAICompatibleConfig = RECOMMENDED_LOCAL_PROVIDER_CONFIG;
 export { FAKE_PROVIDER_CONFIG };
 
 type ConfigSource = "file" | "default";
-
-type TelemetryLogger = (type: string, payload?: TelemetryPayload) => void;
 
 export type ProviderConfigStore = {
   getConfig(): ProviderConfig;
@@ -26,13 +28,14 @@ export type ProviderConfigStore = {
 
 export function createProviderConfigStore(options: {
   userDataPath?: string;
-  logTelemetry?: TelemetryLogger;
+  logTelemetry?: PersistentTelemetryLogger;
 } = {}): ProviderConfigStore {
   const userDataPath = options.userDataPath ?? app.getPath("userData");
   const configPath = join(userDataPath, "config", "provider-config.json");
 
-  function log(type: string, payload?: TelemetryPayload): void {
-    options.logTelemetry?.(type, payload);
+  function log(type: TelemetryEventType, payload: unknown = {}): void {
+    const event = toPersistentTelemetryEvent(type, payload);
+    if (event) options.logTelemetry?.(event);
   }
 
   function logLoaded(config: ProviderConfig, source: ConfigSource): void {
@@ -61,11 +64,7 @@ export function createProviderConfigStore(options: {
         if (config !== parsedConfig) {
           log("provider_config_migrated", {
             source: "file",
-            reason: "external_model_disabled",
-            fromProviderId: parsedConfig.providerId,
-            toProviderId: config.providerId,
-            baseURLHost: parsedConfig.providerId === "fake" ? undefined : readBaseURLHost(parsedConfig.baseURL),
-            modelCategory: parsedConfig.providerId === "fake" ? undefined : "external_model_disabled"
+            configured: true
           });
           logLoaded(config, "default");
           return config;
@@ -101,11 +100,7 @@ export function createProviderConfigStore(options: {
       if (configToSave !== parsed) {
         log("provider_config_migrated", {
           source: "file",
-          reason: "external_model_disabled",
-          fromProviderId: parsed.providerId,
-          toProviderId: configToSave.providerId,
-          baseURLHost: parsed.providerId === "fake" ? undefined : readBaseURLHost(parsed.baseURL),
-          modelCategory: parsed.providerId === "fake" ? undefined : "external_model_disabled"
+          configured: true
         });
       }
 
@@ -201,13 +196,10 @@ function migrateLegacyProviderConfig(config: ProviderConfig): ProviderConfig {
 export function createProviderTelemetryPayload(
   config: ProviderConfig,
   source: "file" | "env" | "default"
-): TelemetryPayload {
+): { source: "file" | "env" | "default"; configured: true } {
   return {
-    providerId: config.providerId,
-    apiKeyRef: config.providerId === "openai-compatible" ? config.apiKeyRef : undefined,
-    localPresetId: config.providerId === "local-openai-compatible" ? config.localPresetId : undefined,
-    baseURLHost: config.providerId === "fake" ? undefined : readBaseURLHost(config.baseURL),
-    source
+    source,
+    configured: true
   };
 }
 
@@ -230,12 +222,4 @@ function parseLocalProviderPresetId(value: unknown): LocalProviderPresetId | nul
     value === "custom-local"
     ? value
     : null;
-}
-
-function readBaseURLHost(baseURL: string): string | undefined {
-  try {
-    return new URL(baseURL).host;
-  } catch {
-    return undefined;
-  }
 }

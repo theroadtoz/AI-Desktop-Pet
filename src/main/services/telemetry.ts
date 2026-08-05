@@ -1,15 +1,48 @@
-import { app } from "electron";
-import { existsSync, mkdirSync, readdirSync, renameSync, statSync, unlinkSync, appendFileSync } from "node:fs";
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  renameSync,
+  statSync,
+  truncateSync,
+  unlinkSync
+} from "node:fs";
 import { join } from "node:path";
+import {
+  encodePersistentTelemetryEvent,
+  type PersistentTelemetryEvent
+} from "../../shared/telemetry-contract.ts";
 
 const MAX_LOG_BYTES = 10 * 1024 * 1024;
 const MAX_LOG_FILES = 5;
 
-export type TelemetryPayload = Record<string, unknown>;
-
 export type TelemetryService = {
-  logEvent(type: string, payload?: TelemetryPayload): void;
+  logEvent(event: PersistentTelemetryEvent): void;
   getLogDirectory(): string;
+};
+
+type TelemetryFileSystem = {
+  appendFileSync: typeof appendFileSync;
+  existsSync: typeof existsSync;
+  mkdirSync: typeof mkdirSync;
+  readdirSync: typeof readdirSync;
+  renameSync: typeof renameSync;
+  statSync: typeof statSync;
+  truncateSync: typeof truncateSync;
+  unlinkSync: typeof unlinkSync;
+};
+
+type TelemetryServiceOptions = {
+  userDataPath?: string;
+  now?: () => Date;
+  fileSystem?: TelemetryFileSystem;
+  encodeEvent?: typeof encodePersistentTelemetryEvent;
+  warn?: (category: "write_failed") => void;
+};
+
+const defaultFileSystem: TelemetryFileSystem = {
+  appendFileSync, existsSync, mkdirSync, readdirSync, renameSync, statSync, truncateSync, unlinkSync
 };
 
 function createLogName(now: Date): string {
@@ -17,77 +50,106 @@ function createLogName(now: Date): string {
   return `telemetry-${stamp}.jsonl`;
 }
 
-function listLogFiles(logDirectory: string): string[] {
-  if (!existsSync(logDirectory)) {
+function listLogFiles(logDirectory: string, fileSystem: TelemetryFileSystem): string[] {
+  if (!fileSystem.existsSync(logDirectory)) {
     return [];
   }
 
-  return readdirSync(logDirectory)
+  return fileSystem.readdirSync(logDirectory)
     .filter((name) => name.startsWith("telemetry-") && name.endsWith(".jsonl"))
     .map((name) => join(logDirectory, name))
-    .sort((left, right) => statSync(right).mtimeMs - statSync(left).mtimeMs);
+    .sort((left, right) => fileSystem.statSync(right).mtimeMs - fileSystem.statSync(left).mtimeMs);
 }
 
-function pruneLogs(logDirectory: string): void {
-  const staleLogs = listLogFiles(logDirectory).slice(MAX_LOG_FILES);
+function pruneLogs(logDirectory: string, fileSystem: TelemetryFileSystem): void {
+  const staleLogs = listLogFiles(logDirectory, fileSystem).slice(MAX_LOG_FILES);
 
   for (const file of staleLogs) {
-    unlinkSync(file);
+    fileSystem.unlinkSync(file);
   }
 }
 
-export function createTelemetryService(): TelemetryService {
-  const logDirectory = join(app.getPath("userData"), "logs");
-  let currentLogPath = join(logDirectory, createLogName(new Date()));
+export function createTelemetryService(options: TelemetryServiceOptions = {}): TelemetryService {
+  const fileSystem = options.fileSystem ?? defaultFileSystem;
+  const now = options.now ?? (() => new Date());
+  const encodeEvent = options.encodeEvent ?? encodePersistentTelemetryEvent;
+  const warn = options.warn ?? (() => console.warn("[telemetry] write_failed"));
+  const logDirectory = join(options.userDataPath ?? getDefaultUserDataPath(), "logs");
+  let currentLogPath = join(logDirectory, createLogName(now()));
+  let prunePending = false;
 
-  function ensureLogFile(): void {
-    if (!existsSync(logDirectory)) {
-      mkdirSync(logDirectory, { recursive: true });
+  function prunePendingLogs(): void {
+    if (!prunePending) return;
+    pruneLogs(logDirectory, fileSystem);
+    prunePending = false;
+  }
+
+  function ensureLogFile(nextLineBytes: number): void {
+    if (!fileSystem.existsSync(logDirectory)) {
+      fileSystem.mkdirSync(logDirectory, { recursive: true });
     }
 
-    if (!existsSync(currentLogPath)) {
-      appendFileSync(currentLogPath, "");
-      pruneLogs(logDirectory);
+    prunePendingLogs();
+
+    if (!fileSystem.existsSync(currentLogPath)) {
+      fileSystem.appendFileSync(currentLogPath, "");
+      prunePending = true;
+      prunePendingLogs();
       return;
     }
 
-    if (statSync(currentLogPath).size < MAX_LOG_BYTES) {
+    if (fileSystem.statSync(currentLogPath).size + nextLineBytes <= MAX_LOG_BYTES) {
       return;
     }
 
-    currentLogPath = join(logDirectory, createLogName(new Date()));
+    const nextLogPath = join(logDirectory, createLogName(now()));
 
-    if (!existsSync(currentLogPath)) {
-      appendFileSync(currentLogPath, "");
-      pruneLogs(logDirectory);
+    if (!fileSystem.existsSync(nextLogPath)) {
+      fileSystem.appendFileSync(nextLogPath, "");
+      currentLogPath = nextLogPath;
+      prunePending = true;
+      prunePendingLogs();
       return;
     }
 
-    const rotatedPath = currentLogPath.replace(/\.jsonl$/, `-${Date.now()}.jsonl`);
-    renameSync(currentLogPath, rotatedPath);
-    appendFileSync(currentLogPath, "");
-    pruneLogs(logDirectory);
+    const rotatedPath = nextLogPath.replace(/\.jsonl$/, `-${now().getTime()}.jsonl`);
+    fileSystem.renameSync(nextLogPath, rotatedPath);
+    fileSystem.appendFileSync(nextLogPath, "");
+    currentLogPath = nextLogPath;
+    prunePending = true;
+    prunePendingLogs();
   }
 
   return {
-    logEvent(type: string, payload: TelemetryPayload = {}) {
+    logEvent(event: PersistentTelemetryEvent) {
       try {
-        ensureLogFile();
-        const line = JSON.stringify({
-          timestamp: new Date().toISOString(),
-          type,
-          payload
-        });
-        appendFileSync(currentLogPath, `${line}\n`);
-      } catch (error: unknown) {
-        console.warn("[telemetry] failed to write event", {
-          type,
-          message: error instanceof Error ? error.message : String(error)
-        });
+        const line = encodeEvent(event, now().toISOString());
+        if (!line) return;
+        const completeLine = `${line}\n`;
+        ensureLogFile(Buffer.byteLength(completeLine));
+        const appendStartSize = fileSystem.statSync(currentLogPath).size;
+        try {
+          fileSystem.appendFileSync(currentLogPath, completeLine);
+        } catch {
+          if (fileSystem.existsSync(currentLogPath) && fileSystem.statSync(currentLogPath).size !== appendStartSize) {
+            fileSystem.truncateSync(currentLogPath, appendStartSize);
+          }
+          throw new Error("append_failed");
+        }
+      } catch {
+        warn("write_failed");
       }
     },
     getLogDirectory() {
       return logDirectory;
     }
   };
+}
+
+function getDefaultUserDataPath(): string {
+  const electron = require("electron") as { app?: { getPath(name: "userData"): string } };
+  if (!electron.app) {
+    throw new Error("telemetry requires an Electron userData path");
+  }
+  return electron.app.getPath("userData");
 }

@@ -3,11 +3,13 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   assertNoScreenshotResidue,
+  assertRealUiRunParentRemoved,
   cleanupRealUiRun,
   click,
   connectToElectron,
   createRealUiRunContext,
   evaluate,
+  readAcceptanceEvidenceForContext,
   sleep,
   startElectron,
   stopElectron,
@@ -85,6 +87,7 @@ async function main() {
   } finally {
     try {
       await cleanup(context);
+      assertRealUiRunParentRemoved(context);
     } catch {
       summary = { ...summary, ok: false, failure: "visual_evidence_cleanup_failed" };
     }
@@ -357,20 +360,9 @@ async function waitForTelemetry(context, startIndex, predicate, timeoutMs) {
 }
 
 function readTelemetry(context) {
-  const logDir = join(context.appDataDir, "logs");
-  if (!existsSync(logDir)) return [];
-  return readdirSync(logDir)
-    .filter((name) => name.startsWith("telemetry-") && name.endsWith(".jsonl"))
-    .map((name) => join(logDir, name))
-    .sort((left, right) => statSync(left).mtimeMs - statSync(right).mtimeMs)
-    .flatMap((path) => readFileSync(path, "utf8").split(/\r?\n/u)
-      .flatMap((line) => {
-        try {
-          return line ? [JSON.parse(line)] : [];
-        } catch {
-          return [];
-        }
-      }));
+  const result = readAcceptanceEvidenceForContext(context, "p2-88b");
+  if (!result.ok) throw new Error("acceptance_evidence_invalid");
+  return result.events;
 }
 
 function activeActionIds(events) {
@@ -403,7 +395,7 @@ async function waitForStartupAppearanceFinished(context, timeoutMs) {
     0,
     (event) =>
       event.type === "pet_interaction_action_finished" &&
-      event.payload?.type === "appearance",
+      event.payload?.actionType === "appearance",
     timeoutMs
   );
 }

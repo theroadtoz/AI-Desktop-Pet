@@ -20,6 +20,18 @@ const {
 const {
   readEnvProviderConfig
 } = require("../dist/main/services/config/env-config.js") as typeof import("../src/main/services/config/env-config");
+const {
+  encodePersistentTelemetryEvent
+} = require("../dist/shared/telemetry-contract.js") as typeof import("../src/shared/telemetry-contract");
+
+function decodeTelemetryEvent(event: import("../src/shared/telemetry-contract").PersistentTelemetryEvent): {
+  type: string;
+  payload: Record<string, unknown>;
+} {
+  const encoded = encodePersistentTelemetryEvent(event, "2026-08-04T00:00:00.000Z");
+  assert.ok(encoded);
+  return JSON.parse(encoded) as { type: string; payload: Record<string, unknown> };
+}
 
 const emptyEnvCwd = join(process.cwd(), ".tmp-does-not-exist-for-provider-config-tests");
 const minimalChatRequest = {
@@ -104,7 +116,7 @@ test("env provider ignores external OpenAI-compatible chat configuration", () =>
   assert.equal(external, null);
 });
 
-test("local provider telemetry records preset and host without key material", () => {
+test("local provider telemetry retains only source and configured state", () => {
   const payload = createProviderTelemetryPayload({
     providerId: "local-openai-compatible",
     displayName: "LM Studio",
@@ -116,11 +128,7 @@ test("local provider telemetry records preset and host without key material", ()
     timeoutMs: 60000
   }, "file");
 
-  assert.equal(payload.providerId, "local-openai-compatible");
-  assert.equal(payload.localPresetId, "lm-studio");
-  assert.equal(payload.baseURLHost, "localhost:1234");
-  assert.equal("apiKey" in payload, false);
-  assert.equal(payload.apiKeyRef, undefined);
+  assert.deepEqual(payload, { source: "file", configured: true });
 });
 
 test("local OpenAI-compatible provider parser accepts embedded preset id", () => {
@@ -179,8 +187,8 @@ test("provider config store migrates legacy external provider file to local reco
 
     const store = createProviderConfigStore({
       userDataPath,
-      logTelemetry(type, payload) {
-        events.push({ type, payload });
+      logTelemetry(event) {
+        events.push(decodeTelemetryEvent(event));
       }
     });
 
@@ -188,8 +196,8 @@ test("provider config store migrates legacy external provider file to local reco
     assert.equal(store.hasConfig(), true);
     assert.ok(events.some((event) => (
       event.type === "provider_config_migrated" &&
-      event.payload?.reason === "external_model_disabled" &&
-      event.payload?.toProviderId === "local-openai-compatible"
+      event.payload?.configured === true &&
+      Object.keys(event.payload ?? {}).every((key) => key === "source" || key === "configured")
     )));
   } finally {
     rmSync(userDataPath, { recursive: true, force: true });
@@ -215,16 +223,16 @@ test("provider config store migrates custom external OpenAI-compatible providers
 
     const store = createProviderConfigStore({
       userDataPath,
-      logTelemetry(type, payload) {
-        events.push({ type, payload });
+      logTelemetry(event) {
+        events.push(decodeTelemetryEvent(event));
       }
     });
 
     assert.deepEqual(store.getConfig(), DEFAULT_PROVIDER_CONFIG);
     assert.ok(events.some((event) => (
       event.type === "provider_config_migrated" &&
-      event.payload?.reason === "external_model_disabled" &&
-      event.payload?.toProviderId === "local-openai-compatible"
+      event.payload?.configured === true &&
+      Object.keys(event.payload ?? {}).every((key) => key === "source" || key === "configured")
     )));
   } finally {
     rmSync(userDataPath, { recursive: true, force: true });

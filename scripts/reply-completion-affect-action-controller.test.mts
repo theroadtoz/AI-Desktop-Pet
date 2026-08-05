@@ -2,6 +2,371 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createReplyCompletionAffectActionController } from "../src/main/services/affect/reply-completion-affect-action-controller.ts";
 import { createReplyCompletionAffectRetryScheduler } from "../src/main/services/affect/reply-completion-affect-retry-scheduler.ts";
+import { createPetPresentationIntent, INITIAL_PET_ROLE_SNAPSHOT } from "../src/shared/pet-role-state.ts";
+
+const genericTerminalIntent = createPetPresentationIntent(INITIAL_PET_ROLE_SNAPSHOT);
+const allowedLiveSnapshot = {
+  latestCompletedRequestVersion: 12,
+  activeRequestVersion: null,
+  hasActiveStream: false,
+  arbitration: { decision: "allow" as const, reason: "allowed" }
+};
+
+function createGenericFakeClock() {
+  let nowMs = 0;
+  let nextId = 0;
+  let currentId: number | null = null;
+  let clearCount = 0;
+  const purposes: string[] = [];
+  const entries: Array<{ id: number; at: number; callback: () => void; fired: boolean }> = [];
+  return {
+    scheduler: {
+      schedule(purpose: "generic_initial_settle" | "affect_cooldown_retry", callback: () => void) {
+        purposes.push(purpose);
+        const entry = { id: ++nextId, at: nowMs + 701, callback, fired: false };
+        entries.push(entry);
+        currentId = entry.id;
+        return true;
+      },
+      cancel() {
+        clearCount += 1;
+        currentId = null;
+      }
+    },
+    advanceBy(deltaMs: number) {
+      nowMs += deltaMs;
+      for (const entry of entries) {
+        if (!entry.fired && entry.id === currentId && entry.at <= nowMs) {
+          entry.fired = true;
+          currentId = null;
+          entry.callback();
+        }
+      }
+    },
+    fireLate(index: number) {
+      entries[index]?.callback();
+    },
+    get purposes() {
+      return purposes;
+    },
+    get clearCount() {
+      return clearCount;
+    },
+    get activeCount() {
+      return currentId === null ? 0 : 1;
+    }
+  };
+}
+
+function registerGenericPending(
+  controller: ReturnType<typeof createReplyCompletionAffectActionController>,
+  blockerReason: "chat_reply_waiting" | "state_local_model_busy" = "chat_reply_waiting"
+) {
+  return controller.registerGenericCompletion({
+    shouldRequestReplyWarmSettle: true,
+    replyAction: "generic",
+    requestVersion: 12,
+    arbitration: { decision: "suppress", reason: "presentation_busy" },
+    activeMainRequest: { requestId: "waiting-generic-1", reason: blockerReason },
+    terminalIntent: genericTerminalIntent
+  }, {
+    dispatch: () => ({ accepted: false, reason: "failed" }),
+    publish() {}
+  });
+}
+
+test("P2-91C1 production generic policy admits only warm generic presentation-busy with a frozen blocker", () => {
+  for (const blockerReason of ["chat_reply_waiting", "state_local_model_busy"] as const) {
+    const controller = createReplyCompletionAffectActionController();
+    assert.equal(registerGenericPending(controller, blockerReason).status, "pending");
+  }
+
+  for (const invalid of [
+    { shouldRequestReplyWarmSettle: false },
+    { replyAction: "affect" as const },
+    { replyAction: "suppressed" as const },
+    { arbitration: { decision: "suppress" as const, reason: "focus_suppressed" } },
+    { arbitration: { decision: "defer" as const, reason: "presentation_busy" } },
+    { activeMainRequest: null },
+    { activeMainRequest: { requestId: "waiting-generic-1", reason: "state_idle" } }
+  ]) {
+    const controller = createReplyCompletionAffectActionController();
+    let dispatchCount = 0;
+    controller.registerGenericCompletion({
+      shouldRequestReplyWarmSettle: true,
+      replyAction: "generic",
+      requestVersion: 12,
+      arbitration: { decision: "suppress", reason: "presentation_busy" },
+      activeMainRequest: { requestId: "waiting-generic-1", reason: "chat_reply_waiting" },
+      terminalIntent: genericTerminalIntent,
+      ...invalid
+    }, {
+      dispatch: () => {
+        dispatchCount += 1;
+        return { accepted: true, requestId: "must-not-dispatch" };
+      },
+      publish() {}
+    });
+    const late = controller.handleGenericLifecycle({
+      lifecycleResult: "main_terminal",
+      requestId: "waiting-generic-1",
+      reason: "chat_reply_waiting"
+    }, {
+      readSnapshot: () => allowedLiveSnapshot,
+      dispatch: () => {
+        dispatchCount += 1;
+        return { accepted: true, requestId: "late" };
+      }
+    });
+    assert.equal(late.status, "ignored", JSON.stringify(invalid));
+    assert.equal(dispatchCount, 0, JSON.stringify(invalid));
+  }
+});
+
+test("P2-91C1 production generic policy consumes only its exact main owner terminal once", () => {
+  const clock = createGenericFakeClock();
+  const controller = createReplyCompletionAffectActionController({ scheduler: clock.scheduler });
+  registerGenericPending(controller);
+  let dispatchCount = 0;
+  const adapters = {
+    readSnapshot: () => allowedLiveSnapshot,
+    dispatch: () => {
+      dispatchCount += 1;
+      return { accepted: true as const, requestId: "generic-dispatch-1" };
+    }
+  };
+  for (const lifecycle of [
+    { lifecycleResult: "local_terminal" as const, requestId: "waiting-generic-1", reason: "chat_reply_waiting" },
+    { lifecycleResult: "main_started" as const, requestId: "waiting-generic-1", reason: "chat_reply_waiting" },
+    { lifecycleResult: "main_terminal" as const, requestId: "other", reason: "chat_reply_waiting" },
+    { lifecycleResult: "main_terminal" as const, requestId: "waiting-generic-1", reason: "state_local_model_busy" }
+  ]) {
+    assert.equal(controller.handleGenericLifecycle(lifecycle, adapters).status, "ignored");
+  }
+  assert.equal(controller.handleGenericLifecycle({
+    lifecycleResult: "main_terminal",
+    requestId: "waiting-generic-1",
+    reason: "chat_reply_waiting"
+  }, adapters).status, "scheduled");
+  assert.equal(controller.handleGenericLifecycle({
+    lifecycleResult: "main_terminal",
+    requestId: "waiting-generic-1",
+    reason: "chat_reply_waiting"
+  }, adapters).status, "ignored");
+  assert.equal(dispatchCount, 0);
+  clock.advanceBy(701);
+  assert.equal(dispatchCount, 1);
+});
+
+test("P2-91C1 production generic cancellation clears every lifecycle exit", () => {
+  for (const cancellation of ["new", "abort", "hide", "close", "rebuild", "destroy", "reset", "disable", "quiesce"]) {
+    const controller = createReplyCompletionAffectActionController();
+    registerGenericPending(controller, "state_local_model_busy");
+    controller.cancel();
+    assert.equal(controller.handleGenericLifecycle({
+      lifecycleResult: "main_terminal",
+      requestId: "waiting-generic-1",
+      reason: "state_local_model_busy"
+    }, {
+      readSnapshot: () => allowedLiveSnapshot,
+      dispatch: () => ({ accepted: true, requestId: "late" })
+    }).status, "ignored", cancellation);
+  }
+});
+
+test("P2-91C1 direct and owner-deferred generic initial settle dispatch at 701ms exactly once", () => {
+  for (const mode of ["direct", "deferred"] as const) {
+    const clock = createGenericFakeClock();
+    const controller = createReplyCompletionAffectActionController({ scheduler: clock.scheduler });
+    let dispatchCount = 0;
+    const adapters = {
+      readSnapshot: () => allowedLiveSnapshot,
+      dispatch: () => {
+        dispatchCount += 1;
+        return { accepted: true as const, requestId: `${mode}-generic` };
+      },
+      publish() {}
+    };
+    const registration = controller.registerGenericCompletion({
+      shouldRequestReplyWarmSettle: true,
+      replyAction: "generic",
+      requestVersion: 12,
+      arbitration: mode === "direct"
+        ? { decision: "allow", reason: "allowed" }
+        : { decision: "suppress", reason: "presentation_busy" },
+      activeMainRequest: mode === "direct"
+        ? null
+        : { requestId: "waiting-generic-1", reason: "chat_reply_waiting" },
+      terminalIntent: genericTerminalIntent
+    }, adapters);
+    assert.equal(registration.status, "pending", mode);
+    assert.equal(dispatchCount, 0, mode);
+    if (mode === "deferred") {
+      clock.advanceBy(5_000);
+      assert.equal(dispatchCount, 0);
+      assert.equal(controller.handleGenericLifecycle({
+        lifecycleResult: "main_terminal",
+        requestId: "waiting-generic-1",
+        reason: "chat_reply_waiting"
+      }, adapters).status, "scheduled");
+    }
+    clock.advanceBy(700);
+    assert.equal(dispatchCount, 0, `${mode} @700ms`);
+    clock.advanceBy(1);
+    assert.equal(dispatchCount, 1, `${mode} @701ms`);
+    clock.advanceBy(10_000);
+    assert.equal(dispatchCount, 1, `${mode} one-shot`);
+    assert.deepEqual(clock.purposes, ["generic_initial_settle"]);
+  }
+});
+
+test("P2-91C1 generic initial settle reads live state at fire and never requeues failures", () => {
+  for (const snapshot of [
+    { ...allowedLiveSnapshot, latestCompletedRequestVersion: 11 },
+    { ...allowedLiveSnapshot, activeRequestVersion: 13 },
+    { ...allowedLiveSnapshot, hasActiveStream: true },
+    { ...allowedLiveSnapshot, arbitration: { decision: "suppress" as const, reason: "chat_hidden" } },
+    { ...allowedLiveSnapshot, arbitration: { decision: "suppress" as const, reason: "renderer_recovering" } },
+    { ...allowedLiveSnapshot, arbitration: { decision: "defer" as const, reason: "presentation_busy" } }
+  ]) {
+    const clock = createGenericFakeClock();
+    const controller = createReplyCompletionAffectActionController({ scheduler: clock.scheduler });
+    let dispatchCount = 0;
+    controller.registerGenericCompletion({
+      shouldRequestReplyWarmSettle: true,
+      replyAction: "generic",
+      requestVersion: 12,
+      arbitration: { decision: "allow", reason: "allowed" },
+      activeMainRequest: null,
+      terminalIntent: genericTerminalIntent
+    }, {
+      readSnapshot: () => snapshot,
+      dispatch: () => {
+        dispatchCount += 1;
+        return { accepted: true, requestId: "must-not-dispatch" };
+      },
+      publish() {}
+    });
+    clock.advanceBy(701);
+    clock.advanceBy(20_000);
+    assert.equal(dispatchCount, 0, JSON.stringify(snapshot));
+    assert.equal(clock.activeCount, 0);
+  }
+
+  for (const outcome of ["busy", "throttled", "send_failed", "rejected", "cooldown", "skipped", "failed", "threw"] as const) {
+    const clock = createGenericFakeClock();
+    const controller = createReplyCompletionAffectActionController({ scheduler: clock.scheduler });
+    let dispatchCount = 0;
+    controller.registerGenericCompletion({
+      shouldRequestReplyWarmSettle: true,
+      replyAction: "generic",
+      requestVersion: 12,
+      arbitration: { decision: "allow", reason: "allowed" },
+      activeMainRequest: null,
+      terminalIntent: genericTerminalIntent
+    }, {
+      readSnapshot: () => allowedLiveSnapshot,
+      dispatch: () => {
+        dispatchCount += 1;
+        if (outcome === "threw") throw new Error("sentinel");
+        return { accepted: false as const, reason: outcome };
+      },
+      publish() {}
+    });
+    clock.advanceBy(701);
+    clock.advanceBy(20_000);
+    assert.equal(dispatchCount, 1, outcome);
+    assert.deepEqual(clock.purposes, ["generic_initial_settle"], outcome);
+  }
+});
+
+test("P2-91C1 shared scheduler purposes replace bidirectionally and cancel stale callbacks", () => {
+  const directAdapters = (dispatch: () => { accepted: true; requestId: string }) => ({
+    readSnapshot: () => allowedLiveSnapshot,
+    dispatch,
+    publish() {}
+  });
+
+  {
+    const clock = createGenericFakeClock();
+    const controller = createReplyCompletionAffectActionController({ scheduler: clock.scheduler });
+    let genericDispatch = 0;
+    let affectDispatch = 0;
+    controller.registerGenericCompletion({
+      shouldRequestReplyWarmSettle: true,
+      replyAction: "generic",
+      requestVersion: 12,
+      arbitration: { decision: "allow", reason: "allowed" },
+      activeMainRequest: null,
+      terminalIntent: genericTerminalIntent
+    }, directAdapters(() => ({ accepted: true, requestId: `generic-${++genericDispatch}` })));
+    assert.equal(controller.scheduleAffectCooldownRetry(() => { affectDispatch += 1; }), true);
+    assert.equal(clock.activeCount, 1);
+    clock.fireLate(0);
+    assert.equal(genericDispatch, 0);
+    clock.advanceBy(701);
+    assert.equal(affectDispatch, 1);
+    assert.deepEqual(clock.purposes, ["generic_initial_settle", "affect_cooldown_retry"]);
+  }
+
+  {
+    const clock = createGenericFakeClock();
+    const controller = createReplyCompletionAffectActionController({ scheduler: clock.scheduler });
+    let genericDispatch = 0;
+    let affectDispatch = 0;
+    assert.equal(controller.scheduleAffectCooldownRetry(() => { affectDispatch += 1; }), true);
+    controller.registerGenericCompletion({
+      shouldRequestReplyWarmSettle: true,
+      replyAction: "generic",
+      requestVersion: 12,
+      arbitration: { decision: "allow", reason: "allowed" },
+      activeMainRequest: null,
+      terminalIntent: genericTerminalIntent
+    }, directAdapters(() => ({ accepted: true, requestId: `generic-${++genericDispatch}` })));
+    clock.fireLate(0);
+    assert.equal(affectDispatch, 0);
+    clock.advanceBy(701);
+    assert.equal(genericDispatch, 1);
+    assert.deepEqual(clock.purposes, ["affect_cooldown_retry", "generic_initial_settle"]);
+  }
+});
+
+test("P2-91C1 generic blocker and initial-settle cancellation are late-callback safe", () => {
+  for (const cancellation of ["new", "abort", "hide", "close", "rebuild", "destroy", "reset", "disable", "quiesce"]) {
+    for (const stage of ["blocker", "settle"] as const) {
+      const clock = createGenericFakeClock();
+      const controller = createReplyCompletionAffectActionController({ scheduler: clock.scheduler });
+      let dispatchCount = 0;
+      const adapters = {
+        readSnapshot: () => allowedLiveSnapshot,
+        dispatch: () => ({ accepted: true as const, requestId: `late-${++dispatchCount}` }),
+        publish() {}
+      };
+      controller.registerGenericCompletion({
+        shouldRequestReplyWarmSettle: true,
+        replyAction: "generic",
+        requestVersion: 12,
+        arbitration: stage === "blocker"
+          ? { decision: "suppress", reason: "presentation_busy" }
+          : { decision: "allow", reason: "allowed" },
+        activeMainRequest: stage === "blocker"
+          ? { requestId: "waiting-generic-1", reason: "state_local_model_busy" }
+          : null,
+        terminalIntent: genericTerminalIntent
+      }, adapters);
+      controller.cancel();
+      controller.cancel();
+      controller.handleGenericLifecycle({
+        lifecycleResult: "main_terminal",
+        requestId: "waiting-generic-1",
+        reason: "state_local_model_busy"
+      }, adapters);
+      clock.fireLate(0);
+      clock.advanceBy(20_000);
+      assert.equal(dispatchCount, 0, `${cancellation}:${stage}`);
+    }
+  }
+});
 
 test("P2-88B releases one medium-happy idle request only after its waiting action reaches a main terminal", () => {
   const controller = createReplyCompletionAffectActionController();

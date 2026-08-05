@@ -27,6 +27,19 @@ const LOCAL_LIVE2D_TESTS = [
   "scripts/live2d-motion-asset-audit.test.mts",
   "scripts/p2-52-motion-resource-dry-run-intake.test.mts"
 ];
+const P284_PROTECTED_TEST = "scripts/p2-84-main-integration.test.mts";
+const P284_PROTECTED_SHA256 = "494b9dd2f1198ca9f6e7fe4984e3abdcf96a36b49e15e18caf3ca594695ff2b0";
+const P284_BASE_TESTS = [
+  "scripts/companion-affect.test.mts",
+  "scripts/bundled-local-user-affect-classifier.test.mts",
+  "scripts/affect-dialogue-presentation-resolver.test.mts",
+  "scripts/dialogue-affect-settings.test.mts"
+] as const;
+const P284_STALE_TEST_NAMES = [
+  "P2-84 affect actions stay behind chat-open priority and P2-83C",
+  "P2-84 telemetry helper exposes only coarse safe affect fields"
+] as const;
+const P284_CURRENT_NAME_PATTERN = "^(?:P2-86C|P2-84 (?:main|inference|settings|production|bundled prompts|user affect|bundled explicit)|OpenAI-compatible)";
 
 function testFiles(scriptName: string): string[] {
   const script = packageJson.scripts[scriptName];
@@ -74,10 +87,88 @@ test("verification scripts keep local assets outside core and register security 
   ]) {
     assert.equal(p291bTests.has(path), true, `${path} must run through P2-91B verify`);
   }
+  const p291cTests = new Set(testFiles("test:p2-91c-telemetry"));
+  for (const path of [
+    "scripts/p2-91c-telemetry-privacy.test.mts",
+    "scripts/p2-91c-acceptance-evidence.test.mts",
+    "scripts/p2-91c-telemetry-pressure.test.mts",
+    "scripts/pet-telemetry-contract.test.mts",
+    "scripts/pet-interaction-actions.test.mts",
+    "scripts/reply-completion-affect-action-controller.test.mts",
+    "scripts/p2-91c-generic-defer-integration.test.mts",
+    "scripts/provider-config.test.mts",
+    "scripts/user-profile-store.test.mts",
+    "scripts/provider-health.test.mts",
+    "scripts/openai-compatible-provider.test.mts"
+  ]) {
+    assert.equal(p291cTests.has(path), true, `${path} must run through P2-91C telemetry verify`);
+  }
+  assert.match(
+    packageJson.scripts["test:p2-91c-telemetry"],
+    /scripts\/support\/real-ui-target-discovery-retry\.test\.mts/u,
+    "real UI target discovery retry coverage must run through P2-91C telemetry verify"
+  );
+  assert.match(packageJson.scripts["accept:p2-91c-telemetry"], /p2-91c-telemetry-real-ui\.mjs/u);
+  const acceptanceEvidenceSource = readFileSync(
+    join(repoRoot, "src/main/services/acceptance-evidence.ts"),
+    "utf8"
+  );
+  assert.doesNotMatch(acceptanceEvidenceSource, /services\/telemetry|telemetry-contract|from ["']electron["']/u);
+  for (const path of ["src/preload", "src/renderer"]) {
+    const result = spawnSync("rg", ["-n", "acceptance-evidence", path], { cwd: repoRoot, encoding: "utf8" });
+    assert.notEqual(result.status, 0, `${path} must not import acceptance evidence`);
+  }
   assert.match(packageJson.scripts["verify:local-assets"], /verify-local-assets\.mjs/u);
   assert.match(packageJson.scripts["verify:local-llm-assets"], /verify-local-llm-assets\.mjs/u);
   assert.match(packageJson.scripts["verify:packaged-assets"], /verify-packaged-assets\.mjs/u);
   assert.doesNotMatch(packageJson.scripts.verify, /local-llm|packaged-assets/u);
+});
+
+test("current verification keeps the protected P2-84 coverage while replacing only the migrated authorities", () => {
+  const protectedSource = readFileSync(join(repoRoot, P284_PROTECTED_TEST), "utf8");
+  const protectedHash = createHash("sha256").update(protectedSource).digest("hex");
+  assert.equal(protectedHash, P284_PROTECTED_SHA256, "protected P2-84 source hash must not drift");
+
+  const declaredNames = [...protectedSource.matchAll(/\btest\(\s*["']([^"']+)["']/gu)].map(([, name]) => name);
+  assert.equal(declaredNames.length, 20, "protected P2-84 source must retain its full 20-test contract");
+  assert.deepEqual(
+    declaredNames.filter((name) => P284_STALE_TEST_NAMES.includes(name as (typeof P284_STALE_TEST_NAMES)[number])),
+    [...P284_STALE_TEST_NAMES],
+    "only the two named migrated authorities may be excluded"
+  );
+
+  const legacy = packageJson.scripts["test:p2-84-legacy"];
+  assert.equal(typeof legacy, "string", "historical P2-84 command must remain available");
+  assert.deepEqual(testFiles("test:p2-84-legacy"), [...P284_BASE_TESTS, P284_PROTECTED_TEST]);
+  assert.doesNotMatch(legacy, /test-name-pattern/u, "historical P2-84 command must run the complete source");
+
+  const current = packageJson.scripts["test:p2-84-current"];
+  assert.equal(typeof current, "string", "current P2-84 command must exist");
+  assert.deepEqual(testFiles("test:p2-84-current"), [P284_PROTECTED_TEST]);
+  assert.equal(
+    current,
+    `node --test --experimental-strip-types --test-name-pattern="${P284_CURRENT_NAME_PATTERN}" ${P284_PROTECTED_TEST}`,
+    "current P2-84 command must use the frozen positive capability pattern"
+  );
+  const currentNamePattern = new RegExp(P284_CURRENT_NAME_PATTERN, "u");
+  const currentNames = declaredNames.filter((name) => currentNamePattern.test(name));
+  assert.equal(currentNames.length, 18, "current P2-84 pattern must cover exactly 18 protected capabilities");
+  for (const name of P284_STALE_TEST_NAMES) {
+    assert.equal(currentNamePattern.test(name), false, `${name} must remain outside current P2-84 coverage`);
+  }
+
+  const affect = packageJson.scripts["test:affect"];
+  assert.deepEqual(testFiles("test:affect"), [...P284_BASE_TESTS]);
+  assert.match(
+    affect,
+    /^node --test --experimental-strip-types scripts\/companion-affect\.test\.mts scripts\/bundled-local-user-affect-classifier\.test\.mts scripts\/affect-dialogue-presentation-resolver\.test\.mts scripts\/dialogue-affect-settings\.test\.mts && npm run test:p2-84-current$/u,
+    "affect entrypoint must run the four base tests unfiltered before current P2-84 coverage"
+  );
+  assert.doesNotMatch(affect, /p2-84-main-integration\.test\.mts/u, "affect entrypoint must not also run unfiltered P2-84");
+
+  assert.match(packageJson.scripts["verify:core"], /npm run test:p2-91c-telemetry/u);
+  assert.doesNotMatch(packageJson.scripts["verify:core"], /test:p2-84-legacy/u);
+  assert.doesNotMatch(packageJson.scripts.verify, /test:p2-84-legacy/u);
 });
 
 test("Live2D adapter accepts only the canonical repository model directory", () => {

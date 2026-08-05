@@ -2,7 +2,11 @@ import type { ChatProvider, ChatProviderMessage, ChatProviderResult, ChatRequest
 import type { ProviderId } from "../../../shared/provider-config";
 import { DEFAULT_PERSONA_CARD, getPersonaDialogueAnchor } from "../../../shared/persona-card";
 import { BAIDU_SEARCH_VERIFICATION_REQUIRED_ERROR, type WebSearchErrorType } from "../../../shared/web-search";
-import type { TelemetryPayload } from "../telemetry";
+import {
+  toPersistentTelemetryEvent,
+  type PersistentTelemetryLogger,
+  type TelemetryEventType
+} from "../../../shared/telemetry-contract";
 import {
   mapChatMessagesToOpenAICompatible,
   getLatestUserMessage,
@@ -24,8 +28,6 @@ type ProviderErrorType =
   | "provider_network_error"
   | "provider_context_budget_exceeded";
 
-type TelemetryLogger = (type: string, payload?: TelemetryPayload) => void;
-
 export type OpenAICompatibleProviderOptions = {
   providerId?: Extract<ProviderId, "openai-compatible" | "local-openai-compatible">;
   baseURL: string;
@@ -34,7 +36,7 @@ export type OpenAICompatibleProviderOptions = {
   temperature: number;
   maxTokens: number;
   timeoutMs: number;
-  logTelemetry?: TelemetryLogger;
+  logTelemetry?: PersistentTelemetryLogger;
 };
 
 type ChatCompletionChunk = {
@@ -48,15 +50,13 @@ type ChatCompletionChunk = {
 export function createOpenAICompatibleProvider(
   options: OpenAICompatibleProviderOptions
 ): ChatProvider {
-  const baseURL = new URL(options.baseURL);
-  const baseURLHost = baseURL.host;
+  new URL(options.baseURL);
   const providerId = options.providerId ?? "openai-compatible";
   const promptTemplateProfile = getPromptTemplateProfile(providerId);
 
   return {
     id: providerId,
     async streamReply(request, streamOptions) {
-      const startedAt = Date.now();
       let replyText = "";
       const latestUserMessage = getLatestUserMessage(request.messages);
       const exactReply = providerId === "local-openai-compatible"
@@ -69,15 +69,7 @@ export function createOpenAICompatibleProvider(
           latestUserMessage,
           assistantReply: exactReply.text
         });
-        log(options, "provider_local_exact_reply_completed", {
-          providerId,
-          model: options.model,
-          baseURLHost,
-          promptTemplateProfile,
-          replyKind: exactReply.kind,
-          replyLength: exactReply.text.length,
-          durationMs: Date.now() - startedAt
-        });
+        log(options, "provider_local_exact_reply_completed");
 
         return {
           text: exactReply.text,
@@ -89,14 +81,7 @@ export function createOpenAICompatibleProvider(
       const shouldConstrainCompanionReply = providerId === "local-openai-compatible" &&
         isOrdinaryCompanionStatement(latestUserMessage);
 
-      log(options, "provider_request_started", {
-        providerId,
-        model: options.model,
-        baseURLHost,
-        promptTemplateProfile,
-        messageCount: request.messages.length,
-        providerMessageCount: providerMessages.length
-      });
+      log(options, "provider_request_started");
 
       try {
         replyText = await streamChatCompletions({
@@ -125,16 +110,7 @@ export function createOpenAICompatibleProvider(
           ...classification
         };
 
-        log(options, "provider_request_completed", {
-          providerId,
-          model: options.model,
-          baseURLHost,
-          promptTemplateProfile,
-          messageCount: request.messages.length,
-          providerMessageCount: providerMessages.length,
-          replyLength: replyText.length,
-          durationMs: Date.now() - startedAt
-        });
+        log(options, "provider_request_completed");
 
         return result;
       } catch (error: unknown) {
@@ -142,17 +118,7 @@ export function createOpenAICompatibleProvider(
           throw error;
         }
 
-        log(options, "provider_request_failed", {
-          providerId,
-          model: options.model,
-          baseURLHost,
-          promptTemplateProfile,
-          messageCount: request.messages.length,
-          providerMessageCount: providerMessages.length,
-          replyLength: replyText.length,
-          durationMs: Date.now() - startedAt,
-          errorType: getProviderErrorType(error)
-        });
+        log(options, "provider_request_failed");
 
         throw error;
       }
@@ -867,8 +833,10 @@ function createAbortError(): DOMException {
 
 function log(
   options: OpenAICompatibleProviderOptions,
-  type: string,
-  payload: TelemetryPayload
+  type: TelemetryEventType
 ): void {
-  options.logTelemetry?.(type, payload);
+  // The lifecycle type is the bounded operational result; provider identity,
+  // endpoint, model, message counts, and reply details are never telemetry.
+  const event = toPersistentTelemetryEvent(type, {});
+  if (event) options.logTelemetry?.(event);
 }
