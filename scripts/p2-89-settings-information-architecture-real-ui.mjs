@@ -12,6 +12,8 @@ import {
   waitForWindow
 } from "./support/real-ui-harness.mjs";
 
+const electronArgs = ["--force-device-scale-factor=1"];
+
 const context = createRealUiRunContext({
   runName: "p2-89-settings-information-architecture-real-ui",
   port: Number(process.env.P2_89_CDP_PORT || 9689),
@@ -23,6 +25,10 @@ const context = createRealUiRunContext({
 });
 
 const checks = {};
+const timing = { sendPromptTiming: null };
+let dpr = null;
+let referenceBaseline = false;
+let failureStage = "starting_electron";
 
 const historyDirectory = join(context.appDataDir, "history");
 mkdirSync(historyDirectory, { recursive: true });
@@ -75,6 +81,7 @@ writeFileSync(join(historyDirectory, "conversations.json"), `${JSON.stringify({
 }, null, 2)}\n`, "utf8");
 
 try {
+  context.electronArgs = electronArgs;
   startElectron(context);
   await connectToElectron(context);
   const pet = await waitForWindow(context, "renderer/pet/index.html");
@@ -107,6 +114,14 @@ try {
 
   const charm = await waitForWindow(context, "renderer/phone-charm/index.html");
   await waitFor(charm, "Boolean(document.querySelector('#charm-pendant'))");
+  const rendererDevicePixelRatio = {
+    pet: await evaluate(pet, "window.devicePixelRatio"),
+    chat: await evaluate(chat, "window.devicePixelRatio"),
+    charm: await evaluate(charm, "window.devicePixelRatio")
+  };
+  dpr = rendererDevicePixelRatio;
+  referenceBaseline = Object.values(rendererDevicePixelRatio).every((devicePixelRatio) => devicePixelRatio === 1);
+  checks.referenceBaseline = referenceBaseline;
   await new Promise((resolve) => setTimeout(resolve, 100));
   const observedPhoneCharm = await evaluate(charm, `
     (() => {
@@ -183,8 +198,8 @@ try {
     })()
   `);
 
-  await evaluate(chat, `
-    (() => {
+  const sendPromptTiming = await evaluate(chat, `
+    (async () => {
       const messages = document.querySelector("#messages");
       for (let index = 0; index < 6; index += 1) {
         const item = document.createElement("p");
@@ -195,9 +210,59 @@ try {
       const input = document.querySelector("#chat-input");
       input.value = "Figma 动画验收";
       input.dispatchEvent(new Event("input", { bubbles: true }));
-      document.querySelector("#chat-form").requestSubmit();
+      const form = document.querySelector("#chat-form");
+      const sampleTargets = [0, 50, 100.874, 140, 200];
+      const samples = [];
+      let submitBaseline = 0;
+      let animationStartOffsetMs = null;
+      const toMilliseconds = (value) => {
+        const firstValue = value.split(",")[0].trim();
+        const amount = Number.parseFloat(firstValue);
+        return firstValue.endsWith("ms") ? amount : amount * 1000;
+      };
+      const onAnimationStart = (event) => {
+        if (
+          event.animationName === "figma-send-placeholder-opacity" &&
+          event.pseudoElement === "::placeholder" &&
+          animationStartOffsetMs === null
+        ) {
+          animationStartOffsetMs = performance.now() - submitBaseline;
+        }
+      };
+      input.addEventListener("animationstart", onAnimationStart);
+      try {
+        submitBaseline = performance.now();
+        form.requestSubmit();
+        for (const targetOffsetMs of sampleTargets) {
+          const remainingMs = targetOffsetMs - (performance.now() - submitBaseline);
+          if (remainingMs > 0) {
+            await new Promise((resolve) => setTimeout(resolve, remainingMs));
+          }
+          await new Promise((resolve) => requestAnimationFrame(() => resolve()));
+          const placeholderStyle = getComputedStyle(input, "::placeholder");
+          samples.push({
+            targetOffsetMs,
+            actualOffsetMs: performance.now() - submitBaseline,
+            animationStartOffsetMs,
+            classIsSending: form.classList.contains("is-sending"),
+            animationName: placeholderStyle.animationName,
+            animationDurationMs: toMilliseconds(placeholderStyle.animationDuration),
+            animationDelayMs: toMilliseconds(placeholderStyle.animationDelay),
+            animationPlayState: placeholderStyle.animationPlayState,
+            placeholderOpacity: Number.parseFloat(placeholderStyle.opacity)
+          });
+        }
+        return {
+          reducedMotion: window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+          visibilityState: document.visibilityState,
+          samples: samples
+        };
+      } finally {
+        input.removeEventListener("animationstart", onAnimationStart);
+      }
     })()
   `);
+  timing.sendPromptTiming = sendPromptTiming;
   checks.sendMotionStarts = await evaluate(chat, `
     document.querySelector("#chat-form")?.classList.contains("is-sending") === true &&
     document.querySelector("#messages")?.classList.contains("is-sending") === true &&
@@ -219,10 +284,8 @@ try {
         buttonStyle.animationDuration === "1.26092s";
     })()
   `);
-  await new Promise((resolve) => setTimeout(resolve, 140));
-  checks.sendPromptFadesQuickly = await evaluate(chat, `
-    Number.parseFloat(getComputedStyle(document.querySelector("#chat-input"), "::placeholder").opacity) <= 0.05
-  `);
+  checks.sendPromptFadesQuickly = timing.sendPromptTiming.samples
+    .find((sample) => sample.targetOffsetMs === 140)?.placeholderOpacity <= 0.05;
   await new Promise((resolve) => setTimeout(resolve, 1260));
   checks.sendMotionFinishes = await evaluate(chat, `
     document.querySelector("#chat-form")?.classList.contains("is-sending") === false &&
@@ -429,6 +492,8 @@ try {
     getComputedStyle(document.querySelector("#memory-page")).animationName === "settings-management-collapse" &&
     getComputedStyle(document.querySelector("#memory-page")).animationDuration === "0.22s"
   `);
+  // Failure-stage label only; the existing close condition and timeout remain unchanged.
+  failureStage = "memory_management_close";
   await waitFor(chat, `
     document.querySelector("#memory-management-actions")?.hidden === true &&
     document.querySelector("#memory-manage-button")?.hidden === false
@@ -625,11 +690,15 @@ try {
     document.querySelector("#settings-panel")?.classList.contains("is-exiting") === false
   `);
 
-  const result = { ok: Object.values(checks).every(Boolean), checks, observedPhoneCharm, observedFlatFigmaSurface, observedSettingsTabMotion, observedHistoryDetail };
+  failureStage = "complete";
+  const result = { ok: Object.values(checks).every(Boolean), checks, dpr, referenceBaseline, observedPhoneCharm, observedFlatFigmaSurface, observedSettingsTabMotion, observedHistoryDetail, timing, stage: failureStage };
   console.log(JSON.stringify(result, null, 2));
   if (!result.ok) {
     process.exitCode = 1;
   }
+} catch {
+  console.log(JSON.stringify({ ok: false, checks, dpr, referenceBaseline, timing, stage: failureStage }, null, 2));
+  process.exitCode = 1;
 } finally {
   await stopElectron(context);
   if (process.env.P2_89_KEEP_TMP !== "1") {
