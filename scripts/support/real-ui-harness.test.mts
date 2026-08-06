@@ -443,8 +443,8 @@ test("P2-89 requires an exact DPR=1 reference baseline while preserving legacy c
     isIdentifier(expression.left.expression, "checks") &&
     !["referenceBaseline", "sendPromptFadesQuickly"].includes(expression.left.name.text)
   )).map((expression) => printer.printNode(ts.EmitHint.Unspecified, expression, runner));
-  assert.equal(legacyChecks.length, 46);
-  assert.equal(createHash("sha256").update(legacyChecks.join("\n")).digest("hex"), "2bd8cd3dfa0ef256fcfb5e344a2052f5a2abfdb349626379b378d6e919a420f6");
+  assert.equal(legacyChecks.length, 47);
+  assert.equal(createHash("sha256").update(legacyChecks.join("\n")).digest("hex"), "bde1cb195263c403902577645d9678f170d9f3eb37d610e68769f40b13b508fa");
 });
 
 function propertyNames(object: ts.ObjectLiteralExpression) {
