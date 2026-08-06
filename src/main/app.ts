@@ -4709,16 +4709,21 @@ app.whenReady().then(async () => {
   });
 
   ipcMain.handle("history:clear", (event) => {
-    if (!isChatSender(event) || !historyStore) {
+    if (!isChatSender(event)) {
       throw new Error("Unauthorized history request");
     }
-
-    const value = historyStore.clearConversations();
-    const response = parseBooleanResponse(value);
-    if (response === null) {
-      throw new Error("Invalid history response");
+    if (!historyStore) {
+      throw new Error("History clear failed");
     }
-    return response;
+
+    try {
+      if (historyStore.clearConversations() !== true) {
+        throw new Error("History clear failed");
+      }
+    } catch {
+      throw new Error("History clear failed");
+    }
+    return undefined;
   });
 
   ipcMain.handle("history:get-retention", (event) => {

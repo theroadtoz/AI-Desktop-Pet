@@ -112,6 +112,7 @@
     "accept:p2-91b-attention": "npm run build && node --no-warnings scripts/p2-91b-attention-post-exit-verifier.mjs",
     "test:p2-91c-telemetry": "npm run build && node --test --experimental-strip-types scripts/p2-91c-telemetry-privacy.test.mts scripts/p2-91c-acceptance-evidence.test.mts scripts/p2-91c-telemetry-pressure.test.mts scripts/pet-telemetry-contract.test.mts scripts/pet-interaction-actions.test.mts scripts/reply-completion-affect-action-controller.test.mts scripts/p2-91c-generic-defer-integration.test.mts scripts/provider-config.test.mts scripts/user-profile-store.test.mts scripts/provider-health.test.mts scripts/openai-compatible-provider.test.mts scripts/support/real-ui-target-discovery-retry.test.mts",
     "test:p2-91c2-persistence-codec": "npm run build && node --test --experimental-strip-types scripts/p2-91c2-persistence-codec.test.mts",
+    "test:p2-91c2c0-history-clear-compat": "npm run build && node --test --experimental-strip-types scripts/p2-91c2c0-history-clear-compat.test.mts",
     "accept:p2-91c-telemetry": "npm run build && node --no-warnings scripts/p2-91c-telemetry-real-ui.mjs",
     "accept:p2-85-context-emotion-proactive": "npm run build && node --no-warnings scripts/p2-85-context-emotion-proactive-real-ui.mjs",
     "test:p2-85-context-emotion-proactive-soak": "node --test --experimental-strip-types scripts/p2-85-context-emotion-proactive-soak-real-ui.test.mts",

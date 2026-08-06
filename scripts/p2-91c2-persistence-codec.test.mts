@@ -337,8 +337,11 @@ async function main() {
     state.history.get = { id: historyId }; expectError(() => call("history:get", historyId), "Invalid history response");
     for (const value of [true, false]) { state.history.delete = value; assert.equal(call("history:delete", historyId), value); }
     state.history.delete = "true"; expectError(() => call("history:delete", historyId), "Invalid history response");
-    for (const value of [true, false]) { state.history.clear = value; assert.equal(call("history:clear"), value); }
-    state.history.clear = 1; expectError(() => call("history:clear"), "Invalid history response");
+    state.history.clear = true; assert.equal(call("history:clear"), undefined);
+    for (const value of [false, 1, undefined, null, "true", new Error("private history path")]) {
+      state.history.clear = value;
+      expectError(() => call("history:clear"), "History clear failed");
+    }
     for (const value of [100, 500, 1000]) { state.history.retention = value; assert.equal(call("history:get-retention"), value); state.history.setRetention = value; assert.equal(call("history:set-retention", value), value); }
     state.history.retention = 501; expectError(() => call("history:get-retention"), "Invalid history retention response");
     state.history.setRetention = "500"; expectError(() => call("history:set-retention", 500), "Invalid history retention response");
@@ -468,7 +471,9 @@ test("main history handlers make shared codec the request and response authority
   assertOrdered(handlerSource(appSource, "history:list"), ["isChatSender(event)", "historyStore.listConversations()", "parseHistoryConversationList("]);
   assertOrdered(handlerSource(appSource, "history:get"), ["isChatSender(event)", "parseHistoryIdRequest({ id })", "historyStore.getConversation(", "parseNullableHistoryConversation("]);
   assertOrdered(handlerSource(appSource, "history:delete"), ["isChatSender(event)", "parseHistoryIdRequest({ id })", "historyStore.deleteConversation(", "parseBooleanResponse("]);
-  assertOrdered(handlerSource(appSource, "history:clear"), ["isChatSender(event)", "historyStore.clearConversations()", "parseBooleanResponse("]);
+  const clearHandler = handlerSource(appSource, "history:clear");
+  assertOrdered(clearHandler, ["isChatSender(event)", "if (!historyStore)", "historyStore.clearConversations() !== true", "return undefined"]);
+  assert.match(clearHandler, /if \(!historyStore\) \{\s+throw new Error\("History clear failed"\);/u);
   assertOrdered(handlerSource(appSource, "history:get-retention"), ["isChatSender(event)", "historyStore.getRetentionLimit()", "parseHistoryRetentionLimit("]);
   assertOrdered(handlerSource(appSource, "history:set-retention"), ["isChatSender(event)", "parseHistoryRetentionRequest({ limit })", "historyStore.setRetentionLimit(", "parseHistoryRetentionLimit("]);
 });

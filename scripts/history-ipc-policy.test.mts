@@ -27,7 +27,8 @@ test("history, memory, automatic situation and user profile IPC are restricted a
   assertOrdered(handlerSource(appSource, "history:list"), ["isChatSender(event)", "historyStore.listConversations()", "parseHistoryConversationList("]);
   assertOrdered(handlerSource(appSource, "history:get"), ["isChatSender(event)", "parseHistoryIdRequest({ id })", "historyStore.getConversation(", "parseNullableHistoryConversation("]);
   assertOrdered(handlerSource(appSource, "history:delete"), ["isChatSender(event)", "parseHistoryIdRequest({ id })", "historyStore.deleteConversation(", "parseBooleanResponse("]);
-  assert.match(appSource, /ipcMain\.handle\("history:clear", \(event\) => \{\s+if \(!isChatSender\(event\) \|\| !historyStore\)/);
+  const historyClearHandler = handlerSource(appSource, "history:clear");
+  assertOrdered(historyClearHandler, ["if (!isChatSender(event))", "Unauthorized history request", "if (!historyStore)", "History clear failed", "historyStore.clearConversations() !== true", "return undefined"]);
   assertOrdered(handlerSource(appSource, "history:get-retention"), ["isChatSender(event)", "historyStore.getRetentionLimit()", "parseHistoryRetentionLimit("]);
   assertOrdered(handlerSource(appSource, "history:set-retention"), ["isChatSender(event)", "parseHistoryRetentionRequest({ limit })", "historyStore.setRetentionLimit(", "parseHistoryRetentionLimit("]);
   assertOrdered(handlerSource(appSource, "memory:list"), ["isChatSender(event)", "memoryStore.listCards()", "parseMemoryCards("]);
