@@ -406,32 +406,176 @@ export function parseMemoryReviewDecisionDraft(value: unknown): MemoryReviewDeci
 }
 
 export function parseMemoryStorage(value: unknown): MemoryStorage | null {
-  const storage = value as (Partial<Omit<MemoryStorage, "version">> & { version?: unknown }) | null;
+  if (!isPlainObject(value)) return null;
+  if (!hasOnlyOwnDataDescriptors(value)) return null;
 
-  if (
-    !storage ||
-    (storage.version !== 1 && storage.version !== 2 && storage.version !== 3 && storage.version !== MEMORY_STORAGE_VERSION) ||
-    typeof storage.enabled !== "boolean" ||
-    !Array.isArray(storage.cards)
-  ) {
-    return null;
-  }
+  const storage = value as Record<string, unknown>;
+  const version = storage.version;
+  if (version !== 1 && version !== 2 && version !== 3 && version !== MEMORY_STORAGE_VERSION) return null;
+  const rootKeys = version === MEMORY_STORAGE_VERSION
+    ? ["version", "enabled", "cards", "suppressions"]
+    : ["version", "enabled", "cards"];
+  if (!hasExactDataKeys(storage, rootKeys) || typeof storage.enabled !== "boolean" || !isDenseArray(storage.cards)) return null;
 
-  const cards = storage.cards.map((card) => parseMemoryCard(card, storage.version !== MEMORY_STORAGE_VERSION));
-  const suppressions = storage.version === MEMORY_STORAGE_VERSION
-    ? (Array.isArray(storage.suppressions) ? storage.suppressions.map(parseMemorySuppression) : null)
+  const cards = storage.cards.map((card) => parseDiskMemoryCard(card, version));
+  if (cards.some((card) => card === null) || hasDuplicate(cards as MemoryCard[], (card) => card.id)) return null;
+
+  const suppressions = version === MEMORY_STORAGE_VERSION
+    ? parseDiskSuppressions(storage.suppressions)
     : [];
+  if (!suppressions) return null;
 
-  if (cards.some((card) => card === null) || !suppressions || suppressions.some((suppression) => suppression === null)) {
-    return null;
-  }
+  return { version: MEMORY_STORAGE_VERSION, enabled: storage.enabled, cards: cards as MemoryCard[], suppressions };
+}
+
+function parseDiskMemoryCard(value: unknown, version: 1 | 2 | 3 | typeof MEMORY_STORAGE_VERSION): MemoryCard | null {
+  if (!isPlainObject(value)) return null;
+  const card = value as Record<string, unknown>;
+  const v1Keys = ["id", "title", "content", "tags", "sourceConversationId", "createdAt", "updatedAt", "enabled"];
+  const v2Keys = [...v1Keys, "sourceType", "namespace", "key", "lastInjectedAt", "injectionCount"];
+  const v4Keys = [
+    "id", "title", "content", "tags", "sourceConversationId", "sourceType", "namespace", "key", "importance", "category",
+    "confidence", "sourceMessageId", "observedCount", "lastObservedAt", "compressionState", "createdAt", "updatedAt", "enabled",
+    "managedByUser", "lastInjectedAt", "injectionCount"
+  ];
+  const expected = version === 1 ? v1Keys : version === 2 ? v2Keys : version === 3 ? v4Keys.filter((key) => key !== "managedByUser") : v4Keys;
+  if (!hasExactDataKeys(card, expected)) return null;
+
+  const title = canonicalMemoryText(card.title, MAX_TITLE_LENGTH);
+  const content = canonicalMemoryText(card.content, MAX_CONTENT_LENGTH);
+  const tags = canonicalMemoryTags(card.tags);
+  if (!isMemoryId(card.id) || !title || !content || !tags || !isMemoryId(card.sourceConversationId) ||
+      !isPositiveTimestamp(card.createdAt) || !isPositiveTimestamp(card.updatedAt) || card.updatedAt < card.createdAt ||
+      typeof card.enabled !== "boolean") return null;
+
+  const createdAt = card.createdAt;
+  const updatedAt = card.updatedAt;
+  const sourceType = version === 1 ? DEFAULT_MEMORY_SOURCE_TYPE : parseMemorySourceType(card.sourceType);
+  const namespace = version === 1 ? DEFAULT_MEMORY_NAMESPACE : canonicalMemoryNamespace(card.namespace);
+  const key = version === 1 ? createDefaultMemoryKey(card.id) : canonicalMemoryKey(card.key);
+  const lastInjectedAt = version <= 1 ? null : parseDiskNullableTimestamp(card.lastInjectedAt);
+  const injectionCount = version <= 1 ? 0 : card.injectionCount;
+  if (!sourceType || !namespace || !key || lastInjectedAt === undefined ||
+      !isNonnegativeSafeInteger(injectionCount) ||
+      (version === 2 && sourceType !== "manual-chat")) return null;
+
+  const importance = version <= 2 ? DEFAULT_MEMORY_IMPORTANCE : parseMemoryImportance(card.importance);
+  const category = version <= 2 ? DEFAULT_MEMORY_CATEGORY : canonicalMemoryCategory(card.category);
+  const confidence = version <= 2 ? DEFAULT_MEMORY_CONFIDENCE : canonicalMemoryConfidence(card.confidence);
+  const sourceMessageId = version <= 2 ? null : card.sourceMessageId;
+  const observedCount = version <= 2 ? DEFAULT_MEMORY_OBSERVED_COUNT : card.observedCount;
+  const lastObservedAt = version <= 2 ? updatedAt : card.lastObservedAt;
+  const compressionState = version <= 2 ? DEFAULT_MEMORY_COMPRESSION_STATE : parseMemoryCompressionState(card.compressionState);
+  const managedByUser = version === MEMORY_STORAGE_VERSION ? card.managedByUser : sourceType === "manual-chat";
+  if (!importance || !category || confidence === null || sourceMessageId !== null && !isMemoryId(sourceMessageId) ||
+      !isPositiveTimestamp(observedCount) || !isPositiveTimestamp(lastObservedAt) || lastObservedAt < card.createdAt ||
+      !compressionState || typeof managedByUser !== "boolean") return null;
 
   return {
-    version: MEMORY_STORAGE_VERSION,
-    enabled: storage.enabled,
-    cards: cards as MemoryCard[],
-    suppressions: suppressions as MemorySuppression[]
+    id: card.id, title, content, tags, sourceConversationId: card.sourceConversationId, sourceType, namespace, key,
+    importance, category, confidence, sourceMessageId, observedCount: observedCount as number, lastObservedAt: lastObservedAt as number, compressionState,
+    createdAt, updatedAt, enabled: card.enabled, managedByUser, lastInjectedAt,
+    injectionCount: injectionCount as number
   };
+}
+
+function parseDiskSuppressions(value: unknown): MemorySuppression[] | null {
+  if (!isDenseArray(value)) return null;
+  const suppressions = value.map((item) => {
+    if (!isPlainObject(item) || !hasExactDataKeys(item, ["namespace", "key", "category", "createdAt"])) return null;
+    const raw = item as Record<string, unknown>;
+    const namespace = canonicalMemoryNamespace(raw.namespace);
+    const key = canonicalMemoryKey(raw.key);
+    const category = canonicalMemoryCategory(raw.category);
+    return namespace && key && category && isPositiveTimestamp(raw.createdAt)
+      ? { namespace, key, category, createdAt: raw.createdAt }
+      : null;
+  });
+  return suppressions.some((item) => item === null) || hasDuplicate(suppressions as MemorySuppression[], (item) => JSON.stringify([item.namespace, item.key, item.category, item.createdAt]))
+    ? null
+    : suppressions as MemorySuppression[];
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype && Object.getOwnPropertySymbols(value).length === 0;
+}
+
+function isDenseArray(value: unknown): value is unknown[] {
+  if (!Array.isArray(value) || Object.getPrototypeOf(value) !== Array.prototype || Object.getOwnPropertySymbols(value).length !== 0) return false;
+  const names = Object.getOwnPropertyNames(value);
+  const lengthDescriptor = Object.getOwnPropertyDescriptor(value, "length");
+  if (!lengthDescriptor || lengthDescriptor.enumerable || lengthDescriptor.configurable || !lengthDescriptor.writable ||
+      !("value" in lengthDescriptor) || !Number.isSafeInteger(lengthDescriptor.value) || lengthDescriptor.value < 0 ||
+      names.length !== lengthDescriptor.value + 1 || !names.includes("length")) return false;
+  for (let index = 0; index < lengthDescriptor.value; index += 1) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+    if (!descriptor || !descriptor.enumerable || !descriptor.configurable || !descriptor.writable || !("value" in descriptor)) return false;
+  }
+  return true;
+}
+
+function hasExactDataKeys(value: Record<string, unknown>, expected: string[]): boolean {
+  const names = Object.getOwnPropertyNames(value).sort();
+  if (names.length !== expected.length || names.some((key, index) => key !== [...expected].sort()[index])) return false;
+  return names.every((key) => {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    return Boolean(descriptor && descriptor.enumerable && descriptor.configurable && descriptor.writable && "value" in descriptor);
+  });
+}
+
+function hasOnlyOwnDataDescriptors(value: Record<string, unknown>): boolean {
+  return Object.getOwnPropertyNames(value).every((key) => {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    return Boolean(descriptor && descriptor.enumerable && descriptor.configurable && descriptor.writable && "value" in descriptor);
+  });
+}
+
+function canonicalMemoryText(value: unknown, maxLength: number): string | null {
+  const parsed = normalizeMemoryText(value, maxLength);
+  return parsed === value ? parsed : null;
+}
+
+function canonicalMemoryTags(value: unknown): string[] | null {
+  if (!isDenseArray(value)) return null;
+  const parsed = normalizeMemoryTags(value);
+  return parsed && parsed.length === value.length && parsed.every((item, index) => item === value[index]) ? parsed : null;
+}
+
+function canonicalMemoryNamespace(value: unknown): string | null {
+  const parsed = normalizeMemoryNamespace(value);
+  return parsed === value ? parsed : null;
+}
+
+function canonicalMemoryKey(value: unknown): string | null {
+  const parsed = normalizeMemoryKey(value);
+  return parsed === value ? parsed : null;
+}
+
+function canonicalMemoryCategory(value: unknown): string | null {
+  const parsed = normalizeMemoryCategory(value);
+  return parsed === value ? parsed : null;
+}
+
+function canonicalMemoryConfidence(value: unknown): number | null {
+  const parsed = parseMemoryConfidence(value);
+  return parsed === value ? parsed : null;
+}
+
+function isPositiveTimestamp(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+}
+
+function isNonnegativeSafeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
+function parseDiskNullableTimestamp(value: unknown): number | null | undefined {
+  return value === null ? null : isPositiveTimestamp(value) ? value : undefined;
+}
+
+function hasDuplicate<T>(values: T[], key: (value: T) => string): boolean {
+  const seen = new Set<string>();
+  return values.some((value) => seen.has(key(value)) || !seen.add(key(value)));
 }
 
 export function parseMemorySuppression(value: unknown): MemorySuppression | null {

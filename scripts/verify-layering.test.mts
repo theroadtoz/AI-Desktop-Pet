@@ -199,6 +199,29 @@ test("current verification keeps the protected P2-84 coverage while replacing on
   assert.doesNotMatch(packageJson.scripts.verify, /test:p2-84-legacy/u);
 });
 
+test("P2-91C2B keeps disk version parsing in the facts store and current history verification", () => {
+  const historyTests = new Set(testFiles("test:history"));
+  assert.equal(historyTests.has("scripts/p2-91c2b-disk-safety.test.mts"), true);
+  assert.equal(historyTests.has("scripts/p2-87b-memory-sovereignty.test.mts"), true);
+  const memoryStoreSource = readFileSync(join(repoRoot, "src/main/services/chat/memory-store.ts"), "utf8");
+  const sharedDiskParserSource = readFileSync(join(repoRoot, "src/shared/chat-memory.ts"), "utf8");
+  const codecSource = readFileSync(join(repoRoot, "src/shared/memory-history-codec.ts"), "utf8");
+  assert.match(memoryStoreSource, /\bparseMemoryStorage\(/u);
+  assert.match(sharedDiskParserSource, /export function parseMemoryStorage/u);
+  assert.doesNotMatch(codecSource, /parseMemoryStorage/u);
+  const consumers = spawnSync("rg", ["-l", "parseMemoryStorage", "src"], { cwd: repoRoot, encoding: "utf8" });
+  assert.equal(consumers.status, 0);
+  assert.deepEqual(
+    consumers.stdout.trim().split(/\r?\n/u).map((path) => path.replaceAll("\\", "/")).sort(),
+    ["src/main/services/chat/memory-store.ts", "src/shared/chat-memory.ts"],
+    "only the facts store may consume the disk parser"
+  );
+  for (const path of ["src/preload", "src/renderer"]) {
+    const result = spawnSync("rg", ["-n", "parseMemoryStorage", path], { cwd: repoRoot, encoding: "utf8" });
+    assert.notEqual(result.status, 0, `${path} must not consume the disk parser`);
+  }
+});
+
 test("Live2D adapter accepts only the canonical repository model directory", () => {
   const root = mkdtempSync(join(tmpdir(), "ai-pet-live2d-layering-"));
   const manifestPath = join(root, "resources", "models", "witch", "model-manifest.json");

@@ -50,6 +50,7 @@ export type AutoMemoryCaptureSummary = {
 };
 
 export type MemoryStore = {
+  canWrite(): boolean;
   getSettings(): MemorySettings;
   getSummary(): MemorySummary;
   setEnabled(enabled: boolean): MemorySettings;
@@ -69,6 +70,11 @@ export type MemoryStore = {
   getMemoryPath(): string;
 };
 
+type MemorySourceState = "missing" | "valid-current" | "valid-legacy" | "invalid" | "future-version" | "sensitive";
+type MemoryReadOutcome = { storage: MemoryStorage; canWrite: boolean; sourceState: MemorySourceState; profile?: UserProfile };
+type UserProfile = ReturnType<typeof parseUserProfile>;
+const MEMORY_STORE_ERROR = "Memory storage unavailable";
+
 export function createMemoryStore(options: { userDataPath?: string } = {}): MemoryStore {
   const userDataPath = options.userDataPath ?? app.getPath("userData");
   const memoryPath = join(userDataPath, "memory", "facts.json");
@@ -85,63 +91,115 @@ export function createMemoryStore(options: { userDataPath?: string } = {}): Memo
     ]);
   }
 
-  function readStorage(): MemoryStorage {
-    let storage = emptyStorage();
+  function unsafeOutcome(sourceState: Extract<MemorySourceState, "invalid" | "future-version" | "sensitive">): MemoryReadOutcome {
+    return { storage: emptyStorage(), canWrite: false, sourceState };
+  }
 
-    if (!existsSync(memoryPath)) {
-      return migrateLegacyUserProfile(storage);
-    } else {
-      try {
-        const rawStorage = JSON.parse(readFileSync(memoryPath, "utf8"));
-        const parsedStorage = parseMemoryStorage(rawStorage);
+  function containsSensitiveStorageMaterial(storage: MemoryStorage): boolean {
+    return storage.cards.some((card) => containsSensitiveMemoryMaterial([
+      card.title, card.content, ...card.tags, card.namespace, card.key, card.category
+    ].join("\n"))) || storage.suppressions.some((suppression) => containsSensitiveMemoryMaterial([
+      suppression.namespace, suppression.key, suppression.category
+    ].join("\n")));
+  }
 
-        if (parsedStorage) {
-          storage = parsedStorage;
-          if (rawStorage?.version !== MEMORY_STORAGE_VERSION) {
-            try {
-              writeStorage(storage);
-            } catch {
-              // Keep compatible reads available even if a migration write cannot be persisted yet.
-            }
-          }
-        }
-      } catch {
-        storage = emptyStorage();
-      }
+  function parseExactLegacyProfile(value: unknown): NonNullable<UserProfile> | null {
+    if (!value || typeof value !== "object" || Array.isArray(value) || Object.getPrototypeOf(value) !== Object.prototype || Object.getOwnPropertySymbols(value).length !== 0) {
+      return null;
     }
+    const profile = value as Record<string, unknown>;
+    const names = Object.getOwnPropertyNames(profile).sort();
+    const expected = names.length === 2
+      ? ["completedAt", "displayName"]
+      : names.length === 3
+        ? ["completedAt", "displayName", "preferredName"]
+        : [];
+    if (names.length !== expected.length || names.some((key, index) => key !== expected[index])) return null;
+    if (!names.every((key) => {
+      const descriptor = Object.getOwnPropertyDescriptor(profile, key);
+      return Boolean(descriptor && descriptor.enumerable && descriptor.configurable && descriptor.writable && "value" in descriptor);
+    })) return null;
+    const parsed = parseUserProfile(profile);
+    if (!parsed || parsed.displayName !== profile.displayName || parsed.preferredName !== profile.preferredName ||
+        typeof profile.completedAt !== "string") return null;
+    return parsed;
+  }
 
-    return migrateLegacyUserProfile(storage);
+  function getSafeOwnVersion(value: unknown): number | undefined {
+    if (!value || typeof value !== "object" || Array.isArray(value) || Object.getPrototypeOf(value) !== Object.prototype || Object.getOwnPropertySymbols(value).length !== 0) return undefined;
+    const descriptor = Object.getOwnPropertyDescriptor(value, "version");
+    return descriptor && descriptor.enumerable && descriptor.configurable && descriptor.writable && "value" in descriptor && typeof descriptor.value === "number"
+      ? descriptor.value
+      : undefined;
+  }
+
+  function inspectStorage(): MemoryReadOutcome {
+    if (!existsSync(memoryPath)) {
+      return inspectLegacyProfile(emptyStorage(), "missing");
+    }
+    try {
+      const rawStorage = JSON.parse(readFileSync(memoryPath, "utf8"));
+      const declaredVersion = getSafeOwnVersion(rawStorage);
+      const storage = parseMemoryStorage(rawStorage);
+      if (!storage) return unsafeOutcome(declaredVersion !== undefined && declaredVersion > MEMORY_STORAGE_VERSION ? "future-version" : "invalid");
+      if (containsSensitiveStorageMaterial(storage)) return unsafeOutcome("sensitive");
+      return inspectLegacyProfile(storage, rawStorage.version === MEMORY_STORAGE_VERSION ? "valid-current" : "valid-legacy");
+    } catch {
+      return unsafeOutcome("invalid");
+    }
+  }
+
+  function readStorage(): MemoryReadOutcome {
+    const outcome = inspectStorage();
+    if (!outcome.canWrite) return outcome;
+    try {
+      const projection = outcome.profile ? projectLegacyUserProfile(outcome.storage, outcome.profile) : { storage: outcome.storage, changed: false };
+      if (outcome.sourceState === "valid-legacy" || projection.changed) writeStorage(projection.storage);
+      return outcome.profile
+        ? finalizeLegacyProfile({ ...outcome, storage: projection.storage, sourceState: "valid-current" })
+        : { ...outcome, storage: projection.storage, sourceState: outcome.sourceState === "valid-legacy" ? "valid-current" : outcome.sourceState };
+    } catch {
+      throw new Error(MEMORY_STORE_ERROR);
+    }
   }
 
   function writeStorage(storage: MemoryStorage): void {
-    mkdirSync(dirname(memoryPath), { recursive: true });
     const temporaryPath = `${memoryPath}.${process.pid}.${Date.now()}.tmp`;
-
     try {
+      mkdirSync(dirname(memoryPath), { recursive: true });
       writeFileSync(temporaryPath, `${JSON.stringify(storage, null, 2)}\n`, "utf8");
       renameSync(temporaryPath, memoryPath);
+    } catch {
+      throw new Error(MEMORY_STORE_ERROR);
     } finally {
       if (existsSync(temporaryPath)) {
-        unlinkSync(temporaryPath);
+        try {
+          unlinkSync(temporaryPath);
+        } catch {
+          // The generic mutation error remains authoritative; no retry is attempted.
+        }
       }
     }
   }
 
-  function migrateLegacyUserProfile(storage: MemoryStorage): MemoryStorage {
-    if (!existsSync(legacyProfilePath)) {
-      return storage;
-    }
-
+  function inspectLegacyProfile(storage: MemoryStorage, sourceState: MemorySourceState): MemoryReadOutcome {
+    if (!existsSync(legacyProfilePath)) return { storage, canWrite: true, sourceState };
     try {
-      const profile = parseUserProfile(JSON.parse(readFileSync(legacyProfilePath, "utf8")));
-      if (!profile) {
-        return storage;
-      }
+      const rawProfile = JSON.parse(readFileSync(legacyProfilePath, "utf8"));
+      const profile = parseExactLegacyProfile(rawProfile);
+      if (!profile) return unsafeOutcome("invalid");
+      if (containsSensitiveMemoryMaterial(`${profile.displayName}\n${profile.preferredName ?? ""}`)) return unsafeOutcome("sensitive");
+      return { storage, canWrite: true, sourceState, profile };
+    } catch {
+      return unsafeOutcome("invalid");
+    }
+  }
 
-      if (!storage.cards.some((card) => card.namespace === "personal" && card.key === "preferred-name")) {
-        const preferredName = profile.preferredName ?? profile.displayName;
-        const now = Date.now();
-        storage.cards.push({
+  function projectLegacyUserProfile(storage: MemoryStorage, profile: NonNullable<UserProfile>): { storage: MemoryStorage; changed: boolean } {
+    if (!storage.cards.some((card) => card.namespace === "personal" && card.key === "preferred-name")) {
+      const preferredName = profile.preferredName ?? profile.displayName;
+      const now = Date.now();
+      return { changed: true, storage: { ...storage, cards: [...storage.cards, {
           id: crypto.randomUUID(),
           title: "用户称呼",
           content: `用户希望被称为${preferredName}。`,
@@ -163,49 +221,64 @@ export function createMemoryStore(options: { userDataPath?: string } = {}): Memo
           managedByUser: false,
           lastInjectedAt: null,
           injectionCount: 0
-        });
-        writeStorage(storage);
-      }
+      }] } };
+    }
+    return { storage, changed: false };
+  }
 
+  function finalizeLegacyProfile(outcome: MemoryReadOutcome): MemoryReadOutcome {
+    try {
       unlinkSync(legacyProfilePath);
     } catch {
-      // Keep the legacy profile available so a later launch can retry the migration.
+      return { ...outcome, canWrite: true, sourceState: "valid-current" };
     }
+    const { profile: _profile, ...rest } = outcome;
+    return { ...rest, canWrite: true, sourceState: "valid-current" };
+  }
 
-    return storage;
+  function requireWritableStorage(): MemoryStorage {
+    const outcome = readStorage();
+    if (!outcome.canWrite) throw new Error(MEMORY_STORE_ERROR);
+    return outcome.storage;
   }
 
   return {
+    canWrite() {
+      return inspectStorage().canWrite;
+    },
     getSettings() {
-      return { enabled: readStorage().enabled };
+      return { enabled: readStorage().storage.enabled };
     },
     getSummary() {
-      return createMemorySummary(readStorage());
+      return createMemorySummary(readStorage().storage);
     },
     setEnabled(enabled) {
-      const storage = readStorage();
+      const storage = requireWritableStorage();
       storage.enabled = enabled;
       writeStorage(storage);
       return { enabled };
     },
     listCards() {
-      return readStorage().cards.sort((left, right) => right.updatedAt - left.updatedAt);
+      return readStorage().storage.cards.sort((left, right) => right.updatedAt - left.updatedAt);
     },
     getCard(id) {
+      const outcome = readStorage();
       if (!isMemoryId(id)) {
         return null;
       }
 
-      return readStorage().cards.find((card) => card.id === id) ?? null;
+      return outcome.storage.cards.find((card) => card.id === id) ?? null;
     },
     createCard(draft) {
+      const storage = requireWritableStorage();
       const parsedDraft = parseMemoryCardDraft(draft);
 
       if (!parsedDraft) {
         throw new Error("Invalid memory draft");
       }
-
-      const storage = readStorage();
+      if (containsSensitiveMemoryMaterial([parsedDraft.title, parsedDraft.content, ...parsedDraft.tags].join("\n"))) {
+        throw new Error("Invalid memory draft");
+      }
 
       if (!storage.enabled) {
         return { status: "disabled" };
@@ -238,7 +311,7 @@ export function createMemoryStore(options: { userDataPath?: string } = {}): Memo
       return { status: "created", card };
     },
     captureAutoMemoriesFromLatestUserMessage(input) {
-      const storage = readStorage();
+      const storage = readStorage().storage;
       const baseSummary = createAutoMemoryCaptureSummary(storage.enabled, storage.cards.length);
 
       if (!storage.enabled) {
@@ -251,7 +324,7 @@ export function createMemoryStore(options: { userDataPath?: string } = {}): Memo
       return { ...baseSummary, skippedReason: "no_candidate" };
     },
     confirmReviewedCandidate(candidate) {
-      const storage = readStorage();
+      const storage = requireWritableStorage();
       if (!storage.enabled) return { status: "disabled" };
       const existingCard = storage.cards.find(
         (card) => card.namespace === candidate.namespace && card.key === candidate.key
@@ -267,7 +340,9 @@ export function createMemoryStore(options: { userDataPath?: string } = {}): Memo
       if (
         candidate.status !== "pending-review" ||
         candidate.action !== "create" ||
-        containsSensitiveMemoryMaterial(`${candidate.title}\n${candidate.content}\n${candidate.tags.join("\n")}`) ||
+        containsSensitiveMemoryMaterial([
+          candidate.title, candidate.content, ...candidate.tags, candidate.namespace, candidate.key, candidate.category
+        ].join("\n")) ||
         isSuppressed(storage, candidate) ||
         (existingCard && (
           candidate.category !== "addressing" ||
@@ -324,6 +399,7 @@ export function createMemoryStore(options: { userDataPath?: string } = {}): Memo
       return { status: "created" };
     },
     updateCard(id, update) {
+      const storage = requireWritableStorage();
       if (!isMemoryId(id)) {
         return null;
       }
@@ -334,10 +410,16 @@ export function createMemoryStore(options: { userDataPath?: string } = {}): Memo
         return null;
       }
 
-      const storage = readStorage();
       const card = storage.cards.find((storedCard) => storedCard.id === id);
 
       if (!card) {
+        return null;
+      }
+      if (containsSensitiveMemoryMaterial([
+        parsedUpdate.title ?? card.title,
+        parsedUpdate.content ?? card.content,
+        ...(parsedUpdate.tags ?? card.tags)
+      ].join("\n"))) {
         return null;
       }
 
@@ -346,11 +428,11 @@ export function createMemoryStore(options: { userDataPath?: string } = {}): Memo
       return card;
     },
     deleteCard(id) {
+      const storage = requireWritableStorage();
       if (!isMemoryId(id)) {
         return false;
       }
 
-      const storage = readStorage();
       const nextCards = storage.cards.filter((card) => card.id !== id);
 
       if (nextCards.length === storage.cards.length) {
@@ -362,11 +444,11 @@ export function createMemoryStore(options: { userDataPath?: string } = {}): Memo
       return true;
     },
     forgetCard(id) {
+      const storage = requireWritableStorage();
       if (!isMemoryId(id)) {
         return { status: "not_found" };
       }
 
-      const storage = readStorage();
       const card = storage.cards.find((storedCard) => storedCard.id === id);
 
       if (!card) {
@@ -390,12 +472,12 @@ export function createMemoryStore(options: { userDataPath?: string } = {}): Memo
       return { status: "forgotten" };
     },
     clearCards() {
-      const storage = readStorage();
+      const storage = requireWritableStorage();
       storage.cards = [];
       writeStorage(storage);
     },
     listSuppressions() {
-      const suppressions = [...readStorage().suppressions].sort((left, right) => right.createdAt - left.createdAt);
+      const suppressions = [...readStorage().storage.suppressions].sort((left, right) => right.createdAt - left.createdAt);
       const activeTupleKeys = new Set(suppressions.map(getSuppressionTupleKey));
 
       for (const [tupleKey, id] of suppressionIdsByTuple) {
@@ -418,13 +500,13 @@ export function createMemoryStore(options: { userDataPath?: string } = {}): Memo
       });
     },
     allowSuppression(id) {
+      const storage = requireWritableStorage();
       const parsedSuppression = isMemoryId(id) ? suppressionsById.get(id) : undefined;
 
       if (!parsedSuppression) {
         return false;
       }
 
-      const storage = readStorage();
       const nextSuppressions = storage.suppressions.filter((item) => !(
         item.namespace === parsedSuppression.namespace &&
         item.key === parsedSuppression.key &&
@@ -443,14 +525,16 @@ export function createMemoryStore(options: { userDataPath?: string } = {}): Memo
       return true;
     },
     clearSuppressions() {
-      const storage = readStorage();
+      const storage = requireWritableStorage();
       storage.suppressions = [];
       writeStorage(storage);
       suppressionIdsByTuple.clear();
       suppressionsById.clear();
     },
     createInjection() {
-      const storage = readStorage();
+      const outcome = readStorage();
+      if (!outcome.canWrite) return { count: 0, cards: [] };
+      const storage = outcome.storage;
       const compactResult = compactMemoryStorage(storage);
       const enabledCards = storage.enabled
         ? rankCardsForInjection(storage.cards.filter((card) => card.enabled))

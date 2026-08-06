@@ -19,6 +19,39 @@ function createDraft() {
   };
 }
 
+function createLiteralLegacyStorage(version: 1 | 2 | 3) {
+  const now = 1_700_000_000_000;
+  const v1 = {
+    id: "11111111-1111-4111-8111-111111111111",
+    title: "P287B legacy title",
+    content: "P287B legacy content",
+    tags: ["P287B-legacy"],
+    sourceConversationId: "22222222-2222-4222-8222-222222222222",
+    createdAt: now,
+    updatedAt: now,
+    enabled: true
+  };
+  const v2 = {
+    ...v1,
+    sourceType: "manual-chat",
+    namespace: "personal",
+    key: "manual-11111111",
+    lastInjectedAt: null,
+    injectionCount: 0
+  };
+  const v3 = {
+    ...v2,
+    importance: "key",
+    category: "manual",
+    confidence: 1,
+    sourceMessageId: null,
+    observedCount: 1,
+    lastObservedAt: now,
+    compressionState: "raw"
+  };
+  return { version, enabled: true, cards: [version === 1 ? v1 : version === 2 ? v2 : v3] };
+}
+
 test("memory-off rejects manual creation at the store boundary without writing a card", async () => {
   const userDataPath = await mkdtemp(join(tmpdir(), "desktop-pet-memory-p287b-"));
 
@@ -244,25 +277,7 @@ test("v4 cards fail closed while legacy cards may receive migration defaults", a
       }), null);
     }
 
-    const legacyCard = { ...validCard } as Record<string, unknown>;
-    for (const field of [
-      "sourceType",
-      "namespace",
-      "key",
-      "importance",
-      "category",
-      "confidence",
-      "sourceMessageId",
-      "observedCount",
-      "lastObservedAt",
-      "compressionState",
-      "managedByUser",
-      "lastInjectedAt",
-      "injectionCount"
-    ]) {
-      delete legacyCard[field];
-    }
-    const migrated = parseMemoryStorage({ version: 3, enabled: true, cards: [legacyCard] });
+    const migrated = parseMemoryStorage(createLiteralLegacyStorage(3));
     assert.equal(migrated?.cards[0]?.managedByUser, true);
     assert.equal(migrated?.cards[0]?.namespace, "personal");
   } finally {
@@ -275,16 +290,14 @@ test("v1 through v3 cards migrate to v4 with separate empty suppressions", async
     const userDataPath = await mkdtemp(join(tmpdir(), "desktop-pet-memory-p287b-"));
 
     try {
-      const store = createMemoryStore({ userDataPath });
-      store.setEnabled(true);
-      const created = store.createCard(createDraft());
-      assert.equal(created.status, "created");
       const memoryDirectory = join(userDataPath, "memory");
       const memoryPath = join(memoryDirectory, "facts.json");
-      const raw = JSON.parse(await readFile(memoryPath, "utf8"));
-      raw.version = version;
-      delete raw.suppressions;
-      delete raw.cards[0].managedByUser;
+      const raw = createLiteralLegacyStorage(version);
+      const card = raw.cards[0] as Record<string, unknown>;
+      assert.ok(parseMemoryStorage(raw));
+      assert.equal(parseMemoryStorage({ ...raw, cards: [{ ...card, managedByUser: true }] }), null);
+      const { id: _id, ...missingId } = card;
+      assert.equal(parseMemoryStorage({ ...raw, cards: [missingId] }), null);
       await mkdir(memoryDirectory, { recursive: true });
       await writeFile(memoryPath, `${JSON.stringify(raw)}\n`, "utf8");
 
