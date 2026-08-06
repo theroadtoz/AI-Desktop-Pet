@@ -122,6 +122,18 @@ try {
   dpr = rendererDevicePixelRatio;
   referenceBaseline = Object.values(rendererDevicePixelRatio).every((devicePixelRatio) => devicePixelRatio === 1);
   checks.referenceBaseline = referenceBaseline;
+  checks.messageGapAdaptsToStartupDisplayScale = await evaluate(chat, `
+    (() => {
+      const root = document.documentElement;
+      const messages = document.querySelector("#messages");
+      const startupScale = root.style.getPropertyValue("--chat-display-scale").trim();
+      root.style.setProperty("--chat-display-scale", "1.5");
+      const scaledGap = Number.parseFloat(getComputedStyle(messages).rowGap);
+      root.style.setProperty("--chat-display-scale", startupScale);
+      return Number.parseFloat(startupScale) === window.devicePixelRatio &&
+        Math.abs(scaledGap - (116 / 1.5)) < 0.05;
+    })()
+  `);
   await new Promise((resolve) => setTimeout(resolve, 100));
   const observedPhoneCharm = await evaluate(charm, `
     (() => {

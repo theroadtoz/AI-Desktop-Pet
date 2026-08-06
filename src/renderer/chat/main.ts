@@ -475,6 +475,13 @@ function resizeChatInput(): void {
 const CHAT_WINDOW_BASE_WIDTH = 438;
 const CHAT_WINDOW_BASE_HEIGHT = 910;
 
+function captureStartupDisplayScale(): void {
+  const displayScale = Number.isFinite(window.devicePixelRatio) && window.devicePixelRatio > 0
+    ? window.devicePixelRatio
+    : 1;
+  document.documentElement.style.setProperty("--chat-display-scale", String(displayScale));
+}
+
 function updateChatUiScale(): void {
   const scale = Math.min(
     window.innerWidth / CHAT_WINDOW_BASE_WIDTH,
@@ -3513,6 +3520,7 @@ window.addEventListener("resize", updateChatUiScale);
 updatePhoneClock();
 window.setInterval(updatePhoneClock, 30_000);
 resizeChatInput();
+captureStartupDisplayScale();
 updateChatUiScale();
 
 window.chatApi?.focusInput();

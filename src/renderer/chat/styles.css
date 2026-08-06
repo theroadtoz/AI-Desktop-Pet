@@ -1224,6 +1224,7 @@ textarea:disabled {
 /* Figma phone shell — main chat adaptation */
 :root {
   color-scheme: light;
+  --chat-display-scale: 1;
   --chat-ui-scale: 1;
   --phone-shell: #dcd4ff;
   --phone-screen: #f9f7ff;
@@ -1461,7 +1462,7 @@ body {
   overflow-x: hidden;
   overflow-y: auto;
   flex-direction: column;
-  gap: 116px;
+  gap: calc(116px / var(--chat-display-scale));
   scroll-behavior: smooth;
   scrollbar-width: thin;
   scrollbar-color: rgb(106 84 218 / 32%) transparent;
