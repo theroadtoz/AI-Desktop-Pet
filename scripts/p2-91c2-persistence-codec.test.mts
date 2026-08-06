@@ -149,11 +149,12 @@ const suppression = { id: historyId, category: "language", createdAt: now };
 const memorySummary = ${JSON.stringify(memorySummary)};
 const state = {
   authorized: true,
+  recoveryRequired: false,
   history: { list: [summary], get: conversation, delete: true, clear: true, retention: 500, setRetention: 500 },
   memory: {
     settings: { enabled: true }, summary: memorySummary, setEnabled: { enabled: true }, list: [card], get: card,
     create: { status: "created", card }, update: card, delete: true,
-    forget: { status: "forgotten" }, clearCards: 7, suppressions: [suppression], allow: true,
+    forget: { status: "forgotten" }, clearTransaction: { status: "cleared" }, suppressions: [suppression], allow: true,
     clearSuppressions: undefined, confirm: { status: "created" }
   },
   review: { list: [review], candidate: review, update: review, setStatus: { ...review, status: "confirmed" }, clear: 2 }
@@ -262,6 +263,11 @@ Module._load = function(request, parent, isMain) {
   if (request === "./services/chat/history-store") return { createHistoryStore() { return historyStore; } };
   if (request === "./services/chat/memory-store") return { createMemoryStore() { return memoryStore; } };
   if (request === "./services/chat/memory-review-store") return { createMemoryReviewStore() { return memoryReviewStore; } };
+  if (request === "./services/chat/memory-clear-transaction") return {
+    recoverMemoryClearTransactions() { return { status: "clean" }; },
+    isMemoryClearRecoveryRequired() { called("memory:clear:recovery-check"); return state.recoveryRequired; },
+    clearMemoryTransaction() { called("memory:clear:transaction"); return returnOrThrow(state.memory.clearTransaction); }
+  };
   if (request === "./ipc/trusted-ipc-sender") return { isTrustedIpcSender() { return state.authorized; } };
   if (request === "./windows/chat-window") return { createChatWindow() { return fakeWindow; }, showChatWindow() {}, focusChatInput() {} };
   if (request === "./windows/pet-window") return { createPetWindow() { return fakeWindow; } };
@@ -372,7 +378,9 @@ async function main() {
     state.memory.delete = {}; expectError(() => call("memory:delete", historyId), "Invalid memory response"); state.memory.allow = 1; expectError(() => call("memory:allow-suppression", historyId), "Invalid memory response");
     for (const status of ["forgotten", "manual", "not_found"]) { state.memory.forget = { status }; assert.deepEqual(call("memory:forget", historyId), { status }); }
     state.memory.forget = { status: "future" }; expectError(() => call("memory:forget", historyId), "Invalid memory response");
-    clearCalls(); state.memory.clearCards = 7; state.review.clear = 2; assert.equal(call("memory:clear"), undefined); assert.deepEqual(callSequence, ["memory:clear:cards", "memory:clear:reviews"]);
+    clearCalls(); state.memory.clearTransaction = { status: "cleared" }; assert.equal(call("memory:clear"), undefined); assert.deepEqual(callSequence, ["memory:clear:transaction"]);
+    clearCalls(); state.memory.clearTransaction = new Error("private"); expectError(() => call("memory:clear"), "Memory clear failed"); assert.deepEqual(callSequence, ["memory:clear:transaction", "memory:clear:recovery-check"]);
+    state.memory.clearTransaction = { status: "cleared" };
     state.memory.suppressions = [suppression]; assert.deepEqual(call("memory:list-suppressions"), [suppression]); state.memory.suppressions = [{ ...suppression, extra: true }]; expectError(() => call("memory:list-suppressions"), "Invalid memory response");
     state.memory.clearSuppressions = undefined; assert.equal(call("memory:clear-suppressions"), undefined);
     for (const value of [null, 0, {}]) { state.memory.clearSuppressions = value; expectError(() => call("memory:clear-suppressions"), "Invalid memory response"); }
@@ -392,6 +400,10 @@ async function main() {
     state.review.setStatus = null; assert.deepEqual(call("memory:reject-review", historyId), { status: "not_found" });
     state.review.setStatus = { ...review, status: "rejected" }; assert.deepEqual(call("memory:reject-review", historyId), { status: "rejected" });
     for (const value of [{ ...review, extra: true }, { ...review, status: "future" }, new Error("private")]) { state.review.setStatus = value; expectError(() => call("memory:reject-review", historyId), "Invalid memory review response"); }
+    clearCalls(); state.memory.clearTransaction = new Error("private"); state.recoveryRequired = true;
+    expectError(() => call("memory:clear"), "Memory clear failed");
+    assert.deepEqual(callSequence, ["memory:clear:transaction", "memory:clear:recovery-check"]);
+    clearCalls(); expectError(() => call("memory:list"), "Unauthorized memory request"); assertNoStoreCalls();
   } finally {
     Module._load = originalLoad;
     rmSync(userDataPath, { recursive: true, force: true });
@@ -491,7 +503,8 @@ test("main memory handlers make shared codec the request and response authority"
   assertOrdered(handlerSource(appSource, "memory:update"), ["isChatSender(event)", "parseMemoryCardUpdateRequest({ id, update })", "memoryStore.updateCard(", "parseNullableMemoryCard("]);
   assertOrdered(handlerSource(appSource, "memory:delete"), ["isChatSender(event)", "parseMemoryIdRequest({ id })", "memoryStore.deleteCard(", "parseBooleanResponse("]);
   assertOrdered(handlerSource(appSource, "memory:forget"), ["isChatSender(event)", "parseMemoryIdRequest({ id })", "memoryStore.forgetCard(", "parseMemoryForgetResult("]);
-  assertOrdered(handlerSource(appSource, "memory:clear"), ["isChatSender(event)", "memoryStore.clearCards()", "memoryReviewStore.clearPendingCandidates()"]);
+  assertOrdered(handlerSource(appSource, "memory:clear"), ["isChatSender(event)", "const result = clearMemoryTransaction({", "userDataPath: app.getPath(\"userData\")", "result.status !== \"cleared\"", "Memory clear failed", "return undefined"]);
+  assert.doesNotMatch(handlerSource(appSource, "memory:clear"), /clearCards|clearPendingCandidates/u);
   assertOrdered(handlerSource(appSource, "memory:list-suppressions"), ["isChatSender(event)", "memoryStore.listSuppressions()", "parseMemorySuppressionViews("]);
   assertOrdered(handlerSource(appSource, "memory:allow-suppression"), ["isChatSender(event)", "parseMemoryIdRequest({ id })", "memoryStore.allowSuppression(", "parseBooleanResponse("]);
   assertOrdered(handlerSource(appSource, "memory:clear-suppressions"), ["isChatSender(event)", "memoryStore.clearSuppressions()", "parseVoidResponse("]);

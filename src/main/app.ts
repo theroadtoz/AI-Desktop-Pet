@@ -183,6 +183,7 @@ import {
 import { createHistoryStore, type HistoryStore } from "./services/chat/history-store";
 import { createMemoryStore, type AutoMemoryCaptureSummary, type MemoryStore } from "./services/chat/memory-store";
 import { createMemoryReviewStore, type MemoryReviewStore } from "./services/chat/memory-review-store";
+import { clearMemoryTransaction, isMemoryClearRecoveryRequired, recoverMemoryClearTransactions } from "./services/chat/memory-clear-transaction";
 import { createLocalMemoryExtractor, type LocalMemoryExtractor } from "./services/chat/local-memory-extractor";
 import { createChatProviderFromConfig } from "./services/chat/provider-factory";
 import { checkProviderHealth } from "./services/chat/provider-health";
@@ -348,6 +349,7 @@ import {
 
 let petWindow: BrowserWindow | null = null;
 let chatWindow: BrowserWindow | null = null;
+let p291c2cUntrustedPreloadWindows: BrowserWindow[] = [];
 let pointerController: PointerController | null = null;
 let telemetry: TelemetryService | null = null;
 let acceptanceEvidence: ReturnType<typeof createAcceptanceEvidenceService> | null = null;
@@ -362,6 +364,7 @@ let petPresentationPersistence: PetPresentationPersistence | null = null;
 let historyStore: HistoryStore | null = null;
 let memoryStore: MemoryStore | null = null;
 let memoryReviewStore: MemoryReviewStore | null = null;
+let memoryClearRecoveryRequired = false;
 let localMemoryExtractor: LocalMemoryExtractor | null = null;
 let webSearchSettingsStore: WebSearchSettingsStore | null = null;
 let proactiveCompanionSettingsStore: ProactiveCompanionSettingsStore | null = null;
@@ -383,6 +386,13 @@ let latestLlamaCppRuntimeSummary: LlamaCppRuntimeSummary | null = null;
 let latestBundledLlamaCppRuntimeSummary: BundledLlamaCppRuntimeSafeSummary | null = null;
 let bundledLlamaCppRuntimeStartupPromise: Promise<BundledLlamaCppRuntimeSafeSummary> | null = null;
 let refreshCurrentProvider: (() => void) | null = null;
+
+function enterMemoryClearRecoveryMode(): void {
+  memoryClearRecoveryRequired = true;
+  memoryStore = null;
+  memoryReviewStore = null;
+  userProfileStore = null;
+}
 let openChatWindowAdapter: (() => void) | null = null;
 let pendingChatWindowOpen = false;
 let automaticSituationCoordinator: AutomaticSituationCoordinator | null = null;
@@ -476,6 +486,14 @@ const isP284AcceptanceFixtureEnabled = isP284AcceptanceObservationEnabled &&
   process.env.AI_DESKTOP_PET_P2_84_SAFE_FIXTURE === "1";
 const isP288bAcceptanceFixtureEnabled = isAcceptanceTelemetryEnabled &&
   process.env.AI_DESKTOP_PET_P2_88B_SAFE_FIXTURE === "1";
+const isP291c2cUntrustedPreloadFixtureEnabled =
+  !app.isPackaged &&
+  isAcceptanceTelemetryEnabled &&
+  process.env.AI_DESKTOP_PET_P2_91C2C_UNTRUSTED_PRELOAD_FIXTURE === "1";
+const isP291c2cRecoveryRequiredFixtureEnabled =
+  !app.isPackaged &&
+  isAcceptanceTelemetryEnabled &&
+  process.env.AI_DESKTOP_PET_P2_91C2C_RECOVERY_REQUIRED_FIXTURE === "1";
 const isP288dCuriousFocusPulsePreviewEnabled =
   !app.isPackaged &&
   process.env.AI_DESKTOP_PET_ACCEPTANCE_TELEMETRY === "1" &&
@@ -2744,6 +2762,13 @@ function rebuildPetWindow(recoverySource?: string): void {
 }
 
 app.whenReady().then(async () => {
+  try {
+    const memoryClearRecovery = recoverMemoryClearTransactions({ userDataPath: app.getPath("userData") });
+    memoryClearRecoveryRequired = memoryClearRecovery.status === "recovery_required";
+  } catch {
+    memoryClearRecoveryRequired = true;
+  }
+
   if (process.env.P2_82A_1_GSMTC_PROTOTYPE === "1") {
     const {
       createGsmtcCapabilityPrototypeResult,
@@ -2788,9 +2813,11 @@ app.whenReady().then(async () => {
   currentPetPresentationIntent = withCurrentAccessorySelection(currentPetPresentationIntent);
   petPresentationPersistence = createPetPresentationPersistence(petPresentationStore);
   historyStore = createHistoryStore();
-  memoryStore = createMemoryStore();
-  memoryReviewStore = createMemoryReviewStore();
-  memoryReviewStore.pruneExpiredPendingCandidates();
+  if (!memoryClearRecoveryRequired) {
+    memoryStore = createMemoryStore();
+    memoryReviewStore = createMemoryReviewStore();
+    memoryReviewStore.pruneExpiredPendingCandidates();
+  }
   localMemoryExtractor = createLocalMemoryExtractor({
     getTarget() {
       const config = bundledLlamaCppProviderConfig;
@@ -2997,7 +3024,9 @@ app.whenReady().then(async () => {
   powerMonitor.on("suspend", handleSystemSuspend);
   powerMonitor.on("resume", handleSystemResume);
   shortcutPreferencesStore = createShortcutPreferencesStore();
-  userProfileStore = createUserProfileStore({ logTelemetry: logPersistentTelemetry });
+  if (!memoryClearRecoveryRequired) {
+    userProfileStore = createUserProfileStore({ logTelemetry: logPersistentTelemetry });
+  }
   shortcutRegistry = createUserShortcutRegistry();
   secureKeyStore = createSecureKeyStore({ logTelemetry: logPersistentTelemetry });
   llamaCppRuntimeSettingsStore = createLlamaCppRuntimeSettingsStore({
@@ -3025,6 +3054,27 @@ app.whenReady().then(async () => {
   chatWindow = createChatWindow({
     shouldClose: () => shutdownCoordinator.isQuiescing()
   });
+  if (isP291c2cUntrustedPreloadFixtureEnabled) {
+    const preload = join(__dirname, "../preload/chat-preload.js");
+    p291c2cUntrustedPreloadWindows = ["pet", "child", "foreign"].map((role) => {
+      const fixtureWindow = new BrowserWindow({
+        show: false,
+        ...(role === "child" && chatWindow ? { parent: chatWindow } : {}),
+        webPreferences: {
+          preload,
+          nodeIntegration: false,
+          contextIsolation: true,
+          sandbox: true
+        }
+      });
+      const html = encodeURIComponent("<!doctype html><meta charset=utf-8><title>P2-91C2C untrusted preload</title>");
+      void fixtureWindow.loadURL(`data:text/html;charset=utf-8,${html}#p2-91c2c-untrusted-${role}`);
+      fixtureWindow.on("closed", () => {
+        p291c2cUntrustedPreloadWindows = p291c2cUntrustedPreloadWindows.filter((candidate) => candidate !== fixtureWindow);
+      });
+      return fixtureWindow;
+    });
+  }
   setTimeout(warmUpWebSearchMcpConnection, 1_500);
   function handleChatWindowInactive(): void {
     isChatInteractionActive = false;
@@ -4898,12 +4948,35 @@ app.whenReady().then(async () => {
   });
 
   ipcMain.handle("memory:clear", (event) => {
-    if (!isChatSender(event) || !memoryStore || !memoryReviewStore) {
+    if (!isChatSender(event)) {
       throw new Error("Unauthorized memory request");
     }
+    if (memoryClearRecoveryRequired || !memoryStore || !memoryReviewStore || !userProfileStore) {
+      throw new Error("Memory clear failed");
+    }
 
-    memoryStore.clearCards();
-    memoryReviewStore.clearPendingCandidates();
+    try {
+      const result = clearMemoryTransaction({
+        userDataPath: app.getPath("userData"),
+        ...(isP291c2cRecoveryRequiredFixtureEnabled ? {
+          fault(operation, participant) {
+            if ((operation === "commit" && participant === "facts") || operation === "rollback") {
+              throw new Error("P2-91C2C recovery-required fixture fault");
+            }
+          }
+        } : {})
+      });
+      if (result.status !== "cleared") {
+        enterMemoryClearRecoveryMode();
+        throw new Error("Memory clear failed");
+      }
+    } catch {
+      if (isMemoryClearRecoveryRequired({ userDataPath: app.getPath("userData") })) {
+        enterMemoryClearRecoveryMode();
+      }
+      throw new Error("Memory clear failed");
+    }
+    return undefined;
   });
 
   ipcMain.handle("memory:list-suppressions", (event) => {

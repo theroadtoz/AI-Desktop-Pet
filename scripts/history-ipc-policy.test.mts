@@ -34,7 +34,36 @@ test("history, memory, automatic situation and user profile IPC are restricted a
   assertOrdered(handlerSource(appSource, "memory:list"), ["isChatSender(event)", "memoryStore.listCards()", "parseMemoryCards("]);
   assertOrdered(handlerSource(appSource, "memory:create"), ["isChatSender(event)", "parseMemoryCardDraftRequest({ draft })", "memoryStore.createCard(", "parseMemoryCreateResult("]);
   assertOrdered(handlerSource(appSource, "memory:confirm-review"), ["isChatSender(event)", "parseMemoryReviewDecisionRequest({ id, update })", "memoryReviewStore.pruneExpiredPendingCandidates()", "parseMemoryReviewDecisionResult("]);
-  assert.match(appSource, /ipcMain\.handle\("memory:clear", \(event\) => \{\s+if \(!isChatSender\(event\) \|\| !memoryStore \|\| !memoryReviewStore\)/);
+  assert.match(appSource, /from "\.\/services\/chat\/memory-clear-transaction"/u);
+  const readySource = appSource.slice(appSource.indexOf("app.whenReady().then(async () => {"));
+  const recoveryIndex = readySource.indexOf('recoverMemoryClearTransactions({ userDataPath: app.getPath("userData") })');
+  const firstStoreFactoryIndex = readySource.search(/create[A-Za-z0-9]+Store\(/u);
+  assert.ok(recoveryIndex >= 0 && firstStoreFactoryIndex >= 0 && recoveryIndex < firstStoreFactoryIndex,
+    "memory recovery must precede every store factory, including prototype environment settings");
+  assertOrdered(appSource, [
+    "recoverMemoryClearTransactions({ userDataPath: app.getPath(\"userData\") })",
+    "createProviderConfigStore(",
+    "createPetPresentationStore()",
+    "createHistoryStore()",
+    "createMemoryStore()",
+    "createMemoryReviewStore()",
+    "memoryReviewStore.pruneExpiredPendingCandidates()",
+    "createUserProfileStore("
+  ]);
+  const memoryClearHandler = handlerSource(appSource, "memory:clear");
+  assertOrdered(memoryClearHandler, [
+    "if (!isChatSender(event))",
+    "Unauthorized memory request",
+    "if (memoryClearRecoveryRequired || !memoryStore || !memoryReviewStore || !userProfileStore)",
+    "Memory clear failed",
+    "const result = clearMemoryTransaction({",
+    "userDataPath: app.getPath(\"userData\")",
+    "if (result.status !== \"cleared\")",
+    "enterMemoryClearRecoveryMode()",
+    "Memory clear failed",
+    "return undefined"
+  ]);
+  assert.doesNotMatch(memoryClearHandler, /clearCards|clearPendingCandidates/u);
   assert.match(appSource, /ipcMain\.handle\("userProfile:get", \(event\) => \{\s+if \(!isChatSender\(event\) \|\| !userProfileStore\)/);
   assert.match(appSource, /ipcMain\.handle\("userProfile:save", \(event, profile: unknown\) => \{\s+if \(!isChatSender\(event\) \|\| !userProfileStore\)/);
   assert.match(appSource, /ipcMain\.handle\("userProfile:clear", \(event\) => \{\s+if \(!isChatSender\(event\) \|\| !userProfileStore\)/);

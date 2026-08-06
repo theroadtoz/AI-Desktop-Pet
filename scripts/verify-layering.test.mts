@@ -211,12 +211,16 @@ test("P2-91C2B keeps disk version parsing in the facts store and current history
   assert.doesNotMatch(codecSource, /parseMemoryStorage/u);
   const consumers = spawnSync("rg", ["-l", "parseMemoryStorage", "src"], { cwd: repoRoot, encoding: "utf8" });
   assert.equal(consumers.status, 0);
+  const productionConsumers = consumers.stdout.trim().split(/\r?\n/u)
+    .map((path) => path.replaceAll("\\", "/"))
+    .filter((path) => path !== "src/shared/chat-memory.ts")
+    .sort();
   assert.deepEqual(
-    consumers.stdout.trim().split(/\r?\n/u).map((path) => path.replaceAll("\\", "/")).sort(),
-    ["src/main/services/chat/memory-store.ts", "src/shared/chat-memory.ts"],
-    "only the facts store may consume the disk parser"
+    productionConsumers,
+    ["src/main/services/chat/memory-clear-transaction.ts", "src/main/services/chat/memory-store.ts"],
+    "only the facts store and memory-clear transaction may consume the disk parser"
   );
-  for (const path of ["src/preload", "src/renderer"]) {
+  for (const path of ["src/preload", "src/renderer", "src/main/services/chat/history-store.ts", "src/shared/memory-history-codec.ts"]) {
     const result = spawnSync("rg", ["-n", "parseMemoryStorage", path], { cwd: repoRoot, encoding: "utf8" });
     assert.notEqual(result.status, 0, `${path} must not consume the disk parser`);
   }
